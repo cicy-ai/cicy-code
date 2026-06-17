@@ -33,6 +33,7 @@ type knowledgeRow struct {
 	ID           string `json:"id"` // slug = filename stem (unique across the store)
 	Title        string `json:"title"`
 	Body         string `json:"body"`
+	Summary      string `json:"summary"` // one-line catalog blurb (for pointer/recall view)
 	Tags         string `json:"tags"`
 	SourcePane   string `json:"source_pane"`
 	SourceKind   string `json:"source_kind"`
@@ -120,6 +121,9 @@ func knowledgeRenderFile(k knowledgeRow) string {
 	if t := knowledgeOneLine(k.Tags); t != "" {
 		b.WriteString("tags: " + t + "\n")
 	}
+	if s := knowledgeOneLine(k.Summary); s != "" {
+		b.WriteString("summary: " + s + "\n")
+	}
 	b.WriteString("source: " + kind + "\n")
 	if p := strings.TrimSpace(k.SourcePane); p != "" {
 		b.WriteString("source_pane: " + p + "\n")
@@ -154,6 +158,7 @@ func knowledgeParseFile(path string) (knowledgeRow, error) {
 		ID:           strings.TrimSuffix(filepath.Base(path), ".md"),
 		Title:        firstNonEmpty(fm["name"], strings.TrimSuffix(filepath.Base(path), ".md")),
 		Body:         body,
+		Summary:      fm["summary"],
 		Tags:         fm["tags"],
 		SourceKind:   firstNonEmpty(fm["source"], "manual"),
 		SourcePane:   fm["source_pane"],
@@ -396,7 +401,7 @@ func listKnowledge(f knowledgeFilter) ([]knowledgeRow, error) {
 			continue
 		}
 		if q != "" {
-			hay := strings.ToLower(k.Title + "\n" + k.Tags + "\n" + k.Body)
+			hay := strings.ToLower(k.Title + "\n" + k.Tags + "\n" + k.Summary + "\n" + k.Body)
 			if !strings.Contains(hay, q) {
 				continue
 			}
@@ -449,6 +454,14 @@ func handleKnowledge(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// Pointer/index view: drop bodies so recall over a large KB returns a
+		// small catalog (id/title/tags/summary/domain) instead of every full
+		// entry — the caller then reads only the hits via GET /api/knowledge/<id>.
+		if v := q.Get("view"); v == "index" || v == "pointer" {
+			for i := range rows {
+				rows[i].Body = ""
+			}
+		}
 		J(w, M{"knowledge": rows})
 	case http.MethodPost:
 		var req M
@@ -462,6 +475,7 @@ func handleKnowledge(w http.ResponseWriter, r *http.Request) {
 		id, err := insertKnowledge(knowledgeRow{
 			Title:      title,
 			Body:       body,
+			Summary:    getString(req, "summary"),
 			Tags:       getString(req, "tags"),
 			SourcePane: getString(req, "source_pane"),
 			SourceKind: getString(req, "source_kind"),

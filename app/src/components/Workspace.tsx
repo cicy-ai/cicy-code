@@ -41,6 +41,8 @@ import { MobileDeviceColumn, type MobileSel } from './layout/MobileDevicesPanel'
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
 import AgentUsageLogView from './layout/AgentUsageLogView';
+import AuditLogTab from './audit/AuditLogTab';
+import PolicyTab from './audit/PolicyTab';
 import AgentUsageAnalysisView from './layout/AgentUsageAnalysisView';
 import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
@@ -51,6 +53,7 @@ import SettingsModal, { type SettingsSection } from './settings/SettingsModal';
 import { useDialogs } from './ui/Modal';
 import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
+import { loadHandled, serverAckedIds, resolveStatus } from './audit/auditHandled';
 import { sendCommandToTmux } from '../services/mockApi';
 import { chatWs } from '../services/chatWs';
 import { ApiSwitchDialog } from './layout/ApiSwitchDialog';
@@ -316,11 +319,11 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'customAgents' | 'agents' | 'todo' | 'windows' | null;
-type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'knowledge' | RequestViewTab;
+type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'knowledge' | 'log' | 'policy' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'knowledge' || value === 'todo') {
+  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'knowledge' || value === 'todo' || value === 'log' || value === 'policy') {
     return value;
   }
   return 'files';
@@ -394,6 +397,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [todoCount, setTodoCount] = useState<number>(0);
   // Pending-review count (_inbox) for the red badge on the 知识库 (knowledge) tab.
   const [knowledgePendingCount, setKnowledgePendingCount] = useState<number>(0);
+  const [auditAlertCount, setAuditAlertCount] = useState<number>(0);
   const [cliDrawerWidth, setCliDrawerWidth] = useState(() => clampCliDrawerWidth(Number(cache.get(CLI_DRAWER_WIDTH_KEY, CLI_DRAWER_DEFAULT_WIDTH))));
   const [cliDrawerResizing, setCliDrawerResizing] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
@@ -410,6 +414,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setMembershipMenuOpen(false);
     setLangMenuOpen(false);
   }, []);
+  // Let deep children (e.g. the audit policy panel's "configure SMTP" button)
+  // open the global Settings modal at a given section via a window event.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const sec = (e as CustomEvent)?.detail?.section as SettingsSection | undefined;
+      openSettings(sec || 'general');
+    };
+    window.addEventListener('cicy:open-settings', onOpen as EventListener);
+    return () => window.removeEventListener('cicy:open-settings', onOpen as EventListener);
+  }, [openSettings]);
 
   const [status, setStatus] = useState('idle');
   const [contextUsage, setContextUsage] = useState<number | null>(null);
@@ -596,8 +610,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // its tmux pane (same path as voice / file-path send), surfaced in the chat.
   const sendBrowserToAgent = useCallback((text: string) => {
     const tmuxTarget = activeCliPaneIdRef.current || paneId;
-    window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: text } }));
-    sendCommandToTmux(text, tmuxTarget, true).catch(() => {});
+    // Insert into the agent's input WITHOUT submitting (no Enter) — the user edits/
+    // sends it themselves. So no chat-q-sent either (it isn't a submitted q yet).
+    sendCommandToTmux(text, tmuxTarget, false).catch(() => {});
   }, [paneId]);
   const closeLeftPanel = useCallback(() => {
     setLeftPanelView(null);
@@ -888,6 +903,28 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     };
     refresh();
     const id = window.setInterval(refresh, 30000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+
+  // Open (unhandled) audit-alert count, for the 审计日志 tab + agent-stack card badges.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const res: any = await apiService.getAuditEvents({ limit: 80, severity: 'low,medium,high,critical' });
+        const events: any[] = Array.isArray(res?.data?.events) ? res.data.events : [];
+        const handled = loadHandled();
+        const acked = serverAckedIds(events);
+        const open = events.filter((e: any) =>
+          e.decision?.applied &&
+          ['block', 'redact', 'notify'].includes(e.decision?.action || '') &&
+          resolveStatus(e.id, handled, acked) === 'open'
+        ).length;
+        if (!cancelled) setAuditAlertCount(open);
+      } catch { /* keep previous count on transient error */ }
+    };
+    refresh();
+    const id = window.setInterval(refresh, 15000);
     return () => { cancelled = true; window.clearInterval(id); };
   }, []);
   useEffect(() => {
@@ -1374,6 +1411,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentTab('memory');
     setCliContentOpen(true);
   }, [paneId]);
+  // Generic opener for the agent-card header buttons that mirror cli-content-tabs
+  // (knowledge / 审计日志 / 审计策略) — open the named content tab for that pane.
+  const openPaneContent = useCallback((targetPaneId: string, tab: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentMode('fixed');
+    setCliContentTab(normalizeCliContentTab(tab));
+    setCliContentOpen(true);
+  }, [paneId]);
   const handleCliDrawerResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1462,6 +1509,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     { id: 'session', label: t('tabSession'), icon: <LineChart className="h-3.5 w-3.5" /> },
     { id: 'knowledge', label: t('tabKnowledge', '知识库'), icon: <BookOpen className="h-3.5 w-3.5" /> },
     { id: 'memory', label: t('tabMemory'), icon: <Brain className="h-3.5 w-3.5" /> },
+    // Audit log + policy as normal right-panel tabs. 日志 = behaviour/secret
+    // hits, 策略 = policy rules. Always shown (no audit_enabled gate).
+    { id: 'log', label: t('tabAuditLog', { ns: 'audit', defaultValue: '审计日志' }), icon: <Activity className="h-3.5 w-3.5" /> },
+    { id: 'policy', label: t('tabAuditPolicy', { ns: 'audit', defaultValue: '审计策略' }), icon: <ShieldCheck className="h-3.5 w-3.5" /> },
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
   const sessionSubTabs: { id: RequestViewTab; label: string }[] = [
@@ -1535,8 +1586,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   else setCliContentTab(item.id as WorkspaceCliContentTab);
                 }}
               >
-                <span className="inline-flex items-center gap-1.5">
-                  <span data-id={`cli-content-tab-icon-${item.id}`} className="shrink-0 opacity-80">{item.icon}</span>
+                <span className="inline-flex items-center">
                   {item.label}
                 </span>
                 {item.id === 'todo' && todoCount > 0 && (
@@ -1553,6 +1603,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     className="pointer-events-none absolute right-0 top-0 inline-flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-amber-500 px-[3px] text-[9px] font-semibold leading-none text-white tabular-nums"
                   >
                     {knowledgePendingCount > 99 ? '99+' : knowledgePendingCount}
+                  </span>
+                )}
+                {item.id === 'log' && auditAlertCount > 0 && (
+                  <span
+                    data-id="cli-content-tab-log-badge"
+                    className="pointer-events-none absolute right-0 top-0 inline-flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-red-500 px-[3px] text-[9px] font-semibold leading-none text-white tabular-nums"
+                  >
+                    {auditAlertCount > 99 ? '99+' : auditAlertCount}
                   </span>
                 )}
               </button>
@@ -1627,6 +1685,24 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           style={{ display: cliContentTab === 'usage' ? 'block' : 'none' }}
         >
           <AgentUsageLogView paneId={activeCliPaneId} active={cliContentOpen && cliContentTab === 'usage'} />
+        </div>
+        <div
+          data-id="cli-content-log-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'log' ? 'block' : 'none' }}
+        >
+          {cliContentOpen && cliContentTab === 'log' && (
+            <div className="h-full overflow-auto p-3"><AuditLogTab /></div>
+          )}
+        </div>
+        <div
+          data-id="cli-content-policy-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'policy' ? 'block' : 'none' }}
+        >
+          {cliContentOpen && cliContentTab === 'policy' && (
+            <div className="h-full overflow-auto p-3"><PolicyTab /></div>
+          )}
         </div>
         <div
           data-id="cli-content-analysis-host"
@@ -1787,9 +1863,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             onOpenPaneSession={handleStackOpenSession}
             onOpenPaneTodo={todoSkillInstalled ? openPaneTodo : undefined}
             onOpenPaneMemory={openPaneMemory}
+            onOpenPaneContent={openPaneContent}
             onActivePaneIdChange={handleStackActivePaneIdChange}
             onRenamePaneTitle={handleRenamePaneTitle}
             todoCount={todoCount}
+            auditAlertCount={auditAlertCount}
           />
         </div>
       </div>
@@ -1817,12 +1895,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <SideBtn dataId="btn-custom-agents" active={leftActive === 'customAgents'} icon={<Bot className="w-5 h-5" />} title={t('sidebarCustomAgents')} onClick={() => toggleLeft('customAgents')} />
               {/* Browser windows: Chrome / Electron profiles → live windows + screenshots */}
               <SideBtn dataId="btn-windows" active={leftActive === 'windows'} icon={<AppWindow className="w-5 h-5" />} title="浏览器窗口" onClick={() => toggleLeft('windows')} />
-              {/* Audit guard: 安全/审计 entry — opens the audit panel (AuditGuardFab,
-                  mounted at App level) via a window event. Replaces the old floating
-                  draggable FAB. Only shows when the audit master switch is on. */}
-              {globalVar?.audit_enabled && (
-                <SideBtn dataId="btn-audit" active={false} icon={<ShieldCheck className="w-5 h-5" />} title="审计 / 安全" onClick={() => window.dispatchEvent(new CustomEvent('cicy:toggle-audit-guard'))} />
-              )}
+              {/* Audit log/policy live as normal right-panel tabs (日志/策略), gated
+                  by the audit master switch — no dedicated left-bar entry. */}
               {/* Providers & IM moved into the unified Settings modal (bottom-left gear). */}
             </>
           )}

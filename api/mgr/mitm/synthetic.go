@@ -3,42 +3,73 @@ package mitm
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
-// WriteSyntheticBlock writes a provider-shaped 429 response that the
-// client SDK will surface as a recognizable error (rate_limit_error /
-// rate_limit_exceeded). Header X-Cicy-Mitm-Blocked-By carries the node
-// id so chain-aware tooling can attribute the block.
-func WriteSyntheticBlock(w http.ResponseWriter, provider, ruleID, message, nodeID string) {
-	w.Header().Set("Content-Type", "application/json")
-	if nodeID != "" {
-		w.Header().Set(HeaderBlockedBy, nodeID)
+// Audit-block response — UNIFIED with the gateway's writeGatewayBlocked so cicy /
+// 网关 CLI / MITM all surface an identical terminal "已拦截" turn:
+//
+//	HTTP 403 Forbidden
+//	X-Cicy-Audit-Blocked: <eventID>     (clients key off this header, not the code)
+//	X-Cicy-Audit-Rules:   <rule,rule>
+//	X-Cicy-Mitm-Blocked-By: <nodeID>    (extra: which chain node blocked)
+//	X-Cicy-Mitm-Block-Rule: <rule>      (extra: first rule, chain tooling)
+//	{"error":"blocked_by_audit","action":"block","event_id":…,"rules":[…],"message":…}
+//
+// 403 is non-retryable, so third-party SDKs (claude code / codex) fail cleanly
+// instead of the retry storm a 429 rate-limit shape would have triggered.
+const (
+	auditBlockedHeader = "X-Cicy-Audit-Blocked"
+	auditRulesHeader   = "X-Cicy-Audit-Rules"
+)
+
+func buildAuditBlockBody(eventID string, rules []string, message string) []byte {
+	if rules == nil {
+		rules = []string{}
 	}
-	if ruleID != "" {
-		w.Header().Set("X-Cicy-Mitm-Block-Rule", ruleID)
-	}
-	w.WriteHeader(http.StatusTooManyRequests)
-	body := buildBlockBody(provider, ruleID, message)
-	_, _ = w.Write(body)
+	b, _ := json.Marshal(map[string]interface{}{
+		"error":    "blocked_by_audit",
+		"action":   "block",
+		"event_id": eventID,
+		"rules":    rules,
+		"message":  message,
+	})
+	return b
 }
 
-// writeSyntheticBlockRaw is like WriteSyntheticBlock but writes directly
-// to an io.Writer (the TLS conn) using a minimal HTTP/1.1 wire format.
-// Used by the pump because we don't have an http.ResponseWriter.
-func writeSyntheticBlockRaw(conn writeOnly, provider, ruleID, message, nodeID string) error {
-	body := buildBlockBody(provider, ruleID, message)
+// WriteAuditBlock writes the unified 403 audit-block via an http.ResponseWriter.
+func WriteAuditBlock(w http.ResponseWriter, eventID string, rules []string, message, nodeID string) {
+	h := w.Header()
+	h.Set("Content-Type", "application/json; charset=utf-8")
+	h.Set(auditBlockedHeader, eventID)
+	h.Set(auditRulesHeader, strings.Join(rules, ","))
+	if len(rules) > 0 {
+		h.Set("X-Cicy-Mitm-Block-Rule", rules[0])
+	}
+	if nodeID != "" {
+		h.Set(HeaderBlockedBy, nodeID)
+	}
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write(buildAuditBlockBody(eventID, rules, message))
+}
+
+// writeAuditBlockRaw is like WriteAuditBlock but writes directly to the TLS conn
+// (the pump has no http.ResponseWriter) using a minimal HTTP/1.1 wire format.
+func writeAuditBlockRaw(conn writeOnly, eventID string, rules []string, message, nodeID string) error {
+	body := buildAuditBlockBody(eventID, rules, message)
 	var buf bytes.Buffer
-	buf.WriteString("HTTP/1.1 429 Too Many Requests\r\n")
-	buf.WriteString("Content-Type: application/json\r\n")
+	buf.WriteString("HTTP/1.1 403 Forbidden\r\n")
+	buf.WriteString("Content-Type: application/json; charset=utf-8\r\n")
 	buf.WriteString("Content-Length: " + strconv.Itoa(len(body)) + "\r\n")
+	buf.WriteString(auditBlockedHeader + ": " + eventID + "\r\n")
+	buf.WriteString(auditRulesHeader + ": " + strings.Join(rules, ",") + "\r\n")
+	if len(rules) > 0 {
+		buf.WriteString("X-Cicy-Mitm-Block-Rule: " + rules[0] + "\r\n")
+	}
 	if nodeID != "" {
 		buf.WriteString(HeaderBlockedBy + ": " + nodeID + "\r\n")
-	}
-	if ruleID != "" {
-		buf.WriteString("X-Cicy-Mitm-Block-Rule: " + ruleID + "\r\n")
 	}
 	buf.WriteString("Connection: close\r\n\r\n")
 	buf.Write(body)
@@ -50,49 +81,4 @@ func writeSyntheticBlockRaw(conn writeOnly, provider, ruleID, message, nodeID st
 // purposes of writing a synthetic response.
 type writeOnly interface {
 	Write(p []byte) (int, error)
-}
-
-// buildBlockBody produces the JSON envelope each provider's SDK
-// expects for a rate-limit-class error. Falls back to a plain envelope
-// for unknown providers.
-func buildBlockBody(provider, ruleID, message string) []byte {
-	msg := fmt.Sprintf("cicy-mitm: blocked by rule %s — %s", nonEmpty(ruleID, "(unspecified)"), nonEmpty(message, "preventive policy hit"))
-	switch provider {
-	case "anthropic":
-		payload := map[string]interface{}{
-			"type": "error",
-			"error": map[string]interface{}{
-				"type":    "rate_limit_error",
-				"message": msg,
-			},
-		}
-		b, _ := json.Marshal(payload)
-		return b
-	case "openai":
-		payload := map[string]interface{}{
-			"error": map[string]interface{}{
-				"message": msg,
-				"type":    "rate_limit_exceeded",
-				"code":    "cicy_mitm_blocked",
-				"param":   nil,
-			},
-		}
-		b, _ := json.Marshal(payload)
-		return b
-	default:
-		payload := map[string]interface{}{
-			"error":   "rate_limit_exceeded",
-			"message": msg,
-			"code":    "cicy_mitm_blocked",
-		}
-		b, _ := json.Marshal(payload)
-		return b
-	}
-}
-
-func nonEmpty(a, fallback string) string {
-	if a != "" {
-		return a
-	}
-	return fallback
 }

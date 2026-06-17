@@ -531,14 +531,19 @@ interface AuditDashboardProps {
   /** Subset + order of tabs to expose. Omitted = all tabs. */
   tabs?: Tab[];
   defaultTab?: Tab;
-  onClose?: () => void;
-  onMinimize?: () => void;
+  /** Controlled active tab — when set, the outer host (e.g. Workspace
+   *  cli-content-tabs) drives which tab shows; usually paired with hideChrome. */
+  activeTab?: Tab;
+  /** Hide the dashboard's own header + tab nav — the host renders its own
+   *  tab bar instead (audit view in Workspace). */
+  hideChrome?: boolean;
 }
 
-export default function AuditDashboard({ onBack, variant = 'page', tabs: tabsAllow, defaultTab, onClose, onMinimize }: AuditDashboardProps) {
+export default function AuditDashboard({ onBack, variant = 'page', tabs: tabsAllow, defaultTab, activeTab, hideChrome = false }: AuditDashboardProps) {
   const { t } = useTranslation('audit');
   const embedded = variant === 'embedded';
-  const [tab, setTab] = useState<Tab>(defaultTab || tabsAllow?.[0] || 'assistant');
+  const [tabState, setTab] = useState<Tab>(defaultTab || tabsAllow?.[0] || 'assistant');
+  const tab = activeTab ?? tabState;
   const [userId, setUserId] = useState('');
   const [proxyToken, setProxyToken] = useState('');
   const [days, setDays] = useState(7);
@@ -585,15 +590,10 @@ export default function AuditDashboard({ onBack, variant = 'page', tabs: tabsAll
   return (
     <div data-id="audit-dashboard-root" className={`${embedded ? 'h-full' : 'h-screen'} flex flex-col bg-[var(--vsc-bg)] text-[var(--vsc-text)]`}>
       {/* Header */}
-      <header data-id="audit-dashboard-header" className="flex items-center gap-3 px-4 py-3 border-b border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] shrink-0">
+      {!hideChrome && <header data-id="audit-dashboard-header" className="flex items-center gap-3 px-4 py-3 border-b border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] shrink-0">
         {onBack && !embedded && (
           <button data-id="audit-dashboard-header-back" onClick={onBack} className="p-1 rounded hover:bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
             <ArrowLeft size={16} />
-          </button>
-        )}
-        {embedded && onMinimize && (
-          <button data-id="audit-dashboard-header-minimize" onClick={onMinimize} title={t('guardMinimize', '缩小')} className="p-1 rounded hover:bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
-            <Minimize2 size={16} />
           </button>
         )}
         <div data-id="audit-dashboard-header-brand" className="flex items-center gap-2">
@@ -605,15 +605,10 @@ export default function AuditDashboard({ onBack, variant = 'page', tabs: tabsAll
         <span data-id="audit-dashboard-header-user" className="text-xs text-[var(--vsc-text-muted)]">
           {userId && t('userBadge', { userId })}
         </span>
-        {embedded && onClose && (
-          <button data-id="audit-dashboard-header-close" onClick={onClose} title={t('guardHide')} className="p-1 rounded hover:bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
-            <X size={16} />
-          </button>
-        )}
-      </header>
+      </header>}
 
       {/* Tab bar */}
-      <nav data-id="audit-dashboard-tabs" className="flex items-center gap-1 px-4 py-1.5 border-b border-[var(--vsc-border)] bg-[var(--vsc-bg)] shrink-0">
+      {!hideChrome && <nav data-id="audit-dashboard-tabs" className="flex items-center gap-1 px-4 py-1.5 border-b border-[var(--vsc-border)] bg-[var(--vsc-bg)] shrink-0">
         {tabs.map(t => (
           <button key={t.id} data-id={`audit-dashboard-tab-${t.id}`} onClick={() => setTab(t.id)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${tab === t.id ? 'bg-[var(--vsc-bg-active)] text-white' : 'text-[var(--vsc-text-secondary)] hover:text-[var(--vsc-text)] hover:bg-[var(--vsc-bg-hover)]'}`}>
@@ -621,7 +616,7 @@ export default function AuditDashboard({ onBack, variant = 'page', tabs: tabsAll
             {t.label}
           </button>
         ))}
-      </nav>
+      </nav>}
 
       {/* Content */}
       <main data-id="audit-dashboard-content" className={tab === 'assistant' ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 overflow-auto p-4'}>

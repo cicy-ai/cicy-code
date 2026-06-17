@@ -60,6 +60,12 @@ func workspaceAssetsFilesDir(workspace string) string {
 	return filepath.Join(runtimePathToHostPath(workspace), "assets")
 }
 
+// sharedAssetsFilesDir 是所有聊天附件上传的**统一存储目录**(~/cicy-ai/assets),不再按
+// 每个 agent 的工作区分散。上传/取文件都走这里;URL 用 /assets/files/<rel>(无 pane 段)。
+func sharedAssetsFilesDir() string {
+	return filepath.Join(cicyRootDir, "assets")
+}
+
 func workspaceLegacyAssetsFilesDir(workspace string) string {
 	return filepath.Join(workspaceRuntimeDir(workspace), "assets", "files")
 }

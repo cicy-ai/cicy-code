@@ -44,7 +44,7 @@ const DEFAULT_VALUES: CreateAgentValues = {
   use_custom_gateway: true,
   use_proxy: false,
   inherit_guidance: false,
-  project_template: '',
+  project_template: 'default', // 开箱即用:新 agent 默认归属 default 项目(共享记忆)
   role_template: '',
 };
 
@@ -69,8 +69,33 @@ export default function CreateAgentDialog({
 
   // Template selection only — management lives in the Inspector 记忆 tab. Global
   // is always added; project/role are optional. (~/cicy-ai/memory/{projects,agents}/*.md)
-  const [projectTemplates, setProjectTemplates] = useState<string[]>([]);
+  const [projects, setProjects] = useState<{ slug: string; name: string; dir: string }[]>([]);
   const [roleTemplates, setRoleTemplates] = useState<string[]>([]);
+  // Inline "新建项目" form (name + dir) — so a fresh user with no projects can
+  // create one right here instead of hand-authoring a markdown template.
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [newProject, setNewProject] = useState({ name: '', dir: '' });
+  const [projectSaving, setProjectSaving] = useState(false);
+
+  const loadProjects = () =>
+    apiService.listProjects()
+      .then((res) => setProjects(Array.isArray(res.data?.projects) ? res.data.projects : []))
+      .catch(() => {});
+
+  const submitNewProject = async () => {
+    const name = newProject.name.trim();
+    if (!name || projectSaving) return;
+    setProjectSaving(true);
+    try {
+      const { data } = await apiService.createProject(name, newProject.dir.trim());
+      await loadProjects();
+      set({ project_template: data?.slug || '' });
+      setCreatingProject(false);
+      setNewProject({ name: '', dir: '' });
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('projectCreateFailed', '创建项目失败') }));
+    } finally { setProjectSaving(false); }
+  };
 
   // User-authored custom agents appear as their own agent-type options
   // ("custom:<slug>"), alongside claude/codex/cicy. Picking one creates an
@@ -84,9 +109,11 @@ export default function CreateAgentDialog({
       ...DEFAULT_VALUES,
       agent_type: agentTypeOptions[0]?.value || 'claude',
     });
+    setCreatingProject(false);
+    setNewProject({ name: '', dir: '' });
+    void loadProjects();
     apiService.listMemoryTemplates()
       .then((res) => {
-        setProjectTemplates(Array.isArray(res.data?.projects) ? res.data.projects : []);
         setRoleTemplates(Array.isArray(res.data?.roles) ? res.data.roles : []);
       })
       .catch(() => {});
@@ -194,19 +221,57 @@ export default function CreateAgentDialog({
           </div>
 
           <div data-id="create-agent-dialog-templates-field" className="grid grid-cols-2 gap-2">
-            <div>
+            <div data-id="create-agent-dialog-project-field">
               <label className="mb-1.5 block text-[13px] font-medium text-zinc-300">{t('templateProjectLabel')}</label>
-              <select
-                data-id="create-agent-dialog-project-template-select"
-                value={values.project_template}
-                onChange={(e) => set({ project_template: e.target.value })}
-                className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 outline-none transition-all focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20"
-              >
-                <option value="">{t('templateNone')}</option>
-                {projectTemplates.map((slug) => (
-                  <option key={slug} value={slug}>{slug}</option>
-                ))}
-              </select>
+              {creatingProject ? (
+                <div data-id="create-agent-dialog-new-project-form" className="flex flex-col gap-1.5">
+                  <input
+                    data-id="create-agent-dialog-new-project-name"
+                    value={newProject.name}
+                    onChange={(e) => setNewProject((p) => ({ ...p, name: e.target.value }))}
+                    placeholder={t('projectNamePlaceholder', '项目名,如 cicy-code')}
+                    className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 outline-none focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20"
+                  />
+                  <input
+                    data-id="create-agent-dialog-new-project-dir"
+                    value={newProject.dir}
+                    onChange={(e) => setNewProject((p) => ({ ...p, dir: e.target.value }))}
+                    placeholder={t('projectDirPlaceholder', '项目目录,如 ~/projects/cicy-code')}
+                    className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 outline-none focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20"
+                  />
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      data-id="create-agent-dialog-new-project-save"
+                      onClick={submitNewProject}
+                      disabled={!newProject.name.trim() || projectSaving}
+                      className="rounded-lg border border-blue-500/40 bg-blue-500/15 px-3 py-1.5 text-[13px] text-blue-200 hover:bg-blue-500/25 disabled:opacity-50"
+                    >{projectSaving ? t('projectSaving', '创建中…') : t('projectCreate', '创建')}</button>
+                    <button
+                      type="button"
+                      data-id="create-agent-dialog-new-project-cancel"
+                      onClick={() => { setCreatingProject(false); setNewProject({ name: '', dir: '' }); }}
+                      className="rounded-lg border border-white/[0.08] px-3 py-1.5 text-[13px] text-zinc-400 hover:text-zinc-200"
+                    >{tc('cancel', '取消')}</button>
+                  </div>
+                </div>
+              ) : (
+                <select
+                  data-id="create-agent-dialog-project-template-select"
+                  value={values.project_template}
+                  onChange={(e) => {
+                    if (e.target.value === '__new__') { setCreatingProject(true); return; }
+                    set({ project_template: e.target.value });
+                  }}
+                  className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 outline-none transition-all focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20"
+                >
+                  <option value="">{t('templateNone')}</option>
+                  {projects.map((p) => (
+                    <option key={p.slug} value={p.slug}>{p.name}{p.dir ? ` (${p.dir})` : ''}</option>
+                  ))}
+                  <option value="__new__">＋ {t('projectCreateNew', '新建项目…')}</option>
+                </select>
+              )}
             </div>
             <div>
               <label className="mb-1.5 block text-[13px] font-medium text-zinc-300">{t('templateRoleLabel')}</label>

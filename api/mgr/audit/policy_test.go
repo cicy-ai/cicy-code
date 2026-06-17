@@ -92,7 +92,7 @@ func TestPolicy_LoadMissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPolicy missing file should be ok: %v", err)
 	}
-	if p == nil || p.Hash != "sha256:DEFAULT" || !p.Enabled || p.FailMode != "open" {
+	if p == nil || p.Hash != "sha256:DEFAULT" || p.FailMode != "open" {
 		t.Errorf("default policy wrong: %+v", p)
 	}
 }
@@ -104,7 +104,7 @@ func TestPolicy_LoadValidFile(t *testing.T) {
         "version": 1,
         "enabled": true,
         "fail_mode": "open",
-        "rules_override": [{"id": "pii.phone_cn", "severity": "high"}],
+        "rules_override": [{"id": "secret.jwt", "severity": "high"}],
         "custom_rules": [{
             "id": "custom.demo",
             "category": "corp",
@@ -140,7 +140,7 @@ func TestPolicy_ValidationErrors(t *testing.T) {
 			`{"rules_override":[{"id":"does.not.exist","severity":"high"}]}`,
 			"unknown builtin rule id"},
 		{"bad_severity",
-			`{"rules_override":[{"id":"pii.phone_cn","severity":"plaid"}]}`,
+			`{"rules_override":[{"id":"secret.jwt","severity":"plaid"}]}`,
 			"invalid severity"},
 		{"custom_id_no_prefix",
 			`{"custom_rules":[{"id":"corp.x","severity":"low","scan_directions":["outbound"],"match":{"type":"regex","pattern":"x"}}]}`,
@@ -151,9 +151,8 @@ func TestPolicy_ValidationErrors(t *testing.T) {
 		{"custom_unknown_match_type",
 			`{"custom_rules":[{"id":"custom.x","severity":"low","scan_directions":["outbound"],"match":{"type":"bogus"}}]}`,
 			"unknown match.type"},
-		{"custom_no_direction",
-			`{"custom_rules":[{"id":"custom.x","severity":"low","scan_directions":[],"match":{"type":"regex","pattern":"x"}}]}`,
-			"scan_directions must list"},
+		// (custom_no_direction removed: per-rule scan_directions config + its
+		// "must list at least one" validation were dropped — rules scan both.)
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -185,19 +184,19 @@ func setupPipelineWithPolicy(t *testing.T, policy *Policy) (*Pipeline, string) {
 	return p, workersRoot
 }
 
+const bearerPayload = "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123"
+
 func TestPipeline_RuleOverride_Disabled(t *testing.T) {
 	p, _ := setupPipelineWithPolicy(t, &Policy{
 		Hash:    "sha256:test",
-		Enabled: true,
 		RulesOverride: []RuleOverride{
-			{ID: "pii.phone_cn", Disabled: true},
+			{ID: "secret.bearer_token", Disabled: true},
 		},
 	})
-	// Phone number alone (low severity rule, only one that'd hit).
-	findings := p.scanner.Scan([]byte("call 13800138000"), DirectionOutbound, p.CurrentPolicy())
+	findings := p.scanner.Scan([]byte(bearerPayload), DirectionOutbound, p.CurrentPolicy())
 	for _, f := range findings {
-		if f.RuleID == "pii.phone_cn" {
-			t.Errorf("pii.phone_cn should be disabled, got: %+v", f)
+		if f.RuleID == "secret.bearer_token" {
+			t.Errorf("secret.bearer_token should be disabled, got: %+v", f)
 		}
 	}
 }
@@ -205,30 +204,28 @@ func TestPipeline_RuleOverride_Disabled(t *testing.T) {
 func TestPipeline_RuleOverride_SeverityChange(t *testing.T) {
 	p, _ := setupPipelineWithPolicy(t, &Policy{
 		Hash:    "sha256:test",
-		Enabled: true,
 		RulesOverride: []RuleOverride{
-			{ID: "pii.phone_cn", Severity: SeverityHigh},
+			{ID: "secret.bearer_token", Severity: SeverityHigh},
 		},
 	})
-	findings := p.scanner.Scan([]byte("call 13800138000"), DirectionOutbound, p.CurrentPolicy())
-	var phone *Finding
+	findings := p.scanner.Scan([]byte(bearerPayload), DirectionOutbound, p.CurrentPolicy())
+	var hit *Finding
 	for i := range findings {
-		if findings[i].RuleID == "pii.phone_cn" {
-			phone = &findings[i]
+		if findings[i].RuleID == "secret.bearer_token" {
+			hit = &findings[i]
 		}
 	}
-	if phone == nil {
-		t.Fatal("phone rule didn't fire")
+	if hit == nil {
+		t.Fatal("bearer_token rule didn't fire")
 	}
-	if phone.Severity != SeverityHigh {
-		t.Errorf("override severity not applied: got %s want high", phone.Severity)
+	if hit.Severity != SeverityHigh {
+		t.Errorf("override severity not applied: got %s want high", hit.Severity)
 	}
 }
 
 func TestPipeline_CustomRule_Regex(t *testing.T) {
 	p, _ := setupPipelineWithPolicy(t, &Policy{
 		Hash:    "sha256:test",
-		Enabled: true,
 		CustomRules: []CustomRule{{
 			ID:             "custom.demo",
 			Category:       "corp",
@@ -247,13 +244,8 @@ func TestPipeline_CustomRule_Regex(t *testing.T) {
 	if !found {
 		t.Errorf("custom regex rule didn't fire on DEMO-1234, got: %+v", findings)
 	}
-	// Negative: should not hit on inbound (direction gating)
-	findings = p.scanner.Scan([]byte("DEMO-1234"), DirectionInbound, p.CurrentPolicy())
-	for _, f := range findings {
-		if f.RuleID == "custom.demo" {
-			t.Errorf("custom.demo should be outbound-only, got inbound hit")
-		}
-	}
+	// (per-rule direction gating removed: a rule now scans both directions, so
+	// the former "outbound-only" negative assertion no longer applies.)
 }
 
 func TestPipeline_CustomRule_DictFile(t *testing.T) {
@@ -263,7 +255,6 @@ func TestPipeline_CustomRule_DictFile(t *testing.T) {
 
 	p, _ := setupPipelineWithPolicy(t, &Policy{
 		Hash:    "sha256:test",
-		Enabled: true,
 		CustomRules: []CustomRule{{
 			ID:             "custom.customers",
 			Severity:       SeverityMedium,
@@ -289,7 +280,6 @@ func TestPipeline_CustomRule_DictFile(t *testing.T) {
 func TestPolicy_AllowList_Agent(t *testing.T) {
 	pol := &Policy{
 		Hash:    "sha256:test",
-		Enabled: true,
 		AllowList: AllowList{
 			Agents: []string{"w-allow"},
 		},
@@ -305,7 +295,6 @@ func TestPolicy_AllowList_Agent(t *testing.T) {
 func TestPolicy_AllowList_PathPrefix(t *testing.T) {
 	pol := &Policy{
 		Hash:    "sha256:test",
-		Enabled: true,
 		AllowList: AllowList{
 			Paths: []string{"mitm:flow-known-false-positive-"},
 		},
@@ -319,7 +308,6 @@ func TestPolicy_AllowList_PathPrefix(t *testing.T) {
 func TestPolicy_AllowList_ContentHash(t *testing.T) {
 	pol := &Policy{
 		Hash:    "sha256:test",
-		Enabled: true,
 		AllowList: AllowList{
 			ContentHashes: []string{"sha256:knownbenign"},
 		},
@@ -332,8 +320,7 @@ func TestPolicy_AllowList_ContentHash(t *testing.T) {
 
 func TestPipeline_Allowlist_EventStillRecorded(t *testing.T) {
 	pol := &Policy{
-		Hash:    "sha256:test",
-		Enabled: true,
+		Hash: "sha256:test",
 		AllowList: AllowList{
 			Agents: []string{"w-eve"},
 		},
@@ -386,14 +373,14 @@ func TestPipeline_HotReload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Initially: builtin pii.phone_cn at severity low.
-	got := p.scanner.Scan([]byte("13800138000"), DirectionOutbound, p.CurrentPolicy())
-	if len(got) == 0 || got[0].Severity != SeverityLow {
-		t.Fatalf("initial severity expected low, got %+v", got)
+	// Initially: builtin secret.bearer_token at its default severity (medium).
+	got := p.scanner.Scan([]byte(bearerPayload), DirectionOutbound, p.CurrentPolicy())
+	if len(got) == 0 || got[0].Severity != SeverityMedium {
+		t.Fatalf("initial severity expected medium, got %+v", got)
 	}
 
-	// Write a policy that bumps phone_cn to high.
-	body := `{"enabled":true,"rules_override":[{"id":"pii.phone_cn","severity":"high"}]}`
+	// Write a policy that bumps bearer_token to high.
+	body := `{"enabled":true,"rules_override":[{"id":"secret.bearer_token","severity":"high"}]}`
 	if err := os.WriteFile(policyPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -401,12 +388,12 @@ func TestPipeline_HotReload(t *testing.T) {
 	// fsnotify + 200ms debounce: poll for up to 3 seconds.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		f := p.scanner.Scan([]byte("13800138000"), DirectionOutbound, p.CurrentPolicy())
+		f := p.scanner.Scan([]byte(bearerPayload), DirectionOutbound, p.CurrentPolicy())
 		if len(f) > 0 && f[0].Severity == SeverityHigh {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Errorf("expected severity to become high within 3s after policy write; current = %+v",
-		p.scanner.Scan([]byte("13800138000"), DirectionOutbound, p.CurrentPolicy()))
+		p.scanner.Scan([]byte(bearerPayload), DirectionOutbound, p.CurrentPolicy()))
 }

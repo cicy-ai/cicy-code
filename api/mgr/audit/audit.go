@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -18,7 +19,7 @@ var (
 
 	// responseMailerKind records whether the active mailer can actually reach
 	// humans ("smtp"/"gmail") or only spools to disk ("file"). Read by the
-	// readiness check so the 审计专员 can warn when owner alerts reach no one.
+	// readiness check so the 审核策略专员 can warn when owner alerts reach no one.
 	responseMailerKind = "file"
 )
 
@@ -41,6 +42,21 @@ func Init() error {
 		workersRoot := filepath.Join(home, "cicy-ai", "workers")
 		policyPath := filepath.Join(auditRoot, "policy.json")
 
+		// First run: no policy.json → seed it with the builtins materialized as
+		// editable rules (RulesManaged). From here on policy.json is the single
+		// source of truth — every rule (incl. former built-ins) is editable and
+		// deletable via this config.
+		if _, statErr := os.Stat(policyPath); os.IsNotExist(statErr) {
+			seed := DefaultPolicyWithBuiltins()
+			if b, mErr := json.MarshalIndent(seed, "", "  "); mErr == nil {
+				if mkErr := os.MkdirAll(filepath.Dir(policyPath), 0o700); mkErr == nil {
+					if wErr := os.WriteFile(policyPath, b, 0o600); wErr == nil {
+						log.Printf("[audit] seeded policy.json with %d rules (config is the single source)", len(seed.CustomRules))
+					}
+				}
+			}
+		}
+
 		policy, err := LoadPolicy(policyPath)
 		if err != nil {
 			log.Printf("[audit] policy.json parse failed, falling back to default: %v", err)
@@ -52,6 +68,9 @@ func Init() error {
 			globalErr = err
 			return
 		}
+		// Production: only persist alert/finding events, not clean pass-through
+		// traffic (which is 99% of volume and has nothing to audit).
+		p.dropCleanEvents = true
 		globalPipeline = p
 		if werr := p.WatchPolicyFile(policyPath); werr != nil {
 			log.Printf("[audit] policy watcher disabled (no hot reload): %v", werr)
@@ -60,26 +79,16 @@ func Init() error {
 			log.Printf("[audit] email-credential watcher disabled: %v", werr)
 		}
 
-		// Mailer selection (Resend cut — SMTP is the primary external channel):
-		// SMTP relay wins when db/smtp.json is configured; Gmail OAuth is the
-		// fallback alternative; FileMailer spools to disk when neither is set.
+		// Mailer selection — SMTP ONLY ("只用 smtp"). SMTP config comes from the
+		// settings UI's db/email.json (single source); Gmail OAuth path retired.
+		// FileMailer spools to disk when SMTP isn't configured.
 		mailerName := "FileMailer"
 		mailerDetail := filepath.Join(auditRoot, "email-out")
-		gcreds := loadGmailCredentials()
-		scfg := loadSmtpCredentials()
-		switch {
-		case scfg != nil:
-			// Generic SMTP relay (company server / SES SMTP / Aliyun DirectMail / …).
+		if scfg := loadSmtpCredentials(); scfg != nil {
 			p.SetMailer(NewSmtpMailer(scfg))
 			mailerName = "SmtpMailer"
-			mailerDetail = "smtp " + scfg.Host + " (db/smtp.json)"
+			mailerDetail = "smtp " + scfg.Host + " (db/email.json)"
 			responseMailerKind = "smtp"
-		case gcreds != nil:
-			// Gmail OAuth: no verified domain needed — sends as the authenticated account.
-			p.SetMailer(NewGmailMailer(gcreds))
-			mailerName = "GmailMailer"
-			mailerDetail = "oauth (db/google.json)"
-			responseMailerKind = "gmail"
 		}
 
 		log.Printf("[audit] initialized root=%s rules_version=%s active_rules=%d custom=%d policy_hash=%s mailer=%s (%s)",
@@ -173,6 +182,35 @@ func SubmitGatewayTurn(agentID, provider, model, turnID, conversationID string, 
 		Direction:      DirectionInbound,
 		Payload:        payload,
 		PayloadRef:     fmt.Sprintf("reply.json#%s", turnID),
+	})
+}
+
+// SubmitBehavior records one turn's TOOL CALLS as a DirectionBehavior event,
+// scanned by the behaviour scanner (dangerous commands / file access) rather
+// than the secret regexes. calls is the normalised tool-call list (provider +
+// name + arguments). SourceChannel reflects which path produced it (gateway vs
+// mitm). No-op on empty input / uninitialized pipeline.
+func SubmitBehavior(agentID, sourceChannel, provider, model, turnID, conversationID string, calls []ToolCall) {
+	if globalPipeline == nil || len(calls) == 0 {
+		return
+	}
+	payload, err := json.Marshal(calls)
+	if err != nil || len(payload) == 0 {
+		return
+	}
+	if sourceChannel == "" {
+		sourceChannel = SourceGateway
+	}
+	Submit(context.Background(), Envelope{
+		AgentID:        agentID,
+		SourceChannel:  sourceChannel,
+		TurnID:         turnID,
+		ConversationID: conversationID,
+		Provider:       provider,
+		Model:          model,
+		Direction:      DirectionBehavior,
+		Payload:        payload,
+		PayloadRef:     fmt.Sprintf("behavior#%s", turnID),
 	})
 }
 

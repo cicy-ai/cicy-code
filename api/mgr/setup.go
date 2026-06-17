@@ -467,6 +467,24 @@ func helperModeBuiltinWorker() builtinWorker {
 	}
 }
 
+// teamHelperWorker is the 团队专员 at w-100, seeded on EVERY platform. Its job is
+// Docker-based team scaling (无限扩编) — and on Windows (no tmux), WSL-or-Docker
+// install. The charter adapts by platform via {{PLATFORM_SETUP}}.
+//   - Windows: it's the sole/primary agent (master=true) — tmux roster can't run.
+//   - macOS/Linux: a normal bound team member alongside the full roster.
+const teamHelperPort = 100
+
+func teamHelperWorker(master bool) builtinWorker {
+	return builtinWorker{
+		Port:          teamHelperPort,
+		AgentType:     "cicy",
+		Title:         "团队专员",
+		RoleTemplate:  "团队专员",
+		Master:        master,
+		BindToPrimary: !master,
+	}
+}
+
 type builtinWorker struct {
 	Port          int
 	AgentType     string
@@ -477,32 +495,46 @@ type builtinWorker struct {
 }
 
 // officialRoleRoster is the fixed set of agents an official release preinstalls.
-// The PM master anchors at w-1001; every other official agent counts DOWN from
-// w-1000 so they never collide with user-created agents, which count UP from
-// w-1002 (defaultWorkerIndex=1001 → next id 1002). ALL roster agents are created
-// (they live in the DB). Attached under w-1001 by default (shown on the master's
-// team): HR + Token优化 (always-on support) and the three coding agents 架构师/
-// 全栈/软件工程师 (995/994/993). The remaining cicy roles (产品/QA/法务/运维) exist
-// standalone; the user (with HR's help) brings them onto the team on demand.
+// The PM master anchors at w-1001; every OTHER official agent counts UP from
+// w-101 (101,102,…). User-created agents count UP from w-1002 (defaultWorkerIndex
+// =1001 → next id 1002), so the 101.. role band never collides with them.
+// ALL roster agents are created (they live in the DB) AND attached under w-1001
+// (BindToPrimary on every non-master entry), so the master's team shows the whole
+// preinstalled roster out of the box.
 //
 // Two flavors:
-//   - cicy lite agents (1001..996): non-coding roles, each with a role template
+//   - cicy lite agents: non-coding roles, each with a role template
 //     (~/cicy-ai/memory/agents/<slug>.md) that shapes its AGENTS.md charter.
-//   - CLI coding agents (995..992): claude/codex/opencode, gateway-routed
+//   - CLI coding agents: claude/codex/opencode, gateway-routed
 //     (use_custom_gateway via createBuiltinWorker); no role template.
 func officialRoleRoster() []builtinWorker {
-	return []builtinWorker{
+	roster := []builtinWorker{
 		{Port: 1001, AgentType: "cicy", Title: "项目经理", RoleTemplate: "项目经理", Master: true},
-		{Port: 1000, AgentType: "cicy", Title: "产品经理", RoleTemplate: "产品经理"},
-		{Port: 999, AgentType: "cicy", Title: "QA测试工程师", RoleTemplate: "测试工程师"},
-		{Port: 998, AgentType: "cicy", Title: "法务", RoleTemplate: "法务"},
-		{Port: 997, AgentType: "cicy", Title: "HR", RoleTemplate: "人力资源", BindToPrimary: true},
-		{Port: 996, AgentType: "cicy", Title: "Token优化", RoleTemplate: "Token优化师", BindToPrimary: true},
-		{Port: 995, AgentType: "claude", Title: "架构师", BindToPrimary: true},
-		{Port: 994, AgentType: "codex", Title: "全栈开发工程师", BindToPrimary: true},
-		{Port: 993, AgentType: "opencode", Title: "软件工程师", BindToPrimary: true},
-		{Port: 992, AgentType: "cicy", Title: "运维工程师", RoleTemplate: "运维工程师"},
+		{Port: 101, AgentType: "cicy", Title: "产品经理", RoleTemplate: "产品经理", BindToPrimary: true},
+		{Port: 102, AgentType: "cicy", Title: "QA测试工程师", RoleTemplate: "测试工程师", BindToPrimary: true},
+		{Port: 103, AgentType: "cicy", Title: "法务", RoleTemplate: "法务", BindToPrimary: true},
+		{Port: 104, AgentType: "cicy", Title: "HR", RoleTemplate: "人力资源", BindToPrimary: true},
+		{Port: 105, AgentType: "cicy", Title: "Token优化", RoleTemplate: "Token优化师", BindToPrimary: true},
+		{Port: 106, AgentType: "claude", Title: "架构师", BindToPrimary: true},
+		{Port: 107, AgentType: "codex", Title: "全栈开发工程师", BindToPrimary: true},
+		{Port: 108, AgentType: "opencode", Title: "软件工程师", BindToPrimary: true},
+		{Port: 109, AgentType: "cicy", Title: "运维工程师", RoleTemplate: "运维工程师", BindToPrimary: true},
+		// 单一审计角色:审核策略专员 = 用户的审计顾问(配规则 + 解读日志 + 研判命中)。
+		// 旧的 审计专员已并入本席位。
+		{Port: 110, AgentType: "cicy", Title: "审核策略专员", RoleTemplate: "审核策略专员", BindToPrimary: true},
+		// 知识专员:团队知识库 + 按项目策展 claude 共享记忆池(project-mem/<slug>/)。
+		// 开箱即上岗,否则没人给"越用越聪明"的共享记忆把关。
+		{Port: 111, AgentType: "cicy", Title: "知识专员", RoleTemplate: "知识专员", BindToPrimary: true},
+		// 评测专员:考核团队 agent —— 多维评分 + 模型对位(每角色哪个模型最优)。
+		// 没它就只有"越用越聪明"的机制、没有"到底有没有变聪明"的反馈回路。
+		{Port: 112, AgentType: "cicy", Title: "评测专员", RoleTemplate: "评测专员", BindToPrimary: true},
 	}
+	// 团队专员(w-100):用 Docker 给团队无限扩编(Windows 上则 WSL/Docker 安装)。
+	// 仅 cicy-desktop 启动(--desktop)才挂;容器/服务器里的 cicy-code 不需要它。
+	if desktopMode {
+		roster = append(roster, teamHelperWorker(false))
+	}
+	return roster
 }
 
 // usesOfficialRoster reports whether this runtime should preinstall the fixed
@@ -523,6 +555,16 @@ func usesOfficialRoster() bool {
 func selectedBuiltinWorkers(selected []string) []builtinWorker {
 	if helperMode {
 		return []builtinWorker{helperModeBuiltinWorker()}
+	}
+	// Windows can't orchestrate a tmux team. On win32 (default, no --helper) seed
+	// ONLY the 团队专员 (w-100, master) — it installs cicy-code into WSL/Docker
+	// where the real team runs. Only when launched by cicy-desktop (--desktop):
+	// a plain win32 cicy-code without desktop has no team to seed.
+	if runtime.GOOS == "windows" {
+		if desktopMode {
+			return []builtinWorker{teamHelperWorker(true)}
+		}
+		return nil
 	}
 	var workers []builtinWorker
 	if usesOfficialRoster() {
@@ -945,6 +987,10 @@ func checkEnv() {
 	// role templates on first boot — the live, hot-editable source thereafter.
 	// (Also migrates a legacy ~/cicy-ai/employees.yaml into db/ if present.)
 	ensureEmployeeTemplates()
+	// Seed the out-of-the-box "default" project so every agent shares one memory
+	// pool from first boot (A→B works with zero setup). Users add their own
+	// projects later; unassigned agents fall back to "default" at launch.
+	ensureDefaultProject()
 
 	ensureDefaultProviders()
 	applyGatewayEnvToDefaultProviders()
@@ -992,9 +1038,9 @@ func checkEnv() {
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
 	// audit-v2: no w-6001 singleton pane to bootstrap/remove anymore — the audit
-	// advisor role is now an ordinary cicy agent (role_template=审计专员) the
+	// advisor role is now an ordinary cicy agent (role_template=审核策略专员) the
 	// operator onboards on demand. Collection/scanning is wired in main.go via
-	// audit.Init(); finding hits dispatch to the 审计专员 (audit_agent_notify.go).
+	// audit.Init(); finding hits dispatch to the 审核策略专员 (audit_agent_notify.go).
 	go ensureFfmpegAsync()
 	go ensurePreinstalledSkills()
 }

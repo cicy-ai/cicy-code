@@ -14,7 +14,8 @@ import (
 type EmailMessage struct {
 	To       []string
 	Subject  string
-	Body     string
+	Body     string // plain-text alternative (always set)
+	HTMLBody string // optional product HTML; when set, sent as multipart/alternative
 	EventID  string
 	AgentID  string
 	Severity Severity

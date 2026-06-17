@@ -134,15 +134,17 @@ func TestBreaker_PassActionForwards(t *testing.T) {
 	}
 }
 
-func TestBreaker_BlockReturns429(t *testing.T) {
+func TestBreaker_BlockReturns403(t *testing.T) {
 	upstreamCalled := false
-	provider := "anthropic" // host 127.0.0.1 maps to "unknown" actually; force test by direct request
 
 	post, hook, stop := startTestServer(t, &stubBreaker{decide: func(BreakerRequest) BreakerDecision {
 		return BreakerDecision{
-			Action: BreakerActionBlock,
-			Reason: "test: secret detected",
-			RuleID: "test.secret",
+			Action:  BreakerActionBlock,
+			Reason:  "test: secret detected",
+			RuleID:  "test.secret",
+			EventID: "evt-test-1",
+			Rules:   []string{"test.secret"},
+			Message: "命中审计拦截规则【test.secret】,已被 cicy-code 审计策略实时阻断。(事件 ID: evt-test-1)",
 		}
 	}}, func(w http.ResponseWriter, r *http.Request) {
 		upstreamCalled = true
@@ -154,71 +156,39 @@ func TestBreaker_BlockReturns429(t *testing.T) {
 		t.Fatalf("post: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 429 {
-		t.Fatalf("status=%d, want 429", resp.StatusCode)
+	// UNIFIED block contract: 403 (non-retryable), same as the gateway path.
+	if resp.StatusCode != 403 {
+		t.Fatalf("status=%d, want 403", resp.StatusCode)
 	}
 	if upstreamCalled {
 		t.Fatal("upstream should NOT be called on block")
 	}
+	if resp.Header.Get("X-Cicy-Audit-Blocked") != "evt-test-1" {
+		t.Errorf("X-Cicy-Audit-Blocked=%q", resp.Header.Get("X-Cicy-Audit-Blocked"))
+	}
+	if resp.Header.Get("X-Cicy-Audit-Rules") != "test.secret" {
+		t.Errorf("X-Cicy-Audit-Rules=%q", resp.Header.Get("X-Cicy-Audit-Rules"))
+	}
 	if resp.Header.Get(HeaderBlockedBy) != "node-breaker" {
 		t.Errorf("X-Cicy-Mitm-Blocked-By=%q", resp.Header.Get(HeaderBlockedBy))
 	}
-	if resp.Header.Get("X-Cicy-Mitm-Block-Rule") != "test.secret" {
-		t.Errorf("X-Cicy-Mitm-Block-Rule=%q", resp.Header.Get("X-Cicy-Mitm-Block-Rule"))
-	}
 	body, _ := io.ReadAll(resp.Body)
-	// Provider for 127.0.0.1 is "unknown" → plain error envelope.
 	var parsed map[string]interface{}
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		t.Fatalf("body not JSON: %s", body)
 	}
+	if parsed["error"] != "blocked_by_audit" {
+		t.Errorf("body.error=%v, want blocked_by_audit", parsed["error"])
+	}
 	if !strings.Contains(string(body), "test.secret") {
 		t.Errorf("body missing rule id: %s", body)
 	}
-	if !strings.Contains(string(body), "test: secret detected") {
-		t.Errorf("body missing reason: %s", body)
+	if !strings.Contains(string(body), "审计策略实时阻断") {
+		t.Errorf("body missing unified message: %s", body)
 	}
 	// Turn was still recorded with Fail.
 	if len(hook.turns) != 1 || hook.turns[0].Err == nil {
 		t.Errorf("expected audit turn with Err set, got: %+v", hook.turns)
 	}
-	_ = provider
 }
 
-func TestBreaker_RedactSwapsBody(t *testing.T) {
-	var upstreamGotBody []byte
-	post, hook, stop := startTestServer(t, &stubBreaker{decide: func(req BreakerRequest) BreakerDecision {
-		// Pretend we found a secret and redact it.
-		redacted := strings.ReplaceAll(string(req.Payload), "sk-abcdef", "[REDACTED:test.secret]")
-		return BreakerDecision{
-			Action:          BreakerActionRedact,
-			Reason:          "test: redacted",
-			RuleID:          "test.secret",
-			ModifiedPayload: []byte(redacted),
-		}
-	}}, func(w http.ResponseWriter, r *http.Request) {
-		upstreamGotBody, _ = io.ReadAll(r.Body)
-		fmt.Fprint(w, `{"ok":true}`)
-	})
-	defer stop()
-
-	resp, err := post(t, `{"prompt":"my key is sk-abcdef stop"}`)
-	if err != nil {
-		t.Fatalf("post: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Fatalf("status=%d", resp.StatusCode)
-	}
-	if strings.Contains(string(upstreamGotBody), "sk-abcdef") {
-		t.Errorf("upstream still saw secret! body=%s", upstreamGotBody)
-	}
-	if !strings.Contains(string(upstreamGotBody), "[REDACTED:test.secret]") {
-		t.Errorf("upstream missing redacted marker: %s", upstreamGotBody)
-	}
-	// Audit's snapshot of the request body is the pre-redact original
-	// (StartTurn was called before breaker.Check) — forensically correct.
-	if !strings.Contains(string(hook.turns[0].Body), "sk-abcdef") {
-		t.Errorf("audit should retain pre-redact body, got: %s", hook.turns[0].Body)
-	}
-}

@@ -38,6 +38,28 @@ type aiGatewayToolCall struct {
 // call's name + arguments. The builtin rules (secrets / PII / dangerous tool
 // use) run over this combined text. Returns nil when there is nothing worth
 // scanning (no question and no tool calls).
+// aiGatewayBuildBehaviorToolCalls converts the normalised gateway tool calls
+// into the audit package's ToolCall shape (provider + name + arguments) for the
+// behaviour-layer scanner. Provider is carried so the scanner can resolve
+// provider-specific tool naming (claude vs codex). Empty-named calls are dropped.
+func aiGatewayBuildBehaviorToolCalls(provider string, toolCalls []aiGatewayToolCall) []audit.ToolCall {
+	if len(toolCalls) == 0 {
+		return nil
+	}
+	out := make([]audit.ToolCall, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		if strings.TrimSpace(tc.ToolName) == "" {
+			continue
+		}
+		out = append(out, audit.ToolCall{
+			Provider:  provider,
+			ToolName:  tc.ToolName,
+			Arguments: tc.Arguments,
+		})
+	}
+	return out
+}
+
 func aiGatewayBuildTurnAuditUnit(question string, toolCalls []aiGatewayToolCall) []byte {
 	q := strings.TrimSpace(question)
 	if q == "" && len(toolCalls) == 0 {
@@ -226,6 +248,14 @@ type aiGatewayAuditSession struct {
 	requestID       string
 	conversationID  string
 	question        string
+	// requestBody is the RAW outbound request bytes (the full prompt the agent
+	// sends to the model). Scanned at turn completion as the OUTBOUND audit
+	// payload — this is the real interception point, same as the MITM adapter.
+	requestBody     []byte
+	// auditSourceChannel tags which path this session came from for audit
+	// events: "" / "gateway" (default) for the cooperative AI gateway, "mitm"
+	// when the mitm adapter created it. Drives Envelope.SourceChannel.
+	auditSourceChannel string
 	startedAt       time.Time
 	// firstByteAt is stamped when the first upstream response byte arrives
 	// (≈ reply start / time-to-first-token for streaming). Zero until then.
@@ -602,6 +632,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		requestID:      requestID,
 		conversationID: conversationID,
 		question:       question,
+		requestBody:    append([]byte(nil), trimmedBody...),
 		startedAt:      startedAt,
 		current:        current,
 		reply:          reply,
@@ -1210,9 +1241,24 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 
 	if failed {
 		errorText := aiGatewayExtractErrorText(responseBody, responseErr)
+		// Cap so a huge raw error body doesn't bloat reply.json / the UI.
+		if r := []rune(errorText); len(r) > 1200 {
+			errorText = strings.TrimSpace(string(r[:1200])) + "…"
+		}
 		if s.reply.Answer == "" {
 			s.reply.Answer = errorText
 			requestSpan.AnswerPreview = aiGatewayPreviewText(errorText, 220)
+		}
+		// Persist the failure DETAIL as a visible item (HTTP <statusCode> + message)
+		// so the history view shows WHY it failed, not just a bare "failed" status.
+		// Plain text (no cicy_outcome tag) → renders as normal markdown content.
+		if errorText != "" {
+			detail := fmt.Sprintf("⚠️ 生成失败（HTTP %d）\n\n%s", statusCode, errorText)
+			s.reply.Items = append(s.reply.Items, map[string]interface{}{
+				"id":   len(s.reply.Items) + 1,
+				"type": "text",
+				"text": detail,
+			})
 		}
 		s.current.Status = "failed"
 		s.reply.Status = "failed"
@@ -1273,13 +1319,47 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	}
 	hub.publishAgent(s.agentID, currentUpdatedEvent)
 	notifyWorkerReplyFinished(s.agentID, replySnapshot.Status)
-	// audit-v2: hand this completed turn to the audit pipeline. The audit unit
-	// is the outbound question + the reply's tool calls (where leaked secrets /
-	// dangerous tool use would surface); aux/internal calls (X-Cicy-Aux) carry
-	// no human prompt or real tool use, so they are skipped.
+	// Audit at the interception point: scan the REAL traffic that passed through
+	// the gateway this turn — the agent's full OUTBOUND request (what it sent to
+	// the model: prompt, context, file contents it read, pasted secrets) and the
+	// model's full INBOUND response. This is the ONLY audit trigger for the
+	// gateway path, mirroring the MITM adapter; outbound uses the incremental
+	// payload so accumulated history is never re-scanned (no flood). Runs even on
+	// failed turns (e.g. 402) — a leak is a leak regardless of the LLM result.
+	// Aux/internal calls (X-Cicy-Aux: suggestion/title) carry no real turn.
 	if !s.auxiliary {
-		if unit := aiGatewayBuildTurnAuditUnit(s.question, replySnapshot.ToolCalls); len(unit) > 0 {
-			audit.SubmitGatewayTurn(s.agentID, s.provider, s.model, s.turnID, s.conversationID, unit)
+		// Diagnostic: record this round's FULL outbound request body into
+		// outbound.json (accumulated across the conversation's rounds), so we can
+		// inspect exactly what is sent to the model each round. Raw body, unfiltered.
+		aiGatewayAppendOutbound(s.agentID, s.conversationID, s.turnID, s.current.RequestID, s.requestBody, time.Now())
+		// 出站审 agent 发给 LLM 的全部新内容 —— q + tool_use + tool_result,一个都不丢。
+		// 出站拦截点在「转发给 LLM 之前」,所以无论是哪种,数据此刻都还没到模型 =
+		// 未发生的 exfil,都可拦:
+		//   - q           用户粘进 prompt 的密钥(少见)
+		//   - tool_use    args 里 `curl -H "auth: TOKEN"` 把 token 当参数外发
+		//   - tool_result agent read 到的敏感文件内容,正发给 LLM
+		// 只靠 IncrementalOutboundPayload 去重(每个 message block 按内容哈希扫一次,
+		// 不重扫历史 → 不 flood);不再按内容类型过滤(旧 q-only 把真正的泄漏面丢了)。
+		if inc := audit.IncrementalOutboundPayload(s.agentID, s.requestBody); len(inc) > 0 {
+			audit.SubmitGatewayOutbound(s.agentID, "", "", "", s.turnID, s.conversationID, s.provider, s.model, inc)
+		}
+		// inbound: scan the model's ASSEMBLED reply (answer + thinking + tool
+		// calls), NOT the raw SSE stream — a secret in a streamed answer is split
+		// across `data:` deltas in the raw bytes and would never match contiguously.
+		var rb strings.Builder
+		rb.WriteString(replySnapshot.Answer)
+		if replySnapshot.Thinking != "" {
+			rb.WriteByte('\n')
+			rb.WriteString(replySnapshot.Thinking)
+		}
+		for _, tc := range replySnapshot.ToolCalls {
+			rb.WriteByte('\n')
+			rb.WriteString(tc.ToolName)
+			rb.WriteByte(' ')
+			rb.WriteString(tc.Arguments)
+		}
+		if rb.Len() > 0 {
+			audit.SubmitGatewayInbound(s.agentID, "", "", "", s.turnID, s.conversationID, s.provider, s.model, []byte(rb.String()))
 		}
 	}
 	// 先补推没推过的 items（见上面 backstop 注释），再 finalize 收尾。

@@ -526,9 +526,11 @@ func cicyTagOutcome(messages []map[string]interface{}) {
 		label := "生成失败"
 		if kind == "cancelled" {
 			label = "已停止生成"
+		} else if kind == "blocked" {
+			label = "已拦截"
 		}
 		m["content"] = label
-		m["cicy_outcome"] = kind // "cancelled" | "error" — UI styles it + 重试 on latest
+		m["cicy_outcome"] = kind // "cancelled" | "error" | "blocked" — UI styles it (+ 重试 on latest, blocked 不给)
 	}
 }
 

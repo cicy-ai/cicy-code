@@ -155,17 +155,16 @@ func deleteCustomAgent(slug string) error {
 	return os.RemoveAll(filepath.Join(customAgentsDir(), clean))
 }
 
-// customAgentToolGroups returns the tool-group names a custom (cicy/dispatcher)
-// agent may select from — the dispatcher profile's grantable set, since a custom
-// agent runs under the dispatcher profile (no frontmatter profile in its seeded
-// AGENTS.md). Selecting a group outside this set would be narrowed away anyway
-// (effective = selected ∩ grantable), so the UI only offers what actually works.
+// customAgentToolGroups returns the tool-group names a custom agent may select
+// from — the universal assistant profile's grantable set (every cicy agent is an
+// assistant now). Selecting a group outside this set would be narrowed away
+// anyway (effective = selected ∩ grantable), so the UI only offers what works.
 func customAgentToolGroups() []string {
 	cfg := loadLiteConfig()
-	if prof, ok := cfg.Profiles["dispatcher"]; ok && len(prof.GrantableGroups) > 0 {
+	if prof, ok := cfg.Profiles["assistant"]; ok && len(prof.GrantableGroups) > 0 {
 		return append([]string{}, prof.GrantableGroups...)
 	}
-	return []string{"coordinate", "onboard", "shell"}
+	return []string{"coordinate", "onboard", "shell", "handoff"}
 }
 
 // ── HTTP ─────────────────────────────────────────────────────────────────────

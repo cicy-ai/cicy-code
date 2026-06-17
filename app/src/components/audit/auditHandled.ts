@@ -9,8 +9,8 @@
 //      handled / false-positive straight from the log without the email round
 //      trip. Optimistic + survives reload.
 //
-// Both AuditLogTab (badges + buttons) and useAuditHits (so handled alerts stop
-// pulsing the FAB) read through these helpers.
+// AuditLogTab (badges + buttons) reads through these helpers to resolve each
+// alert's handled status.
 
 const KEY = 'cicy.auditGuard.handled';
 

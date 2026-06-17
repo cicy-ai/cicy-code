@@ -736,7 +736,6 @@ func handleRuntimeFlags(w http.ResponseWriter, r *http.Request) {
 	}
 	J(w, M{
 		"use_native_files": useNativeFiles(),
-		"audit_enabled":    auditEnabled(),
 	})
 }
 

@@ -8,6 +8,7 @@
   "toolExitCodeNoOutput": "退出码 {{code}} · 无输出",
   "toolExitNoOutput": "退出 · 无输出",
   "composerPlaceholder": "问问你的项目经理…",
+  "slashMenuTitle": "命令",
   "composerBusyPlaceholder": "回复生成中…(按 Esc 取消)",
   "composerDropHint": "松开以添加附件",
   "composerAttach": "添加附件(图片 / PDF / 文档)",

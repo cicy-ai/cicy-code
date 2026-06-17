@@ -405,7 +405,7 @@ button:hover{background:rgba(255,255,255,.18)}
 <button type="submit">${tl('bwStartGo')}</button>
 </form>
 <div class="links">
-<a href="https://www.google.com">Google</a><a href="https://github.com">GitHub</a><a href="https://cicy-ai.com">CiCy</a>
+<a href="https://api.myip.com">api.myip.com</a>
 </div></div></body></html>`;
 const startPageUrl = () => `data:text/html;charset=utf-8,${encodeURIComponent(buildStartPageHtml())}`;
 

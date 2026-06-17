@@ -8,6 +8,7 @@
   "toolExitCodeNoOutput": "終了コード {{code}} · 出力なし",
   "toolExitNoOutput": "終了 · 出力なし",
   "composerPlaceholder": "プロジェクトマネージャーに聞いてみる…",
+  "slashMenuTitle": "コマンド",
   "composerBusyPlaceholder": "返信を生成中…(Esc でキャンセル)",
   "composerDropHint": "ドロップして添付",
   "composerAttach": "添付(画像 / PDF / ドキュメント)",

@@ -120,95 +120,36 @@ func desktopRPC(clientID, tool string, args map[string]interface{}, timeout time
 	}
 }
 
-// deviceShellOut runs exec_shell on a device and returns trimmed stdout.
-// The desktop bridge's `result` is not uniform: small outputs arrive as a JSON
-// object {stdout,stderr,exitCode}; large ones (our base64 screenshots) arrive as
-// a JSON-encoded STRING of that same object. Handle all three shapes (object,
-// JSON-string-of-object, raw string) so we always end up with just stdout.
-func deviceShellOut(clientID, command string) (string, error) {
-	res, err := desktopRPC(clientID, "exec_shell", map[string]interface{}{"command": command}, snapRPCTimeout)
-	if err != nil {
-		return "", err
-	}
-	stdoutFromMap := func(m map[string]interface{}) (string, error) {
-		if e, _ := m["error"].(string); strings.TrimSpace(e) != "" {
-			return "", errors.New(e)
-		}
-		s, _ := m["stdout"].(string)
-		return strings.TrimSpace(s), nil
-	}
-	switch v := res.(type) {
-	case map[string]interface{}:
-		return stdoutFromMap(v)
-	case string:
-		t := strings.TrimSpace(v)
-		if strings.HasPrefix(t, "{") {
-			var m map[string]interface{}
-			if json.Unmarshal([]byte(t), &m) == nil {
-				return stdoutFromMap(m)
-			}
-		}
-		return t, nil
-	default:
-		return "", errors.New("unexpected exec_shell result")
-	}
-}
+// ── capture ───────────────────────────────────────────────────────────────────
+// We capture via cicy-desktop's DEDICATED, NON-dangerous `desktop_snapshot` RPC
+// tool — NOT exec_shell / file_read. cicy-desktop's rpc-guard (utils/rpc-guard.js)
+// marks exec_*/file_* as DANGEROUS_TOOLS and pops a per-call consent dialog
+// ("敏感操作请求 · 来源/操作/命令") plus, on macOS, the live `screencapture` path
+// triggers the OS Screen-Recording permission prompt. The dedicated tool returns
+// a base64 JPEG from cicy-desktop's own native capturer (which holds the OS grant),
+// so there's no shell, no consent dialog, and no per-call permission prompt.
+const desktopSnapshotTool = "desktop_snapshot"
 
-// ── per-platform screenshot ───────────────────────────────────────────────────
-// mac/linux capture LIVE via the OS's own grabber (screencapture / scrot) — no
-// 360/PowerShell hurdles, works fine, unchanged. Windows is the exception: live
-// PowerShell CopyFromScreen returns empty under 360/AppLocker or a display-less
-// RDP session, so there cicy-desktop captures the desktop on a timer (its
-// utils/desktop-snapshot.js → a --disable-gpu desktopCapturer child, ≤600px
-// wide) and writes ~/cicy-files/desktop-snapshot/desktop.b64 — we just read it.
-const snapTmpUnix = "/tmp/cicy_desktop_snap.jpg"
-
-func snapShellCommand(platform string) (string, error) {
-	switch platform {
-	case "darwin":
-		// screencapture → jpg, downscale to ≤600px long edge via sips, base64.
-		// NOTE: exec_shell runs a bare /bin/sh whose PATH lacks /usr/sbin, where
-		// `screencapture` lives — so normalize PATH and prefer the absolute path.
-		return fmt.Sprintf(`export PATH="/usr/sbin:/usr/bin:/bin:$PATH"; f=%[1]s; rm -f "$f"; /usr/sbin/screencapture -x -t jpg "$f" 2>/dev/null || screencapture -x -t jpg "$f" 2>/dev/null; [ -s "$f" ] && { sips -Z 600 "$f" >/dev/null 2>&1 || true; base64 < "$f"; }; rm -f "$f"`, snapTmpUnix), nil
-	case "linux":
-		// Try common X11/Wayland grabbers in order; quality-compressed jpg.
-		return fmt.Sprintf(`f=%[1]s; export PATH="/usr/bin:/usr/local/bin:/bin:$PATH"; export DISPLAY="${DISPLAY:-:0}"; rm -f "$f";
-if command -v scrot >/dev/null 2>&1; then scrot -o -q 60 "$f" 2>/dev/null;
-elif command -v import >/dev/null 2>&1; then import -window root -quality 60 "$f" 2>/dev/null;
-elif command -v gnome-screenshot >/dev/null 2>&1; then gnome-screenshot -f "$f" 2>/dev/null;
-elif command -v grim >/dev/null 2>&1; then grim -t jpeg "$f" 2>/dev/null;
-elif command -v spectacle >/dev/null 2>&1; then spectacle -b -n -o "$f" 2>/dev/null;
-fi
-[ -s "$f" ] && base64 < "$f"; rm -f "$f"`, snapTmpUnix), nil
-	case "win":
-		// exec_shell on Windows runs through cmd.exe, so `type` reads the file the
-		// cicy-desktop snapshot daemon writes (≤600px, refreshed on a timer).
-		return `type "%USERPROFILE%\cicy-files\desktop-snapshot\desktop.b64" 2>nul`, nil
-	default:
-		return "", fmt.Errorf("unsupported platform %q", platform)
-	}
-}
-
-// captureDevice screenshots one device and writes a new snapshot file. Returns
-// the written file's base name.
+// captureDevice fetches a desktop snapshot from cicy-desktop and writes it to disk.
 func captureDevice(clientID, deviceID, platform string, keep int) (string, error) {
-	cmd, err := snapShellCommand(platform)
+	_ = platform // capture happens inside cicy-desktop; platform is informational
+	res, err := desktopRPC(clientID, desktopSnapshotTool, map[string]interface{}{"maxWidth": 600}, snapRPCTimeout)
 	if err != nil {
 		return "", err
 	}
-	out, err := deviceShellOut(clientID, cmd)
-	if err != nil {
-		return "", err
+	b64 := extractSnapshotB64(res)
+	if b64 == "" {
+		return "", errors.New("empty snapshot (desktop_snapshot returned no image)")
 	}
-	out = strings.TrimSpace(out)
-	if out == "" {
-		return "", errors.New("empty screenshot (no grabber or no display)")
+	clean := strings.NewReplacer("\n", "", "\r", "", " ", "", "\t", "").Replace(b64)
+	if strings.HasPrefix(clean, "data:") { // tolerate a data: URL prefix
+		if i := strings.IndexByte(clean, ','); i > 0 {
+			clean = clean[i+1:]
+		}
 	}
-	// base64 may arrive wrapped; strip whitespace before decode.
-	clean := strings.NewReplacer("\n", "", "\r", "", " ", "", "\t", "").Replace(out)
 	raw, err := base64.StdEncoding.DecodeString(clean)
 	if err != nil || len(raw) < 512 {
-		return "", fmt.Errorf("invalid screenshot data: %v (%d bytes)", err, len(raw))
+		return "", fmt.Errorf("invalid snapshot data: %v (%d bytes)", err, len(raw))
 	}
 	key := snapDeviceKey(deviceID, clientID)
 	dir := snapDeviceDir(key)
@@ -221,6 +162,37 @@ func captureDevice(clientID, deviceID, platform string, keep int) (string, error
 	}
 	pruneSnapshots(dir, keep)
 	return name, nil
+}
+
+// extractSnapshotB64 pulls the base64 image out of the desktop_snapshot result,
+// which may be a raw base64 string, an object {b64|base64|image|data|jpeg: "..."},
+// or a JSON-encoded string of such an object.
+func extractSnapshotB64(res interface{}) string {
+	pick := func(m map[string]interface{}) string {
+		for _, k := range []string{"b64", "base64", "image", "data", "jpeg"} {
+			if s, ok := m[k].(string); ok && strings.TrimSpace(s) != "" {
+				return strings.TrimSpace(s)
+			}
+		}
+		return ""
+	}
+	switch v := res.(type) {
+	case map[string]interface{}:
+		return pick(v)
+	case string:
+		t := strings.TrimSpace(v)
+		if strings.HasPrefix(t, "{") {
+			var m map[string]interface{}
+			if json.Unmarshal([]byte(t), &m) == nil {
+				if s := pick(m); s != "" {
+					return s
+				}
+			}
+		}
+		return t
+	default:
+		return ""
+	}
 }
 
 func pruneSnapshots(dir string, keep int) {

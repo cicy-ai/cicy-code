@@ -8,6 +8,7 @@
   "toolExitCodeNoOutput": "Exited with code {{code}} · no output",
   "toolExitNoOutput": "Exited · no output",
   "composerPlaceholder": "Ask your project manager…",
+  "slashMenuTitle": "Commands",
   "composerBusyPlaceholder": "Generating reply… (Esc to cancel)",
   "composerDropHint": "Drop to attach",
   "composerAttach": "Attach (image / PDF / document)",

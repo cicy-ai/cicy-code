@@ -701,7 +701,6 @@ func buildAutonomyStats(events []Event) map[string]interface{} {
 func summarizePolicyForSuggesterMin(p *Policy) map[string]interface{} {
 	out := map[string]interface{}{
 		"version":            p.Version,
-		"enabled":            p.Enabled,
 		"fail_mode":          p.FailMode,
 		"hash":               p.Hash,
 		"preventive_enabled": p.Preventive.Enabled,

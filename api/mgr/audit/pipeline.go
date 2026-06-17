@@ -45,6 +45,12 @@ type Pipeline struct {
 	mailer           Mailer
 	incidentCooldown *incidentCooldownTracker
 
+	// dropCleanEvents skips persisting events with no findings (clean
+	// pass-through traffic) — production sets this so the index only holds
+	// alerts. Default false so tests keep the "record every event" contract
+	// their chain/verify assertions rely on.
+	dropCleanEvents bool
+
 	wg sync.WaitGroup
 }
 
@@ -237,8 +243,8 @@ func (p *Pipeline) reload() {
 			p.CurrentPolicy().Hash, err)
 		return
 	}
-	log.Printf("[audit] policy reloaded hash=%s active_rules=%d custom=%d enabled=%v",
-		pol.Hash, p.activeRuleCount(), len(pol.CustomRules), pol.Enabled)
+	log.Printf("[audit] policy reloaded hash=%s active_rules=%d custom=%d",
+		pol.Hash, p.activeRuleCount(), len(pol.CustomRules))
 	// Credentials/config may have changed; re-resolve the active mailer
 	// (SMTP primary, Gmail fallback) or revert to FileMailer.
 	p.reloadMailer()
@@ -275,7 +281,7 @@ func (p *Pipeline) WatchEmailCredentials() error {
 					return
 				}
 				switch filepath.Base(ev.Name) {
-				case "smtp.json", "google.json", "google_oauth_client.json":
+				case "email.json":
 				default:
 					continue
 				}
@@ -300,18 +306,17 @@ func (p *Pipeline) WatchEmailCredentials() error {
 // OAuth the fallback. Idempotent: if the resolved config is identical to the
 // current state, the swap is a no-op log-line-free operation.
 func (p *Pipeline) reloadMailer() {
+	// SMTP ONLY ("只用 smtp"), sourced from the UI's db/email.json. Downgrade to
+	// FileMailer when SMTP is no longer configured.
 	if scfg := loadSmtpCredentials(); scfg != nil {
 		p.SetMailer(NewSmtpMailer(scfg))
 		responseMailerKind = "smtp"
-		log.Printf("[audit] mailer -> SmtpMailer (%s, db/smtp.json)", scfg.Host)
+		log.Printf("[audit] mailer -> SmtpMailer (%s, db/email.json)", scfg.Host)
 		return
 	}
-	if gcreds := loadGmailCredentials(); gcreds != nil {
-		p.SetMailer(NewGmailMailer(gcreds))
-		responseMailerKind = "gmail"
-		log.Printf("[audit] mailer -> GmailMailer (oauth, db/google.json)")
-		return
-	}
+	p.SetMailer(&FileMailer{OutputDir: filepath.Join(p.store.auditRoot, "email-out")})
+	responseMailerKind = "file"
+	log.Printf("[audit] mailer -> FileMailer (no SMTP in db/email.json)")
 }
 
 // Submit ingests an envelope. Wall and monotonic timestamps are captured
@@ -398,35 +403,52 @@ func (p *Pipeline) process(env Envelope) {
 		}
 	}
 
-	// Archive a redacted snapshot for notify alerts so they can be reviewed /
-	// audited later without re-exposing the secret. (block/redact already keep
-	// an encrypted original via pre-redact; notify previously kept nothing.)
-	if e.Decision.Action == ActionNotify && len(findings) > 0 && !allow.Suppressed {
-		redacted := RedactPayload(env.Payload, findings)
-		ref, err := SaveSnapshot(p.store.workersRoot, env.AgentID, e.ID, redacted)
-		if err != nil {
-			log.Printf("[audit] snapshot save failed agent=%s id=%s: %v", env.AgentID, e.ID, err)
-		} else {
+	// Forensic q/reply snapshot for ANY finding event (log/notify, in/out): records
+	// conversation_id + history_id + the request question + the response, taken
+	// from the REDACTED payload so the secret is never re-exposed. Lets the audit
+	// log answer "当前请求/response 是什么". (block/redact save theirs in
+	// submitPreventive; this covers the detective path.)
+	if len(findings) > 0 && !allow.Suppressed {
+		if ref := p.saveQRSnapshot(e, env, findings); ref != "" {
 			e.Meta.SnapshotRef = ref
 		}
 	}
 
-	persisted, err := p.store.Append(e)
-	if err != nil {
+	// Response delivery: for a notify event, attempt the SMTP/email alert NOW
+	// (this worker is already off the agent hot path) and record the REAL
+	// outcome on the event BEFORE persisting, so 发送状态 is auditable. log/none
+	// events still always record — they just carry no alert. Email-ONLY: we
+	// never forward to an agent (that costs an LLM call per hit).
+	if e.Decision.Action == ActionNotify && len(findings) > 0 {
+		switch {
+		case allow.Suppressed:
+			e.Meta.AlertStatus = "未发送:白名单"
+		case e.Meta.NotifySuppressedBy != "":
+			e.Meta.AlertStatus = "未发送:" + e.Meta.NotifySuppressedBy
+		default:
+			e.Meta.AlertStatus = p.dispatchIncident(e)
+		}
+	}
+
+	// Only persist events worth auditing: a finding fired, the match was
+	// allowlist-suppressed (worth a record), or the pipeline errored. Clean
+	// pass-through traffic (no findings, action=none) is the overwhelming
+	// majority and has nothing to audit — recording it just bloats the index
+	// and slows every query. Drop it.
+	if p.dropCleanEvents && len(e.Findings) == 0 && e.Meta.AllowlistedBy == "" && e.Meta.PipelineError == "" {
+		return
+	}
+
+	if _, err := p.store.Append(e); err != nil {
 		log.Printf("[audit] store.Append failed agent=%s id=%s: %v", env.AgentID, e.ID, err)
 		return
 	}
 
 	if len(findings) > 0 {
-		log.Printf("[audit] event=%s agent=%s findings=%d action=%s scan_ms=%d total_ms=%d",
-			e.ID, env.AgentID, len(findings), e.Decision.Action,
+		log.Printf("[audit] event=%s agent=%s findings=%d action=%s alert=%q scan_ms=%d total_ms=%d",
+			e.ID, env.AgentID, len(findings), e.Decision.Action, e.Meta.AlertStatus,
 			e.Meta.ScannerDurationMs, elapsedMs(startedAt))
 	}
-
-	// Phase 6 cut 1: best-effort async incident-email dispatch on
-	// high/critical events. Async so the audit pipeline keeps its
-	// fire-and-forget latency profile.
-	go p.dispatchIncident(persisted)
 }
 
 func (p *Pipeline) buildEvent(env Envelope, pol *Policy) Event {
@@ -462,6 +484,7 @@ func (p *Pipeline) buildEvent(env Envelope, pol *Policy) Event {
 		Subject: Subject{
 			TurnID:         env.TurnID,
 			ConversationID: env.ConversationID,
+			HistoryID:      env.HistoryID,
 			Provider:       env.Provider,
 			Model:          env.Model,
 			Direction:      env.Direction,

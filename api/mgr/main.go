@@ -40,7 +40,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.2"
+const version = "2.3.4"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -141,6 +141,10 @@ Options:
 		case arg == "--helper" || arg == "--helper=1":
 			helperMode = true
 			os.Setenv("CICY_HELPER", "1")
+		case arg == "--desktop" || arg == "--desktop=1":
+			// Launched by cicy-desktop → seed the 团队专员 (w-100). A plain
+			// cicy-code (server / inside a container) must NOT have it.
+			desktopMode = true
 		case arg == "--port":
 			// space form: --port 8208
 			if i+1 < len(cliArgs) {
@@ -169,14 +173,12 @@ Options:
 		log.Printf("[knowledge] ensure root: %v", err)
 	}
 
-	if auditEnabled() {
-		if err := audit.Init(); err != nil {
-			log.Printf("[audit] init failed: %v", err)
-		} else {
-			log.Printf("[audit] enabled (audit_enabled=true) — collection + scanning active")
-		}
+	// Audit is always on — there is no master off-switch. The pipeline
+	// initializes unconditionally; collection + scanning are always active.
+	if err := audit.Init(); err != nil {
+		log.Printf("[audit] init failed: %v", err)
 	} else {
-		log.Printf("[audit] OFF (set \"audit_enabled\": true in global.json to enable) — no collection, no scanning")
+		log.Printf("[audit] init ok — collection + scanning active")
 	}
 	ensureMITMConfig() // seed ~/cicy-ai/mitm/config.json (enabled) before startMITM reads it
 	startMITM()
@@ -240,9 +242,12 @@ Options:
 	http.HandleFunc("/api/audit/triage", wa(handleAuditTriage))
 	http.HandleFunc("/api/audit/snapshot", wa(handleAuditSnapshot))
 	http.HandleFunc("/api/audit/stats", wa(handleAuditStats))
+	http.HandleFunc("/api/audit/rules", wa(handleAuditRules))
+	http.HandleFunc("/api/audit/rules/test", wa(handleAuditRulesTest))
 	http.HandleFunc("/api/audit/agents", wa(handleAuditAgents))
 	http.HandleFunc("/api/audit/ingest", wa(handleAuditIngest))
 	http.HandleFunc("/api/audit/allowlist/content", wa(handleAuditAllowlistContent))
+	http.HandleFunc("/api/audit/allowlist", wa(handleAuditAllowlist))
 	http.HandleFunc("/api/audit/policy", wa(handleAuditPolicyGlobal))
 	http.HandleFunc("/api/audit/policy/agents/", wa(handleAuditPolicyAgent))
 	http.HandleFunc("/api/audit/policy/effective/", wa(handleAuditPolicyEffective))
@@ -338,7 +343,10 @@ Options:
 	http.HandleFunc("/api/cicy/files", wa(handleCicyFiles))
 	http.HandleFunc("/api/cicy/file", wa(handleCicyFile))
 	http.HandleFunc("/assets/files", wa(handleAssetFileUpload))
-	http.HandleFunc("/assets/files/", wa(handleAssetFile))
+	// GET 取文件公开(不带 cicy token):文件名自带 64-bit 随机前缀,不可猜的随机路径即
+	// capability。这样附件 URL(进聊天消息、发给模型)不含任何 secret,出站审计不会把它当
+	// cicy token 拦截;<img> 也能直接加载(无需在 URL 里塞 API token)。上传(POST)仍需认证。
+	http.HandleFunc("/assets/files/", corsM(handleAssetFile))
 	http.HandleFunc("/api/notify/stream", corsM(func(w http.ResponseWriter, r *http.Request) {
 		t := r.URL.Query().Get("token")
 		if t == "" || !verifyToken(t) {
@@ -351,6 +359,8 @@ Options:
 	// Memory templates (global + project, backs create-agent dialog)
 	http.HandleFunc("/api/memory/templates", wa(handleMemoryTemplates))
 	http.HandleFunc("/api/memory/templates/", wa(handleMemoryTemplateByName))
+	// Projects (first-class: name + dir + rules; per-project shared claude memory)
+	http.HandleFunc("/api/projects", wa(handleProjects))
 
 	// Custom agents (user-authored cicy personas, ~/cicy-ai/agents/<slug>/AGENT.md)
 	http.HandleFunc("/api/custom-agents", wa(handleCustomAgents))
@@ -522,9 +532,6 @@ Options:
 	// Headless cicy: warm every local cicy agent's server-side session so they're
 	// online and message-ready without a tmux pane.
 	warmCicySessions()
-
-	// A2A liaison: poll the platform inbox for bound liaison agents
-	startA2ALiaisonPoller()
 
 	// Hook: thinking → idle
 	RegisterHook(func(paneID string, old, new paneSt) {

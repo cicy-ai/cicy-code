@@ -220,8 +220,9 @@ func randomAssetID(byteLen int) string {
 	return hex.EncodeToString(buf)
 }
 
-func buildAssetFileURL(r *http.Request, pane string, relPath string) string {
-	parts := []string{url.PathEscape(shortPaneID(normPaneID(pane)))}
+func buildAssetFileURL(r *http.Request, relPath string) string {
+	// 共享存储(~/cicy-ai/assets):URL 无 pane 段,直接 /assets/files/<rel>。
+	parts := []string{}
 	for _, segment := range strings.Split(relPath, "/") {
 		segment = strings.TrimSpace(segment)
 		if segment == "" {
@@ -229,15 +230,9 @@ func buildAssetFileURL(r *http.Request, pane string, relPath string) string {
 		}
 		parts = append(parts, url.PathEscape(segment))
 	}
-	assetURL := "/assets/files/" + strings.Join(parts, "/")
-	token := strings.TrimSpace(getToken(r))
-	if token == "" {
-		token = strings.TrimSpace(r.URL.Query().Get("token"))
-	}
-	if token != "" {
-		assetURL += "?token=" + url.QueryEscape(token)
-	}
-	return assetURL
+	// 不附 ?token=<cicy API token>:GET /assets/files/ 公开(随机路径即 capability),
+	// 附件 URL 不含 secret,出站审计不拦,<img> 也能直接加载。
+	return "/assets/files/" + strings.Join(parts, "/")
 }
 
 func resolveAssetDiskPath(root string, relPath string) (string, bool) {
@@ -332,7 +327,7 @@ func handleAssetFileUpload(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	relDir := path.Join(now.Format("2006"), now.Format("01"), now.Format("02"))
 	relPath := path.Join(relDir, randomAssetID(8)+"__"+fileName)
-	assetsRoot := workspaceAssetsFilesDir(workspace)
+	assetsRoot := sharedAssetsFilesDir() // 统一写到 ~/cicy-ai/assets
 	fullPath, ok := resolveAssetDiskPath(assetsRoot, relPath)
 	if !ok {
 		httpErr(w, 400, "bad asset path")
@@ -380,7 +375,7 @@ func handleAssetFileUpload(w http.ResponseWriter, r *http.Request) {
 		Size:        size,
 		ContentType: contentType,
 		IsImage:     strings.HasPrefix(contentType, "image/"),
-		URL:         buildAssetFileURL(r, pane, relPath),
+		URL:         buildAssetFileURL(r, relPath),
 		Path:        relPath,
 		FileRef:     hostPathToFileRef(fullPath),
 	}
@@ -393,35 +388,20 @@ func handleAssetFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rawPath := strings.TrimPrefix(r.URL.Path, "/assets/files/")
-	parts := strings.SplitN(rawPath, "/", 2)
-	if len(parts) != 2 {
+	// 共享存储:URL 形如 /assets/files/<rel>(无 pane 段),rel 即 ~/cicy-ai/assets 下的相对路径。
+	if strings.TrimSpace(rawPath) == "" {
 		http.NotFound(w, r)
 		return
 	}
-	pane := normPaneID(parts[0])
-	workspace := paneWorkspace(pane)
-	if workspace == "" {
-		httpErr(w, 404, "pane not found")
-		return
-	}
-	assetsRoot := workspaceAssetsFilesDir(workspace)
-	fullPath, ok := resolveAssetDiskPath(assetsRoot, parts[1])
+	assetsRoot := sharedAssetsFilesDir()
+	fullPath, ok := resolveAssetDiskPath(assetsRoot, rawPath)
 	if !ok {
 		httpErr(w, 400, "bad asset path")
 		return
 	}
 	if info, err := os.Stat(fullPath); err != nil || info.IsDir() {
-		legacyRoot := workspaceLegacyAssetsFilesDir(workspace)
-		legacyPath, legacyOK := resolveAssetDiskPath(legacyRoot, parts[1])
-		if !legacyOK {
-			http.NotFound(w, r)
-			return
-		}
-		if legacyInfo, legacyErr := os.Stat(legacyPath); legacyErr != nil || legacyInfo.IsDir() {
-			http.NotFound(w, r)
-			return
-		}
-		fullPath = legacyPath
+		http.NotFound(w, r)
+		return
 	}
 	contentType := detectAssetContentType("", fullPath, nil)
 	if contentType == "application/octet-stream" {

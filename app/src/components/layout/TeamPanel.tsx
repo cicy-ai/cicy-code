@@ -59,6 +59,10 @@ interface Props {
   // Open a file (workspace-relative path) in the given agent's file editor.
   // Used by the fork-confirm modal to reveal the source's history files.
   onOpenAgentFile?: (paneId: string, relPath: string) => void;
+  // When true, skip the fixed "current agent (master)" header card so the list
+  // shows ONLY the bound members. Used by the audit view to render just the two
+  // security agents without the w-1001 master card.
+  hideMaster?: boolean;
 }
 
 // Live header metrics (status/model/context/cost) for every card in the panel.
@@ -151,7 +155,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll, onOpenAgentFile }: Props) {
+export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll, onOpenAgentFile, hideMaster = false }: Props) {
   const [creating, setCreating] = useState(false);
   const [forkingId, setForkingId] = useState<string | null>(null);
   // Source pane id whose fork-confirm preview modal is open (null = closed).
@@ -1002,7 +1006,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         </div>,
         document.body
       ) : null}
-      <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 flex-shrink-0" data-id="team-panel-toolbar">
+      {!hideMaster && <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 flex-shrink-0" data-id="team-panel-toolbar">
         <div data-id="team-panel-bind-select" className="flex-1 min-w-0">
         <Select
           options={available.map(a => ({
@@ -1038,7 +1042,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         >
           {creating ? <Spinner size="xs" /> : <Plus className="w-3.5 h-3.5" />}
         </button>
-      </div>
+      </div>}
 
       <CreateAgentDialog
         open={createDialogOpen}
@@ -1055,7 +1059,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 
 
       <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto hide-scrollbar select-none" data-id="team-panel-worker-list">
-        <div className="p-1.5 border-b border-[var(--vsc-border)]" data-id="team-panel-current-agent">
+        {!hideMaster && <div className="p-1.5 border-b border-[var(--vsc-border)]" data-id="team-panel-current-agent">
           {renderAgentCard({
             wid: paneId,
             title: currentAgent.title,
@@ -1084,7 +1088,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               setOpenMenuId(null);
             },
           })}
-        </div>
+        </div>}
         {bindings.length > 0 ? (
           <div className="flex w-full min-w-0 flex-col" data-id="team-panel-groups">
             {groupedBindings.map(group => {

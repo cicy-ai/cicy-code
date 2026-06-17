@@ -831,6 +831,7 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 			useProxy:         opts.useProxy,
 			proxyPassword:    opts.proxyPassword,
 			proxyRule:        opts.proxyRule,
+			projectTemplate:  opts.projectTemplate,
 		})
 	}
 	return M{
@@ -1387,14 +1388,14 @@ func handleUpdateAgentCLI(w http.ResponseWriter, r *http.Request, id string) {
 
 func restartPaneCore(paneID, token string) error {
 	var port sql.NullInt64
-	var workspace, initScript, title, config, agentType, defaultModel, trustLevel sql.NullString
+	var workspace, initScript, title, config, agentType, defaultModel, trustLevel, projectTemplate sql.NullString
 	var allowAllActions sql.NullBool
 	var replyInChinese sql.NullBool
 	var useCustomGateway sql.NullBool
 	var useMitm sql.NullBool
 	var useProxy sql.NullBool
-	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, default_model, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0), COALESCE(use_custom_gateway, 0), COALESCE(use_mitm, 1), COALESCE(proxy_enable, 0) FROM agent_config WHERE pane_id=?", paneID).
-		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &defaultModel, &trustLevel, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm, &useProxy)
+	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, default_model, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0), COALESCE(use_custom_gateway, 0), COALESCE(use_mitm, 1), COALESCE(proxy_enable, 0), COALESCE(project_template, '') FROM agent_config WHERE pane_id=?", paneID).
+		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &defaultModel, &trustLevel, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm, &useProxy, &projectTemplate)
 	if err != nil {
 		return fmt.Errorf("pane %s not found in db", paneID)
 	}
@@ -1433,6 +1434,7 @@ func restartPaneCore(paneID, token string) error {
 		useCustomGateway: useCustomGateway.Bool,
 		useMitm:          useMitm.Bool,
 		useProxy:         useProxy.Bool,
+		projectTemplate:  projectTemplate.String,
 	})
 	store.Exec(fmt.Sprintf("UPDATE agent_config SET updated_at=%s WHERE pane_id=?", store.Now()), paneID)
 	return nil
@@ -1453,6 +1455,7 @@ type paneEnvOpts struct {
 	useProxy         bool
 	proxyPassword    string
 	proxyRule        string
+	projectTemplate  string // project slug → per-project shared claude memory pool
 }
 
 func tmuxShellQuote(v string) string {
@@ -4600,7 +4603,15 @@ func initPaneEnv(opts paneEnvOpts) {
 		sessionEnv["CICY_ANTHROPIC_URL"] = strings.TrimSpace(aiCfg.AnthropicURL)
 		sessionEnv["CICY_OPENCLAW_MODEL"] = strings.TrimSpace(aiCfg.OpenClawModel)
 	case "claude":
-		// claude uses ANTHROPIC_BASE_URL and settings.json directly in boot lines
+		// claude uses ANTHROPIC_BASE_URL and settings.json directly in boot lines.
+		// Per-project shared memory: point claude's auto-memory at the project's
+		// shared pool so same-project claude agents share learnings (A writes →
+		// B recalls). cwd/workspace/role stay per-worker; only memory is shared.
+		// Unassigned agents fall back to the "default" project → everyone shares
+		// one pool out of the box.
+		if pool := ensureProjectMemDir(projectSlugOrDefault(opts.projectTemplate)); pool != "" {
+			sessionEnv["CLAUDE_COWORK_MEMORY_PATH_OVERRIDE"] = pool
+		}
 	case "opencode":
 	case "codex":
 		// codex uses -c flags directly, no env needed

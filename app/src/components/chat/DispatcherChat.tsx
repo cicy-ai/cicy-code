@@ -108,9 +108,16 @@ function AttachmentChip({ att, onRemove }: { att: Attachment; onRemove: () => vo
   );
 }
 
+// 斜杠命令清单:输入框首字符为 `/` 时弹出。服务端拦截这些命令(slash-ack),不入对话历史。
+const SLASH_COMMANDS: { cmd: string; label: string; desc: string }[] = [
+  { cmd: '/clear', label: '清空对话', desc: '清空当前对话上下文,开始新对话' },
+  { cmd: '/compact', label: '压缩对话', desc: '压缩历史以释放上下文,保留摘要' },
+];
+
 export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: { paneId: string; active: boolean; agentType?: string }) {
   const { t } = useTranslation('chat');
   const [text, setText] = useState('');
+  const [slashSel, setSlashSel] = useState(0);
   const [sending, setSending] = useState(false);
   // 回复进行中(busy)→ 锁发送、显示 waiting。只有 reply complete / fail 才解锁。
   // 信号来自 CurrentHistoryView 的轮询(cicy:dispatcher-busy)。
@@ -249,9 +256,10 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
     });
   }, []);
 
-  const send = useCallback(async () => {
-    const value = text.trim();
-    const done = attachmentsRef.current.filter((a) => a.status === 'done');
+  const send = useCallback(async (override?: string) => {
+    const value = (override ?? text).trim();
+    // 斜杠命令(override 直发)是纯指令,不挂附件。
+    const done = override ? [] : attachmentsRef.current.filter((a) => a.status === 'done');
     // 无内容(既无文本也无已传附件)、发送中、或还有附件在上传 → 不发。
     if ((!value && done.length === 0) || sending || uploading) return;
     // 已上传附件用**标准 markdown** 拼进消息,URL 用文件的**绝对路径**(从 FileRef 取):
@@ -305,10 +313,16 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
   const hasContent = !!text.trim() || attachments.some((a) => a.status === 'done');
   const canSend = hasContent && !sending && !uploading;
 
+  // 斜杠命令菜单:首字符为 `/` 且还没敲空格(仍在拼命令 token)时,按前缀过滤候选。
+  const slashToken = text.startsWith('/') && !/\s/.test(text) ? text.toLowerCase() : '';
+  const slashMatches = slashToken ? SLASH_COMMANDS.filter((c) => c.cmd.startsWith(slashToken)) : [];
+  const slashOpen = slashMatches.length > 0 && !sending;
+  const slashSelClamped = Math.min(slashSel, Math.max(0, slashMatches.length - 1));
+
   return (
     <div data-id="dispatcher-chat" className="flex h-full w-full flex-col bg-[#0c0d10]">
       <div data-id="dispatcher-chat-history" className="min-h-0 flex-1 overflow-hidden">
-        <CurrentHistoryView key={paneId} paneId={paneId} open={active} agentType={agentType} fullWidth />
+        <CurrentHistoryView key={paneId} paneId={paneId} open={active} agentType={agentType} fullWidth leftAlignQuestions />
       </div>
       <div
         data-id="dispatcher-chat-input-bar"
@@ -330,6 +344,29 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
             ))}
           </div>
         ) : null}
+        {/* 斜杠命令菜单:首字符 `/` 即浮在输入卡上方(Claude/Slack 风格)。↑↓ 选,
+            Enter/点击执行,Tab 补全,Esc 关闭。 */}
+        {slashOpen ? (
+          <div data-id="dispatcher-chat-slash-menu" className="absolute bottom-full left-4 right-4 z-20 mb-2 overflow-hidden rounded-2xl border border-white/[0.10] bg-[#16171b] shadow-xl shadow-black/40">
+            <div className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-500">{t('slashMenuTitle')}</div>
+            {slashMatches.map((c, i) => {
+              const selected = i === slashSelClamped;
+              return (
+                <button
+                  key={c.cmd}
+                  type="button"
+                  data-id={`dispatcher-chat-slash-item-${c.cmd.slice(1)}`}
+                  onMouseEnter={() => setSlashSel(i)}
+                  onMouseDown={(e) => { e.preventDefault(); void send(c.cmd); setSlashSel(0); }}
+                  className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${selected ? 'bg-blue-500/15' : 'hover:bg-white/[0.04]'}`}
+                >
+                  <span className="shrink-0 font-mono text-[13px] text-blue-300">{c.cmd}</span>
+                  <span className="truncate text-[12px] text-zinc-500">{c.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         {/* Gemini-style prompt card: big rounded container, textarea on top,
             a bottom toolbar (left: attach + thinking; right: round send).
             Full width (matches the full-width history). */}
@@ -349,7 +386,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
             value={text}
             rows={Math.min(8, Math.max(1, text.split('\n').length))}
             placeholder={busy ? t('composerBusyPlaceholder') : t('composerPlaceholder')}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => { setText(e.target.value); setSlashSel(0); }}
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={() => { composingRef.current = false; }}
             onPaste={(e) => {
@@ -358,6 +395,14 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
             }}
             onKeyDown={(e) => {
               e.stopPropagation();
+              // 斜杠菜单打开时,方向键/Enter/Tab/Esc 先归菜单(优先于发送/取消)。
+              if (slashOpen && !composingRef.current) {
+                if (e.key === 'ArrowDown') { e.preventDefault(); setSlashSel((s) => Math.min(s + 1, slashMatches.length - 1)); return; }
+                if (e.key === 'ArrowUp') { e.preventDefault(); setSlashSel((s) => Math.max(s - 1, 0)); return; }
+                if (e.key === 'Tab') { e.preventDefault(); setText(slashMatches[slashSelClamped].cmd + ' '); setSlashSel(0); return; }
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(slashMatches[slashSelClamped].cmd); setSlashSel(0); return; }
+                if (e.key === 'Escape') { e.preventDefault(); setText(''); setSlashSel(0); return; }
+              }
               if (e.key === 'Escape' && busy && !composingRef.current) {
                 e.preventDefault();
                 void cancel();

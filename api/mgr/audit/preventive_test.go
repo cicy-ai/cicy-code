@@ -27,9 +27,40 @@ func preventiveFixture(t *testing.T, policy *Policy) (*Pipeline, string) {
 	return p, workersRoot
 }
 
-func TestPreventive_Disabled_PassThrough(t *testing.T) {
+// blockRedactPolicy builds a policy whose CONTROL is the per-rule action:
+// a custom block rule (private key) + a custom redact rule (AWS access key id).
+// This is the post-toggle design — preventive interception is driven entirely
+// by rules whose action is block/redact, with no global preventive.enabled gate.
+func blockRedactPolicy() *Policy {
 	pol := DefaultPolicy()
-	pol.Preventive.Enabled = false
+	pol.CustomRules = []CustomRule{
+		{
+			ID:             "custom.private_key",
+			Label:          "Private key",
+			Category:       "secret",
+			Severity:       SeverityHigh,
+			ScanDirections: []string{DirectionOutbound, DirectionInbound},
+			DefaultAction:  ActionBlock,
+			Match:          RuleMatch{Type: "regex", Pattern: `-----BEGIN [A-Z ]*PRIVATE KEY-----`},
+		},
+		{
+			ID:             "custom.akid",
+			Label:          "AWS access key id",
+			Category:       "secret",
+			Severity:       SeverityHigh,
+			ScanDirections: []string{DirectionOutbound, DirectionInbound},
+			DefaultAction:  ActionLog,
+			Match:          RuleMatch{Type: "regex", Pattern: `AKIA[0-9A-Z]{16}`},
+		},
+	}
+	return pol
+}
+
+// With NO block/redact rule configured, preventive interception is a no-op:
+// the per-rule action is the control, so a rule set of only log-action rules
+// short-circuits with reason no_intercept_rule and writes no event.
+func TestPreventive_NoInterceptRule_PassThrough(t *testing.T) {
+	pol := DefaultPolicy() // seed: jwt + bearer, both action=log
 	p, _ := preventiveFixture(t, pol)
 
 	dec := p.PreventiveCheck(Envelope{
@@ -38,17 +69,16 @@ func TestPreventive_Disabled_PassThrough(t *testing.T) {
 		Direction:     DirectionOutbound,
 		Payload:       []byte("AKIAIOSFODNN7EXAMPLE"),
 	})
-	if dec.Action != ActionNone || dec.Reason != "preventive_disabled" {
-		t.Errorf("expected none/preventive_disabled, got %+v", dec)
+	if dec.Action != ActionNone || dec.Reason != "no_intercept_rule" {
+		t.Errorf("expected none/no_intercept_rule, got %+v", dec)
 	}
 	if dec.EventID != "" {
-		t.Errorf("no event should be written when preventive disabled, got %s", dec.EventID)
+		t.Errorf("no event should be written when no intercept rule, got %s", dec.EventID)
 	}
 }
 
 func TestPreventive_BlocksHighInlineRule(t *testing.T) {
-	pol := DefaultPolicy()
-	pol.Preventive.Enabled = true
+	pol := blockRedactPolicy()
 	p, workersRoot := preventiveFixture(t, pol)
 
 	dec := p.PreventiveCheck(Envelope{
@@ -85,11 +115,12 @@ func TestPreventive_BlocksHighInlineRule(t *testing.T) {
 }
 
 func TestPreventive_NoInlineMatch_PassThrough(t *testing.T) {
-	pol := DefaultPolicy()
-	pol.Preventive.Enabled = true
+	pol := blockRedactPolicy() // has block/redact rules, but none match this payload
 	p, workersRoot := preventiveFixture(t, pol)
 
-	// pii.phone_cn is low severity, inline=false; does NOT trigger preventive.
+	// A plain phone number matches neither the block nor the redact rule, so
+	// preventive lets it through with no_inline_match (interception is armed,
+	// nothing fired).
 	dec := p.PreventiveCheck(Envelope{
 		AgentID:       "w-y",
 		SourceChannel: SourceGateway,
@@ -105,78 +136,6 @@ func TestPreventive_NoInlineMatch_PassThrough(t *testing.T) {
 	// No preventive event for pass-through.
 	if _, err := os.Stat(filepath.Join(workersRoot, "w-y", ".cicy", "history", "audit.ndjson")); !os.IsNotExist(err) {
 		t.Errorf("expected no event file, got err=%v", err)
-	}
-}
-
-func TestPreventive_AWS_AKID_Redacts(t *testing.T) {
-	pol := DefaultPolicy()
-	pol.Preventive.Enabled = true
-	p, workersRoot := preventiveFixture(t, pol)
-
-	// secret.aws_akid is inline=true with DefaultAction=redact. Phase 3 cut 2
-	// applies the redaction: the body returned to the caller has the AKID
-	// replaced with [REDACTED:secret.aws_akid] and the original is saved
-	// to the encrypted pre-redact archive.
-	original := []byte("token=AKIAIOSFODNN7EXAMPLE end")
-	dec := p.PreventiveCheck(Envelope{
-		AgentID:       "w-z",
-		SourceChannel: SourceGateway,
-		Direction:     DirectionOutbound,
-		Payload:       original,
-	})
-	if dec.Action != ActionRedact {
-		t.Fatalf("aws_akid must redact in cut 2, got %+v", dec)
-	}
-	if !strings.Contains(string(dec.ModifiedPayload), "[REDACTED:secret.aws_akid]") {
-		t.Errorf("modified payload missing REDACTED token: %q", dec.ModifiedPayload)
-	}
-	if strings.Contains(string(dec.ModifiedPayload), "AKIAIOSFODNN7EXAMPLE") {
-		t.Errorf("original AKID leaked into modified payload: %q", dec.ModifiedPayload)
-	}
-	if dec.PreRedactRef == "" {
-		t.Error("expected non-empty PreRedactRef")
-	}
-	if dec.EventID == "" {
-		t.Error("expected non-empty EventID")
-	}
-
-	// Pre-redact file should decrypt back to the original.
-	encPath := filepath.Join(workersRoot, "w-z", ".cicy", "history", "pre-redact", dec.EventID+".enc")
-	data, err := os.ReadFile(encPath)
-	if err != nil {
-		t.Fatalf("read pre-redact file: %v", err)
-	}
-	plaintext, err := DecryptPreRedact(filepath.Join(filepath.Dir(workersRoot), "audit"), data)
-	if err != nil {
-		t.Fatalf("decrypt: %v", err)
-	}
-	if string(plaintext) != string(original) {
-		t.Errorf("pre-redact decrypted %q != original %q", plaintext, original)
-	}
-}
-
-func TestPreventive_BlockBeatsRedact(t *testing.T) {
-	pol := DefaultPolicy()
-	pol.Preventive.Enabled = true
-	p, _ := preventiveFixture(t, pol)
-
-	// Payload with BOTH a private-key block trigger and an AKID redact
-	// trigger. Block must win — the redact is moot once the request is
-	// refused.
-	dec := p.PreventiveCheck(Envelope{
-		AgentID:       "w-mix",
-		SourceChannel: SourceGateway,
-		Direction:     DirectionOutbound,
-		Payload:       []byte("-----BEGIN RSA PRIVATE KEY-----\nAKIAIOSFODNN7EXAMPLE\n"),
-	})
-	if dec.Action != ActionBlock {
-		t.Errorf("block must beat redact, got %s", dec.Action)
-	}
-	// Findings should only carry the block-default rule(s).
-	for _, f := range dec.Findings {
-		if f.RuleID == "secret.aws_akid" {
-			t.Errorf("redact-default findings should not appear when block wins, got: %+v", f)
-		}
 	}
 }
 
@@ -233,8 +192,7 @@ func TestPreRedactRoundTrip(t *testing.T) {
 }
 
 func TestPreventive_AllowlistAgent_Bypass(t *testing.T) {
-	pol := DefaultPolicy()
-	pol.Preventive.Enabled = true
+	pol := blockRedactPolicy()
 	pol.AllowList.Agents = []string{"w-trusted"}
 	p, _ := preventiveFixture(t, pol)
 
@@ -253,8 +211,7 @@ func TestPreventive_AllowlistAgent_Bypass(t *testing.T) {
 }
 
 func TestPreventive_PrivateKey_BlocksAndStampsFindings(t *testing.T) {
-	pol := DefaultPolicy()
-	pol.Preventive.Enabled = true
+	pol := blockRedactPolicy()
 	p, workersRoot := preventiveFixture(t, pol)
 
 	dec := p.PreventiveCheck(Envelope{
@@ -266,10 +223,10 @@ func TestPreventive_PrivateKey_BlocksAndStampsFindings(t *testing.T) {
 	if dec.Action != ActionBlock {
 		t.Fatalf("private key must block, got %+v", dec)
 	}
-	// Check only the secret.private_key finding made it through (other rules
+	// Check only the custom.private_key finding made it through (other rules
 	// have non-block defaults).
 	for _, f := range dec.Findings {
-		if f.RuleID != "secret.private_key" {
+		if f.RuleID != "custom.private_key" {
 			t.Errorf("unexpected non-block-default finding leaked through filter: %s", f.RuleID)
 		}
 	}

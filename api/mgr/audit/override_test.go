@@ -13,7 +13,7 @@ func TestAgentOverride_LoadSaveRoundTrip(t *testing.T) {
 	workers := filepath.Join(root, "workers")
 
 	ov := &AgentOverride{
-		RulesOverride: []RuleOverride{{ID: "pii.phone_cn", Disabled: true}},
+		RulesOverride: []RuleOverride{{ID: "secret.jwt", Disabled: true}},
 		AllowList: AgentAllowListSubset{
 			Paths:         []string{"mitm:flow-x"},
 			ContentHashes: []string{"sha256:abc"},
@@ -212,30 +212,30 @@ func TestPipeline_AgentOverride_DisablesRuleForOneAgent(t *testing.T) {
 	pol := DefaultPolicy()
 	p, workersRoot := preventiveFixture(t, pol)
 
-	// Save per-agent override disabling pii.phone_cn for w-quiet only.
-	ov := &AgentOverride{RulesOverride: []RuleOverride{{ID: "pii.phone_cn", Disabled: true}}}
+	// Save per-agent override disabling secret.bearer_token for w-quiet only.
+	ov := &AgentOverride{RulesOverride: []RuleOverride{{ID: "secret.bearer_token", Disabled: true}}}
 	if err := SaveAgentOverride(workersRoot, "w-quiet", ov); err != nil {
 		t.Fatal(err)
 	}
 
-	// Same payload triggers phone rule normally for w-loud.
-	res := p.scanner.Scan([]byte("call 13800138000"), DirectionOutbound, p.CurrentPolicy())
-	hasPhone := false
+	// Same payload triggers the rule normally for w-loud.
+	res := p.scanner.Scan([]byte("Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123"), DirectionOutbound, p.CurrentPolicy())
+	hasHit := false
 	for _, f := range res {
-		if f.RuleID == "pii.phone_cn" {
-			hasPhone = true
+		if f.RuleID == "secret.bearer_token" {
+			hasHit = true
 		}
 	}
-	if !hasPhone {
-		t.Fatal("baseline: phone rule should fire")
+	if !hasHit {
+		t.Fatal("baseline: bearer_token rule should fire")
 	}
 
 	// Now simulate the pipeline's effective merge for w-quiet.
 	merged := MergeIntoEffective(p.CurrentPolicy(), ov)
 	filtered := ApplyRulesOverrideToFindings(res, merged.RulesOverride)
 	for _, f := range filtered {
-		if f.RuleID == "pii.phone_cn" {
-			t.Errorf("phone rule should have been disabled for w-quiet, got %+v", f)
+		if f.RuleID == "secret.bearer_token" {
+			t.Errorf("bearer_token rule should have been disabled for w-quiet, got %+v", f)
 		}
 	}
 }

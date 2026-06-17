@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -249,8 +250,38 @@ func substituteTemplatePlaceholders(content, agentID, workspace, agentType strin
 		"{{AGENT_ID}}", strings.Split(agentID, ":")[0],
 		"{{WORKSPACE}}", workspace,
 		"{{AGENT_TYPE}}", normalizeAgentType(agentType),
+		"{{PLATFORM}}", platformDisplayName(),
+		"{{PLATFORM_SETUP}}", platformSetupGuidance(),
 	)
 	return rep.Replace(content)
+}
+
+// platformDisplayName is the daemon host's OS, for charters that adapt by platform.
+func platformDisplayName() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "Windows"
+	case "darwin":
+		return "macOS"
+	case "linux":
+		return "Linux"
+	default:
+		return runtime.GOOS
+	}
+}
+
+// platformSetupGuidance is the platform-specific install path for the 团队专员
+// charter ({{PLATFORM_SETUP}}): Windows can use WSL or Docker; macOS/Linux use
+// Docker. Substituted at seed time so the prompt genuinely differs per platform.
+func platformSetupGuidance() string {
+	if runtime.GOOS == "windows" {
+		return "你在 **Windows**:本机跑不了 tmux 团队编排。给用户两条路,让他**选 WSL 还是 Docker**——\n" +
+			"- **WSL**:启用 WSL2(`wsl --install`)+ 发行版,在里面装 cicy-code(Linux 装法)起 daemon;贴近原生,适合开发者。\n" +
+			"- **Docker**:装/起 Docker Desktop,拉起 cicy-code 容器(映射端口)起 daemon;隔离干净、一键起停。\n" +
+			"探测已有环境(`wsl --status` / `docker version`)有哪个推哪个;都没有默认推 WSL2。"
+	}
+	return "你在 **" + platformDisplayName() + "**:用 **Docker** 给团队**无限扩编**——本机已有一支团队,需要更多算力/并行时,用 Docker 起额外的 cicy-code 容器实例(各自一套团队),横向扩。\n" +
+		"探测 `docker version` 确认 Docker 在跑;没装就引导装 Docker;按需 `docker run` 起 cicy-code 容器、映射端口、起 daemon,把入口给用户。"
 }
 
 // composeAgentMemory builds the seed content for a new agent's guidance file:
@@ -265,7 +296,9 @@ func composeAgentMemory(agentID, workspace, agentType, projectSlug, roleSlug str
 		parts = append(parts, global)
 	}
 	if slug := sanitizeTemplateSlug(projectSlug); slug != "" {
-		if project := strings.TrimSpace(loadTemplateFile(projectTemplatePath(slug))); project != "" {
+		// projectRulesBody strips the YAML frontmatter (name/dir) so only the
+		// rules body lands in the agent's CLAUDE.md — never the metadata header.
+		if project := projectRulesBody(slug); project != "" {
 			parts = append(parts, project)
 		}
 	}

@@ -104,19 +104,14 @@ func pumpHTTP(
 	})
 	switch bd.Action {
 	case BreakerActionBlock:
-		if err := writeSyntheticBlockRaw(client, provider, bd.RuleID, bd.Reason, cfg.Node.ID); err != nil {
-			log.Printf("[mitm] write synthetic block: %v", err)
+		if err := writeAuditBlockRaw(client, bd.EventID, bd.Rules, bd.Message, cfg.Node.ID); err != nil {
+			log.Printf("[mitm] write audit block: %v", err)
 		}
 		turn.Fail(fmt.Errorf("blocked by %s: %s", bd.RuleID, bd.Reason))
 		return nil
-	case BreakerActionRedact:
-		if len(bd.ModifiedPayload) > 0 {
-			body = bd.ModifiedPayload
-			req.Body = io.NopCloser(bytes.NewReader(body))
-			req.ContentLength = int64(len(body))
-		}
 	case BreakerActionPass:
-		// fall through
+		// fall through — forward unchanged. (redact removed: the breaker never
+		// rewrites the body; audit only passes or blocks.)
 	}
 
 	// Final hop: strip the trace headers so the real provider never sees

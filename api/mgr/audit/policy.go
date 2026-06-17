@@ -21,13 +21,22 @@ type Policy struct {
 	// so future replays know which policy was in effect.
 	Hash string `json:"-"`
 
-	Version  int    `json:"version"`
-	Enabled  bool   `json:"enabled"`
+	Version int `json:"version"`
+	// (master `enabled` switch removed 2026-06-16 — audit is always on; the
+	// per-rule action is the control. No global kill-switch to silently disable
+	// auditing.)
 	FailMode string `json:"fail_mode"` // "open" | "closed"
 
 	RulesOverride []RuleOverride `json:"rules_override"`
 	CustomRules   []CustomRule   `json:"custom_rules"`
 	AllowList     AllowList      `json:"allow_list"`
+
+	// RulesManaged means policy.json IS the single source of truth for the
+	// rule set: the built-in rules have been materialized into CustomRules and
+	// the hardcoded builtin layer is NOT merged at runtime. A fresh install is
+	// seeded this way, so every rule (including former built-ins) is fully
+	// editable / deletable via this config and nothing is "hardcoded".
+	RulesManaged bool `json:"rules_managed,omitempty"`
 
 	// Notify drives noise governance (P2-T5) and the channel-delivery
 	// pipeline (Phase 3). Defaults applied at load time.
@@ -245,6 +254,25 @@ type RuleOverride struct {
 	Disabled      bool     `json:"disabled,omitempty"`
 	Severity      Severity `json:"severity,omitempty"`
 	DefaultAction Action   `json:"default_action,omitempty"`
+	// Pattern + MatchType, when set, REPLACE a builtin rule's matcher entirely —
+	// so ANY builtin (even Go-function ones like high_entropy) becomes
+	// configurable: override it with your own regex or JS. MatchType "js" runs
+	// Pattern as a JS matcher; "regex"/"" runs it as a regex. Empty Pattern =
+	// keep the builtin's own matcher.
+	Pattern   string `json:"pattern,omitempty"`
+	MatchType string `json:"match_type,omitempty"` // "regex" (default) | "js"
+	// Tests are saved test cases for the overridden matcher. When the override
+	// carries a Pattern, every test must pass before the policy is accepted.
+	Tests []RuleTest `json:"tests,omitempty"`
+}
+
+// RuleTest is a saved test case for a rule's matcher. Text is sample input;
+// Expect is "hit" (matcher must match) or "miss" (must not match). Every test
+// attached to a rule must pass before a policy containing it is accepted —
+// this is enforced both in the UI and here in validatePolicy.
+type RuleTest struct {
+	Text   string `json:"text"`
+	Expect string `json:"expect,omitempty"` // "hit" (default) | "miss"
 }
 
 // CustomRule is an enterprise-defined rule layered on top of the builtin set.
@@ -258,6 +286,13 @@ type CustomRule struct {
 	Inline         bool      `json:"inline,omitempty"`
 	DefaultAction  Action    `json:"default_action,omitempty"`
 	Match          RuleMatch `json:"match"`
+	// Disabled keeps the rule in policy.json but removes it from the active set
+	// — the same off-switch builtins get via rules_override.disabled, so a
+	// custom rule can be paused without deleting it.
+	Disabled bool `json:"disabled,omitempty"`
+	// Tests are saved test cases for this rule's matcher. Every test must pass
+	// before the policy is accepted (UI gate + validatePolicy).
+	Tests []RuleTest `json:"tests,omitempty"`
 }
 
 // RuleMatch is the matcher spec for a CustomRule. Phase 2 supports:
@@ -292,7 +327,6 @@ func DefaultPolicy() *Policy {
 	return &Policy{
 		Hash:     "sha256:DEFAULT",
 		Version:  1,
-		Enabled:  true,
 		FailMode: "open",
 		AllowList: AllowList{
 			Paths:         []string{},
@@ -423,10 +457,26 @@ func validatePolicy(p *Policy) error {
 		if o.DefaultAction != "" && !validAction(o.DefaultAction) {
 			return fmt.Errorf("audit: rules_override[%d]: invalid action %q", i, o.DefaultAction)
 		}
+		if o.Pattern != "" {
+			mt := o.MatchType
+			if mt == "js" {
+				if _, err := jsDetect(o.Pattern); err != nil {
+					return fmt.Errorf("audit: rules_override[%d %s]: js compile: %w", i, o.ID, err)
+				}
+			} else if _, err := regexp.Compile(o.Pattern); err != nil {
+				return fmt.Errorf("audit: rules_override[%d %s]: pattern compile: %w", i, o.ID, err)
+			}
+			if err := runRuleTests(mt, o.Pattern, o.Tests, fmt.Sprintf("rules_override[%d %s]", i, o.ID)); err != nil {
+				return err
+			}
+		}
 	}
 	for i, c := range p.CustomRules {
-		if !strings.HasPrefix(c.ID, "custom.") {
-			return fmt.Errorf("audit: custom_rules[%d]: id %q must start with \"custom.\"", i, c.ID)
+		// Allow the "custom." namespace OR a known builtin id — the latter so
+		// materialized built-ins (RulesManaged seed) live in custom_rules as
+		// first-class editable entries.
+		if !strings.HasPrefix(c.ID, "custom.") && !builtinIDs[c.ID] {
+			return fmt.Errorf("audit: custom_rules[%d]: id %q must start with \"custom.\" (or be a builtin id)", i, c.ID)
 		}
 		if !validSeverity(c.Severity) {
 			return fmt.Errorf("audit: custom_rules[%d %s]: invalid severity %q", i, c.ID, c.Severity)
@@ -434,11 +484,11 @@ func validatePolicy(p *Policy) error {
 		if c.DefaultAction != "" && !validAction(c.DefaultAction) {
 			return fmt.Errorf("audit: custom_rules[%d %s]: invalid default_action %q", i, c.ID, c.DefaultAction)
 		}
-		if len(c.ScanDirections) == 0 {
-			return fmt.Errorf("audit: custom_rules[%d %s]: scan_directions must list at least one of outbound/inbound", i, c.ID)
-		}
+		// scan_directions is OPTIONAL and no longer gates matching — a rule scans
+		// every payload; the EVENT records the direction it was caught on. Kept for
+		// backward compat: if present, values must be valid; empty = scan all.
 		for _, d := range c.ScanDirections {
-			if d != DirectionOutbound && d != DirectionInbound {
+			if d != DirectionOutbound && d != DirectionInbound && d != DirectionBehavior {
 				return fmt.Errorf("audit: custom_rules[%d %s]: invalid scan_direction %q", i, c.ID, d)
 			}
 		}
@@ -455,8 +505,43 @@ func validatePolicy(p *Policy) error {
 			if strings.TrimSpace(c.Match.Path) == "" {
 				return fmt.Errorf("audit: custom_rules[%d %s]: dict_file path required", i, c.ID)
 			}
+		case "js":
+			if strings.TrimSpace(c.Match.Pattern) == "" {
+				return fmt.Errorf("audit: custom_rules[%d %s]: js match requires code in match.pattern", i, c.ID)
+			}
+			if _, err := jsDetect(c.Match.Pattern); err != nil {
+				return fmt.Errorf("audit: custom_rules[%d %s]: js compile: %w", i, c.ID, err)
+			}
 		default:
 			return fmt.Errorf("audit: custom_rules[%d %s]: unknown match.type %q", i, c.ID, c.Match.Type)
+		}
+		// Saved test cases must pass (regex/js only; dict_file isn't testable here).
+		if !c.Disabled && (c.Match.Type == "regex" || c.Match.Type == "js") {
+			if err := runRuleTests(c.Match.Type, c.Match.Pattern, c.Tests, fmt.Sprintf("custom_rules[%d %s]", i, c.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// runRuleTests runs each saved test case through the matcher and fails if any
+// test's outcome disagrees with its expectation. "miss" expects no match; any
+// other value (incl. empty) expects a match. Empty test list passes trivially.
+func runRuleTests(matchType, pattern string, tests []RuleTest, ctx string) error {
+	for ti, tc := range tests {
+		spans, err := TestRuleMatcher(matchType, pattern, tc.Text)
+		if err != nil {
+			return fmt.Errorf("audit: %s: test[%d]: %w", ctx, ti, err)
+		}
+		hit := len(spans) > 0
+		wantHit := tc.Expect != "miss"
+		if hit != wantHit {
+			want := "命中"
+			if !wantHit {
+				want = "不命中"
+			}
+			return fmt.Errorf("audit: %s: 测试用例[%d] 期望%s,实际相反", ctx, ti, want)
 		}
 	}
 	return nil
@@ -472,9 +557,10 @@ func validSeverity(s Severity) bool {
 
 func validAction(a Action) bool {
 	switch a {
-	case ActionLog, ActionNotify, ActionRedact, ActionBlock, ActionNone:
+	case ActionLog, ActionNotify, ActionBlock, ActionNone:
 		return true
 	}
+	// redact removed 2026-06-16 — no longer a valid rule action.
 	return false
 }
 
@@ -527,6 +613,21 @@ func DefaultPolicyPath() string {
 		return ""
 	}
 	return filepath.Join(home, "cicy-ai", "audit", "policy.json")
+}
+
+// CurrentPolicyManaged reports whether the active policy.json is config-managed
+// (builtins materialized into custom_rules). Used by the rule-catalog endpoint
+// to avoid showing the hardcoded builtin layer on top of the config copies.
+func CurrentPolicyManaged() bool {
+	raw, err := ReadGlobalPolicyRaw()
+	if err != nil {
+		return false
+	}
+	var p Policy
+	if json.Unmarshal(raw, &p) != nil {
+		return false
+	}
+	return p.RulesManaged
 }
 
 // WriteGlobalPolicy validates and atomically writes a new global policy.
@@ -587,7 +688,14 @@ func ReadGlobalPolicyRaw() ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []byte("{}"), nil
+			// No policy.json yet — return the effective default WITH the builtins
+			// materialized, so the UI shows the full (editable) rule set and never
+			// a spurious "disabled" state. Audit has no master off-switch; a fresh
+			// install is on by default and config-managed.
+			if b, mErr := json.MarshalIndent(DefaultPolicyWithBuiltins(), "", "  "); mErr == nil {
+				return b, nil
+			}
+			return []byte(`{}`), nil
 		}
 		return nil, err
 	}
@@ -605,6 +713,21 @@ const (
 	AllowCategoryPath        AllowListCategory = "path"
 )
 
+// allowListKey maps a public category to its policy.json allow_list array
+// key. Returns "" for an unknown category.
+func allowListKey(category AllowListCategory) string {
+	switch category {
+	case AllowCategoryContentHash:
+		return "content_hashes"
+	case AllowCategoryAgent:
+		return "agents"
+	case AllowCategoryPath:
+		return "paths"
+	default:
+		return ""
+	}
+}
+
 // AddToAllowList atomically appends value to the named allow_list bucket
 // in policy.json. Idempotent: a value that is already present is a no-op
 // (no error, file not rewritten). Returns the *policy.json path written
@@ -617,15 +740,8 @@ func AddToAllowList(category AllowListCategory, value, reason string) (string, e
 	if strings.TrimSpace(value) == "" {
 		return "", fmt.Errorf("audit: allow_list value empty")
 	}
-	var key string
-	switch category {
-	case AllowCategoryContentHash:
-		key = "content_hashes"
-	case AllowCategoryAgent:
-		key = "agents"
-	case AllowCategoryPath:
-		key = "paths"
-	default:
+	key := allowListKey(category)
+	if key == "" {
 		return "", fmt.Errorf("audit: unknown allow_list category %q", category)
 	}
 
@@ -677,6 +793,80 @@ func AddToAllowList(category AllowListCategory, value, reason string) (string, e
 		return "", err
 	}
 	_ = reason // recorded by the caller (log line + meta-audit event in P5)
+	return path, nil
+}
+
+// RemoveFromAllowList atomically deletes every occurrence of value from the
+// named allow_list bucket in policy.json. Idempotent: a value that is absent
+// is a no-op (no error, file not rewritten). Returns the *policy.json path
+// written when a change occurred, or "" when nothing changed.
+//
+// Mirrors AddToAllowList: map[string]interface{} round-trip so unknown /
+// future policy fields survive verbatim.
+func RemoveFromAllowList(category AllowListCategory, value string) (string, error) {
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("audit: allow_list value empty")
+	}
+	key := allowListKey(category)
+	if key == "" {
+		return "", fmt.Errorf("audit: unknown allow_list category %q", category)
+	}
+
+	path := DefaultPolicyPath()
+	if path == "" {
+		return "", fmt.Errorf("audit: cannot resolve policy.json path")
+	}
+
+	policyWriteMu.Lock()
+	defer policyWriteMu.Unlock()
+
+	raw := map[string]interface{}{}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil // nothing to remove
+		}
+		return "", err
+	}
+	_ = json.Unmarshal(data, &raw)
+
+	allowList, _ := raw["allow_list"].(map[string]interface{})
+	if allowList == nil {
+		return "", nil
+	}
+	existing, _ := allowList[key].([]interface{})
+	if len(existing) == 0 {
+		return "", nil
+	}
+
+	kept := make([]interface{}, 0, len(existing))
+	removed := false
+	for _, e := range existing {
+		if s, ok := e.(string); ok && s == value {
+			removed = true
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if !removed {
+		return "", nil // absent, idempotent no-op
+	}
+	allowList[key] = kept
+	raw["allow_list"] = allowList
+
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	out = append(out, '\n')
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0o600); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
 	return path, nil
 }
 

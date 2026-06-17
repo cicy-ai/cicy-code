@@ -1,4 +1,4 @@
-import { Brain, Check, Copy, Folder, History, LineChart, ListTodo, Pencil, Settings, X } from 'lucide-react'
+import { Activity, BookOpen, Brain, Check, Copy, Folder, History, LineChart, ListTodo, Pencil, Settings, ShieldCheck, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -39,8 +39,10 @@ function AgentStack({
   onOpenPaneSession,
   onOpenPaneTodo,
   onOpenPaneMemory,
+  onOpenPaneContent,
   onRenamePaneTitle,
   todoCount = 0,
+  auditAlertCount = 0,
 }: {
   items: AgentCanvasItem[]
   activePaneId: string
@@ -53,9 +55,14 @@ function AgentStack({
   onOpenPaneSession: (paneId: string) => void
   onOpenPaneTodo?: (paneId: string) => void
   onOpenPaneMemory?: (paneId: string) => void
+  // Generic "open this right-panel content tab for the pane" — used for the
+  // header buttons that mirror cli-content-tabs (knowledge / 审计日志 / 审计策略).
+  onOpenPaneContent?: (paneId: string, tab: string) => void
   onRenamePaneTitle?: (paneId: string, nextTitle: string) => Promise<void> | void
   // Pending-todo count for the active pane; shown as a badge on its todo button.
   todoCount?: number
+  // Open (unhandled) audit-alert count; shown as a badge on the 审计日志 button.
+  auditAlertCount?: number
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const { t } = useTranslation('layout')
@@ -65,8 +72,6 @@ function AgentStack({
   // whose history is open (null = closed). It renders INLINE inside that card's
   // body, layered over the WebFrame (no modal/portal) — see AgentStackCard.
   const [historyPaneId, setHistoryPaneId] = useState<string | null>(null)
-  // Default ON: the history overlay is meant to surface the clean q list first.
-  const [promptsOnly, setPromptsOnly] = useState(true)
 
   const toggleHistory = useCallback((paneId: string) => {
     setHistoryPaneId((cur) => (cur === paneId ? null : paneId))
@@ -109,13 +114,13 @@ function AgentStack({
           onOpenPaneSession={onOpenPaneSession}
           onOpenPaneTodo={onOpenPaneTodo}
           onOpenPaneMemory={onOpenPaneMemory}
+          onOpenPaneContent={onOpenPaneContent}
           onRenamePaneTitle={onRenamePaneTitle}
           todoCount={activePaneId === item.paneId ? todoCount : 0}
+          auditAlertCount={auditAlertCount}
           onClick={() => onActivePaneIdChange(item.paneId)}
           onToggleHistory={() => toggleHistory(item.paneId)}
           historyActive={historyPaneId === item.paneId}
-          promptsOnly={promptsOnly}
-          onPromptsOnlyChange={setPromptsOnly}
         />
       ))}
     </div>
@@ -141,13 +146,13 @@ function AgentStackCard({
   onOpenPaneSession,
   onOpenPaneTodo,
   onOpenPaneMemory,
+  onOpenPaneContent,
   onRenamePaneTitle,
   todoCount = 0,
+  auditAlertCount = 0,
   onClick,
   onToggleHistory,
   historyActive,
-  promptsOnly,
-  onPromptsOnlyChange,
 }: {
   item: AgentCanvasItem;
   active: boolean;
@@ -159,13 +164,13 @@ function AgentStackCard({
   onOpenPaneSession: (paneId: string) => void;
   onOpenPaneTodo?: (paneId: string) => void;
   onOpenPaneMemory?: (paneId: string) => void;
+  onOpenPaneContent?: (paneId: string, tab: string) => void;
   onRenamePaneTitle?: (paneId: string, nextTitle: string) => Promise<void> | void;
   todoCount?: number;
+  auditAlertCount?: number;
   onClick: () => void;
   onToggleHistory: () => void;
   historyActive: boolean;
-  promptsOnly: boolean;
-  onPromptsOnlyChange: (next: boolean) => void;
 }) {
   const { t } = useTranslation('layout')
   const { globalVar } = useApp()  // helper_mode → hide the card header-right controls
@@ -315,6 +320,18 @@ function AgentStackCard({
     onOpenPaneTodo?.(item.paneId)
   }, [item.paneId, onOpenPaneTodo])
 
+  const handleOpenKnowledge = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onOpenPaneContent?.(item.paneId, 'knowledge')
+  }, [item.paneId, onOpenPaneContent])
+  const handleOpenAuditLog = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onOpenPaneContent?.(item.paneId, 'log')
+  }, [item.paneId, onOpenPaneContent])
+  const handleOpenAuditPolicy = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onOpenPaneContent?.(item.paneId, 'policy')
+  }, [item.paneId, onOpenPaneContent])
   const handleOpenMemory = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     onOpenPaneMemory?.(item.paneId)
@@ -491,6 +508,18 @@ function AgentStackCard({
             >
               <LineChart className="h-4 w-4" />
             </button>
+            {onOpenPaneContent && (
+              <button
+                data-id="agent-stack-card-knowledge"
+                type="button"
+                onClick={handleOpenKnowledge}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+                title={t('tabKnowledge', { defaultValue: '知识库' })}
+                aria-label={t('tabKnowledge', { defaultValue: '知识库' })}
+              >
+                <BookOpen className="h-4 w-4" />
+              </button>
+            )}
             {onOpenPaneMemory && (
               <button
                 data-id="agent-stack-card-memory"
@@ -502,6 +531,38 @@ function AgentStackCard({
               >
                 <Brain className="h-4 w-4" />
               </button>
+            )}
+            {onOpenPaneContent && (
+              <>
+                <button
+                  data-id="agent-stack-card-audit-log"
+                  type="button"
+                  onClick={handleOpenAuditLog}
+                  className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+                  title={t('tabAuditLog', { ns: 'audit', defaultValue: '审计日志' })}
+                  aria-label={t('tabAuditLog', { ns: 'audit', defaultValue: '审计日志' })}
+                >
+                  <Activity className="h-4 w-4" />
+                  {auditAlertCount > 0 && (
+                    <span
+                      data-id="agent-stack-card-audit-log-badge"
+                      className="absolute -right-0.5 -top-0.5 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
+                    >
+                      {auditAlertCount > 99 ? '99+' : auditAlertCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  data-id="agent-stack-card-audit-policy"
+                  type="button"
+                  onClick={handleOpenAuditPolicy}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+                  title={t('tabAuditPolicy', { ns: 'audit', defaultValue: '审计策略' })}
+                  aria-label={t('tabAuditPolicy', { ns: 'audit', defaultValue: '审计策略' })}
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                </button>
+              </>
             )}
             <button
               data-id="agent-stack-card-settings"
@@ -577,21 +638,8 @@ function AgentStackCard({
             className="absolute inset-x-0 top-0 z-30 flex flex-col border-b border-white/[0.1] bg-[#0c0d10] shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
             style={{ height: `${historyHeightFrac * 100}%` }}
           >
-            <div data-id={`agent-stack-card-history-inline-header-${item.paneId}`} className="flex shrink-0 items-center gap-2.5 border-b border-white/[0.06] px-4 py-2.5">
-              <label
-                data-id={`agent-stack-card-history-prompts-only-${item.paneId}`}
-                className="inline-flex cursor-pointer select-none items-center gap-1.5 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200"
-              >
-                <input
-                  type="checkbox"
-                  data-id={`agent-stack-card-history-prompts-only-input-${item.paneId}`}
-                  checked={promptsOnly}
-                  onChange={(event) => onPromptsOnlyChange(event.target.checked)}
-                  className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
-                />
-                {t('agentStackPromptsOnly', { defaultValue: '只显示 prompt' })}
-              </label>
-              <div className="flex-1" />
+            <div data-id={`agent-stack-card-history-inline-header-${item.paneId}`} className="flex shrink-0 items-center justify-end gap-2 border-b border-white/[0.06] px-4 py-2.5">
+              <span data-id={`agent-stack-card-history-inline-esc-hint-${item.paneId}`} className="select-none text-[11px] text-zinc-500">按 ESC 关闭</span>
               <button
                 type="button"
                 data-id={`agent-stack-card-history-inline-close-${item.paneId}`}
@@ -604,7 +652,8 @@ function AgentStackCard({
               </button>
             </div>
             <div data-id={`agent-stack-card-history-inline-body-${item.paneId}`} className="min-h-0 flex-1 overflow-hidden">
-              <CurrentHistoryView key={item.paneId} paneId={item.paneId} open promptsOnly={promptsOnly} fullWidth leftAlignQuestions agentType={item.agentType || ''} />
+              {/* Always prompts-only (no toggle) — this view IS the prompt list. */}
+              <CurrentHistoryView key={item.paneId} paneId={item.paneId} open promptsOnly fullWidth leftAlignQuestions agentType={item.agentType || ''} />
             </div>
             {/* Draggable bottom edge: resize history vs the live tmux strip below. */}
             <div

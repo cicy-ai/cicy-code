@@ -273,8 +273,11 @@ const cicyOutcomeLegacyMark = "⟦cicy-turn-outcome⟧"
 
 // cicyOutcomeMarkerText renders the clean wire/display text for a turn outcome.
 func cicyOutcomeMarkerText(kind string) string {
-	if kind == "cancelled" {
+	switch kind {
+	case "cancelled":
 		return cicyOutcomePrefix + "·已停止）"
+	case "blocked":
+		return cicyOutcomePrefix + "·已拦截）"
 	}
 	return cicyOutcomePrefix + "·生成失败）"
 }
@@ -309,11 +312,19 @@ func cicyAttachOutcomeToSnapshot(shortID, kind, detail string) {
 			return
 		}
 	}
-	msgs = append(msgs, map[string]interface{}{
+	marker := map[string]interface{}{
 		"id":      aiGatewayCurrentBodyMaxHistoryID(current.Body) + 1,
 		"role":    "assistant",
 		"content": []interface{}{map[string]interface{}{"type": "text", "text": cicyOutcomeMarkerText(kind)}},
-	})
+	}
+	// detail(如 blocked 的具体拦截原因)挂在 current.json 的 marker 上作为**展示字段**,
+	// 供 UI 在「已拦截」卡里 inline 显示(像余额不足卡显示原因)。这是 display-only:下一轮
+	// wire 请求体由 session.messages 经 cicyRequestMessages 重新构建(marker 文本干净、无此
+	// 字段),所以不上 wire、不污染压缩。reload 时 web 读 current.json → 原因仍在。
+	if d := strings.TrimSpace(detail); d != "" {
+		marker["cicy_outcome_detail"] = d
+	}
+	msgs = append(msgs, marker)
 	body["messages"] = msgs
 	current.Body = body
 	_ = aiGatewayWriteCurrentSnapshot(shortID, current)
@@ -329,6 +340,9 @@ func cicyOutcomeKindFromText(s string) string {
 	}
 	if strings.Contains(s, "已停止") || strings.Contains(s, "cancelled") {
 		return "cancelled"
+	}
+	if strings.Contains(s, "已拦截") || strings.Contains(s, "blocked") {
+		return "blocked"
 	}
 	return "error"
 }
@@ -954,6 +968,25 @@ func cicyForEachBlock(msg M, fn func(bm map[string]interface{}, typ string)) {
 	}
 }
 
+// cicyTextFromBlocks concatenates the text of all text-type content blocks
+// (Anthropic content shape) — used to pull a human-readable notice out of a gateway
+// response's content (e.g. the audit-block reason in the legacy 200+SSE path).
+func cicyTextFromBlocks(content interface{}) string {
+	var b strings.Builder
+	cicyForEachBlock(M{"content": content}, func(bm map[string]interface{}, typ string) {
+		if typ != "text" {
+			return
+		}
+		if s, _ := bm["text"].(string); s != "" {
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(s)
+		}
+	})
+	return b.String()
+}
+
 func cicyToolUseIDs(msg M) []string {
 	var ids []string
 	cicyForEachBlock(msg, func(bm map[string]interface{}, t string) {
@@ -1063,8 +1096,7 @@ func cicyToolDefs(cfg liteConfig) []M {
 }
 
 func cicyAllToolDefs() []M {
-	defs := append([]M{}, a2aLiaisonToolDefs()...) // a2a_* (liaison profile)
-	return append(defs, []M{
+	return append([]M{}, []M{
 		{
 			"name":        "todo_add",
 			"description": "Record a new task in the shared todo list. Optionally assign it to an agent by short pane id (e.g. w-10003).",
@@ -1449,9 +1481,6 @@ func cicyRunTool(selfShortID, name string, input map[string]interface{}, cfg lit
 		}
 		return s
 	}
-	if strings.HasPrefix(name, "a2a_") {
-		return a2aLiaisonRunTool(selfShortID, name, input)
-	}
 	return "error: unknown tool " + name
 }
 
@@ -1589,6 +1618,20 @@ func cicyModel(shortID string) string {
 			defaultModel = hm
 		}
 	}
+	// default_model 空 → 用 CICY agent-type 的默认 provider 的 model(providers.default["cicy"],
+	// 如 opencodeZen→big-pickle)。否则 resolveClaudeStartupModel 的兜底写死按 "claude" 取默认
+	// provider,cicy agent 会拿到 claude 链路(defaultAnthropic)的 model、跟自己实际的 provider
+	// (cicy 链路)对不上 → 网关 model↔provider 不一致 → 401。这样所有 cicy agent 即便没显式
+	// 选过 model,也自动用对的默认 model,不必逐个重选。
+	if strings.TrimSpace(defaultModel) == "" {
+		if pk := loadDefaultProviderKeyForAgentType("cicy"); pk != "" {
+			if pc, ok := loadProviderByKey(pk); ok && pc != nil {
+				if m := providerDefaultModelForAgentType(pc, "cicy"); m != "" {
+					return m
+				}
+			}
+		}
+	}
 	return resolveClaudeStartupModel(defaultModel, loadRuntimeAIConfig(), shortID)
 }
 
@@ -1669,7 +1712,22 @@ func cicyCallGateway(ctx context.Context, shortID, sessionID, auxKind string, pa
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
 			retryAfter := resp.Header.Get("retry-after")
 			shouldRetryHeader := resp.Header.Get("x-should-retry")
+			auditBlocked := resp.Header.Get("X-Cicy-Audit-Blocked")
 			resp.Body.Close()
+			// 出站审计拦截(契约 B-plus):非 2xx(如 403)+ X-Cicy-Audit-Blocked 头 →
+			// 不是普通网关错误,是终态 blocked。不 retry、不卡(走错误路径天然立即返回)。
+			// body.message 作为具体原因透传给 caller 的 blocked 分支渲染。按 header 识别而非
+			// 状态码,兼容网关从旧的 200+SSE 切到 403 的过渡期(两路径都认)。
+			if auditBlocked != "" {
+				var jb map[string]interface{}
+				_ = json.Unmarshal(respBody, &jb)
+				msg, _ := jb["message"].(string)
+				return map[string]interface{}{
+					"_cicy_audit_blocked": auditBlocked,
+					"_cicy_audit_rules":   resp.Header.Get("X-Cicy-Audit-Rules"),
+					"_cicy_audit_message": msg,
+				}, false, nil
+			}
 			gwErr := fmt.Errorf("gateway %d: %s", resp.StatusCode, truncateForLog(string(respBody), 400))
 			if attempt < cicyMaxGatewayRetries && cicyStatusRetryable(resp.StatusCode, shouldRetryHeader) {
 				if !cicySleepBackoff(ctx, attempt, retryAfter) {
@@ -1694,10 +1752,26 @@ func cicyCallGateway(ctx context.Context, shortID, sessionID, auxKind string, pa
 			if err := json.Unmarshal(respBody, &parsed); err != nil {
 				return nil, false, fmt.Errorf("gateway response parse failed: %v", err)
 			}
+			// 非流式 block 响应(网关自适应:非 stream 请求返单个 Anthropic JSON)也带审计头 →
+			// 同样透传,否则非 SSE 路径会把拦截 JSON 当正常答案 commit。
+			if parsed != nil {
+				if ab := resp.Header.Get("X-Cicy-Audit-Blocked"); ab != "" {
+					parsed["_cicy_audit_blocked"] = ab
+					parsed["_cicy_audit_rules"] = resp.Header.Get("X-Cicy-Audit-Rules")
+				}
+			}
 			return parsed, false, nil
 		}
+		// 出站审计拦截(网关契约 A):命中 block 时网关返 200 + 合成 SSE,并带这两个头。
+		// 透传给 caller(塞进 result),让它记成 blocked 终态、不把拦截提示 commit 进历史。
+		auditBlocked := resp.Header.Get("X-Cicy-Audit-Blocked")
+		auditRules := resp.Header.Get("X-Cicy-Audit-Rules")
 		result, streamed, aerr := cicyAssembleSSE(resp.Body, emit)
 		resp.Body.Close()
+		if result != nil && auditBlocked != "" {
+			result["_cicy_audit_blocked"] = auditBlocked
+			result["_cicy_audit_rules"] = auditRules
+		}
 		return result, streamed, aerr
 	}
 }
@@ -2153,6 +2227,53 @@ func cicyWriteSlashAckStatus(shortID, convID, text, status string) {
 	})
 }
 
+// cicyResetReplyForNewTurn wipes reply.json to a fresh working placeholder at the
+// new turn's answer slot (current.json maxID + 1). A new user turn means the
+// previous reply is stale — especially a FAILED turn's ⚠️ error that the new q just
+// overwrote (dropTrailingFailedTurnLocked + id reuse). Without this, the web's
+// reply.json poll keeps serving the OLD error as the new q's answer until the first
+// new token streams in（表现为"新 q 的 a 先显示旧 error,等后端推真 a 才覆盖"）。
+// Reset to working/empty → UI shows thinking immediately, then the live stream fills a.
+func cicyResetReplyForNewTurn(shortID, convID string) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	historyID := int64(1)
+	if current := agentInspectorLoadCurrent(shortID); current.ConversationID == convID {
+		historyID = int64(aiGatewayCurrentBodyMaxHistoryID(current.Body)) + 1
+	}
+	_ = aiGatewayWriteReplySnapshot(shortID, aiGatewayReplySnapshot{
+		ConversationID: convID,
+		HistoryID:      historyID,
+		Status:         "working",
+		StartedAt:      now,
+		UpdatedAt:      now,
+		Items:          []map[string]interface{}{},
+	})
+}
+
+// cicyWriteTerminalReply finalizes reply.json to a terminal (completed) empty state.
+// Used by the blocked path: the gateway returned 200 (synthetic SSE) so there's no
+// normal answer, but cicyResetReplyForNewTurn seeded a "working" placeholder at turn
+// start. If left working, the web poll treats it as an in-flight live tail → 永久
+// Thinking + spinner 不解锁(且 historyID 可能 > committed marker 而被当 live tail)。
+// completed + 空 answer → replyInFlight=false 解锁、hasContent=false 不 attach;拦截态
+// 由 current.json 的 blocked marker(cicy_outcome=blocked)渲染红色「已拦截」徽标。
+func cicyWriteTerminalReply(shortID, convID string) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	historyID := int64(1)
+	if current := agentInspectorLoadCurrent(shortID); current.ConversationID == convID {
+		historyID = int64(aiGatewayCurrentBodyMaxHistoryID(current.Body)) + 1
+	}
+	_ = aiGatewayWriteReplySnapshot(shortID, aiGatewayReplySnapshot{
+		ConversationID: convID,
+		HistoryID:      historyID,
+		Status:         "completed",
+		StartedAt:      now,
+		UpdatedAt:      now,
+		Answer:         "",
+		Items:          []map[string]interface{}{},
+	})
+}
+
 // archiveCicySnapshots copies the live current.json AND reply.json to
 // timestamped siblings (current.<unix>.json / reply.<unix>.json, same stamp)
 // inside the conversation dir before /compact rewrites history — so the
@@ -2563,6 +2684,28 @@ func (s *cicySession) dropTrailingOutcomeLocked() bool {
 	return r == "user"
 }
 
+// dropTrailingFailedTurnLocked overwrites a trailing FAILED turn: when the last
+// message is an "error" outcome marker, it removes that marker AND the user q that
+// produced it (back to and including the last user message). A failed turn yields
+// no real answer, so accumulating "q→失败 / q→失败 / …" only pollutes the window
+// and compaction — the next q should REPLACE the failed attempt, not stack on it.
+// Cancelled turns are left intact (the user explicitly stopped them and may 重试).
+// Caller holds session.mu.
+func (s *cicySession) dropTrailingFailedTurnLocked() {
+	n := len(s.messages)
+	if n == 0 || cicyMessageOutcomeKind(s.messages[n-1]) != "error" {
+		return
+	}
+	cut := n - 1 // fallback: at least drop the marker
+	for i := n - 1; i >= 0; i-- {
+		if r, _ := s.messages[i]["role"].(string); r == "user" {
+			cut = i
+			break
+		}
+	}
+	s.messages = s.messages[:cut]
+}
+
 // retryCicyPane re-runs the latest cancelled/failed turn for a cicy agent (web 点
 // 「重试」入口)。It runs the turn in the background and returns immediately; the
 // web surfaces the result through its normal reply.json live-tail polling. reason
@@ -2597,6 +2740,8 @@ func retryCicyPane(shortID, workspace string) (started bool, reason string) {
 // that just persists/broadcasts. The runtime itself is transport-agnostic — no
 // tmux, no ResponseWriter dependency.
 func runCicyTurnLocked(ctx context.Context, session *cicySession, shortID, workspace, text string, emit func(M)) bool {
+	// 上一轮若是「生成失败」,新 q 直接覆盖它(丢掉失败的 q + 标记),失败不堆叠。
+	session.dropTrailingFailedTurnLocked()
 	session.messages = append(session.messages, M{"role": "user", "content": text})
 	return cicyRunWindowLocked(ctx, session, shortID, workspace, emit)
 }
@@ -2614,6 +2759,12 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 	// 仍修复历史中段的孤儿 tool_use(被打断的轮次),否则坏窗口会让每轮 provider 400。
 	session.messages = cicyBalanceToolCalls(session.messages)
 	cfg := resolveLiteConfig(shortID, workspace)
+
+	// 新一轮开始:先把当前窗口(含刚追加的 q)落 current.json,再把 reply.json 重置成
+	// working 空占位 —— 清掉上一轮残留(尤其被覆盖的失败轮 ⚠️error),让 web 立刻显示
+	// thinking 而不是旧 error,新 reply 流进来再逐字填充 a。
+	cicySeedCurrentSnapshot(shortID, session.convID, session.messages)
+	cicyResetReplyForNewTurn(shortID, session.convID)
 
 	for round := 0; round < cicyMaxToolRounds; round++ {
 		// 用户已取消 → 立刻收尾:持久化已有内容,不再发下一轮网关请求。
@@ -2661,6 +2812,36 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 			emit(M{"type": "error", "error": detail})
 			session.persistLocked(workspace)
 			cicyAttachOutcomeToSnapshot(shortID, kind, detail)
+			return false
+		}
+
+		// 出站审计拦截(契约 A):网关已返 200 + 合成 SSE(已流式收尾,不卡 Thinking),并带
+		// X-Cicy-Audit-Blocked 头。这里把它记成 blocked 终态:**不把拦截提示 commit 进历史**
+		// (免污染上下文/下轮回发模型),只追加一条干净的「已拦截」标记;UI 据此渲染红色徽标、
+		// 不给重试(重试只会再次命中)。
+		if blockedID, _ := resp["_cicy_audit_blocked"].(string); blockedID != "" {
+			rules, _ := resp["_cicy_audit_rules"].(string)
+			// 具体原因优先级:① 403 JSON body.message(契约 B-plus)② 旧 200+SSE 的人类
+			// 可读文案(resp content)③ rules+事件ID 兜底。这段只作为「已拦截」卡的展示
+			// detail(挂在 current.json 的 marker 上,见 cicyAttachOutcomeToSnapshot),
+			// 不进 session.messages/wire、不污染上下文。
+			reason, _ := resp["_cicy_audit_message"].(string)
+			reason = strings.TrimSpace(reason)
+			if reason == "" {
+				reason = strings.TrimSpace(cicyTextFromBlocks(resp["content"]))
+			}
+			if reason == "" {
+				reason = "命中审计拦截规则：" + rules
+				if blockedID != "" {
+					reason += "（事件 " + blockedID + "）"
+				}
+			}
+			session.messages = append(session.messages, cicyOutcomeMessage("blocked", reason))
+			emit(M{"type": "blocked", "rules": rules, "event_id": blockedID, "reason": reason})
+			session.persistLocked(workspace)
+			cicyAttachOutcomeToSnapshot(shortID, "blocked", reason)
+			// reply.json 收尾成终态,否则起手的 working 占位会让 UI 永久 Thinking 不解锁。
+			cicyWriteTerminalReply(shortID, session.convID)
 			return false
 		}
 

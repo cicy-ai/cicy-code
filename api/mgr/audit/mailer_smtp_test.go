@@ -85,10 +85,11 @@ func TestLoadSmtpCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	if loadSmtpCredentials() != nil {
-		t.Error("expected nil when smtp.json absent")
+		t.Error("expected nil when email.json absent")
 	}
-	os.WriteFile(filepath.Join(db, "smtp.json"),
-		[]byte(`{"host":"smtp.corp.com","port":587,"username":"u@corp.com","password":"pw","from":"alerts@corp.com","tls":"starttls"}`), 0o600)
+	// Credentials now live under ~/cicy-ai/db/email.json in a nested "smtp" object.
+	os.WriteFile(filepath.Join(db, "email.json"),
+		[]byte(`{"smtp":{"host":"smtp.corp.com","port":587,"user":"u@corp.com","pass":"pw","from":"alerts@corp.com"}}`), 0o600)
 	c := loadSmtpCredentials()
 	if c == nil {
 		t.Fatal("expected creds")
@@ -97,7 +98,7 @@ func TestLoadSmtpCredentials(t *testing.T) {
 		t.Errorf("parsed wrong: %+v", c)
 	}
 	// host missing → nil (incomplete config)
-	os.WriteFile(filepath.Join(db, "smtp.json"), []byte(`{"port":587,"from":"x@y"}`), 0o600)
+	os.WriteFile(filepath.Join(db, "email.json"), []byte(`{"smtp":{"port":587,"from":"x@y","pass":"pw"}}`), 0o600)
 	if loadSmtpCredentials() != nil {
 		t.Error("expected nil when host missing")
 	}

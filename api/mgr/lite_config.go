@@ -78,13 +78,12 @@ type liteConfigFile struct {
 func defaultLiteConfig() liteConfigFile {
 	return liteConfigFile{
 		Profiles: map[string]liteProfileCfg{
-			"dispatcher": {Name: "产品项目经理", SystemBase: "@dispatcher",
-				DefaultGroups: []string{"coordinate"}, GrantableGroups: []string{"coordinate", "onboard", "shell"}},
-			"assistant": {Name: "轻量助理", SystemBase: "@assistant",
-				DefaultGroups: nil, GrantableGroups: []string{"coordinate"}},
-			"liaison": {Name: "对外联络员", SystemBase: "@liaison",
-				DefaultGroups: []string{"a2a", "handoff"}, GrantableGroups: []string{"a2a", "handoff"},
-				External: true},
+			// ONE universal base. Every cicy agent is an "assistant"; its identity
+			// and behavior come entirely from its system prompt + selected tools —
+			// no dispatcher/liaison profiles, no a2a/external concept anymore.
+			"assistant": {Name: "CiCy", SystemBase: "@assistant",
+				DefaultGroups:   []string{"coordinate"},
+				GrantableGroups: []string{"coordinate", "onboard", "shell", "handoff"}},
 		},
 		ToolGroups: map[string][]string{
 			"coordinate": {"todo_add", "todo_list", "todo_update", "agent_list", "agent_msg", "agent_capture"},
@@ -92,15 +91,151 @@ func defaultLiteConfig() liteConfigFile {
 			// HR-only: pull an offline/standalone agent onto the team and bring it
 			// online (bind under master; cicy → warm session, CLI → launch pane).
 			"onboard": {"agent_online"},
-			// Team-Helper-only: a real shell (PowerShell on Windows, bash on unix)
-			// so the cicy helper can install Docker + cicy-code hands-on. Grantable
-			// to dispatcher but only the 团队助手 template selects it.
+			// A real shell (PowerShell on Windows, bash on unix) — e.g. the team
+			// helper installing Docker + cicy-code hands-on.
 			"shell": {"shell"},
-			"a2a": {"a2a_status", "a2a_tasks_list", "a2a_task_get", "a2a_task_publish", "a2a_task_close",
-				"a2a_msg_send", "a2a_thread_msgs", "a2a_threads", "a2a_inbox"},
+			// audit: the 审核策略专员 (audit advisor) calls the /api/audit/* API as
+			// native tools. Declared here (image default), grantable to every
+			// assistant, selected only by the 审核策略专员 charter's `tools:` line.
+			"audit": auditGroupToolNames(),
 		},
-		CustomTools: map[string]liteCustomTool{},
-		Grants:      liteGrants{ByAgent: map[string][]string{}, ByProfile: map[string][]string{}},
+		CustomTools: auditCustomTools(),
+		// Grant the audit group to every assistant (the ceiling). Only the
+		// 审核策略专员 charter actually selects it, so no other agent gets the
+		// audit tools unless its charter opts in.
+		Grants: liteGrants{ByAgent: map[string][]string{}, ByProfile: map[string][]string{"assistant": {"audit"}}},
+	}
+}
+
+// auditGroupToolNames is the ordered tool list of the "audit" group. Kept in
+// sync with the keys of auditCustomTools().
+func auditGroupToolNames() []string {
+	return []string{
+		"audit_events", "audit_event_get", "audit_snapshot", "audit_stats", "audit_agents",
+		"audit_policy_get", "audit_policy_set", "audit_policy_effective", "audit_rule_test",
+		"audit_allowlist_get", "audit_allowlist_add", "audit_allowlist_remove",
+	}
+}
+
+// auditAPIBase is the in-process API the audit tools call (the server serves it
+// on 8008 inside the container; the host maps it to a dev port).
+const auditAPIBase = "http://127.0.0.1:8008"
+
+// auditCustomTools declares the /api/audit/* endpoints as schema-checked custom
+// tools. Each runs `bash -lc <script> audit [args...]`: the script self-reads
+// the api_token from ~/cicy-ai/global.json (custom-tool env is washed of tokens,
+// liteToolSafeEnv) and pipes the Authorization header to curl via `-K -` so the
+// token never appears in argv / ps / the [lite-tool] log. Params arrive as
+// positional $1/$2 (never interpolated into the script text) and POST bodies are
+// built with python3 json.dumps so values are escaped safely.
+func auditCustomTools() map[string]liteCustomTool {
+	// shared bash prelude: TOK = api_token (read inside the subprocess).
+	const tok = `TOK=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/cicy-ai/global.json')))['api_token'])")` + "\n"
+	// auth pipe: write the bearer header to curl's stdin config (-K -).
+	const hdr = `printf 'header = "Authorization: Bearer %s"\n' "$TOK" | `
+
+	get := func(urlExpr string) []string {
+		return []string{"bash", "-c", tok + hdr + `curl -s -K - "` + urlExpr + `"`, "audit"}
+	}
+	post := func(method, bodyVar, urlExpr string) string {
+		return tok + hdr + `curl -s -K - -H "Content-Type: application/json" -X ` + method +
+			` --data "` + bodyVar + `" "` + urlExpr + `"`
+	}
+
+	return map[string]liteCustomTool{
+		// ── read / interpret logs ──────────────────────────────────────────
+		"audit_events": {
+			Description: "列出审计事件(命中/流量)。query 是原样查询串,如 severity=high,critical&agent=w-12&limit=50&direction=outbound。空=最近全部。",
+			Argv:        append(get(auditAPIBase+`/api/audit/events?$1`), "{query}"),
+			Params:      map[string]liteToolParam{"query": {Type: "string", MaxLen: 300, Pattern: `[A-Za-z0-9=&_,%.:\-]*`}},
+			Risk:        "readonly", TimeoutSec: 20, MaxOutputKB: 64,
+		},
+		"audit_event_get": {
+			Description: "取单条审计事件全量详情。id 形如 evt_xxx。",
+			Argv:        append(get(auditAPIBase+`/api/audit/events/$1`), "{id}"),
+			Params:      map[string]liteToolParam{"id": {Type: "string", Required: true, MaxLen: 80, Pattern: `[A-Za-z0-9_\-]+`}},
+			Risk:        "readonly", TimeoutSec: 20, MaxOutputKB: 64,
+		},
+		"audit_snapshot": {
+			Description: "按 snapshot_ref 取某事件的取证快照(原始未脱敏请求上下文)。ref 取自事件 meta.snapshot_ref。",
+			Argv:        append(get(auditAPIBase+`/api/audit/snapshot?ref=$1`), "{ref}"),
+			Params:      map[string]liteToolParam{"ref": {Type: "string", Required: true, MaxLen: 160, Pattern: `[A-Za-z0-9_\-./:]+`}},
+			Risk:        "readonly", TimeoutSec: 20, MaxOutputKB: 128,
+		},
+		"audit_stats": {
+			Description: "审计聚合统计(按规则/agent/严重度的命中分布)——评估规则吵不吵、谁反复命中。",
+			Argv:        get(auditAPIBase + `/api/audit/stats`),
+			Risk:        "readonly", TimeoutSec: 20, MaxOutputKB: 64,
+		},
+		"audit_agents": {
+			Description: "列出有审计事件的 agent。",
+			Argv:        get(auditAPIBase + `/api/audit/agents`),
+			Risk:        "readonly", TimeoutSec: 20, MaxOutputKB: 32,
+		},
+		// ── configure rules / policy ───────────────────────────────────────
+		"audit_policy_get": {
+			Description: "读取全局审计策略 policy.json(规则集/严重度/动作/allowlist/阈值)。改策略前先 get 存底。",
+			Argv:        get(auditAPIBase + `/api/audit/policy`),
+			Risk:        "readonly", TimeoutSec: 20, MaxOutputKB: 128,
+		},
+		"audit_policy_effective": {
+			Description: "读取某 agent 合并后的有效策略(全局 ⊕ per-agent override)。",
+			Argv:        append(get(auditAPIBase+`/api/audit/policy/effective/$1`), "{agent}"),
+			Params:      map[string]liteToolParam{"agent": {Type: "string", Required: true, MaxLen: 80, Pattern: `[A-Za-z0-9:_.\-]+`}},
+			Risk:        "readonly", TimeoutSec: 20, MaxOutputKB: 64,
+		},
+		"audit_policy_set": {
+			Description: "写入全局审计策略(原子写+热加载)。policy_json 必须是完整 policy 对象的 JSON。高破坏(全局 block、批量禁规则)须 Barry 拍。务必先 audit_policy_get 存回滚底。",
+			Argv:        []string{"bash", "-c", post("POST", "$1", auditAPIBase+`/api/audit/policy`), "audit", "{policy_json}"},
+			Params:      map[string]liteToolParam{"policy_json": {Type: "string", Required: true, MaxLen: 200000}},
+			Risk:        "exec", TimeoutSec: 25, MaxOutputKB: 16,
+		},
+		"audit_rule_test": {
+			Description: "试跑一条规则匹配器:match_type=regex|js,pattern 是表达式,text 是待测样本。返回是否命中。加规则前先验。",
+			Argv: []string{"bash", "-c",
+				`TOK=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/cicy-ai/global.json')))['api_token'])")` + "\n" +
+					`BODY=$(python3 -c "import json,sys;print(json.dumps({'match_type':sys.argv[1],'pattern':sys.argv[2],'text':sys.argv[3]}))" "$1" "$2" "$3")` + "\n" +
+					hdr + `curl -s -K - -H "Content-Type: application/json" -X POST --data "$BODY" "` + auditAPIBase + `/api/audit/rules/test"`,
+				"audit", "{match_type}", "{pattern}", "{text}"},
+			Params: map[string]liteToolParam{
+				"match_type": {Type: "string", Required: true, Enum: []string{"regex", "js"}},
+				"pattern":    {Type: "string", Required: true, MaxLen: 2000},
+				"text":       {Type: "string", Required: true, MaxLen: 8000},
+			},
+			Risk: "readonly", TimeoutSec: 20, MaxOutputKB: 16,
+		},
+		// ── allowlist (误报治理) ────────────────────────────────────────────
+		"audit_allowlist_get": {
+			Description: "查看白名单(content_hashes / paths / agents 三类)。",
+			Argv:        get(auditAPIBase + `/api/audit/allowlist`),
+			Risk:        "readonly", TimeoutSec: 20, MaxOutputKB: 32,
+		},
+		"audit_allowlist_add": {
+			Description: "把某内容哈希加入白名单(标误报,以后相同内容不再告警)。sha256 形如 sha256:<64hex>,reason 写清为什么是误报。",
+			Argv: []string{"bash", "-c",
+				`TOK=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/cicy-ai/global.json')))['api_token'])")` + "\n" +
+					`BODY=$(python3 -c "import json,sys;print(json.dumps({'sha256':sys.argv[1],'reason':sys.argv[2]}))" "$1" "$2")` + "\n" +
+					hdr + `curl -s -K - -H "Content-Type: application/json" -X POST --data "$BODY" "` + auditAPIBase + `/api/audit/allowlist/content"`,
+				"audit", "{sha256}", "{reason}"},
+			Params: map[string]liteToolParam{
+				"sha256": {Type: "string", Required: true, MaxLen: 80, Pattern: `sha256:[a-f0-9]{64}`},
+				"reason": {Type: "string", Required: true, MaxLen: 200},
+			},
+			Risk: "exec", TimeoutSec: 20, MaxOutputKB: 8,
+		},
+		"audit_allowlist_remove": {
+			Description: "从白名单移除一条。category=content_hash|path|agent,value 是要移除的具体值。",
+			Argv: []string{"bash", "-c",
+				`TOK=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/cicy-ai/global.json')))['api_token'])")` + "\n" +
+					`BODY=$(python3 -c "import json,sys;print(json.dumps({'category':sys.argv[1],'value':sys.argv[2]}))" "$1" "$2")` + "\n" +
+					hdr + `curl -s -K - -H "Content-Type: application/json" -X DELETE --data "$BODY" "` + auditAPIBase + `/api/audit/allowlist"`,
+				"audit", "{category}", "{value}"},
+			Params: map[string]liteToolParam{
+				"category": {Type: "string", Required: true, Enum: []string{"content_hash", "path", "agent"}},
+				"value":    {Type: "string", Required: true, MaxLen: 160},
+			},
+			Risk: "exec", TimeoutSec: 20, MaxOutputKB: 8,
+		},
 	}
 }
 
@@ -195,8 +330,6 @@ func resolveSystemBase(ref string) string {
 		return cicySystemPromptBase
 	case "@assistant":
 		return assistantSystemPromptBase
-	case "@liaison":
-		return liaisonSystemPromptBase
 	}
 	if slug := strings.TrimPrefix(ref, "@role:"); slug != ref {
 		raw := loadTemplateFile(roleTemplatePath(sanitizeTemplateSlug(slug)))

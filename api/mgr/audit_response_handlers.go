@@ -10,8 +10,8 @@ import (
 
 // handleAuditReadiness — GET /api/audit/readiness. Snapshot of whether the
 // incident-response chain is wired end to end (owner configured? mail
-// deliverable? IM bound? preventive on? AI研判 on?). The 审计专员 (or operator)
-// calls this to体检 and surface the gaps.
+// deliverable? IM bound? preventive on? AI研判 on?). The 审核策略专员 (the
+// audit advisor, or an operator) calls this to体检 and surface the gaps.
 func handleAuditReadiness(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -21,9 +21,9 @@ func handleAuditReadiness(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAuditNotify — POST /api/audit/notify {event_id, note}. Escalates an
-// event to its responsible person(s) by email. Called by the 审计专员 when it
-// decides a finding warrants extra human attention (the auto owner-alert
-// already fired at hit time). note = the specialist's assessment, prepended.
+// event to its responsible person(s) by email. Called by the 审核策略专员 when
+// it decides a finding warrants extra human attention (the auto owner-alert
+// already fired at hit time). note = the advisor's assessment, prepended.
 func handleAuditNotify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")

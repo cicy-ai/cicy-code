@@ -8,6 +8,7 @@
   "toolExitCodeNoOutput": "Code de sortie {{code}} · aucune sortie",
   "toolExitNoOutput": "Terminé · aucune sortie",
   "composerPlaceholder": "Demandez à votre chef de projet…",
+  "slashMenuTitle": "Commandes",
   "composerBusyPlaceholder": "Génération de la réponse… (Échap pour annuler)",
   "composerDropHint": "Déposez pour joindre",
   "composerAttach": "Joindre (image / PDF / document)",

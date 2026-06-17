@@ -1640,11 +1640,12 @@ def main():
     local_group.add_argument(
         "--reply-mirror",
         dest="reply_mirror",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Enable the AI gateway reply mirror (full request/response snapshots under "
-        ".cicy/history/reply_mirror/). OFF by default and HARD-forced off otherwise, so a "
-        "stray `export CICY_GATEWAY_REPLY_MIRROR=1` in your shell can no longer leak in. "
-        "Writes ~6MB/turn with no rotation — only use for short diagnostics.",
+        ".cicy/history/reply_mirror/) — this is the per-agent tool-call request/response "
+        "stream the audit layer should inspect (behaviour, not just intent). ON by default; "
+        "pass --no-reply-mirror to disable. Writes ~6MB/turn with no rotation.",
     )
 
     docker_group = parser.add_argument_group("docker runtime")
