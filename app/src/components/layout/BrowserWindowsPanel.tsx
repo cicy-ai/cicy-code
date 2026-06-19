@@ -464,11 +464,26 @@ type WinAction = 'open' | 'reload' | 'close';
 // close = close the window/tab
 async function windowAction(clientId: string, p: Profile, w: WinItem, action: WinAction): Promise<void> {
   if (p.backend === 'electron') {
+    if (action === 'open') {
+      // Eye = bring the tab to front. If its webContents is gone (the tab
+      // window was closed out-of-band, leaving the panel's list stale), the
+      // activate fails with "tab not found" — recover by reopening the tab
+      // window at this tab's URL, so the eye always reopens something instead
+      // of silently doing nothing.
+      let r: any = null;
+      if (w.webContentsId != null) {
+        r = await deviceCall(clientId, 'electron_tab_activate', { webContentsId: w.webContentsId });
+      }
+      if (!r || r.error) {
+        const u = w.url && !w.url.startsWith('data:') ? w.url : '';
+        r = await deviceCall(clientId, 'electron_tab_open', { accountIdx: p.accountIdx, ...(u ? { url: u } : {}) });
+        if (r && r.error) throw new Error(r.error);
+      }
+      return;
+    }
     if (w.webContentsId == null) throw new Error(tl('bwErrTabNotOpen'));
     let r: any;
-    if (action === 'open') {
-      r = await deviceCall(clientId, 'electron_tab_activate', { webContentsId: w.webContentsId });
-    } else if (action === 'reload') {
+    if (action === 'reload') {
       r = await deviceCall(clientId, 'electron_tab_eval', { webContentsId: w.webContentsId, code: 'location.reload()' });
     } else {
       r = await deviceCall(clientId, 'electron_tab_close', { webContentsId: w.webContentsId });
@@ -1206,15 +1221,8 @@ export function BrowserWindowsColumn({
           </div>
         )}
         {loading ? (
-          <div data-id="browser-windows-cards-skeleton" className="flex-1 overflow-hidden p-2.5 flex flex-col gap-2.5">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="rounded-xl border border-white/[0.08] bg-[#161619] overflow-hidden">
-                <div className="aspect-video bg-gradient-to-b from-[#222228] to-[#16161a] animate-pulse" />
-                <div className="px-2.5 py-2 border-t border-white/[0.06]">
-                  <div className="h-2.5 rounded bg-white/[0.06] animate-pulse" style={{ width: `${60 - i * 12}%` }} />
-                </div>
-              </div>
-            ))}
+          <div data-id="browser-windows-cards-loading" className="flex-1 flex items-center justify-center py-10">
+            <Loader2 className="w-5 h-5 animate-spin text-zinc-600" />
           </div>
         ) : !windows || windows.length === 0 ? (
           !error && (
@@ -1457,7 +1465,7 @@ function ProfileConfigModal({ clientId, profile, onClose }: { clientId: string; 
                 <div>
                   <div className={labelCls}>{t('bwFieldProxy')}{!isElectron && t('bwProxyNextLaunch')}</div>
                   <input data-id="profile-config-proxy" value={proxyUrl} onChange={(e) => setProxyUrl(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') save(); }} className={inputCls} placeholder="socks5://127.0.0.1:1080" />
+                    onKeyDown={(e) => { if (e.key === 'Enter') save(); }} className={inputCls} placeholder="socks5://127.0.0.1:20001" />
                 </div>
                 <div>
                   <div className={labelCls}>{t('bwFieldNote')}</div>
