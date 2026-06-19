@@ -1083,6 +1083,33 @@ func isDeepSeekFlavored(upstreamHost, model string) bool {
 	return false
 }
 
+// isGeminiFlavored reports whether the upstream is Google Gemini's OpenAI-compat
+// endpoint (generativelanguage.googleapis.com/v1beta/openai), directly or behind
+// a proxy. Gemini differs from both DeepSeek and standard OpenAI in how it
+// carries thinking: NOT a `reasoning_content` field, but the thought text inline
+// in `delta.content` wrapped in <thought>…</thought>, flagged per-chunk by
+// `extra_content.google.thought == true`. And it only EMITS thoughts when the
+// request asks via `extra_body.google.thinking_config.include_thoughts`. Both the
+// request injection and the SSE reader gate on this. Host OR model match (a
+// proxied Gemini keeps the "gemini-*" model id in the body).
+func isGeminiFlavored(upstreamHost, model string) bool {
+	h := strings.ToLower(upstreamHost)
+	if strings.Contains(h, "generativelanguage") || strings.Contains(h, "googleapis") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(model), "gemini")
+}
+
+// stripThoughtTags removes Gemini's literal <thought>/</thought> delimiters that
+// bracket the inline thinking text in the OpenAI-compat stream (the opening tag
+// rides the first thought chunk, the closing tag prefixes the first answer
+// chunk). Safe as a plain replace — the tags only ever appear at those bounds.
+func stripThoughtTags(s string) string {
+	s = strings.ReplaceAll(s, "<thought>", "")
+	s = strings.ReplaceAll(s, "</thought>", "")
+	return s
+}
+
 // deepSeekThinkingFromSource extracts the resolved DeepSeek V4 thinking switch
 // from an Anthropic-shaped `thinking` value (set upstream by
 // agentInspectorApplyThinking per the config-driven policy). Only the `type` is
@@ -1184,6 +1211,28 @@ func transformMessagesRequestToChatCompletions(body []byte, upstreamHost string)
 	// follows the client/model defaults, unforced.
 	if deepseek {
 		dst["thinking"] = deepSeekThinkingFromSource(src["thinking"])
+	}
+
+	// Gemini-ONLY: ask the OpenAI-compat endpoint to return thought summaries so
+	// the SSE reader can surface them as Anthropic thinking blocks. Gemini 2.5
+	// thinks by default but withholds the reasoning text unless include_thoughts
+	// is set. Honor an explicit disable (thinking.type=="disabled") by NOT asking
+	// for thoughts; otherwise opt in. This is a Gemini private extension under
+	// extra_body — standard OpenAI/DeepSeek upstreams never see it.
+	if isGeminiFlavored(upstreamHost, model) {
+		wantThoughts := true
+		if th, ok := src["thinking"].(map[string]interface{}); ok {
+			if t, _ := th["type"].(string); t == "disabled" {
+				wantThoughts = false
+			}
+		}
+		if wantThoughts {
+			dst["extra_body"] = map[string]interface{}{
+				"google": map[string]interface{}{
+					"thinking_config": map[string]interface{}{"include_thoughts": true},
+				},
+			}
+		}
 	}
 
 	messages := make([]map[string]interface{}, 0)
@@ -1527,6 +1576,19 @@ func (r *chatCompletionsToMessagesReader) processOneLine() error {
 	}
 	delta, _ := choice["delta"].(map[string]interface{})
 	if delta != nil {
+		// Gemini (OpenAI-compat) marks thought chunks with
+		// extra_content.google.thought==true and puts the reasoning text inline in
+		// `content` (wrapped in <thought>…</thought>). Detect the marker so the
+		// SAME content field routes to thinking vs visible text. The marker is
+		// Gemini-specific, so this branch is inert for DeepSeek/standard OpenAI.
+		geminiThought := false
+		if ec, ok := delta["extra_content"].(map[string]interface{}); ok {
+			if g, ok := ec["google"].(map[string]interface{}); ok {
+				if th, _ := g["thought"].(bool); th {
+					geminiThought = true
+				}
+			}
+		}
 		// Reasoning streams first — open/extend the thinking block.
 		if rc, ok := delta["reasoning_content"].(string); ok && rc != "" {
 			r.ensureThinkingBlock()
@@ -1534,10 +1596,23 @@ func (r *chatCompletionsToMessagesReader) processOneLine() error {
 			r.accumThinking.WriteString(rc)
 		}
 		if content, ok := delta["content"].(string); ok && content != "" {
-			r.closeThinkingBlock()
-			r.ensureTextBlock()
-			r.emitTextDelta(content)
-			r.accumText.WriteString(content)
+			if geminiThought {
+				// Gemini thought chunk → thinking block (strip <thought> delimiter).
+				if clean := stripThoughtTags(content); clean != "" {
+					r.ensureThinkingBlock()
+					r.emitThinkingDelta(clean)
+					r.accumThinking.WriteString(clean)
+				}
+			} else {
+				// Visible answer. The transition chunk prefixes a stray </thought>;
+				// strip it (no-op for non-Gemini upstreams).
+				if clean := stripThoughtTags(content); clean != "" {
+					r.closeThinkingBlock()
+					r.ensureTextBlock()
+					r.emitTextDelta(clean)
+					r.accumText.WriteString(clean)
+				}
+			}
 		}
 		if rawTC, ok := delta["tool_calls"].([]interface{}); ok {
 			r.closeThinkingBlock()

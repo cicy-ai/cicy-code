@@ -203,6 +203,9 @@
     "noProviders": "无可用供应商",
     "noMatches": "无匹配模型",
     "routes": "{{n}} 条线",
-    "default": "默认"
+    "default": "默认",
+    "availOk": "可用",
+    "availPaid": "需付费",
+    "availQuota": "额度耗尽"
   }
 }

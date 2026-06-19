@@ -159,6 +159,10 @@ func codexInstallCmd() string {
 	return npmGlobalInstallCmd("@openai/codex@latest")
 }
 
+// geminiInstallCmd installs Google's gemini-cli. Gemini is no longer PRESET as a
+// builtin CLI agent (removed from builtinAgents/selectedAgentConfigs) — we use
+// Gemini via the OpenAI-compat provider through the gateway instead. This remains
+// only for the tmux launcher's legacy gemini-pane path.
 func geminiInstallCmd() string {
 	return npmGlobalInstallCmd("@google/gemini-cli@latest")
 }
@@ -350,7 +354,6 @@ func selectedAgentConfigs() map[string]Tool {
 		"claude":   {"claude", "claude", claudeInstallCmd(), true, false},
 		"cicy":     {"cicy", "cicy", cicyInstallCmd(), true, false},
 		"codex":    {"codex", "codex", codexInstallCmd(), true, false},
-		"gemini":   {"gemini", "gemini", geminiInstallCmd(), true, false},
 		"opencode": {"opencode", "opencode", opencodeInstallCmd(), true, false},
 	}
 }
@@ -402,12 +405,11 @@ var builtinAgents = []struct {
 }{
 	{"claude", "Claude"},
 	{"codex", "Codex"},
-	{"gemini", "Gemini"},
 	{"opencode", "OpenCode"},
 	{"cicy", "CiCy"},
 }
 
-var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "gemini", "opencode", "cicy"}
+var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "cicy"}
 
 // cliAgentsEnabled reports whether pane-based CLI agent types (everything except
 // headless cicy) are available on this host. Windows always ships cicy-only:

@@ -434,6 +434,20 @@ async function addWindow(clientId: string, p: Profile, url: string): Promise<voi
   if (r && r.error) throw new Error(r.error);
 }
 
+// Recognize a "Chrome isn't installed" launch failure so the panel can show an
+// install prompt instead of a raw error. Covers cicy-desktop's resolveChromeBinary
+// message (mac/win: "Chrome/Chromium binary not found. Please configure
+// chromeBinary…") and the Linux bare-command spawn failure (ENOENT on
+// google-chrome/chromium).
+function isChromeMissingError(msg?: string): boolean {
+  if (!msg) return false;
+  const s = msg.toLowerCase();
+  return s.includes('binary not found')
+    || s.includes('chrome/chromium')
+    || s.includes('please configure chromebinary')
+    || (s.includes('enoent') && (s.includes('chrome') || s.includes('chromium')));
+}
+
 // Build a prompt that hands one window to the agent, telling it which skill +
 // identifiers to use so it can drive the window.
 // Readable title/url for the prompt — the start page is a giant data: URL,
@@ -1215,10 +1229,29 @@ export function BrowserWindowsColumn({
       {/* windows: Chrome-style compact tab list + preview pane for the selected one */}
       <div data-id="browser-windows-column-body" className="flex-1 flex flex-col overflow-hidden">
         {error && (
-          <div className="flex items-start gap-2 m-2.5 mb-0 p-2 rounded-lg bg-white/[0.03] border border-white/[0.07] text-[11px] text-zinc-400">
-            <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-zinc-500" />
-            <span>{error}{profile.backend === 'chrome' ? t('bwChromeRefreshHint') : ''}</span>
-          </div>
+          isChromeMissingError(error) && profile.backend === 'chrome' ? (
+            <div data-id="browser-windows-chrome-missing" className="flex items-start gap-2 m-2.5 mb-0 p-3 rounded-lg bg-amber-950/30 border border-amber-900/40 text-[12px] text-amber-200/90">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-amber-100">{t('bwChromeMissingTitle')}</div>
+                <div className="mt-0.5 text-amber-200/80">{t('bwChromeMissingDesc')}</div>
+                <a
+                  data-id="browser-windows-chrome-install-link"
+                  href="https://www.google.com/chrome/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium bg-amber-500/20 text-amber-100 hover:bg-amber-500/30 transition-colors"
+                >
+                  <Download className="w-3 h-3" />{t('bwChromeInstallBtn')}
+                </a>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2 m-2.5 mb-0 p-2 rounded-lg bg-white/[0.03] border border-white/[0.07] text-[11px] text-zinc-400">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-zinc-500" />
+              <span>{error}{profile.backend === 'chrome' ? t('bwChromeRefreshHint') : ''}</span>
+            </div>
+          )
         )}
         {loading ? (
           <div data-id="browser-windows-cards-loading" className="flex-1 flex items-center justify-center py-10">

@@ -494,6 +494,8 @@ Options:
 
 	http.HandleFunc("/api/openclaw/gateway", wa(handleOpenClawGatewayInfo))
 	http.HandleFunc("/api/openclaw/provider/", handleOpenClawProviderProxy)
+	// More specific than the "/api/ai-gateway/" proxy prefix below, so it wins.
+	http.HandleFunc("/api/ai-gateway/provider-balance", authM(handleProviderBalance))
 	http.HandleFunc("/api/ai-gateway/", handleAIGatewayProxy)
 	http.HandleFunc("/api/cicy/chat", handleCicyChat)       // loopback-only, like the AI gateway
 	http.HandleFunc("/api/dispatcher/chat", handleCicyChat) // legacy alias (kept for in-flight REPLs)

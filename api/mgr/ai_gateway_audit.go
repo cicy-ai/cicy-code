@@ -1116,7 +1116,11 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 				"thinking": parsed.Thinking,
 			})
 		}
-		if parsed.Answer != "" {
+		// 失败时 parsed.Answer 就是上游的错误响应体(如 429 的 JSON)。绝不能把它当作
+		// 正文 text item 落盘——否则它会和下面失败分支追加的「⚠️ 生成失败（HTTP …）」格式化
+		// 块一起渲染,UI 上同一个错误显示两遍(原始体 + 带抬头的格式化体)。错误的展示由
+		// 失败分支独占;这里只在成功时把答案补成 item。
+		if !failed && parsed.Answer != "" {
 			s.reply.Items = append(s.reply.Items, map[string]interface{}{
 				"id":   len(s.reply.Items) + 1,
 				"type": "text",

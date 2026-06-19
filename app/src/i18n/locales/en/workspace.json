@@ -203,6 +203,9 @@
     "noProviders": "No providers",
     "noMatches": "No matching models",
     "routes": "{{n}} routes",
-    "default": "default"
+    "default": "default",
+    "availOk": "available",
+    "availPaid": "needs billing",
+    "availQuota": "quota used"
   }
 }

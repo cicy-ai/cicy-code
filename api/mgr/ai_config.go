@@ -32,6 +32,12 @@ type providerConfig struct {
 	DefaultModels map[string]string `json:"defaultModels"`
 	ModelMapping  map[string]string `json:"modelMapping"`
 	Models        []string          `json:"models"`
+	// EgressProxy, when set (e.g. "socks5://127.0.0.1:9001"), routes this
+	// provider's UPSTREAM traffic through that proxy. Needed for geo-restricted
+	// upstreams (Gemini rejects requests from unsupported regions with 400
+	// "User location is not supported") when the gateway host sits in a blocked
+	// region — point it at a mihomo listener with a supported exit. Empty = direct.
+	EgressProxy string `json:"egressProxy"`
 }
 
 type runtimeAIProviderOption struct {
@@ -334,6 +340,7 @@ func loadProvidersConfig() *providersConfig {
 						DefaultModels: make(map[string]string),
 						ModelMapping:  make(map[string]string),
 						Models:        []string{},
+						EgressProxy:   cfgStringValue(itemMap, "egressProxy"),
 					}
 
 					// Parse defaultModels (per agent type)

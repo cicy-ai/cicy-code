@@ -350,6 +350,8 @@ const api = {
   getProxyExitInfo: () => http.get('/api/proxy/exit-info'),
   selectProxy: (member: string, group?: string) => http.post('/api/proxy/select', { member, group }),
   getProxyNodeConfig: (name: string) => http.get('/api/proxy/node-config', { params: { name } }),
+  // Provider balance / per-model availability for the model picker. Cached server-side.
+  getProviderBalance: (provider: string) => http.get('/api/ai-gateway/provider-balance', { params: { provider } }),
   resetProxyConfig: () => http.post('/api/proxy/config/reset'),
   listProxySsh: () => http.get('/api/proxy-ssh/list'),
   showProxySsh: (name: string) => http.get('/api/proxy-ssh/show', { params: { name } }),

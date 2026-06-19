@@ -2706,6 +2706,10 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
   const [query, setQuery] = useState('');
   const [activeStyle, setActiveStyle] = useState('');
   const [expandedModel, setExpandedModel] = useState<string | null>(null);
+  // Per-provider balance / availability, keyed by provider key. Real balance for
+  // providers that expose one (DeepSeek), per-model availability badges for those
+  // that don't (Gemini). Fetched on open; cached server-side.
+  const [balances, setBalances] = useState<Record<string, any>>({});
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -2762,6 +2766,19 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
     setActiveStyle(proto && protos.includes(proto) ? proto : (protos[0] || ''));
     setQuery('');
     setExpandedModel(null);
+  }, [open]);
+
+  // Fetch each provider's balance/availability on open (server-side cached, so a
+  // re-open is cheap and won't re-burn Gemini's free quota).
+  useEffect(() => {
+    if (!open) return;
+    const opts: any[] = agentDetail?.runtime_ai_provider_options || [];
+    const keys = Array.from(new Set(opts.map((p) => String(p?.key || '')).filter(Boolean)));
+    keys.forEach((k) => {
+      apiService.getProviderBalance(k)
+        .then((res: any) => setBalances((prev) => ({ ...prev, [k]: res?.data ?? res })))
+        .catch(() => {});
+    });
   }, [open]);
 
   const useCustomGateway = !!agentDetail?.use_custom_gateway;
@@ -2857,6 +2874,37 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
     familyToModels.get(fam)!.push(m);
   }
   const providerLabelOf = (p: any) => String(p?.label || p?.key || '').trim();
+
+  // Balance number for providers that expose one (e.g. DeepSeek); '' otherwise.
+  const balanceLabelOf = (p: any) => {
+    const b = balances[String(p?.key || '')];
+    if (b?.kind === 'balance' && b?.ok && b?.total != null) {
+      const cur = b.currency === 'CNY' ? '¥' : b.currency === 'USD' ? '$' : '';
+      return `${cur}${b.total}${cur ? '' : (b.currency ? ' ' + b.currency : '')}`;
+    }
+    return '';
+  };
+  // Per-model availability across the model's providers (prefers an "ok").
+  const modelAvailOf = (m: string, providers: any[]): { status: string; retryAfter?: string } | null => {
+    let fallback: any = null;
+    for (const p of providers) {
+      const b = balances[String(p?.key || '')];
+      const hit = Array.isArray(b?.models) ? b.models.find((x: any) => x.model === m) : null;
+      if (hit) {
+        if (hit.status === 'ok') return hit;
+        fallback = fallback || hit;
+      }
+    }
+    return fallback;
+  };
+  const availBadge = (m: string, providers: any[]) => {
+    const a = modelAvailOf(m, providers);
+    if (!a) return null;
+    if (a.status === 'ok') return <span data-id={`model-picker-avail-${m}`} className="shrink-0 rounded bg-emerald-500/15 px-1 py-px text-[9px] font-medium text-emerald-300/90">{t('modelPicker.availOk', { defaultValue: '可用' })}</span>;
+    if (a.status === 'paid') return <span data-id={`model-picker-avail-${m}`} className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[9px] font-medium text-amber-300/90">{t('modelPicker.availPaid', { defaultValue: '需付费' })}</span>;
+    if (a.status === 'quota') return <span data-id={`model-picker-avail-${m}`} className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[9px] font-medium text-amber-300/90">{t('modelPicker.availQuota', { defaultValue: '额度耗尽' })}{a.retryAfter ? `·${a.retryAfter}` : ''}</span>;
+    return null;
+  };
 
   return (
     <div data-id="model-picker-root" ref={rootRef} className="relative mr-auto">
@@ -2963,13 +3011,17 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
                       >
                         <span className="min-w-0 flex-1 truncate font-mono">{m}</span>
                         {isFree ? <span data-id={`model-picker-free-${m}`} className="shrink-0 rounded bg-emerald-500/15 px-1 py-px text-[9px] font-medium text-emerald-300/90">free</span> : null}
+                        {availBadge(m, providers)}
                         {multi ? (
                           <span data-id={`model-picker-routes-${m}`} className="flex shrink-0 items-center gap-0.5 text-[10px] text-zinc-500">
                             {t('modelPicker.routes', { n: providers.length })}
                             <ChevronDown className={`h-3 w-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                           </span>
                         ) : (
-                          <span data-id={`model-picker-route-${m}`} className="shrink-0 truncate text-[10px] text-zinc-500">{providerLabelOf(soleProvider)}</span>
+                          <span data-id={`model-picker-route-${m}`} className="flex shrink-0 items-center gap-1 truncate text-[10px] text-zinc-500">
+                            {balanceLabelOf(soleProvider) ? <span data-id={`model-picker-balance-${m}`} className="rounded bg-sky-500/15 px-1 py-px font-medium text-sky-300/90">{balanceLabelOf(soleProvider)}</span> : null}
+                            <span className="truncate">{providerLabelOf(soleProvider)}</span>
+                          </span>
                         )}
                         {isCurrent && !multi ? <Check className="h-3 w-3 shrink-0" /> : null}
                       </button>
@@ -2990,6 +3042,7 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
                               >
                                 <Route className="h-3 w-3 shrink-0 text-zinc-600" />
                                 <span className="min-w-0 flex-1 truncate">{providerLabelOf(p)}</span>
+                                {balanceLabelOf(p) ? <span data-id={`model-picker-route-balance-${pKey}-${m}`} className="shrink-0 rounded bg-sky-500/15 px-1 py-px text-[9px] font-medium text-sky-300/90">{balanceLabelOf(p)}</span> : null}
                                 {isDefaultProvider ? <span className="shrink-0 rounded bg-zinc-700/40 px-1 py-px text-[9px] text-zinc-400">{t('modelPicker.default')}</span> : null}
                                 {isCurrentRoute ? <Check className="h-3 w-3 shrink-0" /> : null}
                               </button>

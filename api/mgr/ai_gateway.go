@@ -67,6 +67,26 @@ func aiGatewayProxyAPIKey(provider string, agentID string) string {
 	return strings.TrimSpace(cfg.APIKey)
 }
 
+// aiGatewayEgressProxy returns the proxy URL to route this agent's UPSTREAM
+// traffic through, or "" for direct. Honors the provider's explicit egressProxy
+// config; otherwise Gemini defaults to the local mihomo mixed listener
+// (socks5://127.0.0.1:9001) because Gemini geo-blocks requests from unsupported
+// regions (400 "User location is not supported") and the gateway host may sit in
+// one — the mihomo exit lands in a supported region.
+func aiGatewayEgressProxy(provider, agentID, upstreamHost string) string {
+	if cfg, _, err := resolveRuntimeAIConfigForAgent(provider, agentID); err == nil {
+		if pc, ok := loadProviderByKey(cfg.Provider); ok && pc != nil {
+			if p := strings.TrimSpace(pc.EgressProxy); p != "" {
+				return p
+			}
+		}
+	}
+	if isGeminiFlavored(upstreamHost, "") {
+		return "socks5://127.0.0.1:9001"
+	}
+	return ""
+}
+
 // cicyCloudGatewayHost reports whether the upstream host is a cicy cloud AI
 // gateway (gateway.cicy-ai.com and any *.cicy-ai.com / cicy-ai.com), which
 // authenticates the team token via Authorization: Bearer rather than x-api-key.
@@ -331,8 +351,25 @@ func (t *aiGatewayRetryTransport) RoundTrip(req *http.Request) (*http.Response, 
 func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider string, agentID string, audit *aiGatewayAuditSession) *httputil.ReverseProxy {
 	target := &url.URL{Scheme: targetBase.Scheme, Host: targetBase.Host}
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	// Route upstream traffic through a per-provider egress proxy when configured
+	// (e.g. Gemini → local mihomo US exit to satisfy its region restriction).
+	var baseTransport http.RoundTripper = http.DefaultTransport
+	if ep := aiGatewayEgressProxy(provider, agentID, targetBase.Host); ep != "" {
+		if pu, perr := url.Parse(ep); perr == nil && pu.Host != "" {
+			baseTransport = &http.Transport{
+				Proxy:                 http.ProxyURL(pu),
+				ForceAttemptHTTP2:     true,
+				MaxIdleConns:          100,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+			}
+		} else {
+			log.Printf("[ai-gateway] bad egressProxy %q for agent=%s: %v", ep, agentID, perr)
+		}
+	}
 	proxy.Transport = &aiGatewayRetryTransport{
-		base:     http.DefaultTransport,
+		base:     baseTransport,
 		provider: provider,
 		agentID:  agentID,
 	}
@@ -369,7 +406,14 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 				// That upstream authenticates via `Authorization: Bearer`, NOT x-api-key — so a
 				// bridged turn was getting 401 "Missing API key". When bridged, send Bearer
 				// (the auth must follow the bridge, like resolveRuntimeAIConfigForAgent does).
-				if shouldAdaptAnthropicToChatCompletions(provider, agentID, targetBase.Host, targetBase.Path, suffix) {
+				//
+				// Trust the cicyAdaptMessagesHeader the handler stamps when it actually
+				// bridged — re-deriving via shouldAdapt here is unreliable because `suffix`
+				// has already been rewritten from /messages to /chat/completions, so the
+				// /messages check fails for non-DeepSeek openai upstreams (e.g. Gemini),
+				// which would then wrongly get x-api-key and a 400 "Missing Authorization".
+				if req.Header.Get(cicyAdaptMessagesHeader) == "1" ||
+					shouldAdaptAnthropicToChatCompletions(provider, agentID, targetBase.Host, targetBase.Path, suffix) {
 					req.Header.Set("Authorization", "Bearer "+apiKey)
 					break
 				}
@@ -426,6 +470,10 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 			resp.Header.Del("Content-Length")
 			resp.ContentLength = -1
 		}
+		// Gemini: record per-model availability from real traffic (so the picker
+		// never has to probe + burn the tiny free quota) and rewrite raw upstream
+		// error bodies into clean Anthropic errors. No-op for non-Gemini / 2xx-body.
+		handleGeminiResponseOutcome(resp)
 		if audit == nil || resp.Body == nil {
 			return nil
 		}
@@ -610,6 +658,15 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 		if newBody, _, err := transformMessagesRequestToChatCompletions(requestBody, targetBase.Host); err == nil {
 			requestBody = newBody
 			suffix = rewriteSuffixForDeepSeekChatCompletionsFromMessages(suffix)
+			// Gemini's OpenAI-compat base path already carries the API version
+			// (provider url = …/v1beta/openai). The client's suffix is /v1/messages,
+			// rewritten to /v1/chat/completions; joined onto the base that becomes
+			// …/v1beta/openai/v1/chat/completions — a bad path Gemini rejects with a
+			// misleading 400 "Missing Authorization header". Collapse to the bare
+			// /chat/completions so the join yields …/v1beta/openai/chat/completions.
+			if isGeminiFlavored(targetBase.Host, "") && strings.HasSuffix(suffix, "/chat/completions") {
+				suffix = "/chat/completions"
+			}
 			r.Header.Set(cicyAdaptMessagesHeader, "1")
 		} else {
 			log.Printf("[ai-gateway] messages->chat translation failed for %s: %v", agentID, err)
