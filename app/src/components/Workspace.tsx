@@ -1891,8 +1891,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           {!globalVar?.helper_mode && (
             <>
               <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
-              {/* Custom agents: author your own cicy persona, like building a skill */}
-              <SideBtn dataId="btn-custom-agents" active={leftActive === 'customAgents'} icon={<Bot className="w-5 h-5" />} title={t('sidebarCustomAgents')} onClick={() => toggleLeft('customAgents')} />
               {/* Browser windows: Chrome / Electron profiles → live windows + screenshots */}
               <SideBtn dataId="btn-windows" active={leftActive === 'windows'} icon={<AppWindow className="w-5 h-5" />} title="浏览器窗口" onClick={() => toggleLeft('windows')} />
               {/* Audit log/policy live as normal right-panel tabs (日志/策略), gated

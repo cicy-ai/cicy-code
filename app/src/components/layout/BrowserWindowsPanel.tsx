@@ -465,13 +465,17 @@ type WinAction = 'open' | 'reload' | 'close';
 async function windowAction(clientId: string, p: Profile, w: WinItem, action: WinAction): Promise<void> {
   if (p.backend === 'electron') {
     if (w.webContentsId == null) throw new Error(tl('bwErrTabNotOpen'));
+    let r: any;
     if (action === 'open') {
-      await deviceCall(clientId, 'electron_tab_activate', { webContentsId: w.webContentsId });
+      r = await deviceCall(clientId, 'electron_tab_activate', { webContentsId: w.webContentsId });
     } else if (action === 'reload') {
-      await deviceCall(clientId, 'electron_tab_eval', { webContentsId: w.webContentsId, code: 'location.reload()' });
+      r = await deviceCall(clientId, 'electron_tab_eval', { webContentsId: w.webContentsId, code: 'location.reload()' });
     } else {
-      await deviceCall(clientId, 'electron_tab_close', { webContentsId: w.webContentsId });
+      r = await deviceCall(clientId, 'electron_tab_close', { webContentsId: w.webContentsId });
     }
+    // Surface RPC errors like the chrome path does — a swallowed error here read
+    // as "the close button does nothing".
+    if (r && r.error) throw new Error(r.error);
     return;
   }
   // chrome page target
@@ -1096,15 +1100,20 @@ export function BrowserWindowsColumn({
   const [configOpen, setConfigOpen] = useState(false);
   const [selKey, setSelKey] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true); setError('');
+  const load = useCallback(async (silent = false) => {
+    // silent=true skips the loading skeleton so an action-triggered refresh
+    // (e.g. closing one tab) doesn't unmount every WindowCard and re-screenshot
+    // all tabs. The cards stay mounted and reconcile by stable key — the closed
+    // tab drops out, the rest keep their existing shots.
+    if (!silent) setLoading(true);
+    setError('');
     try {
       setWindows(await loadWindows(clientId, profile));
     } catch (e: any) {
       setError(e?.message || String(e));
       setWindows([]);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [clientId, profile]);
 
@@ -1135,7 +1144,7 @@ export function BrowserWindowsColumn({
 
   const closeTab = async (w: WinItem) => {
     await windowAction(clientId, profile, w, 'close');
-    await load();
+    await load(true); // silent — don't re-screenshot every remaining tab
   };
 
   const onAdd = async () => {
@@ -1144,9 +1153,11 @@ export function BrowserWindowsColumn({
     try {
       await addWindow(clientId, profile, newUrl);
       setNewUrl('');
-      // give the new window a beat to register, then refresh the list
+      // give the new window a beat to register, then refresh the list.
+      // Silent refresh: existing cards reconcile by key (no re-screenshot); only
+      // the new tab's card mounts and captures itself.
       await new Promise((r) => setTimeout(r, 600));
-      await load();
+      await load(true);
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -1224,7 +1235,7 @@ export function BrowserWindowsColumn({
                 deviceId={deviceId}
                 profile={profile}
                 win={w}
-                onRefresh={load}
+                onRefresh={() => load(true)}
                 onSendToAgent={onSendToAgent}
                 onOpenInEditor={onOpenInEditor}
               />
