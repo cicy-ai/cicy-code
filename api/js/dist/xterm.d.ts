@@ -28,6 +28,10 @@ export declare class Xterm {
         columns: number;
         rows: number;
     };
+    isSelecting: boolean;
+    private _selTimer;
+    private _pendingFit;
+    private _endSelecting;
     constructor(elem: HTMLElement);
     configure(options: {
         scrollback?: number;

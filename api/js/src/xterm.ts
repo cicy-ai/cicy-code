@@ -125,6 +125,15 @@ export class Xterm {
     pasteCallback: ((input: string) => void) | null;
     fitCallbacks: Array<(columns: number, rows: number) => void>;
     lastNotifiedFit: { columns: number; rows: number };
+    // Active drag-selection guard: while the mouse button is held for a text
+    // selection, fit()/scrollToBottom() must NOT run — a mid-drag reflow/scroll
+    // resets the selection anchor and drops the leading character. Set on
+    // mousedown, cleared on ANY document mouseup (capture) + a 10s safety
+    // timeout so it can never get stuck and freeze auto-scroll/resize.
+    isSelecting: boolean = false;
+    private _selTimer: number = 0;
+    private _pendingFit: boolean = false;
+    private _endSelecting: (() => void) | null = null;
 
     constructor(elem: HTMLElement) {
         this.elem = elem;
@@ -283,7 +292,9 @@ export class Xterm {
         this.resizeListener = () => {
             this.elem.style.height = "100%";
             this.fit();
-            this.term.scrollToBottom();
+            // Don't yank the viewport to the bottom while the user is dragging a
+            // selection — it would scroll the anchored rows out from under them.
+            if (!this.isSelecting) this.term.scrollToBottom();
             this.showMessage(String(this.term.cols) + "x" + String(this.term.rows), this.messageTimeout);
         };
 
@@ -375,6 +386,29 @@ export class Xterm {
         this.elem.addEventListener('paste', showPasteDialog, true);
         this.elem.addEventListener('mousedown', refocus);
 
+        // ── drag-selection guard ───────────────────────────────────────────
+        // Mark "selecting" the moment a button goes down inside the terminal,
+        // so any fit()/scrollToBottom() triggered during the drag (by the
+        // ResizeObserver / streaming output / tab switches) is deferred instead
+        // of breaking the in-progress selection. Cleared on ANY mouseup in the
+        // document (capture, so a release outside the terminal still counts) and
+        // by a 10s safety timeout — it can never stick and freeze the terminal.
+        this.elem.addEventListener('mousedown', () => {
+            this.isSelecting = true;
+            if (this._selTimer) clearTimeout(this._selTimer);
+            this._selTimer = window.setTimeout(() => { this.isSelecting = false; }, 10000);
+        });
+        this._endSelecting = () => {
+            if (!this.isSelecting) return;
+            this.isSelecting = false;
+            if (this._selTimer) { clearTimeout(this._selTimer); this._selTimer = 0; }
+            if (this._pendingFit) { this._pendingFit = false; this.fit(); }
+        };
+        this.elem.ownerDocument.addEventListener('mouseup', this._endSelecting, true);
+        // Debug handle: lets `agent-webpage exec-js` reach the live Terminal for
+        // selection/geometry diagnostics. Harmless; read-only convenience.
+        try { (this.elem.ownerDocument.defaultView as any).__cicyTerm = this.term; } catch (e) {}
+
         this.fitSoon();
         setTimeout(() => this.fitSoon(), 50);
         setTimeout(() => this.fitSoon(), 200);
@@ -425,6 +459,10 @@ export class Xterm {
         // Skip fit when container is hidden (display:none) or too small
         const rect = this.elem.getBoundingClientRect();
         if (rect.width < 20 || rect.height < 20) return;
+        // Defer reflow while a drag-selection is in progress — fitAddon.fit()
+        // re-lays-out the buffer mid-drag and drops the first selected char.
+        // The deferred fit runs on mouseup (see _endSelecting).
+        if (this.isSelecting) { this._pendingFit = true; return; }
         this.fitAddon.fit();
         this.notifyFitSize();
     }
@@ -637,6 +675,11 @@ export class Xterm {
 
     close(): void {
         window.removeEventListener("resize", this.resizeListener);
+        if (this._endSelecting) {
+            this.elem.ownerDocument.removeEventListener('mouseup', this._endSelecting, true);
+            this._endSelecting = null;
+        }
+        if (this._selTimer) { clearTimeout(this._selTimer); this._selTimer = 0; }
         if (this.renderDisposable) {
             this.renderDisposable.dispose();
             this.renderDisposable = null;

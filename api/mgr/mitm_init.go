@@ -33,6 +33,10 @@ var (
 	mitmSOCKS5Addr string
 	mitmHTTPAddr   string
 	mitmCACertPath string
+	// mitmCABundlePath is a concatenation of the OS root CAs + our MITM CA, so
+	// Rust agents (codex/kiro-cli) can trust the MITM via SSL_CERT_FILE without
+	// root/sudo and without dropping the real internet roots. Empty until built.
+	mitmCABundlePath string
 )
 
 // mitmAgentProxyBootLines returns boot export lines that route a non-gateway
@@ -69,7 +73,94 @@ func mitmAgentProxyBootLines(useMitm bool) []string {
 	if mitmCACertPath != "" {
 		lines = append(lines, fmt.Sprintf(`export NODE_EXTRA_CA_CERTS="%s"`, mitmCACertPath))
 	}
+	// Rust agents (codex/kiro-cli) read OS/openssl trust, NOT NODE_EXTRA_CA_CERTS,
+	// so without this they hit `invalid peer certificate: UnknownIssuer` on the
+	// MITM-intercepted TLS. SSL_CERT_FILE points at a bundle that INCLUDES the OS
+	// roots (built by ensureMITMCABundle), so the real internet keeps working and
+	// the MITM CA is additionally trusted — no system-store install / sudo needed.
+	// rustls-native-certs + openssl + python(requests via SSL_CERT_FILE) all honor it.
+	if mitmCABundlePath != "" {
+		lines = append(lines, fmt.Sprintf(`export SSL_CERT_FILE="%s"`, mitmCABundlePath))
+	}
 	return lines
+}
+
+// ensureMITMCABundle writes <db>/mitm-ca-bundle.crt = OS root CAs + the MITM CA,
+// so the agent boot path can hand Rust agents an SSL_CERT_FILE that trusts BOTH
+// the public internet and the MITM, without root and without the "bare CA
+// replaces the system roots" footgun. Best-effort: on any failure the bundle path
+// stays empty and boot simply omits SSL_CERT_FILE (Rust non-gateway agents then
+// fall back to needing the system-store install).
+func ensureMITMCABundle() {
+	if mitmCACertPath == "" {
+		return
+	}
+	mitmCA, err := os.ReadFile(mitmCACertPath)
+	if err != nil {
+		log.Printf("[mitm] read CA for bundle failed: %v", err)
+		return
+	}
+	out := filepath.Join(filepath.Dir(mitmCACertPath), "mitm-ca-bundle.crt")
+	sys := osRootCAs(out)
+	var buf bytes.Buffer
+	if len(sys) > 0 {
+		buf.Write(sys)
+		if !bytes.HasSuffix(sys, []byte("\n")) {
+			buf.WriteByte('\n')
+		}
+	} else {
+		log.Printf("[mitm] no OS root bundle found — SSL_CERT_FILE bundle would drop public roots; skipping")
+		return
+	}
+	buf.Write(mitmCA)
+	if !bytes.HasSuffix(mitmCA, []byte("\n")) {
+		buf.WriteByte('\n')
+	}
+	if err := os.WriteFile(out, buf.Bytes(), 0644); err != nil {
+		log.Printf("[mitm] write CA bundle failed: %v", err)
+		return
+	}
+	mitmCABundlePath = out
+	log.Printf("[mitm] CA bundle ready: %s (OS roots + MITM CA)", out)
+}
+
+// osRootCAs returns the platform's trusted root CAs as PEM, WITHOUT requiring any
+// privileged install (the whole point is a zero-friction, no-sudo/no-GUI trust
+// path). macOS keeps roots in the Keychain rather than a file, so we export them
+// read-only via `security find-certificate` (reading needs no authorization; only
+// WRITING to the keychain would prompt). Other Unixes ship a PEM bundle on disk.
+// selfPath is our own output bundle, skipped so we never fold it back in.
+func osRootCAs(selfPath string) []byte {
+	if runtime.GOOS == "darwin" {
+		var out bytes.Buffer
+		for _, kc := range []string{
+			"/System/Library/Keychains/SystemRootCertificates.keychain", // built-in roots
+			"/Library/Keychains/System.keychain",                        // admin-added roots
+		} {
+			if b, err := exec.Command("security", "find-certificate", "-a", "-p", kc).Output(); err == nil && len(b) > 0 {
+				out.Write(b)
+				if !bytes.HasSuffix(b, []byte("\n")) {
+					out.WriteByte('\n')
+				}
+			}
+		}
+		return out.Bytes()
+	}
+	for _, c := range []string{
+		strings.TrimSpace(os.Getenv("SSL_CERT_FILE")),
+		"/etc/ssl/certs/ca-certificates.crt", // Debian/Ubuntu/Alpine
+		"/etc/pki/tls/certs/ca-bundle.crt",   // RHEL/Fedora/CentOS
+		"/etc/ssl/ca-bundle.pem",             // openSUSE
+		"/etc/ssl/cert.pem",                  // BSD
+	} {
+		if c == "" || c == selfPath {
+			continue
+		}
+		if b, e := os.ReadFile(c); e == nil && len(b) > 0 {
+			return b
+		}
+	}
+	return nil
 }
 
 // mitmEgressResolver implements mitm.EgressFunc. MITM ALWAYS routes its upstream
@@ -141,6 +232,7 @@ func startMITM() {
 	mitmSOCKS5Addr = cfg.SOCKS5Listen
 	mitmHTTPAddr = cfg.HTTPConnectListen
 	mitmCACertPath = cfg.CA.CertPath
+	ensureMITMCABundle() // build OS-roots+MITM bundle for Rust agents' SSL_CERT_FILE
 
 	// CA cert download — operator runs `cicy-code mitm install-ca` which
 	// fetches this endpoint and installs into the OS trust store. `/ca.pem` is

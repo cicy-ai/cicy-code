@@ -275,13 +275,12 @@ func platformDisplayName() string {
 // Docker. Substituted at seed time so the prompt genuinely differs per platform.
 func platformSetupGuidance() string {
 	if runtime.GOOS == "windows" {
-		return "你在 **Windows**:本机跑不了 tmux 团队编排。给用户两条路,让他**选 WSL 还是 Docker**——\n" +
-			"- **WSL**:启用 WSL2(`wsl --install`)+ 发行版,在里面装 cicy-code(Linux 装法)起 daemon;贴近原生,适合开发者。\n" +
-			"- **Docker**:装/起 Docker Desktop,拉起 cicy-code 容器(映射端口)起 daemon;隔离干净、一键起停。\n" +
-			"探测已有环境(`wsl --status` / `docker version`)有哪个推哪个;都没有默认推 WSL2。"
+		return "你在 **Windows**:托管你的这台 cicy-code 是**原生(非 Docker)直接跑在系统上、占着本机 8008** 的——它能跑 cicy 类 agent(项目经理/各专员/你),但 **Windows 没 tmux,编排不了 claude / codex / gemini / opencode 这些 CLI 编程 agent**。\n" +
+			"所以要一整支带编程 agent 的团队,**统一走 Docker**(给一个有 tmux 的 Linux 运行时):装 **Docker Desktop**(它内部用 WSL2 后端,但你只管 Docker,不单独碰 WSL),按下面命令起 cicy-code 容器(主机端口**从 8009 起**,8008 被原生那台占着)。\n" +
+			"探测 `docker version`;没有就引导装 Docker Desktop。"
 	}
-	return "你在 **" + platformDisplayName() + "**:用 **Docker** 给团队**无限扩编**——本机已有一支团队,需要更多算力/并行时,用 Docker 起额外的 cicy-code 容器实例(各自一套团队),横向扩。\n" +
-		"探测 `docker version` 确认 Docker 在跑;没装就引导装 Docker;按需 `docker run` 起 cicy-code 容器、映射端口、起 daemon,把入口给用户。"
+	return "你在 **" + platformDisplayName() + "**:本机原生 cicy-code(占 8008,tmux 可用,能跑整支含编程 agent 的团队)已在跑。你的活是用 **Docker 无限扩编**——需要更多算力/并行/隔离不同项目时,起额外 cicy-code 容器(主机端口 **8009 起**,8008 被原生那台占着),各自一套独立团队。\n" +
+		"探测 `docker version` 确认 Docker 在跑;没装就引导装;就绪后按下面命令起容器。"
 }
 
 // composeAgentMemory builds the seed content for a new agent's guidance file:

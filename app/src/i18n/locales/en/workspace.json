@@ -193,5 +193,16 @@
   "settingsPublicUrlHint": "This machine's externally reachable address (tunnel domain or LAN IP). Once set, a “scan to open on mobile” QR appears in the corner; leave empty to hide it.",
   "settingsSave": "Save",
   "settingsSaving": "Saving…",
-  "settingsSaved": "Saved"
+  "settingsSaved": "Saved",
+  "modelPicker": {
+    "searchPlaceholder": "Search models / providers…",
+    "current": "Current",
+    "styleClaude": "Claude-style",
+    "styleOpenai": "OpenAI-style",
+    "styleOther": "Other",
+    "noProviders": "No providers",
+    "noMatches": "No matching models",
+    "routes": "{{n}} routes",
+    "default": "default"
+  }
 }

@@ -44,7 +44,7 @@ func rewriteSuffixForChatCompletions(suffix string) string {
 // transformResponsesRequestToChatCompletions converts an OpenAI Responses API
 // request body into a Chat Completions request body. Returns the new body and
 // the resolved model name (for use when emitting Responses events back).
-func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, error) {
+func transformResponsesRequestToChatCompletions(body []byte, upstreamHost string) ([]byte, string, error) {
 	var src map[string]interface{}
 	if err := json.Unmarshal(body, &src); err != nil {
 		return body, "", err
@@ -55,6 +55,7 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 	if model != "" {
 		dst["model"] = model
 	}
+	deepseek := isDeepSeekFlavored(upstreamHost, model)
 	if s, ok := src["stream"].(bool); ok {
 		dst["stream"] = s
 		if s {
@@ -76,10 +77,17 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 			dst[k] = v
 		}
 	}
-	// Disable DeepSeek thinking — codex doesn't track reasoning_content for the
-	// multi-turn echo the API would otherwise require. Use the CORRECT V4 param
-	// (thinking:{type:disabled}); the legacy enable_thinking is ignored by v4.
-	dst["thinking"] = map[string]interface{}{"type": "disabled"}
+	// DeepSeek-ONLY: carry the resolved V4 thinking switch (set on the Responses
+	// body by agentInspectorApplyThinking per config), symmetric with the cicy
+	// messages bridge — so codex thinking actually follows the toggle instead of
+	// being hard-disabled. Multi-turn is kept valid by the reasoning roundtrip
+	// below: the response side emits `type:"reasoning"` items codex stores and
+	// echoes back as assistant.reasoning_content, with a single-char placeholder
+	// fallback when codex drops them (openai/codex#24500). Standard OpenAI
+	// upstreams get NO `thinking` field (DeepSeek private extension).
+	if deepseek {
+		dst["thinking"] = deepSeekThinkingFromSource(src["thinking"])
+	}
 
 	// input + instructions → messages
 	messages := make([]map[string]interface{}, 0)
@@ -173,7 +181,7 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 					"role":    role,
 					"content": text,
 				}
-				if role == "assistant" {
+				if role == "assistant" && deepseek {
 					msg["reasoning_content"] = consumePendingReasoning()
 				}
 				messages = append(messages, msg)
@@ -205,12 +213,15 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 					})
 					j++
 				}
-				messages = append(messages, map[string]interface{}{
-					"role":              "assistant",
-					"content":           nil,
-					"reasoning_content": consumePendingReasoning(),
-					"tool_calls":        toolCalls,
-				})
+				asst := map[string]interface{}{
+					"role":       "assistant",
+					"content":    nil,
+					"tool_calls": toolCalls,
+				}
+				if deepseek {
+					asst["reasoning_content"] = consumePendingReasoning()
+				}
+				messages = append(messages, asst)
 				// For each tool_call in this assistant message, ensure a
 				// corresponding tool message follows. We emit them now in
 				// the same order as the tool_calls. If a function_call_output
@@ -1046,6 +1057,47 @@ func rewriteSuffixForDeepSeekChatCompletionsFromMessages(suffix string) string {
 	return strings.Replace(suffix, "/messages", "/chat/completions", 1)
 }
 
+// isDeepSeekFlavored reports whether the upstream is DeepSeek — directly
+// (api.deepseek.com) OR fronted by a proxy (new-api / cicy cloud). It governs
+// whether the request transforms layer on DeepSeek's PRIVATE quirks on top of
+// the standard Chat Completions translation:
+//   - the V4 `thinking:{type:...}` switch (not a standard OpenAI field)
+//   - `reasoning_content` echoed on every assistant history turn, which DeepSeek's
+//     thinking-mode validator 400s when missing/empty
+//
+// Standard OpenAI-style upstreams (opencodeZen, generic openai-compat) must NOT
+// receive these — they get a clean, unforced translation.
+//
+// Detection is host OR model name. A proxied DeepSeek carries a non-deepseek host
+// (gateway.cicy-ai.com) but the model id ("deepseek-v4"/"deepseek-chat"/
+// "deepseek-reasoner") rides the request body unchanged — and the model is exactly
+// what arms DeepSeek's validator upstream. Standard models (gpt-*, opencodeZen ids)
+// never match, so they stay on the clean path.
+func isDeepSeekFlavored(upstreamHost, model string) bool {
+	if strings.Contains(strings.ToLower(upstreamHost), "deepseek") {
+		return true
+	}
+	if strings.Contains(strings.ToLower(model), "deepseek") {
+		return true
+	}
+	return false
+}
+
+// deepSeekThinkingFromSource extracts the resolved DeepSeek V4 thinking switch
+// from an Anthropic-shaped `thinking` value (set upstream by
+// agentInspectorApplyThinking per the config-driven policy). Only the `type` is
+// carried — DeepSeek's switch is `{type:"enabled"|"disabled"}`; budget_tokens and
+// other Anthropic subfields are dropped. Absent/garbage → disabled (safe default
+// that never trips the thinking-mode validator).
+func deepSeekThinkingFromSource(v interface{}) map[string]interface{} {
+	if m, ok := v.(map[string]interface{}); ok {
+		if t, ok := m["type"].(string); ok && (t == "enabled" || t == "disabled") {
+			return map[string]interface{}{"type": t}
+		}
+	}
+	return map[string]interface{}{"type": "disabled"}
+}
+
 // shouldAdaptAnthropicToChatCompletions decides whether an Anthropic Messages
 // request hitting the /anthropic endpoint must be bridged down to Chat Completions
 // for the upstream. Two cases:
@@ -1090,7 +1142,7 @@ func aiGatewayEffectiveProviderProtocol(pathProvider, agentID string) string {
 
 // transformMessagesRequestToChatCompletions converts an Anthropic Messages API
 // request body into a Chat Completions request body. Returns new body + model.
-func transformMessagesRequestToChatCompletions(body []byte) ([]byte, string, error) {
+func transformMessagesRequestToChatCompletions(body []byte, upstreamHost string) ([]byte, string, error) {
 	var src map[string]interface{}
 	if err := json.Unmarshal(body, &src); err != nil {
 		return body, "", err
@@ -1101,6 +1153,7 @@ func transformMessagesRequestToChatCompletions(body []byte) ([]byte, string, err
 	if model != "" {
 		dst["model"] = model
 	}
+	deepseek := isDeepSeekFlavored(upstreamHost, model)
 	if s, ok := src["stream"].(bool); ok {
 		dst["stream"] = s
 		if s {
@@ -1123,8 +1176,15 @@ func transformMessagesRequestToChatCompletions(body []byte) ([]byte, string, err
 			}
 		}
 	}
-	// Correct V4 thinking switch (legacy enable_thinking is ignored by v4).
-	dst["thinking"] = map[string]interface{}{"type": "disabled"}
+	// DeepSeek-ONLY: carry over the resolved V4 thinking switch (set on the
+	// Anthropic body by agentInspectorApplyThinking per config) so thinking
+	// actually toggles. Standard OpenAI upstreams get NO `thinking` field —
+	// it's a DeepSeek private extension, and forcing it disabled here was what
+	// silently killed thinking for every openai-style provider. Their thinking
+	// follows the client/model defaults, unforced.
+	if deepseek {
+		dst["thinking"] = deepSeekThinkingFromSource(src["thinking"])
+	}
 
 	messages := make([]map[string]interface{}, 0)
 
@@ -1147,7 +1207,7 @@ func transformMessagesRequestToChatCompletions(body []byte) ([]byte, string, err
 			}
 			role, _ := m["role"].(string)
 			content := m["content"]
-			out := convertAnthropicMessageToChatCompletions(role, content)
+			out := convertAnthropicMessageToChatCompletions(role, content, deepseek)
 			messages = append(messages, out...)
 		}
 	}
@@ -1215,11 +1275,17 @@ func flattenAnthropicSystem(sys interface{}) string {
 // item into one or more ChatCompletions messages. Returns a slice because
 // assistant turns with mixed text+tool_use translate to a single message with
 // tool_calls, but tool_result blocks become separate role=tool entries.
-func convertAnthropicMessageToChatCompletions(role string, content interface{}) []map[string]interface{} {
+func convertAnthropicMessageToChatCompletions(role string, content interface{}, deepseek bool) []map[string]interface{} {
 	if s, ok := content.(string); ok {
-		return []map[string]interface{}{
-			{"role": role, "content": s},
+		msg := map[string]interface{}{"role": role, "content": s}
+		// DeepSeek's thinking-mode validator demands a non-empty reasoning_content
+		// on every assistant history turn; a plain-string assistant turn carries
+		// no thinking block, so fall back to the placeholder. (See the block-array
+		// path below for the real-thinking echo.)
+		if deepseek && role == "assistant" {
+			msg["reasoning_content"] = "."
 		}
+		return []map[string]interface{}{msg}
 	}
 	parts, ok := content.([]interface{})
 	if !ok {
@@ -1227,6 +1293,7 @@ func convertAnthropicMessageToChatCompletions(role string, content interface{}) 
 	}
 
 	var text strings.Builder
+	var reasoning strings.Builder
 	toolCalls := make([]map[string]interface{}, 0)
 	toolResultMsgs := make([]map[string]interface{}, 0)
 	for _, p := range parts {
@@ -1239,6 +1306,11 @@ func convertAnthropicMessageToChatCompletions(role string, content interface{}) 
 		case "text":
 			if t, ok := pm["text"].(string); ok {
 				text.WriteString(t)
+			}
+		case "thinking":
+			// Captured to echo back as reasoning_content for DeepSeek (below).
+			if t, ok := pm["thinking"].(string); ok {
+				reasoning.WriteString(t)
 			}
 		case "tool_use":
 			id, _ := pm["id"].(string)
@@ -1277,7 +1349,17 @@ func convertAnthropicMessageToChatCompletions(role string, content interface{}) 
 		if len(toolCalls) > 0 {
 			msg["tool_calls"] = toolCalls
 		}
-		msg["reasoning_content"] = ""
+		// DeepSeek-ONLY: echo the real thinking back as reasoning_content (the
+		// validator rejects empty/missing); placeholder when this turn carried
+		// none. Standard OpenAI upstreams get no reasoning_content at all — it's
+		// not part of the standard API.
+		if deepseek {
+			rc := strings.TrimSpace(reasoning.String())
+			if rc == "" {
+				rc = "."
+			}
+			msg["reasoning_content"] = rc
+		}
 		out = append(out, msg)
 	} else {
 		if text.Len() > 0 {
@@ -1324,6 +1406,16 @@ type chatCompletionsToMessagesReader struct {
 
 	messageID string
 	model     string
+
+	// Thinking block state. Reasoning (`delta.reasoning_content`) streams BEFORE
+	// the visible text; we surface it as an Anthropic `thinking` content block so
+	// the agent/UI shows the model's reasoning. This is PROTOCOL-AGNOSTIC — any
+	// upstream that emits reasoning_content (DeepSeek AND standard openai-style
+	// providers like opencodeZen) gets its thinking rendered.
+	thinkingBlockStarted bool
+	thinkingBlockClosed  bool
+	thinkingBlockIndex   int
+	accumThinking        strings.Builder
 
 	// Text block state
 	textBlockStarted bool
@@ -1435,12 +1527,20 @@ func (r *chatCompletionsToMessagesReader) processOneLine() error {
 	}
 	delta, _ := choice["delta"].(map[string]interface{})
 	if delta != nil {
+		// Reasoning streams first — open/extend the thinking block.
+		if rc, ok := delta["reasoning_content"].(string); ok && rc != "" {
+			r.ensureThinkingBlock()
+			r.emitThinkingDelta(rc)
+			r.accumThinking.WriteString(rc)
+		}
 		if content, ok := delta["content"].(string); ok && content != "" {
+			r.closeThinkingBlock()
 			r.ensureTextBlock()
 			r.emitTextDelta(content)
 			r.accumText.WriteString(content)
 		}
 		if rawTC, ok := delta["tool_calls"].([]interface{}); ok {
+			r.closeThinkingBlock()
 			for _, raw := range rawTC {
 				tcm, ok := raw.(map[string]interface{})
 				if !ok {
@@ -1474,6 +1574,45 @@ func (r *chatCompletionsToMessagesReader) emitMessageStart() {
 		},
 	})
 	r.emitEvent("ping", map[string]interface{}{"type": "ping"})
+}
+
+func (r *chatCompletionsToMessagesReader) ensureThinkingBlock() {
+	if r.thinkingBlockStarted {
+		return
+	}
+	r.thinkingBlockStarted = true
+	r.thinkingBlockIndex = r.nextBlockIndex
+	r.nextBlockIndex++
+	r.emitEvent("content_block_start", map[string]interface{}{
+		"type":  "content_block_start",
+		"index": r.thinkingBlockIndex,
+		"content_block": map[string]interface{}{
+			"type":     "thinking",
+			"thinking": "",
+		},
+	})
+}
+
+func (r *chatCompletionsToMessagesReader) emitThinkingDelta(delta string) {
+	r.emitEvent("content_block_delta", map[string]interface{}{
+		"type":  "content_block_delta",
+		"index": r.thinkingBlockIndex,
+		"delta": map[string]interface{}{
+			"type":     "thinking_delta",
+			"thinking": delta,
+		},
+	})
+}
+
+func (r *chatCompletionsToMessagesReader) closeThinkingBlock() {
+	if !r.thinkingBlockStarted || r.thinkingBlockClosed {
+		return
+	}
+	r.thinkingBlockClosed = true
+	r.emitEvent("content_block_stop", map[string]interface{}{
+		"type":  "content_block_stop",
+		"index": r.thinkingBlockIndex,
+	})
 }
 
 func (r *chatCompletionsToMessagesReader) ensureTextBlock() {
@@ -1598,6 +1737,7 @@ func (r *chatCompletionsToMessagesReader) emitFinalizers() {
 		r.completedSent = true
 		return
 	}
+	r.closeThinkingBlock()
 	r.closeTextBlock()
 	for _, tb := range r.toolBlocks {
 		if tb.started && !tb.closed {

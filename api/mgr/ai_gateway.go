@@ -491,6 +491,43 @@ func applyGatewayModelMapping(agentID string, body []byte) []byte {
 	return out
 }
 
+// coerceModelToProvider guarantees the outbound "model" is one the active
+// provider actually serves. The UI model picker can leave a model selected that
+// belongs to a DIFFERENT provider — e.g. opencodeZen's "north-mini-code-free"
+// lingering after the provider was switched to DeepSeek — and forwarding that
+// foreign model makes the upstream 400 ("supported API model names are
+// deepseek-v4-pro or deepseek-v4-flash, but you passed north-mini-code-free").
+//
+// Runs AFTER applyGatewayModelMapping + the pane-default override (so it sees the
+// final model): take the current model, apply the provider's mapping, and if the
+// provider declares a model list that still doesn't contain it, fall back to the
+// provider's defaultModel. No-op when the provider declares no model list.
+func coerceModelToProvider(agentID string, body []byte) []byte {
+	p := aiGatewayActiveProvider(agentID)
+	if p == nil || len(p.Models) == 0 {
+		return body
+	}
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return body
+	}
+	cur, ok := m["model"].(string)
+	if !ok || cur == "" {
+		return body
+	}
+	final := p.coerceModel(cur)
+	if final == cur {
+		return body
+	}
+	m["model"] = final
+	out, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	log.Printf("[ai-gateway] %s model %q not served by provider (models=%v) → coerced to %q", agentID, cur, p.Models, final)
+	return out
+}
+
 func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRemote(r.RemoteAddr) {
 		httpErr(w, 403, "ai_gateway_proxy_loopback_only")
@@ -539,6 +576,9 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 	if provider != "gemini" {
 		requestBody = applyGatewayModelMapping(agentID, requestBody)
 		requestBody = agentInspectorRewriteRequestBody(provider, agentID, requestBody, targetBase.Host)
+		// Last line of defense: never forward a model the active provider doesn't
+		// serve (UI can leave a foreign model selected after a provider switch).
+		requestBody = coerceModelToProvider(agentID, requestBody)
 	}
 
 	// Codex (Responses API) → Chat Completions adaptation: only api.openai.com
@@ -546,7 +586,7 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 	// request body + path, and ModifyResponse wraps the SSE stream the other
 	// way. Header marks the request so ModifyResponse knows to wrap.
 	if shouldAdaptForCodexResponses(targetBase.Host, suffix) {
-		if newBody, _, err := transformResponsesRequestToChatCompletions(requestBody); err == nil {
+		if newBody, _, err := transformResponsesRequestToChatCompletions(requestBody, targetBase.Host); err == nil {
 			if gatewayDebugResponses() {
 				log.Printf("[responses-debug] agent=%s host=%s transformed_chat_body=%s", agentID, targetBase.Host, truncForDebug(newBody, 3000))
 			}
@@ -567,7 +607,7 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 	// so the agent's consumption path stays single-format. Native anthropic upstreams
 	// (provider protocol "anthropic", or DeepSeek's /anthropic passthrough) skip this.
 	if shouldAdaptAnthropicToChatCompletions(provider, agentID, targetBase.Host, targetBase.Path, suffix) {
-		if newBody, _, err := transformMessagesRequestToChatCompletions(requestBody); err == nil {
+		if newBody, _, err := transformMessagesRequestToChatCompletions(requestBody, targetBase.Host); err == nil {
 			requestBody = newBody
 			suffix = rewriteSuffixForDeepSeekChatCompletionsFromMessages(suffix)
 			r.Header.Set(cicyAdaptMessagesHeader, "1")

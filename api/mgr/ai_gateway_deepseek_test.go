@@ -48,7 +48,7 @@ func TestResponsesToChatCompletionsToolsHaveRequired(t *testing.T) {
 		"input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],
 		"tools": [{"type":"function","name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}]
 	}`)
-	out, _, err := transformResponsesRequestToChatCompletions(body)
+	out, _, err := transformResponsesRequestToChatCompletions(body, "")
 	if err != nil {
 		t.Fatalf("translation error: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestMessagesToChatCompletionsToolsHaveRequired(t *testing.T) {
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{"name":"read_file","description":"r","input_schema":{"type":"object","properties":{"path":{"type":"string"}}}}]
 	}`)
-	out, _, err := transformMessagesRequestToChatCompletions(body)
+	out, _, err := transformMessagesRequestToChatCompletions(body, "")
 	if err != nil {
 		t.Fatalf("translation error: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestMessagesToChatCompletionsToolsHaveRequired(t *testing.T) {
 // server-side but never stream it — the gateway/audit then sees 0 tokens/cache.
 func TestTransformResponsesRequestAddsStreamOptionsUsage(t *testing.T) {
 	body := []byte(`{"model":"deepseek-v4-pro","stream":true,"input":[{"type":"message","role":"user","content":"hi"}]}`)
-	out, _, err := transformResponsesRequestToChatCompletions(body)
+	out, _, err := transformResponsesRequestToChatCompletions(body, "")
 	if err != nil {
 		t.Fatalf("transform: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestTransformResponsesRequestAddsStreamOptionsUsage(t *testing.T) {
 	}
 	// Non-stream requests must NOT carry stream_options.
 	body2 := []byte(`{"model":"deepseek-v4-pro","input":[{"type":"message","role":"user","content":"hi"}]}`)
-	out2, _, _ := transformResponsesRequestToChatCompletions(body2)
+	out2, _, _ := transformResponsesRequestToChatCompletions(body2, "")
 	var m2 map[string]interface{}
 	_ = json.Unmarshal(out2, &m2)
 	if _, present := m2["stream_options"]; present {
@@ -155,7 +155,7 @@ func TestChatUsageToResponsesUsageMapsCache(t *testing.T) {
 // + cache_read_input_tokens).
 func TestTransformMessagesRequestAddsStreamOptionsUsage(t *testing.T) {
 	body := []byte(`{"model":"deepseek-v4-pro","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
-	out, _, err := transformMessagesRequestToChatCompletions(body)
+	out, _, err := transformMessagesRequestToChatCompletions(body, "")
 	if err != nil {
 		t.Fatalf("transform: %v", err)
 	}

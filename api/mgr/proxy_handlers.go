@@ -770,6 +770,14 @@ func handleProxyStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	info["raw"] = out
 	info["success"] = true
+	// The wrapper's `running` is derived from its own PID file, so it misses a
+	// mihomo started by anyone else — e.g. the backend's startCicyMihomoIfNeeded
+	// (→ /usr/local/bin/mihomo). The controller answering is the authoritative
+	// liveness signal, so OR it in; otherwise the drawer shows a "启动" button
+	// while mihomo is actually serving traffic.
+	if running, _ := info["running"].(bool); !running && mihomoControllerAlive(0) {
+		info["running"] = true
+	}
 	J(w, info)
 }
 

@@ -192,5 +192,16 @@
   "settingsPublicUrlHint": "このマシンの外部到達可能なアドレス(トンネルドメインまたは LAN IP)。設定すると隅に「モバイルで開く」QR が表示されます。空欄で非表示。",
   "settingsSave": "保存",
   "settingsSaving": "保存中…",
-  "settingsSaved": "保存しました"
+  "settingsSaved": "保存しました",
+  "modelPicker": {
+    "searchPlaceholder": "モデル / プロバイダーを検索…",
+    "current": "現在",
+    "styleClaude": "Claude 形式",
+    "styleOpenai": "OpenAI 形式",
+    "styleOther": "その他",
+    "noProviders": "プロバイダーなし",
+    "noMatches": "一致するモデルなし",
+    "routes": "{{n}} 経路",
+    "default": "デフォルト"
+  }
 }

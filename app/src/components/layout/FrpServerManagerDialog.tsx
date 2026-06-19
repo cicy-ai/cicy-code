@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, Fragment } from 'react';
 import { X, RefreshCw, Play, Square, RotateCw, Loader2, ChevronDown, ChevronRight, Server, Copy, Eye, EyeOff, Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
-import { cn } from '../../lib/utils';
+import { cn, copyToClipboard } from '../../lib/utils';
 
 type LifecycleAction = 'start' | 'stop' | 'restart' | 'reload';
 
@@ -407,7 +407,7 @@ export function FrpServerManagerDialog({
                           type="button"
                           onClick={async () => {
                             const v = `${install.public_ip || ''}:${install.server_port || ''}`;
-                            await navigator.clipboard.writeText(v);
+                            await copyToClipboard(v);
                             setCopiedKey('addr'); setTimeout(() => setCopiedKey(null), 1500);
                           }}
                           className="text-zinc-400 hover:text-zinc-200 p-1"
@@ -436,7 +436,7 @@ export function FrpServerManagerDialog({
                           type="button"
                           onClick={async () => {
                             if (!install.token) return;
-                            await navigator.clipboard.writeText(install.token);
+                            await copyToClipboard(install.token);
                             setCopiedKey('token'); setTimeout(() => setCopiedKey(null), 1500);
                           }}
                           className="text-zinc-400 hover:text-zinc-200 p-1"
@@ -481,7 +481,7 @@ export function FrpServerManagerDialog({
                                 type="button"
                                 onClick={async () => {
                                   if (!currentCmd) return;
-                                  await navigator.clipboard.writeText(currentCmd);
+                                  await copyToClipboard(currentCmd);
                                   setCopiedKey('cmd'); setTimeout(() => setCopiedKey(null), 1500);
                                 }}
                                 className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100 px-2 py-1 rounded border border-white/[0.06] hover:border-white/[0.12]"

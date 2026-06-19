@@ -2683,10 +2683,31 @@ const ResourceRow = memo(function ResourceRow({
   );
 });
 
+// modelFamily groups a model id under a stable vendor family so the picker can
+// section a long, growing model list (DeepSeek / Claude / OpenAI / Gemini …)
+// instead of one flat scroll. Falls back to the capitalized leading token.
+function modelFamily(model: string): string {
+  const m = model.toLowerCase();
+  if (m.startsWith('deepseek')) return 'DeepSeek';
+  if (m.startsWith('claude')) return 'Claude';
+  if (m.startsWith('gpt') || /^o[1-9]/.test(m)) return 'OpenAI';
+  if (m.startsWith('gemini')) return 'Gemini';
+  if (m.startsWith('qwen')) return 'Qwen';
+  if (m.startsWith('llama')) return 'Llama';
+  const head = (model.split(/[-_/]/)[0] || model).trim();
+  return head ? head.charAt(0).toUpperCase() + head.slice(1) : 'Other';
+}
+
 function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: string; agentDetail: any; onUpdated: (patch: any) => void; onOpen?: () => void }) {
   const { runPaneSaveSerially } = useApp();
+  const { t } = useTranslation('workspace');
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Redesigned picker state: top-level "style" tabs (Claude- vs OpenAI-style,
+  // i.e. provider protocol), a search box, and a per-model expanded route list.
+  const [query, setQuery] = useState('');
+  const [activeStyle, setActiveStyle] = useState('');
+  const [expandedModel, setExpandedModel] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -2723,6 +2744,26 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
       document.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('blur', handleWindowBlur);
     };
+  }, [open]);
+
+  // On open, default the active style-tab to the current provider's protocol and
+  // reset the transient search/expand state. Derived from the prop directly so it
+  // stays above the early-return (rules of hooks).
+  useEffect(() => {
+    if (!open) return;
+    const opts: any[] = agentDetail?.runtime_ai_provider_options || [];
+    const defKey = String(agentDetail?.runtime_ai_default?.provider_name || '').trim();
+    const ovKey = String(agentDetail?.runtime_ai?.provider_name || '').trim();
+    const act = opts.find((p) => p?.key === (ovKey || defKey));
+    const protos: string[] = [];
+    for (const p of opts) {
+      const pr = String(p?.protocol || '').trim() || 'other';
+      if (!protos.includes(pr)) protos.push(pr);
+    }
+    const proto = String(act?.protocol || '').trim();
+    setActiveStyle(proto && protos.includes(proto) ? proto : (protos[0] || ''));
+    setQuery('');
+    setExpandedModel(null);
   }, [open]);
 
   const useCustomGateway = !!agentDetail?.use_custom_gateway;
@@ -2772,6 +2813,53 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
     }
   };
 
+  // ── Derive the picker model: style tabs (by provider protocol), then within the
+  // active style dedupe models across that style's providers and group by family.
+  const stylesPresent: string[] = (() => {
+    const seen: string[] = [];
+    for (const p of providerOptions) {
+      const pr = String(p?.protocol || '').trim() || 'other';
+      if (!seen.includes(pr)) seen.push(pr);
+    }
+    const order = ['anthropic', 'openai'];
+    seen.sort((a, b) => {
+      const ia = order.indexOf(a); const ib = order.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+    return seen;
+  })();
+  const styleOf = (activeStyle && stylesPresent.includes(activeStyle)) ? activeStyle : (stylesPresent[0] || '');
+  const styleLabelOf = (s: string) =>
+    s === 'anthropic' ? t('modelPicker.styleClaude')
+      : s === 'openai' ? t('modelPicker.styleOpenai')
+        : s === 'gemini' ? 'Gemini'
+          : s === 'other' ? t('modelPicker.styleOther')
+            : s;
+  const q = query.trim().toLowerCase();
+  const styleProviders = providerOptions.filter((p: any) => (String(p?.protocol || '').trim() || 'other') === styleOf);
+  const modelOrder: string[] = [];
+  const modelToProviders = new Map<string, any[]>();
+  for (const p of styleProviders) {
+    const models: string[] = Array.isArray(p?.models) ? p.models.map((m: any) => String(m)) : [];
+    for (const m of models) {
+      if (!modelToProviders.has(m)) { modelToProviders.set(m, []); modelOrder.push(m); }
+      modelToProviders.get(m)!.push(p);
+    }
+  }
+  const matchedModels = modelOrder.filter((m) => {
+    if (!q) return true;
+    if (m.toLowerCase().includes(q)) return true;
+    return (modelToProviders.get(m) || []).some((p: any) => String(p?.label || p?.key || '').toLowerCase().includes(q));
+  });
+  const familyOrder: string[] = [];
+  const familyToModels = new Map<string, string[]>();
+  for (const m of matchedModels) {
+    const fam = modelFamily(m);
+    if (!familyToModels.has(fam)) { familyToModels.set(fam, []); familyOrder.push(fam); }
+    familyToModels.get(fam)!.push(m);
+  }
+  const providerLabelOf = (p: any) => String(p?.label || p?.key || '').trim();
+
   return (
     <div data-id="model-picker-root" ref={rootRef} className="relative mr-auto">
       <button
@@ -2809,46 +2897,113 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
         <div
           data-id="model-picker-popover"
           role="dialog"
-          className="animate-select-in absolute left-0 bottom-[calc(100%+8px)] z-[180] w-[300px] overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
+          className="animate-select-in absolute left-0 bottom-[calc(100%+8px)] z-[180] flex max-h-[440px] w-[340px] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
         >
-          <div data-id="model-picker-list" className="max-h-[360px] overflow-y-auto py-1">
-            {providerOptions.length === 0 ? (
-              <div className="px-3 py-3 text-[12px] text-zinc-500">No providers</div>
-            ) : providerOptions.map((p: any) => {
-              const pKey = String(p?.key || '');
-              const models: string[] = Array.isArray(p?.models) ? p.models.map((m: any) => String(m)) : [];
-              const isActiveProvider = pKey === activeProviderKey;
-              const isDefaultProvider = pKey === defaultProviderKey;
-              return (
-                <div key={pKey} data-id={`model-picker-provider-${pKey}`} className="border-b border-white/[0.04] last:border-b-0">
-                  <div data-id={`model-picker-provider-header-${pKey}`} className="flex items-center justify-between gap-2 px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`font-medium ${isActiveProvider ? 'text-blue-300' : 'text-zinc-400'}`}>{p?.label || pKey}</span>
-                      {isDefaultProvider ? <span className="rounded bg-zinc-700/40 px-1 py-px text-[9px] font-normal lowercase tracking-normal text-zinc-400">default</span> : null}
-                    </div>
-                    <span className="font-mono text-[9px] text-zinc-600">{p?.protocol || ''}</span>
-                  </div>
-                  {models.length === 0 ? (
-                    <div className="px-3 py-1.5 text-[11px] text-zinc-600">no models</div>
-                  ) : models.map((m) => {
-                    const isCurrent = isActiveProvider && m === currentModel;
-                    return (
+          {/* Style tabs — Claude-style vs OpenAI-style (provider protocol). */}
+          {stylesPresent.length > 1 ? (
+            <div data-id="model-picker-tabs" className="flex shrink-0 gap-1 border-b border-white/[0.06] p-1.5">
+              {stylesPresent.map((s) => {
+                const isActive = s === styleOf;
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    data-id={`model-picker-tab-${s}`}
+                    onClick={() => { setActiveStyle(s); setExpandedModel(null); }}
+                    className={`flex-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${isActive ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'}`}
+                  >
+                    {styleLabelOf(s)}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {/* Search */}
+          <div data-id="model-picker-search" className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-2">
+            <Search className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
+            <input
+              data-id="model-picker-search-input"
+              type="text"
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setExpandedModel(null); }}
+              placeholder={t('modelPicker.searchPlaceholder')}
+              className="w-full bg-transparent text-[12px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none"
+            />
+          </div>
+          {/* Current selection summary */}
+          {currentModel ? (
+            <div data-id="model-picker-current-summary" className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-2">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-600">{t('modelPicker.current')}</span>
+              <ModelTag model={currentModel} className="shrink-0" />
+              {displayProvider ? <span className="truncate text-[10px] text-zinc-500">· {displayProvider}</span> : null}
+            </div>
+          ) : null}
+          {/* Model list */}
+          <div data-id="model-picker-list" className="min-h-0 flex-1 overflow-y-auto py-1">
+            {familyOrder.length === 0 ? (
+              <div data-id="model-picker-empty" className="px-3 py-4 text-center text-[12px] text-zinc-600">
+                {providerOptions.length === 0 ? t('modelPicker.noProviders') : t('modelPicker.noMatches')}
+              </div>
+            ) : familyOrder.map((fam) => (
+              <div key={fam} data-id={`model-picker-family-${fam}`} className="mb-0.5">
+                <div data-id={`model-picker-family-header-${fam}`} className="px-3 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">{fam}</div>
+                {(familyToModels.get(fam) || []).map((m) => {
+                  const providers = modelToProviders.get(m) || [];
+                  const multi = providers.length > 1;
+                  const isExpanded = expandedModel === m;
+                  const isFree = m.toLowerCase().includes('free');
+                  const isCurrent = m === currentModel && providers.some((p: any) => String(p?.key || '') === activeProviderKey);
+                  const soleProvider = providers[0];
+                  return (
+                    <div key={m} data-id={`model-picker-model-${m}`}>
                       <button
-                        key={`${pKey}/${m}`}
                         type="button"
-                        data-id={`model-picker-item-${pKey}-${m}`}
-                        onClick={() => handleSelect(pKey, m)}
+                        data-id={`model-picker-model-row-${m}`}
+                        onClick={() => { if (multi) { setExpandedModel(isExpanded ? null : m); } else if (soleProvider) { handleSelect(String(soleProvider.key || ''), m); } }}
                         disabled={saving}
                         className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50 ${isCurrent ? 'bg-blue-500/10 text-blue-200' : 'text-zinc-300'}`}
                       >
-                        <span className="flex-1 truncate font-mono">{m}</span>
-                        {isCurrent ? <Check className="h-3 w-3 shrink-0" /> : null}
+                        <span className="min-w-0 flex-1 truncate font-mono">{m}</span>
+                        {isFree ? <span data-id={`model-picker-free-${m}`} className="shrink-0 rounded bg-emerald-500/15 px-1 py-px text-[9px] font-medium text-emerald-300/90">free</span> : null}
+                        {multi ? (
+                          <span data-id={`model-picker-routes-${m}`} className="flex shrink-0 items-center gap-0.5 text-[10px] text-zinc-500">
+                            {t('modelPicker.routes', { n: providers.length })}
+                            <ChevronDown className={`h-3 w-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                          </span>
+                        ) : (
+                          <span data-id={`model-picker-route-${m}`} className="shrink-0 truncate text-[10px] text-zinc-500">{providerLabelOf(soleProvider)}</span>
+                        )}
+                        {isCurrent && !multi ? <Check className="h-3 w-3 shrink-0" /> : null}
                       </button>
-                    );
-                  })}
-                </div>
-              );
-            })}
+                      {multi && isExpanded ? (
+                        <div data-id={`model-picker-routes-list-${m}`} className="bg-black/20">
+                          {providers.map((p: any) => {
+                            const pKey = String(p?.key || '');
+                            const isCurrentRoute = m === currentModel && pKey === activeProviderKey;
+                            const isDefaultProvider = pKey === defaultProviderKey;
+                            return (
+                              <button
+                                key={pKey}
+                                type="button"
+                                data-id={`model-picker-route-item-${pKey}-${m}`}
+                                onClick={() => handleSelect(pKey, m)}
+                                disabled={saving}
+                                className={`flex w-full items-center gap-2 py-1.5 pl-7 pr-3 text-left text-[11px] transition-colors hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50 ${isCurrentRoute ? 'text-blue-200' : 'text-zinc-400'}`}
+                              >
+                                <Route className="h-3 w-3 shrink-0 text-zinc-600" />
+                                <span className="min-w-0 flex-1 truncate">{providerLabelOf(p)}</span>
+                                {isDefaultProvider ? <span className="shrink-0 rounded bg-zinc-700/40 px-1 py-px text-[9px] text-zinc-400">{t('modelPicker.default')}</span> : null}
+                                {isCurrentRoute ? <Check className="h-3 w-3 shrink-0" /> : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </div>
       ) : null}

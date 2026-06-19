@@ -193,5 +193,16 @@
   "settingsPublicUrlHint": "本机对外可达的地址(隧道域名或局域网 IP)。配置后右下角会出现「扫码上手机」二维码;留空则隐藏。",
   "settingsSave": "保存",
   "settingsSaving": "保存中…",
-  "settingsSaved": "已保存"
+  "settingsSaved": "已保存",
+  "modelPicker": {
+    "searchPlaceholder": "搜索模型 / 供应商…",
+    "current": "当前",
+    "styleClaude": "Claude 风格",
+    "styleOpenai": "OpenAI 风格",
+    "styleOther": "其他",
+    "noProviders": "无可用供应商",
+    "noMatches": "无匹配模型",
+    "routes": "{{n}} 条线",
+    "default": "默认"
+  }
 }

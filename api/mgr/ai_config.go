@@ -596,6 +596,32 @@ func (p *providerConfig) applyModelMapping(requestedModel string) string {
 	return requestedModel
 }
 
+// coerceModel returns a model name the provider actually serves. It first applies
+// the provider's model mapping, then — if the provider declares a non-empty model
+// list and the (mapped) model still isn't in it — falls back to the provider's
+// defaultModel. This stops a model selected for a DIFFERENT provider (e.g. left
+// over in the UI after switching provider) from being forwarded to an upstream
+// that rejects it. No-op (returns the mapped/original) when the provider declares
+// no model list or has no defaultModel to fall back to.
+func (p *providerConfig) coerceModel(requestedModel string) string {
+	if p == nil || requestedModel == "" {
+		return requestedModel
+	}
+	mapped := p.applyModelMapping(requestedModel)
+	if len(p.Models) == 0 {
+		return mapped
+	}
+	for _, name := range p.Models {
+		if name == mapped {
+			return mapped
+		}
+	}
+	if def := strings.TrimSpace(p.DefaultModel); def != "" {
+		return def
+	}
+	return mapped
+}
+
 // getEffectiveURL returns the URL for API requests based on protocol
 // For anthropic protocol, returns the base URL
 // For openai protocol, returns the URL (which should already include /v1 if needed)

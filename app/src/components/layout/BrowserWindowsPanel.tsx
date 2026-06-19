@@ -1707,7 +1707,7 @@ function WindowCard({ clientId, deviceId, profile, win, onRefresh, onSendToAgent
   };
 
   return (
-    <div data-id="BrowserWindowCard" className="rounded-xl border border-white/[0.1] bg-[#161619] overflow-hidden shadow-lg shadow-black/50 hover:border-white/20 transition-colors">
+    <div data-id="BrowserWindowCard" className="shrink-0 rounded-xl border border-white/[0.1] bg-[#161619] overflow-hidden shadow-lg shadow-black/50 hover:border-white/20 transition-colors">
       <div data-id="browser-window-shot" className="relative aspect-[16/10] bg-gradient-to-b from-[#222228] to-[#16161a] flex items-center justify-center">
         {shot ? (
           <img src={shot} alt={win.title} className="w-full h-full object-cover object-top" />

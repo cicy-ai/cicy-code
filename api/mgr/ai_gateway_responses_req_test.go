@@ -12,7 +12,7 @@ import (
 func TestTransformResponsesRequest_SimpleUserTurn(t *testing.T) {
 	src := []byte(`{"model":"deepseek-v4-pro","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"reply with exactly CXOK_8899"}]}]}`)
 
-	out, model, err := transformResponsesRequestToChatCompletions(src)
+	out, model, err := transformResponsesRequestToChatCompletions(src, "")
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
 	}

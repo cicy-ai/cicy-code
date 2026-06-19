@@ -192,5 +192,16 @@
   "settingsPublicUrlHint": "Adresse externe joignable de cette machine (domaine de tunnel ou IP du réseau local). Une fois définie, un QR « ouvrir sur mobile » apparaît dans le coin ; laisser vide pour le masquer.",
   "settingsSave": "Enregistrer",
   "settingsSaving": "Enregistrement…",
-  "settingsSaved": "Enregistré"
+  "settingsSaved": "Enregistré",
+  "modelPicker": {
+    "searchPlaceholder": "Rechercher modèles / fournisseurs…",
+    "current": "Actuel",
+    "styleClaude": "Style Claude",
+    "styleOpenai": "Style OpenAI",
+    "styleOther": "Autre",
+    "noProviders": "Aucun fournisseur",
+    "noMatches": "Aucun modèle correspondant",
+    "routes": "{{n}} routes",
+    "default": "défaut"
+  }
 }
