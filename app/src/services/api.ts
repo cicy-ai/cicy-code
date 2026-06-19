@@ -349,6 +349,8 @@ const api = {
   // 🌍 global-proxy panel: exit-IP comparison (direct vs via mihomo) + the switch
   getProxyExitInfo: () => http.get('/api/proxy/exit-info'),
   selectProxy: (member: string, group?: string) => http.post('/api/proxy/select', { member, group }),
+  getProxyNodeConfig: (name: string) => http.get('/api/proxy/node-config', { params: { name } }),
+  resetProxyConfig: () => http.post('/api/proxy/config/reset'),
   listProxySsh: () => http.get('/api/proxy-ssh/list'),
   showProxySsh: (name: string) => http.get('/api/proxy-ssh/show', { params: { name } }),
   proxySshLifecycle: (name: string, action: 'start' | 'stop' | 'restart') => http.post('/api/proxy-ssh/lifecycle', { name, action }),

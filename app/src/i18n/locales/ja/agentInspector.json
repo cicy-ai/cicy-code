@@ -181,5 +181,9 @@
   "anCostTitle": "コスト構成",
   "anCostRate": "単価",
   "useMitm": "MITM 監査を使用",
-  "useMitmHint": "公式ログインのトラフィックをローカル MITM プロキシ経由で監査します(リクエスト/レスポンスを記録)。オフにするとこのエージェントはグローバルプロキシ経由で直接通信し、監査されません。エージェント再起動後に有効。"
+  "useMitmHint": "公式ログインのトラフィックをローカル MITM プロキシ経由で監査します(リクエスト/レスポンスを記録)。オフにするとこのエージェントはグローバルプロキシ経由で直接通信し、監査されません。エージェント再起動後に有効。",
+  "proxyManagerNodeDetail": "ノード詳細を表示",
+  "proxyManagerLastDelay": "前回の遅延",
+  "proxyManagerExitIP": "出口 IP",
+  "proxyManagerNodeConfig": "ソース YAML 設定"
 }

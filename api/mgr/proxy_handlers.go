@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const defaultMihomoMixedPort = "9001"
@@ -301,15 +303,22 @@ func mihomoExitIPProbe(name string) M {
 	// whatever node is currently selected. For any other target we temporarily
 	// repoint the group to it, probe, then restore.
 	skipSwitch := name == "default_proxy_group"
-	var prevSelection string
+	var prevSelection, target string
 	if !skipSwitch {
+		// The probe repoints default_proxy_group at the target, so the target must
+		// be a NODE that default_proxy_group can select. A sibling GROUP (e.g.
+		// chrome-profile-1-group, routed via its own listener) is NOT a member of
+		// default_proxy_group → mihomo rejects the switch with HTTP 400. A group's
+		// exit IP equals its selected node's exit IP, so resolve groups down to the
+		// underlying node first.
+		target = resolveExitProbeTarget(name)
 		prevSelection = readMihomoGroupSelection("default_proxy_group")
-		if err := setMihomoGroupSelection("default_proxy_group", name); err != nil {
+		if err := setMihomoGroupSelection("default_proxy_group", target); err != nil {
 			return M{"ok": false, "error": "switch: " + err.Error()}
 		}
 	}
 	defer func() {
-		if !skipSwitch && prevSelection != "" && prevSelection != name {
+		if !skipSwitch && prevSelection != "" && prevSelection != target {
 			_ = setMihomoGroupSelection("default_proxy_group", prevSelection)
 		}
 	}()
@@ -336,6 +345,50 @@ func mihomoExitIPProbe(name string) M {
 		out["city"] = city
 	}
 	return out
+}
+
+// resolveExitProbeTarget follows group selections down to the node that traffic
+// would actually exit through, so the exit-IP probe can repoint
+// default_proxy_group at a real selectable node instead of a sibling group
+// (which isn't a default_proxy_group member → HTTP 400). Bounded hops guard
+// against selection cycles; returns the deepest resolvable name.
+func resolveExitProbeTarget(name string) string {
+	cur := name
+	for i := 0; i < 8; i++ {
+		kind, now := mihomoProxyKindAndNow(cur)
+		if kind != "group" || now == "" || now == cur {
+			return cur
+		}
+		cur = now
+	}
+	return cur
+}
+
+// mihomoProxyKindAndNow reports whether a proxy is a group ("group", with its
+// selected member in `now`) or a leaf node ("node", now=""). Best-effort: any
+// controller error is treated as a node so callers stop resolving.
+func mihomoProxyKindAndNow(name string) (kind, now string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+		mihomoController()+"/proxies/"+url.PathEscape(name), nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "node", ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "node", ""
+	}
+	var body struct {
+		Now string   `json:"now"`
+		All []string `json:"all"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if len(body.All) > 0 {
+		return "group", body.Now
+	}
+	return "node", ""
 }
 
 // readMihomoGroupSelection returns the currently-selected member of a group,
@@ -782,6 +835,77 @@ func handleProxyStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // mihomoYAMLPath returns the canonical mihomo.yaml location.
+// handleProxyNodeConfig — GET /api/proxy/node-config?name=<name>
+// Returns the raw YAML config block for a single proxy node, read straight from
+// mihomo.yaml's `proxies:` list. Uses yaml.Node so the returned block preserves
+// the SOURCE field order and style (not an alphabetized re-marshal). Group names
+// and provider-sourced nodes aren't inline, so they return {success:false}.
+func handleProxyNodeConfig(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" {
+		httpErr(w, 400, "name required")
+		return
+	}
+	path, err := mihomoYAMLPath()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		httpErr(w, 502, "read mihomo.yaml: "+err.Error())
+		return
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		httpErr(w, 502, "parse mihomo.yaml: "+err.Error())
+		return
+	}
+	item := findProxyNodeInYAML(&root, name)
+	if item == nil {
+		J(w, M{"success": false, "name": name, "detail": "not found in mihomo.yaml proxies (may come from a proxy-provider)"})
+		return
+	}
+	out, err := yaml.Marshal(item)
+	if err != nil {
+		httpErr(w, 500, "marshal: "+err.Error())
+		return
+	}
+	J(w, M{"success": true, "name": name, "yaml": string(out)})
+}
+
+// findProxyNodeInYAML returns the mapping node under `proxies:` whose `name`
+// equals target (nil if absent).
+func findProxyNodeInYAML(root *yaml.Node, target string) *yaml.Node {
+	if root == nil || len(root.Content) == 0 {
+		return nil
+	}
+	doc := root.Content[0]
+	if doc.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(doc.Content); i += 2 {
+		if doc.Content[i].Value != "proxies" {
+			continue
+		}
+		seq := doc.Content[i+1]
+		if seq.Kind != yaml.SequenceNode {
+			return nil
+		}
+		for _, item := range seq.Content {
+			if item.Kind != yaml.MappingNode {
+				continue
+			}
+			for j := 0; j+1 < len(item.Content); j += 2 {
+				if item.Content[j].Value == "name" && item.Content[j+1].Value == target {
+					return item
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func mihomoYAMLPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -1191,4 +1315,36 @@ func handleProxyLifecycle(w http.ResponseWriter, r *http.Request) {
 		result["error"] = err.Error()
 	}
 	J(w, result)
+}
+
+// handleProxyConfigReset — POST /api/proxy/config/reset
+// Backs up the current mihomo.yaml to a timestamped .bak alongside it, then
+// regenerates the default template via `cicy-mihomo gen-config --force` and
+// hot-reloads. Returns the backup path so the UI can surface it.
+func handleProxyConfigReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, 405, "method_not_allowed")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	cfg, err := mihomoYAMLPath()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	backup := ""
+	if data, rerr := os.ReadFile(cfg); rerr == nil {
+		backup = fmt.Sprintf("%s.bak-%s", cfg, time.Now().Format("20060102-150405"))
+		if werr := os.WriteFile(backup, data, 0o600); werr != nil {
+			httpErr(w, 500, "backup failed: "+werr.Error())
+			return
+		}
+	}
+	if out, gerr := runCicyMihomo(ctx, "gen-config", "--force"); gerr != nil {
+		httpErr(w, 500, fmt.Sprintf("gen-config failed: %s: %s", gerr.Error(), out))
+		return
+	}
+	reloadOut, reloadErr := runCicyMihomo(ctx, "reload")
+	J(w, M{"success": true, "backup": backup, "reloaded": reloadErr == nil, "reload_output": reloadOut})
 }

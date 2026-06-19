@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { X, RefreshCw, Play, Square, RotateCw, RefreshCcw, Sparkles, Globe, Copy, Check } from 'lucide-react';
+import { X, RefreshCw, Play, Square, RotateCw, RefreshCcw, Sparkles, Globe, Copy, Check, AlertTriangle, ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { useApp } from '../../contexts/AppContext';
@@ -77,6 +77,11 @@ export function ProxyManagerDialog({
   const [error, setError] = useState<string>('');
   const [results, setResults] = useState<Record<string, TestResult>>({});
   const [testingAll, setTestingAll] = useState(false);
+  // Row interactions: a node row expands to show its SOURCE yaml config; a group
+  // row's "now" cell is a dropdown that switches the active member.
+  const [expandedNode, setExpandedNode] = useState<string>('');
+  const [switchingGroup, setSwitchingGroup] = useState<string>('');
+  const [nodeConfigs, setNodeConfigs] = useState<Record<string, { loading: boolean; yaml?: string; error?: string }>>({});
   const [status, setStatus] = useState<MihomoStatus | null>(null);
   const [pendingAction, setPendingAction] = useState<LifecycleAction | null>(null);
   const [lifecycleOutput, setLifecycleOutput] = useState<string>('');
@@ -85,6 +90,9 @@ export function ProxyManagerDialog({
   const [askAgentResult, setAskAgentResult] = useState<'' | 'sent' | 'failed'>('');
   const [askAgentError, setAskAgentError] = useState<string>('');
   const [allowLan, setAllowLan] = useState<boolean | null>(null);
+  const [resetConfirm, setResetConfirm] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetMsg, setResetMsg] = useState<string>('');
   const [allowLanPending, setAllowLanPending] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportMode, setExportMode] = useState<'local' | 'lan' | 'public'>('local');
@@ -253,6 +261,47 @@ export function ProxyManagerDialog({
     }
   }, []);
 
+  // Switch a group's active member via mihomo's selector, then refresh the list
+  // (so `now` updates) and re-probe the group's new exit.
+  const handleSelectNode = useCallback(async (group: string, member: string) => {
+    setSwitchingGroup(group);
+    try {
+      await apiService.selectProxy(member, group);
+      await loadList();
+      void runTest(group);
+    } catch (e: any) {
+      setError(String(e?.response?.data?.detail || e?.message || e));
+    } finally {
+      setSwitchingGroup('');
+    }
+  }, [loadList, runTest]);
+
+  // Fetch a node's SOURCE yaml config (from mihomo.yaml) for the detail panel.
+  const fetchNodeConfig = useCallback(async (name: string) => {
+    setNodeConfigs((prev) => ({ ...prev, [name]: { ...(prev[name] || {}), loading: true } }));
+    try {
+      const resp = await apiService.getProxyNodeConfig(name);
+      const data = (resp?.data || {}) as { success?: boolean; yaml?: string; detail?: string };
+      setNodeConfigs((prev) => ({
+        ...prev,
+        [name]: data.success
+          ? { loading: false, yaml: String(data.yaml || '') }
+          : { loading: false, error: String(data.detail || 'not found') },
+      }));
+    } catch (e: any) {
+      setNodeConfigs((prev) => ({ ...prev, [name]: { loading: false, error: String(e?.response?.data?.detail || e?.message || e) } }));
+    }
+  }, []);
+
+  // Toggle a node's detail panel; fetch its source yaml on open.
+  const handleToggleExpand = useCallback((name: string) => {
+    setExpandedNode((prev) => {
+      const next = prev === name ? '' : name;
+      if (next) void fetchNodeConfig(name);
+      return next;
+    });
+  }, [fetchNodeConfig]);
+
   // sendToAgent ships a chat-prompt to the currently bound agent, with the
   // same "show sent chip → close drawer" UX as the original single-button
   // flow but parameterized by which workflow (proxy / group / user) the
@@ -273,7 +322,9 @@ export function ProxyManagerDialog({
     let resp: any = null;
     let errorMessage = '';
     try {
-      resp = await apiService.sendCommand(target, prompt, true);
+      // submit=false: drop the prompt into the agent's input WITHOUT pressing
+      // Enter, so the user reviews/edits before sending.
+      resp = await apiService.sendCommand(target, prompt, false);
     } catch (e: any) {
       errorMessage = String(e?.response?.data?.detail || e?.message || e);
     } finally {
@@ -297,22 +348,30 @@ export function ProxyManagerDialog({
     window.setTimeout(() => onClose(), 400);
   }, [paneId, onClose]);
 
-  const askAddProxy = useCallback(() => {
-    const configPath = status?.config || '~/cicy-ai/db/mihomo.yaml';
-    const prompt = t('proxyManagerAskAddProxyPrompt', { configPath });
+  // Single "let the agent manage my proxy" button: drops a fixed cicy-mihomo
+  // request into the agent input (no auto-submit — see sendToAgent submit=false).
+  const askManageProxy = useCallback(() => {
+    const prompt = '请帮我用 cicy-mihomo skill 帮我来管理我的本机的 proxy，配置文件在 ~/cicy-ai/db/mihomo.yaml';
     return sendToAgent('proxy', prompt);
-  }, [status?.config, sendToAgent, t]);
+  }, [sendToAgent]);
 
-  const askAddGroup = useCallback(() => {
-    const prompt = t('proxyManagerAskAddGroupPrompt');
-    return sendToAgent('group', prompt);
-  }, [sendToAgent, t]);
-
-  const askAddUser = useCallback(() => {
-    const currentUser = String(activeAgentId || paneId || '').replace(/:.*$/, '') || '<user>';
-    const prompt = t('proxyManagerAskAddUserPrompt', { user: currentUser });
-    return sendToAgent('user', prompt);
-  }, [activeAgentId, paneId, sendToAgent, t]);
+  // Restore-default: backend backs up the current mihomo.yaml then regenerates
+  // the default template (cicy-mihomo gen-config --force) and reloads.
+  const doResetConfig = useCallback(async () => {
+    setResetting(true);
+    setResetMsg('');
+    try {
+      const resp = await apiService.resetProxyConfig();
+      const backup = String((resp as any)?.data?.backup || '');
+      setResetMsg(backup ? `${t('proxyManagerResetDone')}（backup: ${backup}）` : t('proxyManagerResetDone'));
+      setResetConfirm(false);
+      await loadList();
+    } catch (e: any) {
+      setResetMsg(String(e?.response?.data?.detail || e?.message || e));
+    } finally {
+      setResetting(false);
+    }
+  }, [loadList, t]);
 
   const runAll = useCallback(async () => {
     if (!list) return;
@@ -369,6 +428,15 @@ export function ProxyManagerDialog({
           </div>
           <div data-id="proxy-manager-drawer-actions" className="flex items-center gap-1">
             <button
+              data-id="proxy-manager-drawer-reset-config"
+              type="button"
+              onClick={() => { setResetMsg(''); setResetConfirm(true); }}
+              disabled={loading || resetting}
+              className="rounded-lg border border-red-900/40 bg-red-950/30 px-2.5 py-1 text-[11px] text-red-300/90 transition-colors hover:bg-red-900/30 disabled:opacity-40"
+            >
+              {t('proxyManagerResetDefault')}
+            </button>
+            <button
               data-id="proxy-manager-drawer-test-all"
               type="button"
               onClick={runAll}
@@ -397,6 +465,60 @@ export function ProxyManagerDialog({
             </button>
           </div>
         </header>
+
+        <div
+          data-id="proxy-manager-drawer-config-alert"
+          className="flex items-start gap-2 border-b border-red-900/50 bg-red-950/40 px-5 py-2.5 text-[11px] text-red-300/90"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400/90" />
+          <div className="min-w-0">
+            <div>
+              {t('proxyManagerConfigLabel')}：
+              <code data-id="proxy-manager-drawer-config-path" className="select-text break-all font-mono text-red-200">
+                {status?.config || '~/cicy-ai/db/mihomo.yaml'}
+              </code>
+            </div>
+            <div data-id="proxy-manager-drawer-config-warn" className="mt-0.5 text-red-400/90">{t('proxyManagerConfigWarn')}</div>
+            {resetMsg && !resetConfirm && (
+              <div data-id="proxy-manager-drawer-reset-msg" className="mt-1 break-all text-emerald-400/90">{resetMsg}</div>
+            )}
+          </div>
+        </div>
+
+        {resetConfirm && (
+          <div data-id="proxy-manager-reset-modal" className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60" onClick={() => { if (!resetting) setResetConfirm(false); }} />
+            <div className="relative w-full max-w-sm rounded-xl border border-red-900/50 bg-[#141416] p-5 shadow-2xl">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+                <div className="min-w-0">
+                  <h3 data-id="proxy-manager-reset-modal-title" className="text-[14px] font-semibold text-white">{t('proxyManagerResetTitle')}</h3>
+                  <p className="mt-1 text-[12px] leading-relaxed text-zinc-400">{t('proxyManagerResetConfirm')}</p>
+                  {resetMsg && <p data-id="proxy-manager-reset-modal-msg" className="mt-2 break-all text-[11px] text-amber-400">{resetMsg}</p>}
+                </div>
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setResetConfirm(false)}
+                  disabled={resetting}
+                  className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-white/[0.08] disabled:opacity-40"
+                >
+                  {t('proxyManagerResetCancel')}
+                </button>
+                <button
+                  data-id="proxy-manager-reset-confirm-button"
+                  type="button"
+                  onClick={doResetConfig}
+                  disabled={resetting}
+                  className="rounded-lg border border-red-700/50 bg-red-800/40 px-3 py-1.5 text-[12px] font-medium text-red-100 hover:bg-red-700/50 disabled:opacity-40"
+                >
+                  {resetting ? t('proxyManagerResetting') : t('proxyManagerResetOk')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div data-id="proxy-manager-drawer-lifecycle" className="border-b border-white/[0.06] bg-[#0c0c0e] px-5 py-3">
           <div data-id="proxy-manager-drawer-lifecycle-row" className="flex flex-wrap items-center gap-2 text-[12px]">
@@ -504,24 +626,17 @@ export function ProxyManagerDialog({
             </div>
           )}
           <div data-id="proxy-manager-drawer-ask-agent-row" className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
-            {([
-              { kind: 'proxy' as const, dataId: 'proxy-manager-drawer-ask-add-proxy', onClick: askAddProxy, label: t('proxyManagerAddProxy'), pendingLabel: t('proxyManagerAskAgentSending') },
-              { kind: 'group' as const, dataId: 'proxy-manager-drawer-ask-add-group', onClick: askAddGroup, label: t('proxyManagerAddGroup'), pendingLabel: t('proxyManagerAskAgentSending') },
-              { kind: 'user'  as const, dataId: 'proxy-manager-drawer-ask-add-user',  onClick: askAddUser,  label: t('proxyManagerAddUser'),  pendingLabel: t('proxyManagerAskAgentSending') },
-            ]).map((btn) => (
-              <button
-                key={btn.kind}
-                data-id={btn.dataId}
-                type="button"
-                onClick={btn.onClick}
-                disabled={!!askAgentSending || !paneId}
-                className="inline-flex items-center gap-1.5 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1 text-zinc-100 transition-colors hover:bg-indigo-500/20 disabled:opacity-40"
-                title={!paneId ? t('proxyManagerAskAgentNoPane') : undefined}
-              >
-                <Sparkles size={11} />
-                {askAgentSending === btn.kind ? btn.pendingLabel : btn.label}
-              </button>
-            ))}
+            <button
+              data-id="proxy-manager-drawer-ask-add-proxy"
+              type="button"
+              onClick={askManageProxy}
+              disabled={!!askAgentSending || !paneId}
+              className="inline-flex items-center gap-1.5 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1 text-zinc-100 transition-colors hover:bg-indigo-500/20 disabled:opacity-40"
+              title={!paneId ? t('proxyManagerAskAgentNoPane') : undefined}
+            >
+              <Sparkles size={11} />
+              {askAgentSending ? t('proxyManagerAskAgentSending') : t('proxyManagerManageProxy')}
+            </button>
             {askAgentResult === 'sent' && (
               <span data-id="proxy-manager-drawer-ask-agent-ok" className="text-emerald-400">{t('proxyManagerAskAgentSent')}</span>
             )}
@@ -588,6 +703,11 @@ export function ProxyManagerDialog({
                     kind={kind}
                     result={results[entry.name]}
                     onTest={() => runTest(entry.name)}
+                    expanded={expandedNode === entry.name}
+                    onToggleExpand={() => handleToggleExpand(entry.name)}
+                    onSelectNode={handleSelectNode}
+                    switching={switchingGroup === entry.name}
+                    nodeConfig={nodeConfigs[entry.name]}
                   />
                 ))}
               </tbody>
@@ -635,11 +755,21 @@ function ProxyTableRow({
   kind,
   result,
   onTest,
+  expanded,
+  onToggleExpand,
+  onSelectNode,
+  switching,
+  nodeConfig,
 }: {
   entry: ProxyEntry;
   kind: 'group' | 'node';
   result?: TestResult;
   onTest: () => void;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onSelectNode: (group: string, member: string) => void;
+  switching: boolean;
+  nodeConfig?: { loading: boolean; yaml?: string; error?: string };
 }) {
   const { t } = useTranslation('agentInspector');
   // Map result rows by url for column lookup.
@@ -647,12 +777,30 @@ function ProxyTableRow({
   if (result?.results) {
     for (const r of result.results) byURL[r.url] = r;
   }
+  const isNode = kind === 'node';
+  const totalCols = 6 + PROBE_COLUMNS.length;
   return (
-    <tr data-id={`proxy-manager-row-${entry.name}`} className="text-zinc-300">
+    <>
+    <tr data-id={`proxy-manager-row-${entry.name}`} className={`text-zinc-300 ${expanded ? 'bg-white/[0.03]' : ''}`}>
       <td data-id={`proxy-manager-cell-${entry.name}-name`} className="border-b border-white/[0.04] px-2 py-2 align-top">
-        <div data-id={`proxy-manager-cell-${entry.name}-name-text`} className="truncate font-medium text-zinc-100">{entry.name}</div>
-        {kind === 'group' && entry.members && entry.members.length > 0 && (
-          <div data-id={`proxy-manager-cell-${entry.name}-members`} className="mt-0.5 text-[10px] text-zinc-600">{entry.members.length} {t('proxyManagerMembers')}</div>
+        {isNode ? (
+          <button
+            type="button"
+            data-id={`proxy-manager-cell-${entry.name}-name-toggle`}
+            onClick={onToggleExpand}
+            title={t('proxyManagerNodeDetail')}
+            className="flex w-full items-center gap-1 text-left"
+          >
+            <ChevronDown className={`h-3 w-3 shrink-0 text-zinc-600 transition-transform ${expanded ? 'rotate-180 text-zinc-300' : '-rotate-90'}`} />
+            <span data-id={`proxy-manager-cell-${entry.name}-name-text`} className="truncate font-medium text-zinc-100">{entry.name}</span>
+          </button>
+        ) : (
+          <>
+            <div data-id={`proxy-manager-cell-${entry.name}-name-text`} className="truncate font-medium text-zinc-100 select-text">{entry.name}</div>
+            {entry.members && entry.members.length > 0 && (
+              <div data-id={`proxy-manager-cell-${entry.name}-members`} className="mt-0.5 text-[10px] text-zinc-600">{entry.members.length} {t('proxyManagerMembers')}</div>
+            )}
+          </>
         )}
       </td>
       <td data-id={`proxy-manager-cell-${entry.name}-kind`} className="border-b border-white/[0.04] px-2 py-2 align-top text-zinc-500">
@@ -660,7 +808,25 @@ function ProxyTableRow({
       </td>
       <td data-id={`proxy-manager-cell-${entry.name}-type`} className="border-b border-white/[0.04] px-2 py-2 align-top text-zinc-500">{entry.type}</td>
       <td data-id={`proxy-manager-cell-${entry.name}-now`} className="border-b border-white/[0.04] px-2 py-2 align-top text-zinc-400">
-        {kind === 'group' ? (entry.now || '-') : <span data-id={`proxy-manager-cell-${entry.name}-now-na`} className="text-zinc-700">-</span>}
+        {kind === 'group' ? (
+          entry.members && entry.members.length > 0 ? (
+            <div data-id={`proxy-manager-cell-${entry.name}-now-select-wrap`} className="flex items-center gap-1.5">
+              <select
+                data-id={`proxy-manager-cell-${entry.name}-now-select`}
+                value={entry.now || ''}
+                disabled={switching}
+                onChange={(e) => { if (e.target.value && e.target.value !== entry.now) onSelectNode(entry.name, e.target.value); }}
+                className="max-w-[160px] rounded-md border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-zinc-200 outline-none transition-colors hover:border-white/[0.16] focus:border-blue-500/40 disabled:opacity-50"
+              >
+                {!entry.members.includes(entry.now || '') && entry.now ? <option value={entry.now}>{entry.now}</option> : null}
+                {entry.members.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+              {switching ? <RefreshCw data-id={`proxy-manager-cell-${entry.name}-switching`} className="h-3 w-3 animate-spin text-zinc-500" /> : null}
+            </div>
+          ) : (
+            <span data-id={`proxy-manager-cell-${entry.name}-now-text`} className="select-text">{entry.now || '-'}</span>
+          )
+        ) : <span data-id={`proxy-manager-cell-${entry.name}-now-na`} className="text-zinc-700">-</span>}
       </td>
       {PROBE_COLUMNS.map((col) => {
         const row = byURL[col.url];
@@ -719,6 +885,28 @@ function ProxyTableRow({
         </button>
       </td>
     </tr>
+    {isNode && expanded ? (
+      <tr data-id={`proxy-manager-detail-${entry.name}`}>
+        <td colSpan={totalCols} className="border-b border-white/[0.04] bg-black/30 px-4 py-3">
+          <div data-id={`proxy-manager-detail-${entry.name}-head`} className="mb-1.5 flex items-center gap-2 text-[10px] uppercase tracking-wider text-zinc-500">
+            <span>{t('proxyManagerNodeConfig')}</span>
+            <span className="font-mono normal-case tracking-normal text-zinc-600">mihomo.yaml</span>
+          </div>
+          {nodeConfig?.loading ? (
+            <div data-id={`proxy-manager-detail-${entry.name}-loading`} className="flex items-center gap-2 text-[11px] text-zinc-500">
+              <RefreshCw className="h-3 w-3 animate-spin" />{t('proxyManagerLoading')}
+            </div>
+          ) : nodeConfig?.error ? (
+            <div data-id={`proxy-manager-detail-${entry.name}-error`} className="text-[11px] text-amber-400/90">{nodeConfig.error}</div>
+          ) : nodeConfig?.yaml ? (
+            <pre data-id={`proxy-manager-detail-${entry.name}-yaml`} className="max-h-[280px] overflow-auto whitespace-pre rounded-md border border-white/[0.06] bg-black/40 p-2.5 font-mono text-[11px] leading-relaxed text-zinc-300 select-text">{nodeConfig.yaml}</pre>
+          ) : (
+            <div data-id={`proxy-manager-detail-${entry.name}-empty`} className="text-[11px] text-zinc-600">-</div>
+          )}
+        </td>
+      </tr>
+    ) : null}
+    </>
   );
 }
 
