@@ -559,12 +559,18 @@ func selectedBuiltinWorkers(selected []string) []builtinWorker {
 		return []builtinWorker{helperModeBuiltinWorker()}
 	}
 	// Windows can't orchestrate a tmux team. On win32 (default, no --helper) seed
-	// ONLY the 团队专员 (w-100, master) — it installs cicy-code into WSL/Docker
-	// where the real team runs. Only when launched by cicy-desktop (--desktop):
-	// a plain win32 cicy-code without desktop has no team to seed.
+	// ONLY the 团队专员 (master) — it installs cicy-code into WSL/Docker where the
+	// real team runs. Anchor it at the CANONICAL primary session w-1001
+	// (primaryWorkerSession), NOT w-100: the desktop's default active pane and
+	// every server-side w-1001 master assumption (im.go fallback, todo master
+	// workspace, openclaw state) point at w-1001 — seeding at w-100 left w-1001
+	// empty/non-functional. Only when launched by cicy-desktop (--desktop): a
+	// plain win32 cicy-code without desktop has no team to seed.
 	if runtime.GOOS == "windows" {
 		if desktopMode {
-			return []builtinWorker{teamHelperWorker(true)}
+			w := teamHelperWorker(true)
+			w.Port = 1001 // → session "w-1001" == primaryWorkerSession
+			return []builtinWorker{w}
 		}
 		return nil
 	}
