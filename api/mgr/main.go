@@ -142,8 +142,7 @@ Options:
 			helperMode = true
 			os.Setenv("CICY_HELPER", "1")
 		case arg == "--desktop" || arg == "--desktop=1":
-			// Launched by cicy-desktop → seed the 团队专员 (w-100). A plain
-			// cicy-code (server / inside a container) must NOT have it.
+			// Launched by cicy-desktop (vs a plain server / container cicy-code).
 			desktopMode = true
 		case arg == "--port":
 			// space form: --port 8208

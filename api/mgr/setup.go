@@ -469,24 +469,6 @@ func helperModeBuiltinWorker() builtinWorker {
 	}
 }
 
-// teamHelperWorker is the 团队专员 at w-100, seeded on EVERY platform. Its job is
-// Docker-based team scaling (无限扩编) — and on Windows (no tmux), WSL-or-Docker
-// install. The charter adapts by platform via {{PLATFORM_SETUP}}.
-//   - Windows: it's the sole/primary agent (master=true) — tmux roster can't run.
-//   - macOS/Linux: a normal bound team member alongside the full roster.
-const teamHelperPort = 100
-
-func teamHelperWorker(master bool) builtinWorker {
-	return builtinWorker{
-		Port:          teamHelperPort,
-		AgentType:     "cicy",
-		Title:         "团队专员",
-		RoleTemplate:  "团队专员",
-		Master:        master,
-		BindToPrimary: !master,
-	}
-}
-
 type builtinWorker struct {
 	Port          int
 	AgentType     string
@@ -513,10 +495,8 @@ func officialRoleRoster() []builtinWorker {
 	roster := []builtinWorker{
 		{Port: 1001, AgentType: "cicy", Title: "项目经理", RoleTemplate: "项目经理", Master: true},
 		{Port: 101, AgentType: "cicy", Title: "产品经理", RoleTemplate: "产品经理", BindToPrimary: true},
-		{Port: 102, AgentType: "cicy", Title: "QA测试工程师", RoleTemplate: "测试工程师", BindToPrimary: true},
 		{Port: 103, AgentType: "cicy", Title: "法务", RoleTemplate: "法务", BindToPrimary: true},
 		{Port: 104, AgentType: "cicy", Title: "HR", RoleTemplate: "人力资源", BindToPrimary: true},
-		{Port: 105, AgentType: "cicy", Title: "Token优化", RoleTemplate: "Token优化师", BindToPrimary: true},
 		{Port: 106, AgentType: "claude", Title: "架构师", BindToPrimary: true},
 		{Port: 107, AgentType: "codex", Title: "全栈开发工程师", BindToPrimary: true},
 		{Port: 108, AgentType: "opencode", Title: "软件工程师", BindToPrimary: true},
@@ -530,11 +510,6 @@ func officialRoleRoster() []builtinWorker {
 		// 评测专员:考核团队 agent —— 多维评分 + 模型对位(每角色哪个模型最优)。
 		// 没它就只有"越用越聪明"的机制、没有"到底有没有变聪明"的反馈回路。
 		{Port: 112, AgentType: "cicy", Title: "评测专员", RoleTemplate: "评测专员", BindToPrimary: true},
-	}
-	// 团队专员(w-100):用 Docker 给团队无限扩编(Windows 上则 WSL/Docker 安装)。
-	// 仅 cicy-desktop 启动(--desktop)才挂;容器/服务器里的 cicy-code 不需要它。
-	if desktopMode {
-		roster = append(roster, teamHelperWorker(false))
 	}
 	return roster
 }
@@ -566,12 +541,12 @@ func selectedBuiltinWorkers(selected []string) []builtinWorker {
 	// workspace, openclaw state) point at w-1001 — seeding at w-100 left w-1001
 	// empty/non-functional. Only when launched by cicy-desktop (--desktop): a
 	// plain win32 cicy-code without desktop has no team to seed.
-	if runtime.GOOS == "windows" {
-		if desktopMode {
-			w := teamHelperWorker(true)
-			w.Port = 1001 // → session "w-1001" == primaryWorkerSession
-			return []builtinWorker{w}
-		}
+	// Plain win32 cicy-code (server / inside a container, no cicy-desktop) has no
+	// team to seed. Windows DESKTOP falls through to the official roster below; the
+	// CLI coding agents (claude/codex/opencode) are then dropped by cicyOnlyWorkers
+	// (cliAgentsEnabled()==false on Windows — no tmux panes), leaving the headless
+	// cicy roles (项目经理 master + specialists) which need no panes.
+	if runtime.GOOS == "windows" && !desktopMode {
 		return nil
 	}
 	var workers []builtinWorker
