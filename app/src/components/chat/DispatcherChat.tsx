@@ -114,8 +114,12 @@ const SLASH_COMMANDS: { cmd: string; label: string; desc: string }[] = [
   { cmd: '/compact', label: '压缩对话', desc: '压缩历史以释放上下文,保留摘要' },
 ];
 
-export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: { paneId: string; active: boolean; agentType?: string }) {
+export default function DispatcherChat({ paneId, active, agentType = 'cicy', title = '' }: { paneId: string; active: boolean; agentType?: string; title?: string }) {
   const { t } = useTranslation('chat');
+  // placeholder 跟当前 agent 的 title 走(产品经理→「问问你的产品经理」),不再写死「项目经理」。
+  // title 为空时回退到通用文案。
+  const roleName = String(title || '').trim();
+  const idlePlaceholder = roleName ? t('composerPlaceholder', { role: roleName }) : t('composerPlaceholderNoRole');
   const [text, setText] = useState('');
   const [slashSel, setSlashSel] = useState(0);
   const [sending, setSending] = useState(false);
@@ -385,7 +389,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
             data-id="dispatcher-chat-input"
             value={text}
             rows={Math.min(8, Math.max(1, text.split('\n').length))}
-            placeholder={busy ? t('composerBusyPlaceholder') : t('composerPlaceholder')}
+            placeholder={busy ? t('composerBusyPlaceholder') : idlePlaceholder}
             onChange={(e) => { setText(e.target.value); setSlashSel(0); }}
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={() => { composingRef.current = false; }}
@@ -422,11 +426,11 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
                 type="button"
                 data-id="dispatcher-chat-attach"
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.10] text-zinc-300 transition-colors hover:bg-white/[0.08] hover:text-zinc-100"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/[0.10] text-zinc-300 transition-colors hover:bg-white/[0.08] hover:text-zinc-100"
                 title={t('composerAttach')}
                 aria-label="Attach"
               >
-                <Paperclip className="h-[18px] w-[18px]" />
+                <Paperclip className="h-[15px] w-[15px]" />
               </button>
               {showThinking ? (
                 <button
@@ -436,13 +440,13 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
                   disabled={thinkingSaving}
                   aria-pressed={thinkingOn}
                   title={thinkingOn ? t('composerThinkingOn') : t('composerThinkingOff')}
-                  className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium transition-colors disabled:opacity-50 ${
+                  className={`inline-flex h-7 shrink-0 items-center gap-1 rounded-full border px-2.5 text-[12px] font-medium transition-colors disabled:opacity-50 ${
                     thinkingOn
                       ? 'border-blue-500/40 bg-blue-500/15 text-blue-300 hover:bg-blue-500/25'
                       : 'border-white/[0.10] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200'
                   }`}
                 >
-                  {thinkingSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
+                  {thinkingSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Brain className="h-3.5 w-3.5" />}
                   {t('composerThinking')}
                 </button>
               ) : null}

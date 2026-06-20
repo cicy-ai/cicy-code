@@ -604,7 +604,7 @@ function AgentStackCard({
           // Dispatcher (PM) agents are chat-first on the web: history view +
           // prompt bar instead of the raw REPL terminal. The input feeds the
           // same /api/tmux/send pipe, so the terminal/TG channels stay in sync.
-          <DispatcherChat paneId={item.paneId} active={active} agentType={item.agentType || 'cicy'} />
+          <DispatcherChat paneId={item.paneId} active={active} agentType={item.agentType || 'cicy'} title={item.title} />
         ) : !item.isApiOnly && item.ttydSrc ? (
           // Keep the terminal mounted while History is showing so its ttyd
           // WebSocket isn't torn down (and re-attached) on every toggle.
