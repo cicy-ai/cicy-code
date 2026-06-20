@@ -1,5 +1,4 @@
 import React, { forwardRef, useState, useRef, useEffect, useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
 import { Spinner } from './ui/Spinner';
 import { usePointerLock } from '../lib/pointerLock';
 import { WEB_FRAME_MASK_EVENT, WebFrameMaskEventDetail } from '../lib/webFrameMask';
@@ -85,13 +84,13 @@ interface WebFrameProps {
 
 export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
   ({ src, className, style, onLoad, loading, allowFullScreen, title }, ref) => {
-    const { t } = useTranslation('ui');
     const [isLoading, setIsLoading] = useState(true);
     const [maskActive, setMaskActive] = useState(false);
-    // Electron <webview> guests get NO default right-click menu — the embedder
-    // must listen to the 'context-menu' event and draw its own. Browser iframes
-    // keep the native menu, so this state is webview-only.
-    const [ctxMenu, setCtxMenu] = useState<null | { x: number; y: number; canCopy: boolean; canPaste: boolean }>(null);
+    // Right-click in the <webview> guest is served by cicy-desktop's NATIVE
+    // electron-context-menu (复制/粘贴/重新加载/检查元素), attached to webview guests
+    // since cicy-desktop ≥ 2.1.94. No custom in-app menu here — it would double-pop
+    // with the native one. (In a real browser the frame is an <iframe> with its
+    // own native menu, so no in-app menu is needed there either.)
     const webviewRef = useRef<HTMLElement>(null);
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const useWebview = isElectron;
@@ -182,31 +181,11 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
         }
         console.log(`[webview:${title || 'untitled'}]`, msg);
       };
-      // Right-click inside the guest → draw our own menu at the reported spot.
-      // ContextMenuParams x/y arrive in WINDOW coordinates (verified on
-      // Electron 41: click at webview-local (60,60) reports (60+rect.left,
-      // 60+rect.top)) — convert to frame-local and clamp so the menu never
-      // lands outside the (overflow-clipped) wrapper.
-      const onContextMenu = (e: any) => {
-        const p = e.params || {};
-        const rect = (wv as HTMLElement).getBoundingClientRect();
-        let x = (p.x ?? 0) - rect.left;
-        let y = (p.y ?? 0) - rect.top;
-        x = Math.max(0, Math.min(x, Math.max(0, rect.width - 170)));
-        y = Math.max(0, Math.min(y, Math.max(0, rect.height - 150)));
-        setCtxMenu({
-          x,
-          y,
-          canCopy: !!(p.selectionText && p.selectionText.length) || !!p.editFlags?.canCopy,
-          canPaste: p.editFlags ? !!p.editFlags.canPaste : true,
-        });
-      };
       // Fallback: hide spinner after 8s if dom-ready never fires
       const fallback = setTimeout(() => setIsLoading(false), 8000);
 
       wv.addEventListener('dom-ready', onDomReady);
       wv.addEventListener('console-message', onConsole);
-      wv.addEventListener('context-menu', onContextMenu);
       // Suppress ERR_ABORTED from redirects
       wv.addEventListener('did-fail-load', (e: any) => {
         if (e.errorCode === -3) return; // ERR_ABORTED is normal during redirects
@@ -217,7 +196,6 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
         clearTimeout(fallback);
         wv.removeEventListener('dom-ready', onDomReady);
         wv.removeEventListener('console-message', onConsole);
-        wv.removeEventListener('context-menu', onContextMenu);
         unregister();
       };
     }, [useWebview, onLoad]);
@@ -269,50 +247,6 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
             partition: 'persist:sandbox-0',
             webpreferences: 'allowRunningInsecureContent=true',
           })}
-          {ctxMenu && (
-            <>
-              {/* backdrop: swallow the next click anywhere to dismiss */}
-              <div
-                data-id="web-frame-ctx-backdrop"
-                className="fixed inset-0 z-30"
-                onMouseDown={() => setCtxMenu(null)}
-                onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}
-              />
-              <div
-                data-id="web-frame-ctx-menu"
-                className="absolute z-40 min-w-[150px] select-none rounded-md border border-white/10 bg-[#1e1e1e] py-1 text-xs text-zinc-200 shadow-xl"
-                style={{ left: ctxMenu.x, top: ctxMenu.y }}
-              >
-                <button
-                  data-id="web-frame-ctx-copy"
-                  type="button"
-                  disabled={!ctxMenu.canCopy}
-                  className="block w-full px-3 py-1.5 text-left hover:bg-white/[0.08] disabled:opacity-35 disabled:hover:bg-transparent"
-                  onClick={() => { (webviewRef.current as any)?.copy?.(); setCtxMenu(null); }}
-                >{t('webFrameCopy', { defaultValue: '复制' })}</button>
-                <button
-                  data-id="web-frame-ctx-paste"
-                  type="button"
-                  disabled={!ctxMenu.canPaste}
-                  className="block w-full px-3 py-1.5 text-left hover:bg-white/[0.08] disabled:opacity-35 disabled:hover:bg-transparent"
-                  onClick={() => { (webviewRef.current as any)?.paste?.(); setCtxMenu(null); }}
-                >{t('webFramePaste', { defaultValue: '粘贴' })}</button>
-                <div className="my-1 border-t border-white/[0.07]" />
-                <button
-                  data-id="web-frame-ctx-reload"
-                  type="button"
-                  className="block w-full px-3 py-1.5 text-left hover:bg-white/[0.08]"
-                  onClick={() => { (webviewRef.current as any)?.reload?.(); setCtxMenu(null); }}
-                >{t('webFrameReload', { defaultValue: '刷新' })}</button>
-                <button
-                  data-id="web-frame-ctx-devtools"
-                  type="button"
-                  className="block w-full px-3 py-1.5 text-left hover:bg-white/[0.08]"
-                  onClick={() => { (webviewRef.current as any)?.openDevTools?.(); setCtxMenu(null); }}
-                >DevTools</button>
-              </div>
-            </>
-          )}
         </>
       );
     }
