@@ -12,8 +12,6 @@ on:
       - 'api/Dockerfile.runtime'
       - 'api/Dockerfile.runtime.base'
       - 'api/docker-entrypoint.sh'
-      - 'npm/publish-docker.sh'
-      - 'npm/docker/load.sh'
       - '.github/workflows/docker-image.yml'
   workflow_dispatch:
     inputs:
@@ -71,12 +69,7 @@ jobs:
             docker push docker.io/$DOCKERHUB_USERNAME/cicy-code:$tag
           done
 
-      - name: Save image to R2 (CN-friendly docker load)
-        # docker save | gzip -> R2 /docker/cicy-code-<base_tag>.tar.gz + latest +
-        # load.sh, so CN users `curl …/docker/load.sh | sh` without Docker Hub.
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.R2_API_TOKEN }}
-          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
-        run: |
-          bash npm/publish-docker.sh "${BASE_TAG}" "docker.io/$DOCKERHUB_USERNAME/cicy-code:${BASE_TAG}"
+      # NOTE: the R2 "docker save → CN-friendly docker load" step was removed.
+      # The pre-baked WSL package (cicy-desktop build-wsl-package.yml) pulls
+      # cicybot/cicy-code:latest straight from Docker Hub, so the R2 tarball is
+      # no longer consumed by the live flow.

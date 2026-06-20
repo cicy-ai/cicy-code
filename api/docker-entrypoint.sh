@@ -95,87 +95,81 @@ NODE
   CICY_API_TOKEN="$CICY_RUNTIME_API_TOKEN"
 }
 
-start_cloudflared() {
-  local tunnel_token="${CICY_CLOUDFLARED_TOKEN:-${CF_TUNNEL_TOKEN:-${CLOUDFLARED_TOKEN:-}}}"
-  local log_file="$STATE_DIR/cloudflared.log"
-
-  if [ -z "$tunnel_token" ]; then
-    return 0
-  fi
-
-  if ! command -v cloudflared >/dev/null 2>&1; then
-    log "cloudflared not found"
-    exit 1
-  fi
-
-  log "starting cloudflared"
-  nohup cloudflared tunnel run --token "$tunnel_token" >"$log_file" 2>&1 &
-  export CICY_CLOUDFLARED_PID="$!"
-  sleep 2
-  if ! kill -0 "$CICY_CLOUDFLARED_PID" >/dev/null 2>&1; then
-    log "cloudflared exited early"
-    tail -n 50 "$log_file" >&2 || true
-    exit 1
-  fi
-}
-
-# Install cicy-code from npm at startup so the image stays a stable base
-# environment (no baked binary) and the version floats with npm. CN-friendly
-# via npmmirror. Pin with CICY_CODE_VERSION; override registry with NPM_REGISTRY.
-# If a `cicy-code` is already on PATH (e.g. a legacy baked image) and no version
-# is pinned, reuse it.
+# Make cicy-code runnable through the STABLE symlink ~/.local/bin/cicy-code,
+# which is what supervisor execs. Updates only repoint this link (see
+# cicy-code-update.sh) — the cicy-desktop-mac hot-patch model. The image stays a
+# stable BASE environment: no version is baked, it floats with npm (npmmirror,
+# CN-friendly). Pin with CICY_CODE_VERSION; override registry with NPM_REGISTRY.
 ensure_cicy_code() {
-  local reg="${NPM_REGISTRY:-https://registry.npmmirror.com}"
-  local spec="cicy-code"
-  if [ -n "${CICY_CODE_VERSION:-}" ]; then
-    spec="cicy-code@${CICY_CODE_VERSION}"
-  elif command -v cicy-code >/dev/null 2>&1; then
-    log "cicy-code already on PATH; skipping install"
+  local link="$HOME_DIR/.local/bin/cicy-code"
+  local baked="$HOME_DIR/.npm-global/bin/cicy-code"
+  mkdir -p "$(dirname "$link")"
+
+  # Dev image: build.sh docker bakes a locally-built binary as a real file at
+  # ~/.npm-global/bin/cicy-code. Point the canonical symlink at it, skip npm.
+  if [ -f "$baked" ] && [ ! -L "$baked" ]; then
+    log "using baked dev cicy-code binary"
+    ln -sfn "$baked" "$link"
     return 0
   fi
-  log "installing ${spec} from ${reg}"
-  npm install -g "$spec" --registry="$reg"
+
+  # Already linked and no pin requested → reuse (fast/offline boot).
+  if [ -z "${CICY_CODE_VERSION:-}" ] && [ -x "$link" ]; then
+    log "cicy-code already linked → $(readlink -f "$link")"
+    return 0
+  fi
+
+  # First boot / pinned version: install into the versioned runtime store and
+  # set the symlink via the same path used for runtime hot-updates.
+  /usr/local/bin/cicy-code-update.sh "${CICY_CODE_VERSION:-latest}"
 }
 
-build_app_argv() {
-  # cicy-code now binds 127.0.0.1 by DEFAULT everywhere (including containers) —
-  # the old "container auto-binds 0.0.0.0" was removed because it silently
-  # network-exposed the full-control API. To reach the API from the host via a
-  # `-p` mapping you must opt in to a public bind: set CICY_PUBLIC=1 (injected
-  # here as --public) or pass --public in the container command. Prefer also
-  # binding the host side to loopback (`-p 127.0.0.1:8008:8008`) and a strong,
-  # non-default api_token. (--agents was likewise retired; default roster is seeded.)
-  case " $* " in
-    *" --public "*) ;;
-    *)
-      case "${CICY_PUBLIC:-}" in
-        1|true|TRUE|True|yes|YES|on|ON) set -- --public "$@" ;;
-      esac
-      ;;
-  esac
-  # ENABLE_CDN=true → serve the App SPA + ttyd bundle from Cloudflare R2.
-  # The R2 prefixes are baked into every binary; --cdn just activates them.
-  case " $* " in
-    *" --cdn "*) ;;
-    *)
-      case "${ENABLE_CDN:-}" in
-        1|true|TRUE|True|yes|YES|on|ON) set -- --cdn "$@" ;;
-      esac
-      ;;
-  esac
-  printf '%s\0' "$@"
+# Prepare the SSH server: per-container host keys (baked ones were stripped at
+# build so each container is distinct), the privilege-separation dir, and the
+# cicy user's authorized_keys. Provide an RSA public key via CICY_SSH_PUBKEY
+# (or SSH_PUBKEY / AUTHORIZED_KEYS); multiple keys may be newline-separated.
+# Auth policy (RSA pubkey only, no passwords) is in sshd_config.d/cicy.conf.
+ensure_ssh() {
+  sudo -n mkdir -p /run/sshd
+  sudo -n chmod 0755 /run/sshd
+  # ssh-keygen -A only creates the host keys that are missing → idempotent.
+  sudo -n ssh-keygen -A >/dev/null 2>&1 || log "ssh host-key generation failed"
+
+  local ssh_dir="$HOME_DIR/.ssh"
+  local ak="$ssh_dir/authorized_keys"
+  mkdir -p "$ssh_dir"
+  touch "$ak"
+  chmod 700 "$ssh_dir"
+  chmod 600 "$ak"
+
+  local keys="${CICY_SSH_PUBKEY:-${SSH_PUBKEY:-${AUTHORIZED_KEYS:-}}}"
+  if [ -n "$keys" ]; then
+    while IFS= read -r key; do
+      [ -z "$key" ] && continue
+      grep -qxF "$key" "$ak" || printf '%s\n' "$key" >>"$ak"
+    done <<<"$keys"
+    log "authorized_keys updated"
+  fi
+  chown -R cicy:cicy "$ssh_dir" 2>/dev/null || true
 }
 
 main() {
   ensure_cicy_base
   ensure_shell_init_files
   ensure_runtime_api_token
-  start_cloudflared
   ensure_cicy_code
+  ensure_ssh
 
-  mapfile -d '' app_argv < <(build_app_argv "$@")
-  log "starting cicy-code"
-  exec cicy-code "${app_argv[@]}"
+  mkdir -p "$STATE_DIR/logs" "$CICY_ROOT_DIR/supervisor"
+
+  # Capture any extra container args for the cicy-code wrapper. The env-derived
+  # flags (--public/--cdn) are added by the wrapper itself; these are the
+  # positional extras that used to be forwarded via `exec cicy-code "$@"`.
+  : >"$STATE_DIR/cicy-code.args"
+  for arg in "$@"; do printf '%s\n' "$arg" >>"$STATE_DIR/cicy-code.args"; done
+
+  log "starting supervisord (cicy-code + cron + sshd + user daemons)"
+  exec supervisord -c /etc/supervisor/supervisord.conf
 }
 
 main "$@"

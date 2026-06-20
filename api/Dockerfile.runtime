@@ -18,6 +18,28 @@ RUN set -eux; \
         'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
         > /etc/apt/sources.list.d/debian.sources
 
+# supervisord is now PID 1's child (behind tini): it manages cicy-code, the
+# cron daemon, the SSH server, and any user daemons — with autorestart, log
+# capture, and per-program `supervisorctl restart` for hot updates. tini reaps
+# zombies and forwards signals — important once arbitrary user daemons may fork
+# under PID 1. cron + openssh-server let users schedule jobs and SSH in.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends supervisor tini cron openssh-server; \
+    mkdir -p /etc/supervisor/conf.d /etc/ssh/sshd_config.d; \
+    rm -f /etc/ssh/ssh_host_*; \
+    rm -rf /var/lib/apt/lists/*
+
+# supervisord main config + the bundled programs (cicy-code, cron, sshd). User
+# daemons are added at runtime via the include dir (see supervisord.conf).
+COPY supervisord.conf /etc/supervisor/supervisord.conf
+COPY conf.d/ /etc/supervisor/conf.d/
+# SSH policy: RSA-pubkey-only login.
+COPY sshd_config.d/cicy.conf /etc/ssh/sshd_config.d/cicy.conf
+# Launcher (builds argv, execs the stable symlink) + hot-update helper.
+COPY cicy-code-run.sh cicy-code-update.sh /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/cicy-code-run.sh /usr/local/bin/cicy-code-update.sh
+
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # Don't chown -R /usr/local/lib/node_modules — it doubles the layer size
 # (~130MB) and cicy doesn't need write access there: global npm installs go
@@ -26,10 +48,11 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Optionally bake a locally-built binary: `build.sh docker` stages
 # api/cicy-code-docker so DEV images (dev.py --docker) run LOCAL changes; the
-# entrypoint sees cicy-code already on PATH and skips its npm install. Release /
-# base builds omit the file and fall back to npm as before. Pairing the optional
-# file with an always-present one (docker-entrypoint.sh) keeps this COPY valid
-# when the binary is absent; the RUN then installs it onto PATH only if staged.
+# entrypoint detects this real (non-symlink) file and points the canonical
+# ~/.local/bin/cicy-code symlink at it instead of npm-installing. Release / base
+# builds omit the file and fall back to npm as before. Pairing the optional file
+# with an always-present one (docker-entrypoint.sh) keeps this COPY valid when
+# the binary is absent; the RUN then installs it only if staged.
 COPY docker-entrypoint.sh cicy-code-docke[r] /tmp/cicy-stage/
 RUN if [ -f /tmp/cicy-stage/cicy-code-docker ]; then \
       mkdir -p /home/cicy/.npm-global/bin && \
@@ -89,5 +112,7 @@ RUN set -eux; \
     cd /; rm -rf /tmp/mihomo-pkg /tmp/npm-cache /tmp/* 2>/dev/null || true; \
     /home/cicy/.local/bin/mihomo -v | head -1
 
-EXPOSE 8008
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+EXPOSE 8008 22
+# tini as PID 1 → reaps zombies + forwards signals → docker-entrypoint.sh →
+# `exec supervisord`, which runs cicy-code / cron / sshd / user daemons.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
