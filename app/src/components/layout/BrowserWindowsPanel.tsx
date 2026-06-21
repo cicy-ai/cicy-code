@@ -30,6 +30,8 @@ import apiService from '../../services/api';
 import i18n from '../../i18n';
 import { cn } from '../../lib/utils';
 import { listPhones, type MobileDevice, type MobileSel } from './MobileDevicesPanel';
+import { detectRegion, detectOS } from '../../lib/speedup/detect';
+import { execShell } from '../../lib/speedup/rpc';
 
 // i18n helper for non-component (plain async/util) code paths — components use the
 // useTranslation('layout') hook instead so they re-render on language change.
@@ -446,6 +448,28 @@ function isChromeMissingError(msg?: string): boolean {
     || s.includes('chrome/chromium')
     || s.includes('please configure chromebinary')
     || (s.includes('enoent') && (s.includes('chrome') || s.includes('chromium')));
+}
+
+// Open the official Chrome download page in the HOST's default browser via the
+// electron bridge (exec_shell) — NOT a renderer anchor, which would open inside
+// the cicy webview. Probe the region first (also over electron): CN gets the
+// localized google.cn page (google.com/chrome is unreachable in CN), everyone
+// else gets the global page. Falls back to window.open in a plain browser.
+async function openOfficialChromeDownload(): Promise<void> {
+  let url = 'https://www.google.com/chrome/';
+  try {
+    if ((await detectRegion()) === 'cn') url = 'https://www.google.cn/intl/zh-CN/chrome/';
+  } catch { /* unknown region → keep global URL */ }
+  const os = detectOS();
+  const cmd =
+    os === 'windows' ? `start "" "${url}"` :
+    os === 'mac'     ? `open "${url}"` :
+                       `xdg-open "${url}"`;
+  try {
+    await execShell(cmd);
+  } catch {
+    try { window.open(url, '_blank', 'noreferrer'); } catch { /* nothing else to do */ }
+  }
 }
 
 // Build a prompt that hands one window to the agent, telling it which skill +
@@ -1235,15 +1259,14 @@ export function BrowserWindowsColumn({
               <div className="min-w-0 flex-1">
                 <div className="font-medium text-amber-100">{t('bwChromeMissingTitle')}</div>
                 <div className="mt-0.5 text-amber-200/80">{t('bwChromeMissingDesc')}</div>
-                <a
+                <button
+                  type="button"
                   data-id="browser-windows-chrome-install-link"
-                  href="https://www.google.com/chrome/"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-2 inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium bg-amber-500/20 text-amber-100 hover:bg-amber-500/30 transition-colors"
+                  onClick={() => { void openOfficialChromeDownload(); }}
+                  className="mt-2 inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium bg-amber-500/20 text-amber-100 hover:bg-amber-500/30 transition-colors cursor-pointer"
                 >
                   <Download className="w-3 h-3" />{t('bwChromeInstallBtn')}
-                </a>
+                </button>
               </div>
             </div>
           ) : (
