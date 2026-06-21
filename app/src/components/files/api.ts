@@ -561,7 +561,16 @@ export interface FsWatch {
 
 export function openFsWatch(agentId: string): FsWatch {
   const baseURL = config.apiBase || '';
-  const wsBase = baseURL.replace(/^http/, 'ws').replace(/\/$/, '');
+  // WebSocket() requires an ABSOLUTE ws(s):// URL. When apiBase is empty (the
+  // SPA is served same-origin, e.g. the :8009 container), deriving the ws base
+  // from apiBase yields '' → a relative '/api/fs/watch' → DOMException "URL is
+  // invalid". Fall back to window.location for the same-origin case.
+  const httpsLike = baseURL.startsWith('https') ||
+    (typeof window !== 'undefined' && window.location?.protocol === 'https:');
+  const proto = httpsLike ? 'wss' : 'ws';
+  const wsBase = baseURL
+    ? baseURL.replace(/^https?/, proto).replace(/\/$/, '')
+    : (typeof window !== 'undefined' ? `${proto}://${window.location.host}` : '');
   const token = TokenManager.getToken();
   const url = `${wsBase}/api/fs/watch?agent_id=${encodeURIComponent(agentId)}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
   const handlers = new Set<(ev: FsWatchEvent) => void>();

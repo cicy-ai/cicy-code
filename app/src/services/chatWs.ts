@@ -256,7 +256,12 @@ class ChatWsClient {
     const proto = p.apiBase.startsWith('https')
       ? 'wss'
       : (typeof window !== 'undefined' && window.location?.protocol === 'https:' ? 'wss' : 'ws');
-    const base = p.apiBase.replace(/^https?/, proto);
+    // apiBase is '' for same-origin local hosts (127.0.0.1:8009 container) →
+    // a relative '/api/chat/ws' is an invalid WebSocket URL. Derive from
+    // window.location in that case.
+    const base = p.apiBase
+      ? p.apiBase.replace(/^https?/, proto)
+      : (typeof window !== 'undefined' ? `${proto}://${window.location.host}` : '');
     const master = p.paneId.replace(/:.*$/, '');
     return `${base}/api/chat/ws`
       + `?master_agent_id=${encodeURIComponent(master)}`
