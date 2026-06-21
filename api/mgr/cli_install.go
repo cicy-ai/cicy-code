@@ -32,23 +32,6 @@ import (
 
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
-// probeURLReachable does a quick GET with a short timeout; used to choose the npm
-// registry (official vs CN mirror).
-func probeURLReachable(url string, timeout time.Duration) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return false
-	}
-	resp, err := (&http.Client{Timeout: timeout}).Do(req)
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return resp.StatusCode < 500
-}
-
 // cliInstallSpec describes how to detect and install one coding CLI.
 type cliInstallSpec struct {
 	agentType string // canonical agent_type (normalizeAgentType output)
@@ -203,10 +186,37 @@ const (
 // cliInstallEvent is one SSE event streamed to the overlay.
 type cliInstallEvent map[string]interface{}
 
+// cnProbeURL is Google's connectivity-check endpoint: it returns 204 (empty body)
+// when the open internet is reachable, and times out / resets in CN (and on
+// corporate firewalls with the same effect). This is a far better "am I in CN"
+// signal than pinging npmjs — in CN npmjs often answers a quick GET yet downloads
+// crawl, so the old npmjs-reachable heuristic kept picking the official registry
+// and left CN users on a painfully slow install.
+const cnProbeURL = "https://www.google.com/generate_204"
+
+// openInternetReachable returns true only on an exact 204 — a GFW-injected 200
+// or a captive-portal page does NOT count as reachable (mirrors the renderer's
+// detectRegion in lib/speedup/detect.ts).
+func openInternetReachable(timeout time.Duration) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cnProbeURL, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == 204
+}
+
 // resolveNpmRegistry implements "探测优先,重试换源": an empty/auto choice probes
-// the official registry and uses it when reachable, else the CN mirror; an
-// explicit "official"/"mirror" forces that source (the overlay's retry sends the
-// opposite of registry_used). Returns the URL and a short label.
+// the network and, if the host is in CN (open internet unreachable), uses the CN
+// mirror — otherwise the official registry; an explicit "official"/"mirror"
+// forces that source (the overlay's retry sends the opposite of registry_used).
+// Returns the URL and a short label.
 func resolveNpmRegistry(choice string) (url, label string) {
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "mirror", "cn", "npmmirror":
@@ -214,7 +224,8 @@ func resolveNpmRegistry(choice string) (url, label string) {
 	case "official", "npm":
 		return npmRegistryOfficial, "official"
 	}
-	if probeURLReachable(npmRegistryOfficial+"/", 3*time.Second) {
+	// auto:探测网络 —— 通得了开放网络就用官方源,是 CN/被墙就用 CN 镜像。
+	if openInternetReachable(3 * time.Second) {
 		return npmRegistryOfficial, "official"
 	}
 	return npmRegistryMirror, "mirror"
