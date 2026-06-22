@@ -380,36 +380,39 @@ async function saveProfileConfig(clientId: string, p: Profile, cfg: { name?: str
   if (cfg.proxy !== undefined) await setProfileProxy(clientId, p, cfg.proxy);
 }
 
-// A real start page for "new window" instead of a blank about:blank — dark CiCy
-// page with a URL box (navigates on submit) + quick links. Served as a data: URL.
-const buildStartPageHtml = () => `<!doctype html><html lang="${i18n.language || 'en'}"><head><meta charset="utf-8">
+// New-window start page (data: URL). Under the "CiCy · New Window" heading it
+// shows the agent-chrome 提示词 for THIS tab (client_id + accountIdx + live
+// targetId), in a copyable box — 主人: h1 下面放提示词,删掉原来的网址输入 form。
+// targetId is only known after Target.createTarget, so addWindow creates the tab
+// then navigates it here with the real targetId baked in.
+const startPagePromptText = (o: { clientId: string; accountIdx: number; targetId: string }) =>
+  tl('bwPromptChrome', {
+    clientId: o.clientId, accountIdx: o.accountIdx, targetId: o.targetId || '—',
+    title: tl('bwStartTitle'), url: tl('bwStartPageData'),
+    c: `agent-chrome --client ${o.clientId}`,
+  });
+const buildStartPageHtml = (o: { clientId: string; accountIdx: number; targetId: string }) => {
+  const esc = startPagePromptText(o).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const copyLabel = tl('bwCopyPrompt', { defaultValue: '复制提示词' });
+  const copiedLabel = tl('bwCopied', { defaultValue: '已复制' });
+  return `<!doctype html><html lang="${i18n.language || 'en'}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${tl('bwStartTitle')}</title>
 <style>:root{color-scheme:dark}*{box-sizing:border-box}
-body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0a;color:#e4e4e7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-.wrap{width:min(560px,86vw);text-align:center}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0a;color:#e4e4e7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:24px}
+.wrap{width:min(640px,92vw);text-align:center}
 .logo{width:56px;height:56px;margin:0 auto 18px;border-radius:16px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:700}
-h1{font-size:18px;font-weight:600;margin:0 0 6px}
-p{margin:0 0 22px;color:#71717a;font-size:13px}
-form{display:flex;gap:8px}
-input{flex:1;background:#141414;border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px 14px;color:#e4e4e7;font-size:14px;outline:none}
-input:focus{border-color:rgba(255,255,255,.28)}
-button{background:rgba(255,255,255,.1);border:none;border-radius:10px;padding:0 18px;color:#fff;font-size:14px;cursor:pointer}
-button:hover{background:rgba(255,255,255,.18)}
-.links{margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
-.links a{color:#a1a1aa;font-size:12px;text-decoration:none;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.04)}
-.links a:hover{color:#fff;background:rgba(255,255,255,.1)}</style></head>
+h1{font-size:18px;font-weight:600;margin:0 0 16px}
+pre{text-align:left;white-space:pre-wrap;word-break:break-word;background:#141414;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:16px 18px;color:#d4d4d8;font-size:13px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin:0 0 14px}
+button{background:rgba(255,255,255,.1);border:none;border-radius:10px;padding:10px 18px;color:#fff;font-size:14px;cursor:pointer}
+button:hover{background:rgba(255,255,255,.18)}</style></head>
 <body><div class="wrap">
 <div class="logo">&#10022;</div>
 <h1>${tl('bwStartHeading')}</h1>
-<p>${tl('bwStartSubtitle')}</p>
-<form onsubmit="var v=this.u.value.trim();if(v){if(!/^[a-zA-Z]+:\\/\\//.test(v))v='https://'+v;location.href=v}return false">
-<input name="u" autofocus placeholder="${tl('bwStartPlaceholder')}" autocomplete="off" spellcheck="false">
-<button type="submit">${tl('bwStartGo')}</button>
-</form>
-<div class="links">
-<a href="https://api.myip.com">api.myip.com</a>
-</div></div></body></html>`;
-const startPageUrl = () => `data:text/html;charset=utf-8,${encodeURIComponent(buildStartPageHtml())}`;
+<pre id="cicy-prompt">${esc}</pre>
+<button id="cicy-copy" onclick="(function(b){var t=document.getElementById('cicy-prompt').textContent;function ok(){b.textContent='${copiedLabel}';setTimeout(function(){b.textContent='${copyLabel}'},1500)}function fb(){var a=document.createElement('textarea');a.value=t;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();try{document.execCommand('copy')}catch(e){}document.body.removeChild(a);ok()}if(navigator.clipboard){navigator.clipboard.writeText(t).then(ok).catch(fb)}else{fb()}})(this)">${copyLabel}</button>
+</div></body></html>`;
+};
+const startPageUrl = (o: { clientId: string; accountIdx: number; targetId: string }) => `data:text/html;charset=utf-8,${encodeURIComponent(buildStartPageHtml(o))}`;
 
 // Open a new window/tab for a profile.
 async function addWindow(clientId: string, p: Profile, url: string): Promise<void> {
@@ -419,21 +422,65 @@ async function addWindow(clientId: string, p: Profile, url: string): Promise<voi
     // not a separate BrowserWindow. Empty url → the tab browser's start page.
     const r = await deviceCall(clientId, 'electron_tab_open', { accountIdx: p.accountIdx, ...(u ? { url: u } : {}) });
     if (r && r.error) throw new Error(r.error);
+    if (u) return; // user opened a real URL — no prompt page
+    // Empty url → the cicyui://newtab start page. Show the agent-electron 提示词
+    // (with THIS tab's live webContentsId) under "新标签页" + a copy button.
+    // electron_tab_open returns manager.list() (active flag) → grab the new tab's
+    // wcId, then inject the prompt via electron_tab_eval (the newtab page has no
+    // preload on sandbox profiles, so the panel injects it after open).
+    const tabs: any[] = (r && r.tabs) || [];
+    const nt = tabs.find((t) => t.active) || tabs[tabs.length - 1];
+    const wc = nt && nt.webContentsId;
+    if (wc == null) return;
+    const prompt = tl('bwPromptElectron', {
+      clientId, accountIdx: p.accountIdx, wc,
+      title: tl('bwStartPage', { defaultValue: '起始页' }), url: 'cicyui://newtab/',
+      c: `agent-electron --client ${clientId}`,
+    });
+    const copyLabel = tl('bwCopyPrompt', { defaultValue: '复制提示词' });
+    const copiedLabel = tl('bwCopied', { defaultValue: '已复制' });
+    const js = `(function(){if(document.getElementById('cicy-prompt'))return;` +
+      `var w=document.querySelector('.w')||document.body;` +
+      `var pre=document.createElement('pre');pre.id='cicy-prompt';pre.textContent=${JSON.stringify(prompt)};` +
+      `pre.style.cssText='text-align:left;white-space:pre-wrap;word-break:break-word;background:#2a2b2e;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:14px 16px;color:#cfd2d6;font-size:12px;line-height:1.6;font-family:ui-monospace,Menlo,Consolas,monospace;margin:18px auto 12px;max-width:560px';` +
+      `var b=document.createElement('button');b.textContent=${JSON.stringify(copyLabel)};` +
+      `b.style.cssText='background:rgba(255,255,255,.12);border:none;border-radius:10px;padding:9px 16px;color:#fff;font-size:13px;cursor:pointer';` +
+      `b.onclick=function(){var t=pre.textContent;function ok(){b.textContent=${JSON.stringify(copiedLabel)};setTimeout(function(){b.textContent=${JSON.stringify(copyLabel)}},1500)}` +
+      `function fb(){var a=document.createElement('textarea');a.value=t;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();try{document.execCommand('copy')}catch(e){}document.body.removeChild(a);ok()}` +
+      `if(navigator.clipboard){navigator.clipboard.writeText(t).then(ok).catch(fb)}else{fb()}};` +
+      `w.appendChild(pre);w.appendChild(b);})()`;
+    // small delay so cicyui://newtab has finished loading before we inject
+    await new Promise((res) => setTimeout(res, 400));
+    await deviceCall(clientId, 'electron_tab_eval', { webContentsId: wc, code: js }).catch(() => {});
     return;
   }
-  // Chrome's own add-tab: if the profile isn't running, launch it (which opens
-  // the tab); if it's already running, open a new tab via CDP.
-  if (!p.running) {
-    const r = await deviceCall(clientId, 'chrome_launch_profile', { accountIdx: p.accountIdx, url: u || startPageUrl() });
+  // Chrome's own add-tab. Step 1: create the tab as about:blank and GET its
+  // targetId. Try createTarget first (works whenever the debugger is up,
+  // REGARDLESS of the possibly-stale p.running — that race made the 2nd add
+  // re-launch+activate instead of creating a tab → "只能加一个" on Windows,
+  // where Chrome 149's debugger comes up slower than macOS). If createTarget
+  // fails (genuinely not running), launch the profile, then find the new tab.
+  let targetId = '';
+  const created = await deviceCall(clientId, 'chrome_cdp_call', {
+    accountIdx: p.accountIdx, method: 'Target.createTarget', params: { url: 'about:blank' },
+  }).catch((e: any) => ({ error: e?.message || String(e) }));
+  if (created && !created.error && created.result && created.result.targetId) {
+    targetId = created.result.targetId;
+  } else {
+    const r = await deviceCall(clientId, 'chrome_launch_profile', { accountIdx: p.accountIdx, url: 'about:blank' });
     if (r && r.error) throw new Error(r.error);
-    return;
+    const tg = await deviceCall(clientId, 'chrome_get_targets', { accountIdx: p.accountIdx }).catch(() => null);
+    const pages = (((tg && tg.targets) || []) as any[]).filter((t) => t.type === 'page');
+    targetId = (pages.find((t) => t.url === 'about:blank') || pages[pages.length - 1] || {}).id || '';
   }
-  const r = await deviceCall(clientId, 'chrome_cdp_call', {
-    accountIdx: p.accountIdx,
-    method: 'Target.createTarget',
-    params: { url: u || startPageUrl() },
-  });
-  if (r && r.error) throw new Error(r.error);
+  // Step 2: navigate the new tab to its destination — the user's URL if given,
+  // else the start page carrying THIS tab's real targetId in the agent prompt.
+  const dest = u || startPageUrl({ clientId, accountIdx: p.accountIdx, targetId });
+  if (targetId) {
+    await deviceCall(clientId, 'chrome_cdp_call', {
+      accountIdx: p.accountIdx, method: 'Page.navigate', target: targetId, params: { url: dest },
+    }).catch(() => {});
+  }
 }
 
 // Recognize a "Chrome isn't installed" launch failure so the panel can show an
