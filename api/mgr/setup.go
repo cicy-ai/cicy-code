@@ -131,9 +131,12 @@ func npmPkgDir(pkg string) string {
 }
 
 func npmGlobalInstallCmd(pkg string) string {
-	// Auto-detect network: try registry.npmjs.org with a 3-second timeout.
-	// If reachable, use it directly; otherwise fall back to npmmirror (China).
-	registry := `$(if curl -s --max-time 3 https://registry.npmjs.org/ >/dev/null 2>&1; then echo https://registry.npmjs.org; else echo https://registry.npmmirror.com; fi)`
+	// Registry: prefer npmmirror, fall back to npmjs.org. 主人: 老逻辑「先试 npmjs.org
+	// 3s 能通就用」在 CN 是假阳性 —— npmjs.org 根路径常能响应,但实际拉包 tarball 超时
+	// EAI_AGAIN(这就是 cicy-mihomo / cicy-code 装更新失败的根因)。npmmirror 是全球 CDN
+	// 镜像,CN 快、海外也通,所以优先它;探不通(罕见)才回退官方源。用 -fsI(HEAD + 失败
+	// 即错)比裸 -s 更可靠。
+	registry := `$(if curl -fsI --max-time 5 https://registry.npmmirror.com/ >/dev/null 2>&1; then echo https://registry.npmmirror.com; else echo https://registry.npmjs.org; fi)`
 	// Pre-remove the old package directory so npm's atomic rename-to-temp
 	// doesn't fail with ENOTEMPTY on macOS when the directory is non-empty.
 	rmOld := `rm -rf "$HOME/.npm-global/lib/node_modules/` + npmPkgDir(pkg) + `"`
@@ -1492,6 +1495,36 @@ func anyActiveAgentUsesProxy() bool {
 	return count > 0
 }
 
+// cicyMihomoHealOnce ensures at most one background self-heal goroutine per process.
+var cicyMihomoHealOnce sync.Once
+
+// selfHealCicyMihomo retries the cicy-mihomo skill install + ~/.local/bin wrapper
+// symlink in the background until the wrapper exists, then (re)starts mihomo. Stops a
+// transient network failure during first setup from permanently breaking the proxy
+// (用户原本只能整个重建容器才恢复). w-10122 #199.
+func selfHealCicyMihomo() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	wrapper := filepath.Join(home, ".local", "bin", "cicy-mihomo")
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		if _, err := os.Stat(wrapper); err == nil {
+			log.Printf("[self-heal] cicy-mihomo wrapper present — (re)starting mihomo")
+			startCicyMihomoIfNeeded()
+			return
+		}
+		log.Printf("[self-heal] retrying cicy-mihomo skill install")
+		if _, ierr := skillcmd.InstallSkill("cicy-mihomo", io.Discard); ierr != nil {
+			log.Printf("[self-heal] cicy-mihomo install retry failed: %v", ierr)
+			continue
+		}
+		_, _ = skillcmd.EnsureBinSymlinks()
+	}
+}
+
 // startCicyMihomoIfNeeded brings up the local mihomo proxy synchronously when
 // any active worker is configured to route via it. This blocks startup until
 // mihomo is up so the workers don't race a half-started proxy.
@@ -1517,13 +1550,23 @@ func startCicyMihomoIfNeeded() {
 		// open to direct forever). Install it synchronously here (idempotent) and
 		// re-check before giving up.
 		log.Printf("[startup] cicy-mihomo wrapper missing — installing skill synchronously")
-		if _, ierr := skillcmd.InstallSkill("cicy-mihomo", io.Discard); ierr != nil {
-			log.Printf("[startup] cicy-mihomo install failed: %v — proxy-using workers may fail. Install with: cicy-code skill install cicy-mihomo", ierr)
-			return
+		// 网络抖动一次就挂(w-10122 #199):InstallSkill 失败原来直接 return,改成重试
+		// 3 次 + 退避,瞬时网络失败可恢复。
+		var ierr error
+		for attempt := 1; attempt <= 3; attempt++ {
+			if _, ierr = skillcmd.InstallSkill("cicy-mihomo", io.Discard); ierr == nil {
+				break
+			}
+			log.Printf("[startup] cicy-mihomo install attempt %d/3 failed: %v", attempt, ierr)
+			time.Sleep(time.Duration(attempt*2) * time.Second)
 		}
+		// 无论 InstallSkill 是否认为「已装」,都强制重建 ~/.local/bin 软链并校验 wrapper:
+		// skill 目录在但软链没建好正是 'cicy-mihomo not found on PATH' 的根因。
 		_, _ = skillcmd.EnsureBinSymlinks()
 		if _, err := os.Stat(wrapper); err != nil {
-			log.Printf("[startup] cicy-mihomo wrapper still missing after install — skipping mihomo start")
+			// 仍缺 → 不再「只能整个重建容器」,挂后台周期自愈(每进程最多一个)。
+			log.Printf("[startup] cicy-mihomo wrapper still missing after install (last err: %v) — scheduling background self-heal", ierr)
+			cicyMihomoHealOnce.Do(func() { go selfHealCicyMihomo() })
 			return
 		}
 	}
