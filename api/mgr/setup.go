@@ -1002,6 +1002,7 @@ func checkEnv() {
 	ensureDefaultProject()
 
 	ensureDefaultProviders()
+	ensureOpenCodeZenProvider()
 	applyGatewayEnvToDefaultProviders()
 	setupAIConfigs()
 

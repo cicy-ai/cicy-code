@@ -60,10 +60,10 @@ func writeGlobalJSONConfig(cfg map[string]any) error {
 const defaultProvidersBlockJSON = `{
   "default": {
     "claude": "defaultAnthropic",
-    "cicy": "defaultAnthropic",
-    "codex": "defaultOpenAi",
+    "cicy": "opencodeZen",
+    "codex": "opencodeZen",
     "gemini": "defaultOpenAi",
-    "opencode": "defaultOpenAi",
+    "opencode": "opencodeZen",
     "stt": "defaultOpenAi"
   },
   "items": [
@@ -117,6 +117,63 @@ func ensureDefaultProviders() {
 		return
 	}
 	log.Printf("[setup] seeded default providers (CiCyAi gateway) into global.json")
+}
+
+// opencodeZenProviderJSON is the OpenCode Zen free-tier provider. Its free models
+// (big-pickle, *-free) need no real key ("public") and the gateway translates the
+// Anthropic-speaking cicy agent down to this openai-protocol upstream.
+const opencodeZenProviderJSON = `{
+  "key": "opencodeZen",
+  "name": "OpenCode Zen",
+  "apiKey": "public",
+  "defaultModel": "big-pickle",
+  "defaultModels": {},
+  "modelMapping": {},
+  "models": [
+    "big-pickle",
+    "deepseek-v4-flash-free",
+    "mimo-v2.5-free",
+    "nemotron-3-ultra-free",
+    "north-mini-code-free"
+  ],
+  "protocol": "openai",
+  "url": "https://opencode.ai/zen/v1"
+}`
+
+// ensureOpenCodeZenProvider appends the OpenCode Zen provider to global.json when
+// no item with that key exists yet. Runs on every boot after ensureDefaultProviders
+// so a freshly seeded install (whose default map already routes cicy/codex/opencode
+// to "opencodeZen") gets the matching item, and an existing install that predates it
+// is topped up. Idempotent and non-destructive: if the key is already present (even
+// edited by an operator) it leaves it untouched; routing in providers.default is
+// never modified here.
+func ensureOpenCodeZenProvider() {
+	providersFileMu.Lock()
+	defer providersFileMu.Unlock()
+
+	cfg := readGlobalJSONConfig()
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	block := providersBlock(cfg)
+	for _, item := range providersItemsSlice(block) {
+		if strings.EqualFold(providerItemKey(item), "opencodeZen") {
+			return // already present — never clobber operator edits
+		}
+	}
+
+	var item map[string]any
+	if err := json.Unmarshal([]byte(opencodeZenProviderJSON), &item); err != nil {
+		log.Printf("[setup] opencodeZen provider seed parse failed: %v", err)
+		return
+	}
+	block["items"] = append(providersItemsSlice(block), item)
+	cfg["providers"] = block
+	if err := writeGlobalJSONConfig(cfg); err != nil {
+		log.Printf("[setup] opencodeZen provider seed write failed: %v", err)
+		return
+	}
+	log.Printf("[setup] seeded OpenCode Zen provider into global.json")
 }
 
 // applyGatewayEnvToDefaultProviders forces the two platform-managed default
