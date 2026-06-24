@@ -19,7 +19,7 @@ var (
 
 	// responseMailerKind records whether the active mailer can actually reach
 	// humans ("smtp"/"gmail") or only spools to disk ("file"). Read by the
-	// readiness check so the 审核策略专员 can warn when owner alerts reach no one.
+	// readiness check so the 审计策略专员 can warn when owner alerts reach no one.
 	responseMailerKind = "file"
 )
 

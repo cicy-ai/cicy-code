@@ -17,13 +17,13 @@ import (
 //
 //	① SMTP alert — auto-emails the responsible person(s) via the active mailer
 //	   (SmtpMailer), no longer waiting for an agent to trigger it.
-//	② 审核策略专员 — forwards the finding brief to the live 审核策略专员 (the
+//	② 审计策略专员 — forwards the finding brief to the live 审计策略专员 (the
 //	   user's audit advisor) cicy agent for verification / triage / grading.
 //
 // Cooldown is marked if EITHER channel fired, so a noisy finding doesn't spam.
 // Best-effort: any failure logs but does not propagate to the caller path.
 // dispatchIncident attempts the owner SMTP/email alert ONLY (no agent forward —
-// forwarding to the 审核策略专员 agent made it run an LLM per hit and burned real
+// forwarding to the 审计策略专员 agent made it run an LLM per hit and burned real
 // provider balance) and returns a human-readable status recorded on the event
 // (e.Meta.AlertStatus). Runs synchronously in the async audit worker (off the
 // agent hot path) so the REAL send result is captured before the event persists.
@@ -90,7 +90,7 @@ func firstLineOf(s string) string {
 
 // SendOwnerIncident renders and emails the incident to the responsible
 // person(s). Invoked automatically by dispatchIncident on a qualifying hit
-// (note=""), and also by POST /api/audit/notify when the 审核策略专员 escalates
+// (note=""), and also by POST /api/audit/notify when the 审计策略专员 escalates
 // with its own assessment. `note`, when set, is prepended to the email body.
 func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 	pol := p.CurrentPolicy()

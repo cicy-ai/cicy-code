@@ -5,7 +5,7 @@ import "strings"
 // audit-v2 refactor: the fixed w-6001 "SecOps Lead" singleton pane was removed.
 // Its responsibilities now live in ONE ordinary, user-onboarded cicy agent
 // carrying a role_template employee template:
-//   - 审核策略专员 — the user's audit advisor: owns policy.json (rules /
+//   - 审计策略专员 — the user's audit advisor: owns policy.json (rules /
 //     severity / override / allowlist) AND receives finding hits to verify &
 //     triage (audit_agent_notify.go). The old separate 审计专员 seat was
 //     merged into this one role.

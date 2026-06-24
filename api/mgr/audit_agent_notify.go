@@ -8,11 +8,11 @@ import (
 )
 
 // auditSpecialistRoleTemplate is the employee-template slug of the single
-// 审核策略专员 (the user's audit advisor) role. A finding hit is dispatched to
+// 审计策略专员 (the user's audit advisor) role. A finding hit is dispatched to
 // whichever live cicy agent was provisioned with this role_template. The former
-// split (审核策略专员 owns policy + 审计专员 triages) was merged into this one
+// split (审计策略专员 owns policy + 审计专员 triages) was merged into this one
 // advisor: it configures rules, interprets logs, and triages hits.
-const auditSpecialistRoleTemplate = "审核策略专员"
+const auditSpecialistRoleTemplate = "审计策略专员"
 
 // Wire the audit pipeline's "forward finding to advisor" channel to the
 // cross-agent send path. Runs before main() so the forwarder is set by the
@@ -21,8 +21,8 @@ func init() {
 	audit.SetFindingForwarder(forwardAuditFindingToAuditSpecialist)
 }
 
-// auditSpecialistPaneID resolves the pane of the live 审核策略专员 agent (a
-// normal cicy agent carrying role_template=审核策略专员). Returns "" when none
+// auditSpecialistPaneID resolves the pane of the live 审计策略专员 agent (a
+// normal cicy agent carrying role_template=审计策略专员). Returns "" when none
 // is provisioned — callers treat that as "no audit advisor on duty".
 func auditSpecialistPaneID() string {
 	var pane string
@@ -41,7 +41,7 @@ func auditSpecialistPaneID() string {
 func forwardAuditFindingToAuditSpecialist(brief string) error {
 	pane := auditSpecialistPaneID()
 	if pane == "" {
-		return fmt.Errorf("no 审核策略专员 agent provisioned (role_template=%s) — finding not dispatched", auditSpecialistRoleTemplate)
+		return fmt.Errorf("no 审计策略专员 agent provisioned (role_template=%s) — finding not dispatched", auditSpecialistRoleTemplate)
 	}
 	return sendTextToPane(pane, brief, true)
 }

@@ -94,14 +94,14 @@ func defaultLiteConfig() liteConfigFile {
 			// A real shell (PowerShell on Windows, bash on unix) — e.g. the team
 			// helper installing Docker + cicy-code hands-on.
 			"shell": {"shell"},
-			// audit: the 审核策略专员 (audit advisor) calls the /api/audit/* API as
+			// audit: the 审计策略专员 (audit advisor) calls the /api/audit/* API as
 			// native tools. Declared here (image default), grantable to every
-			// assistant, selected only by the 审核策略专员 charter's `tools:` line.
+			// assistant, selected only by the 审计策略专员 charter's `tools:` line.
 			"audit": auditGroupToolNames(),
 		},
 		CustomTools: auditCustomTools(),
 		// Grant the audit group to every assistant (the ceiling). Only the
-		// 审核策略专员 charter actually selects it, so no other agent gets the
+		// 审计策略专员 charter actually selects it, so no other agent gets the
 		// audit tools unless its charter opts in.
 		Grants: liteGrants{ByAgent: map[string][]string{}, ByProfile: map[string][]string{"assistant": {"audit"}}},
 	}

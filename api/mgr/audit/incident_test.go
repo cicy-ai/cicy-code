@@ -81,11 +81,11 @@ func TestSeverityMeetsTrigger(t *testing.T) {
 	}
 }
 
-// ── dispatchIncident: auto-SMTP + forward to 审核策略专员 (audit-v2 contract) ──
+// ── dispatchIncident: auto-SMTP + forward to 审计策略专员 (audit-v2 contract) ──
 //
 // On a qualifying hit dispatchIncident now does BOTH: ① auto-emails the owner
 // via the active mailer (no longer waiting for an agent to trigger it), and
-// ② forwards a masked finding brief to the live 审核策略专员 agent for triage.
+// ② forwards a masked finding brief to the live 审计策略专员 agent for triage.
 // These tests assert the forward (link ②); TestDispatchIncident_HighSeverity*
 // also asserts the auto-email (link ①). The gates (enabled / trigger severity
 // / cooldown) suppress BOTH channels.
