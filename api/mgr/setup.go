@@ -1002,8 +1002,8 @@ func checkEnv() {
 	ensureDefaultProject()
 
 	ensureDefaultProviders()
-	ensureOpenCodeZenProvider()
 	applyGatewayEnvToDefaultProviders()
+	ensureClientProviders()
 	setupAIConfigs()
 
 	var count int

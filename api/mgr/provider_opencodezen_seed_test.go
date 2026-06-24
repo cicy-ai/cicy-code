@@ -43,7 +43,7 @@ func TestOpenCodeZenSeed_FreshInstall(t *testing.T) {
 	withTempGlobalJSON(t)
 
 	ensureDefaultProviders()
-	ensureOpenCodeZenProvider()
+	ensureClientProviders()
 
 	defaults, keys := ocSeedReadProviders(t)
 	for _, at := range []string{"cicy", "codex", "opencode"} {
@@ -74,7 +74,7 @@ func TestOpenCodeZenSeed_TopUpExisting(t *testing.T) {
 	}
 
 	ensureDefaultProviders()    // must no-op (items already exist)
-	ensureOpenCodeZenProvider() // must append opencodeZen item only
+	ensureClientProviders() // must append opencodeZen item only
 
 	defaults, keys := ocSeedReadProviders(t)
 	if defaults["cicy"] != "defaultAnthropic" {
@@ -85,7 +85,7 @@ func TestOpenCodeZenSeed_TopUpExisting(t *testing.T) {
 	}
 
 	before := len(keys)
-	ensureOpenCodeZenProvider() // second run must not duplicate
+	ensureClientProviders() // second run must not duplicate
 	_, keys2 := ocSeedReadProviders(t)
 	if len(keys2) != before {
 		t.Errorf("opencodeZen duplicated: %v", keys2)

@@ -131,23 +131,94 @@ const opencodeZenProviderJSON = `{
   "modelMapping": {},
   "models": [
     "big-pickle",
-    "deepseek-v4-flash-free",
-    "mimo-v2.5-free",
-    "nemotron-3-ultra-free",
-    "north-mini-code-free"
+    "deepseek-v4-flash-free"
   ],
   "protocol": "openai",
   "url": "https://opencode.ai/zen/v1"
 }`
 
-// ensureOpenCodeZenProvider appends the OpenCode Zen provider to global.json when
-// no item with that key exists yet. Runs on every boot after ensureDefaultProviders
-// so a freshly seeded install (whose default map already routes cicy/codex/opencode
-// to "opencodeZen") gets the matching item, and an existing install that predates it
-// is topped up. Idempotent and non-destructive: if the key is already present (even
-// edited by an operator) it leaves it untouched; routing in providers.default is
-// never modified here.
-func ensureOpenCodeZenProvider() {
+// cloudGatewayKey returns this node's sk-cicy- gateway key for authenticating to
+// the cloud (GET /api/providers/client). Prefers the runtime AI config key (per
+// the API contract), then the seeded default providers' apiKey, then the gateway
+// env that dev.py --docker injects — so it resolves on a real node, a dev
+// container, and a fresh install alike.
+func cloudGatewayKey() string {
+	if k := strings.TrimSpace(os.Getenv("CICY_AI_GATEWAY_LLM_API_KEY")); k != "" {
+		return k
+	}
+	if k := strings.TrimSpace(loadRuntimeAIConfig().APIKey); k != "" {
+		return k
+	}
+	for _, key := range []string{"defaultAnthropic", "defaultOpenAi"} {
+		if pc, ok := loadProviderByKey(key); ok {
+			if k := strings.TrimSpace(pc.APIKey); k != "" {
+				return k
+			}
+		}
+	}
+	return ""
+}
+
+// cloudGatewayBase returns the gateway base URL that serves /api/providers/client:
+// the injected endpoint env wins (dev.py --docker sets it from the host), otherwise
+// fall back to the well-known gateway. The endpoint lives on the AI gateway, not on
+// cicy-ai.com.
+func cloudGatewayBase() string {
+	if u := strings.TrimSpace(os.Getenv("CICY_AI_GATEWAY_LLM_ENDPOINT")); u != "" {
+		return u
+	}
+	return "https://gateway.cicy-ai.com"
+}
+
+// fetchClientProviders pulls the cloud's default client provider configs using
+// this node's gateway key. Returns nil on any failure so the caller falls back to
+// its baked-in default — setup must never block on the cloud being reachable.
+func fetchClientProviders(cloudBase, gatewayKey string) []map[string]any {
+	gatewayKey = strings.TrimSpace(gatewayKey)
+	if gatewayKey == "" {
+		return nil
+	}
+	if cloudBase == "" {
+		cloudBase = "https://gateway.cicy-ai.com"
+	}
+	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(cloudBase, "/")+"/api/providers/client", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+gatewayKey)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[setup] fetch client providers failed: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[setup] client providers HTTP %d", resp.StatusCode)
+		return nil
+	}
+	var items []map[string]any
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&items); err != nil {
+		log.Printf("[setup] decode client providers: %v", err)
+		return nil
+	}
+	return items
+}
+
+// ensureClientProviders merges the cloud's client-provider list into global.json.
+// It fetches GET /api/providers/client (authed with this node's gateway key); on
+// success it upserts every returned provider by key, using each entry verbatim —
+// except a cloud default shipped with an empty apiKey (defaultAnthropic/
+// defaultOpenAi), whose key+endpoint are filled from the injected gateway env
+// (CICY_AI_GATEWAY_LLM_API_KEY / _ENDPOINT), falling back to this node's own.
+// When the cloud is unreachable it falls back to the baked-in two-model OpenCode
+// Zen default (seeding it if absent; the cloud gateway defaults are already seeded
+// + key-filled by ensureDefaultProviders/applyGatewayEnvToDefaultProviders). Runs
+// on every boot after those; never touches providers.default routing.
+func ensureClientProviders() {
+	// Fetch outside the file lock — a 10s network call must not hold it.
+	cloud := fetchClientProviders(cloudGatewayBase(), cloudGatewayKey())
+
 	providersFileMu.Lock()
 	defer providersFileMu.Unlock()
 
@@ -156,24 +227,67 @@ func ensureOpenCodeZenProvider() {
 		cfg = map[string]any{}
 	}
 	block := providersBlock(cfg)
-	for _, item := range providersItemsSlice(block) {
-		if strings.EqualFold(providerItemKey(item), "opencodeZen") {
-			return // already present — never clobber operator edits
+	items := providersItemsSlice(block)
+
+	indexOf := func(key string) int {
+		for i, it := range items {
+			if strings.EqualFold(providerItemKey(it), key) {
+				return i
+			}
 		}
+		return -1
 	}
 
-	var item map[string]any
-	if err := json.Unmarshal([]byte(opencodeZenProviderJSON), &item); err != nil {
-		log.Printf("[setup] opencodeZen provider seed parse failed: %v", err)
+	if len(cloud) == 0 {
+		// Cloud unreachable: ensure the baked-in OpenCode Zen default exists so the
+		// node still has it offline. The gateway defaults are seeded + key-filled by
+		// the earlier setup steps, so they need no fallback here.
+		if indexOf("opencodeZen") < 0 {
+			var def map[string]any
+			if err := json.Unmarshal([]byte(opencodeZenProviderJSON), &def); err != nil {
+				log.Printf("[setup] opencodeZen default parse failed: %v", err)
+				return
+			}
+			items = append(items, def)
+			block["items"] = items
+			cfg["providers"] = block
+			if err := writeGlobalJSONConfig(cfg); err != nil {
+				log.Printf("[setup] opencodeZen default write failed: %v", err)
+				return
+			}
+			log.Printf("[setup] seeded OpenCode Zen provider (baked-in default; cloud unreachable)")
+		}
 		return
 	}
-	block["items"] = append(providersItemsSlice(block), item)
+
+	for _, ci := range cloud {
+		key := providerItemKey(ci)
+		if key == "" {
+			continue
+		}
+		// A cloud default ships with an empty apiKey — fill key + endpoint from the
+		// injected gateway env (cloudGatewayKey/cloudGatewayBase are env-first).
+		if k, _ := ci["apiKey"].(string); strings.TrimSpace(k) == "" {
+			if v := cloudGatewayKey(); v != "" {
+				ci["apiKey"] = v
+			}
+			if v := cloudGatewayBase(); v != "" {
+				ci["url"] = v
+			}
+		}
+		if idx := indexOf(key); idx >= 0 {
+			items[idx] = ci
+		} else {
+			items = append(items, ci)
+		}
+	}
+	block["items"] = items
 	cfg["providers"] = block
 	if err := writeGlobalJSONConfig(cfg); err != nil {
-		log.Printf("[setup] opencodeZen provider seed write failed: %v", err)
+		log.Printf("[setup] client providers write failed: %v", err)
 		return
 	}
-	log.Printf("[setup] seeded OpenCode Zen provider into global.json")
+	log.Printf("[setup] merged %d cloud client provider(s) into global.json", len(cloud))
 }
 
 // applyGatewayEnvToDefaultProviders forces the two platform-managed default
