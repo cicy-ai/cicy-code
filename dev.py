@@ -388,6 +388,27 @@ def get_local_api_token():
     return str(data.get("api_token", "") or "").strip()
 
 
+def get_gateway_llm_creds():
+    """Read the gateway LLM apiKey + endpoint from the host's default providers.
+
+    The dev container seeds its own clean providers block (host providers are not
+    mirrored), so defaultAnthropic/defaultOpenAi start with an empty apiKey. We
+    inject these as CICY_AI_GATEWAY_LLM_API_KEY / _ENDPOINT so the container's
+    applyGatewayEnvToDefaultProviders() can fill the seeded defaults. Returns the
+    first non-empty key found on defaultAnthropic, then defaultOpenAi.
+    """
+    data = load_global_json()
+    providers = data.get("providers", {})
+    items = providers.get("items", []) if isinstance(providers, dict) else []
+    for want in ("defaultAnthropic", "defaultOpenAi"):
+        for it in items:
+            if isinstance(it, dict) and it.get("key") == want:
+                key = str(it.get("apiKey", "") or "").strip()
+                if key:
+                    return key, str(it.get("url", "") or "").strip()
+    return "", ""
+
+
 def get_cicy_cluster():
     data = load_global_json().get("cicy-cluster", {})
     return data if isinstance(data, dict) else {}
@@ -1226,6 +1247,15 @@ def run_docker(
     local_token = get_local_api_token()
     if local_token:
         env_vars.extend(["-e", f"CICY_API_TOKEN={local_token}"])
+    # The dev container seeds a clean providers block (we don't mirror host
+    # providers), so its defaultAnthropic/defaultOpenAi have an empty apiKey.
+    # Inject the gateway LLM key+endpoint read from the host's default provider
+    # so the container's applyGatewayEnvToDefaultProviders() fills them in.
+    gw_key, gw_url = get_gateway_llm_creds()
+    if gw_key:
+        env_vars.extend(["-e", f"CICY_AI_GATEWAY_LLM_API_KEY={gw_key}"])
+    if gw_url:
+        env_vars.extend(["-e", f"CICY_AI_GATEWAY_LLM_ENDPOINT={gw_url}"])
     volume_args = []
     if mount_home:
         os.makedirs(dev_home_dir, exist_ok=True)
