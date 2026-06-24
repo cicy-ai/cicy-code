@@ -11,7 +11,7 @@ import {
   ExternalLink, Tag, User, Calendar, HardDrive, Hash, FileCode, BookOpen, ShieldCheck, Lock,
   Compass, Users, RotateCw,
 } from 'lucide-react';
-import { cn } from '../../lib/utils';
+import { cn, copyToClipboard } from '../../lib/utils';
 import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
 import { ProxyManagerDialog } from './ProxyManagerDialog';
@@ -196,14 +196,28 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
     return list;
   }, [skills, filter, query]);
 
+  // Group by SOURCE (team), not category: the public registry, then one section
+  // per subscribed team (registry_source), then locally-authored skills. This
+  // lets each subscribed team show its own skill list, with the same install /
+  // update / uninstall actions as public skills.
   const grouped = useMemo(() => {
     const out: Record<string, MarketSkill[]> = {};
     for (const s of filtered) {
-      const key = s.category || 'other';
+      const key = s.registry_source
+        ? `team:${s.registry_source}`
+        : (s.source === 'user' ? 'local' : 'public');
       (out[key] ||= []).push(s);
     }
     return out;
   }, [filtered]);
+
+  // public first, then teams alphabetically, then local.
+  const groupRank = (k: string) => (k === 'public' ? 0 : k === 'local' ? 2 : 1);
+  const groupLabel = (k: string) => {
+    if (k === 'public') return t('marketGroupPublic');
+    if (k === 'local') return t('marketGroupLocal');
+    return `${t('marketGroupTeam')} · ${k.slice('team:'.length)}`;
+  };
 
   const counts = useMemo(() => ({
     total: skills.length,
@@ -364,10 +378,12 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
               ) : filtered.length === 0 ? (
                 <div data-id="skill-market-empty" className="p-4 text-xs text-zinc-500">{t('marketplaceEmpty')}</div>
               ) : (
-                Object.entries(grouped).sort(([a],[b]) => a.localeCompare(b)).map(([category, list]) => (
-                  <div key={category} data-id={`skill-market-cat-${category}`}>
-                    <div data-id="skill-market-cat-label" className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-zinc-600">{category}</div>
-                    <div data-id="skill-market-cat-items">
+                Object.entries(grouped)
+                  .sort(([a],[b]) => groupRank(a) - groupRank(b) || a.localeCompare(b))
+                  .map(([group, list]) => (
+                  <div key={group} data-id={`skill-market-group-${group}`}>
+                    <div data-id="skill-market-group-label" className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-zinc-600">{groupLabel(group)}</div>
+                    <div data-id="skill-market-group-items">
                       {list.map(skill => (
                         <SkillRow
                           key={skill.name}
@@ -392,7 +408,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
 
         {hubTab === 'subscribe' && (
           <div className="flex-1 overflow-y-auto p-4" data-id="skill-hub-subscribe">
-            <SubscribePanel onChanged={load} />
+            <SubscribePanel onChanged={load} skills={skills} onOpenDetail={(n) => setSelectedName(n)} selectedName={selectedName} />
           </div>
         )}
       </div>
@@ -480,8 +496,9 @@ interface RegistrySourceView {
   public: boolean;
 }
 
-function SubscribePanel({ onChanged }: { onChanged: () => void }) {
+function SubscribePanel({ onChanged, skills, onOpenDetail, selectedName }: { onChanged: () => void; skills: MarketSkill[]; onOpenDetail: (name: string) => void; selectedName: string | null }) {
   const { t } = useTranslation('workspace');
+  const { confirm, node: confirmNode } = useDialogs();
   const [sources, setSources] = useState<RegistrySourceView[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
@@ -522,6 +539,13 @@ function SubscribePanel({ onChanged }: { onChanged: () => void }) {
   };
 
   const remove = async (key: string) => {
+    const ok = await confirm({
+      title: t('subscribeRemoveTitle'),
+      body: t('subscribeRemoveConfirm', { name: key }),
+      danger: true,
+      confirmLabel: t('subscribeRemove'),
+    });
+    if (!ok) return;
     setBusy(true);
     setError('');
     try {
@@ -535,37 +559,12 @@ function SubscribePanel({ onChanged }: { onChanged: () => void }) {
     }
   };
 
+  const teams = sources.filter(s => !s.public);
   return (
     <div className="space-y-4" data-id="subscribe-panel">
-          {/* current sources */}
-          <div data-id="skill-registries-list" className="space-y-1.5">
-            {loading ? (
-              <div className="text-[11px] text-zinc-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> {t('marketplaceModalLoading')}</div>
-            ) : sources.filter(s => !s.public).map(s => (
-              <div key={s.name} data-id={`skill-registry-${s.name}`} className="flex items-center gap-2 px-2.5 py-1.5 rounded bg-white/[0.03] border border-[var(--vsc-border)]/40">
-                <span className={cn('text-[10px] px-1 py-0.5 rounded inline-flex items-center gap-0.5', s.public ? 'bg-zinc-500/15 text-zinc-300' : 'bg-violet-500/15 text-violet-300')}>
-                  {s.public ? <Globe className="w-2.5 h-2.5" /> : <Lock className="w-2.5 h-2.5" />}
-                  {s.name}
-                </span>
-                <span className="text-[11px] text-zinc-500 truncate flex-1" title={s.url}>{s.url}</span>
-                {s.has_token && <Key className="w-3 h-3 text-zinc-600" />}
-                {!s.public && (
-                  <button
-                    data-id={`skill-registry-remove-${s.name}`}
-                    onClick={() => remove(s.name)}
-                    disabled={busy}
-                    className="p-0.5 text-zinc-600 hover:text-red-400 rounded disabled:opacity-40"
-                    title={t('subscribeRemove')}
-                  >
-                    <XCircle className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* add form */}
-          <div className="space-y-2 pt-2 border-t border-[var(--vsc-border)]/40">
+          {confirmNode}
+          {/* Subscribe to a source — primary action, at the top */}
+          <div className="space-y-2" data-id="skill-registry-add">
             <div className="text-[11px] font-medium text-zinc-400">{t('subscribeAddTitle')}</div>
             <input
               data-id="skill-registry-add-url"
@@ -591,6 +590,53 @@ function SubscribePanel({ onChanged }: { onChanged: () => void }) {
               {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />}
               {t('subscribeAdd')}
             </button>
+          </div>
+
+          {/* Subscribed teams — each with its own skill list (same rows as the market) */}
+          <div data-id="skill-registries-list" className="space-y-3 pt-3 border-t border-[var(--vsc-border)]/40">
+            {loading ? (
+              <div className="text-[11px] text-zinc-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> {t('marketplaceModalLoading')}</div>
+            ) : teams.length === 0 ? (
+              <div className="text-[11px] text-zinc-600" data-id="skill-registry-empty">{t('subscribeNoSources')}</div>
+            ) : teams.map(s => {
+              const teamSkills = skills.filter(k => k.registry_source === s.name);
+              return (
+              <div key={s.name} data-id={`skill-registry-${s.name}`}>
+                {/* team header */}
+                <div className="flex items-center gap-2 px-1 pb-1.5">
+                  <span className="text-[10px] px-1 py-0.5 rounded inline-flex items-center gap-0.5 bg-violet-500/15 text-violet-300">
+                    <Lock className="w-2.5 h-2.5" />
+                    {s.name}
+                  </span>
+                  <span className="text-[11px] text-zinc-500 truncate flex-1" title={s.url}>{s.url}</span>
+                  {s.has_token && <Key className="w-3 h-3 text-zinc-600" />}
+                  <button
+                    data-id={`skill-registry-remove-${s.name}`}
+                    onClick={() => remove(s.name)}
+                    disabled={busy}
+                    className="p-0.5 text-zinc-600 hover:text-red-400 rounded disabled:opacity-40"
+                    title={t('subscribeRemove')}
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {/* this team's skills — identical rows to the market (icon + name + description + status), click to open detail (install / update / uninstall) */}
+                <div data-id={`skill-registry-skills-${s.name}`} className="rounded border border-[var(--vsc-border)]/40 overflow-hidden">
+                  {teamSkills.length === 0 ? (
+                    <div className="text-[10px] text-zinc-600 px-3 py-2" data-id={`skill-registry-skill-${s.name}-empty`}>{t('subscribeNoSkills')}</div>
+                  ) : teamSkills.map(k => (
+                    <SkillRow
+                      key={k.name}
+                      skill={k}
+                      selected={selectedName === k.name}
+                      onClick={() => onOpenDetail(k.name)}
+                      hideSourceBadge
+                    />
+                  ))}
+                </div>
+              </div>
+              );
+            })}
           </div>
     </div>
   );
@@ -622,7 +668,7 @@ function PublishPanel({ onChanged, onOpenDetail }: { onChanged: () => void; onOp
   useEffect(() => { refresh(); }, [refresh]);
 
   const copy = (text: string, key: string) => {
-    navigator.clipboard?.writeText(text);
+    copyToClipboard(text);
     setCopied(key);
     setTimeout(() => setCopied(''), 1200);
   };
@@ -715,11 +761,14 @@ function PublishPanel({ onChanged, onOpenDetail }: { onChanged: () => void; onOp
   );
 }
 
-function SkillRow({ skill, selected, onClick, trailing }: {
+function SkillRow({ skill, selected, onClick, trailing, hideSourceBadge }: {
   skill: MarketSkill;
   selected: boolean;
   onClick: () => void;
   trailing?: ReactNode;
+  // Hide the registry-source badge when the row is already shown under that
+  // team's header (subscribe tab) — avoids repeating "hk" on every row.
+  hideSourceBadge?: boolean;
 }) {
   const installed = skill.status.installed;
 
@@ -744,7 +793,7 @@ function SkillRow({ skill, selected, onClick, trailing }: {
         <div data-id="skill-row-info" className="flex-1 min-w-0">
           <div data-id="skill-row-title-row" className="flex items-center gap-2 mb-0.5">
             <div data-id="skill-row-title" className="text-xs font-medium text-zinc-200 truncate">{skill.title}</div>
-            {skill.registry_source && (
+            {skill.registry_source && !hideSourceBadge && (
               <span
                 className="text-[10px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-300 inline-flex items-center gap-0.5 shrink-0"
                 data-id={`skill-market-private-${skill.name}`}
@@ -994,7 +1043,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
   }, [onClose]);
 
   const copy = (text: string) => {
-    navigator.clipboard?.writeText(text);
+    copyToClipboard(text);
     setCopied(text);
     setTimeout(() => setCopied(prev => prev === text ? '' : prev), 1200);
   };

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation, Trans } from 'react-i18next';
 import i18n from '../../i18n';
-import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, UserPlus, GitBranch, ChevronRight, ChevronDown, Archive, Eraser } from 'lucide-react';
+import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, UserPlus, GitBranch, ChevronRight, ChevronDown } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
@@ -737,53 +737,8 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                 <span data-id="team-panel-worker-menu-restart-label">{i18n.t('restart', { ns: 'teamPanel' })}</span>
               </button>
             ) : null}
-            {/* 压缩 / 清空:把 /compact、/clear 直接 api send 给该 agent 的输入。
-                CLI 和 cicy lite 都吃这两个命令,所以对所有类型显示 —— 这也保证
-                菜单永远非空(w-1001 这类 cicy master 卡也有内容)。/clear 不可逆,
-                先 modal confirm。 */}
-            <button
-              type="button"
-              data-id="team-panel-worker-menu-compact"
-              onMouseEnter={showMenuTip('compact')}
-              onMouseLeave={hideMenuTip}
-              onClick={() => {
-                setOpenMenuId(null);
-                setMenuTip(null);
-                apiService.sendCommand(wid, '/compact').then(() => {
-                  showToast(i18n.t('toastCompactSent', { ns: 'teamPanel', defaultValue: '已发送 /compact', name: title }));
-                }).catch(() => {
-                  showToast(i18n.t('toastSendFailed', { ns: 'teamPanel', defaultValue: '发送失败' }));
-                });
-              }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-white/[0.06]"
-            >
-              <Archive className="w-3.5 h-3.5 shrink-0" />
-              <span data-id="team-panel-worker-menu-compact-label">{i18n.t('menuCompact', { ns: 'teamPanel', defaultValue: '压缩对话 (/compact)' })}</span>
-            </button>
-            <button
-              type="button"
-              data-id="team-panel-worker-menu-clear"
-              onMouseEnter={showMenuTip('clear')}
-              onMouseLeave={hideMenuTip}
-              onClick={async () => {
-                setOpenMenuId(null);
-                setMenuTip(null);
-                const ok = await confirm({
-                  body: i18n.t('confirmClear', { ns: 'teamPanel', defaultValue: '清空 {{name}} 的对话?此操作不可恢复。', name: title }),
-                  danger: true,
-                });
-                if (!ok) return;
-                apiService.sendCommand(wid, '/clear').then(() => {
-                  showToast(i18n.t('toastClearSent', { ns: 'teamPanel', defaultValue: '已发送 /clear', name: title }));
-                }).catch(() => {
-                  showToast(i18n.t('toastSendFailed', { ns: 'teamPanel', defaultValue: '发送失败' }));
-                });
-              }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-red-500/10 hover:text-red-300"
-            >
-              <Eraser className="w-3.5 h-3.5 shrink-0" />
-              <span data-id="team-panel-worker-menu-clear-label">{i18n.t('menuClear', { ns: 'teamPanel', defaultValue: '清空对话 (/clear)' })}</span>
-            </button>
+            {/* /compact、/clear 已从此菜单移除 —— 这两个命令改由对话输入框的斜杠命令菜单
+                (输入 `/` 弹出)触发,菜单里不再重复。 */}
             {/* Fork(分身):coding-CLI agent 走 agent-summary + 新 tmux pane 拉起
                 CLI;cicy lite agent(如 w-1001 项目经理)没有终端,后端改走 headless
                 路径 —— 摘要内容内嵌为新 agent 的第一条 user message(UI 折叠显示),

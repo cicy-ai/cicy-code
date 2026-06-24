@@ -207,5 +207,12 @@
     "availOk": "available",
     "availPaid": "needs billing",
     "availQuota": "quota used"
-  }
+  },
+  "marketGroupPublic": "Public",
+  "marketGroupTeam": "Team",
+  "marketGroupLocal": "Local",
+  "subscribeNoSkills": "(no skills from this source)",
+  "subscribeNoSources": "No team sources subscribed yet",
+  "subscribeRemoveTitle": "Unsubscribe this team?",
+  "subscribeRemoveConfirm": "Remove team source \"{{name}}\". Installed skills stay on disk but won't update from this source."
 }

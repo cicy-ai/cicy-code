@@ -1175,10 +1175,12 @@ function cpModalUpdateAgent(opts: { agentType: string; agentId: string; apiHeade
         // Esc only closes when not mid-install (don't orphan a running stream silently).
         if (e.key === "Escape" && !running) { e.preventDefault(); e.stopPropagation(); close(); }
     }
-    // Restart the agent in its pane (re-source .cicy/boot.sh → relaunch the CLI on
-    // the freshly-installed version). Same action as the top-bar ▶ Launch button;
-    // offered after a successful update so the user can restart from here instead
-    // of hunting for the launch button.
+    // Restart the agent after a successful update. Use the real restart API
+    // (/api/tmux/panes/<id>/restart → restartPaneCore: full pane respawn that
+    // re-sources boot.sh and relaunches the CLI on the freshly-installed version),
+    // NOT /relaunch-agent — the latter just send-keys "source .cicy/boot.sh" into
+    // the pane, which races/garbles if the agent CLI is still running and isn't a
+    // clean restart. Same endpoint the top-bar ⟳ restart button uses.
     function restartAgent(): void {
         var headers: { [k: string]: string } = {};
         for (var hk in opts.apiHeaders) {
@@ -1186,7 +1188,7 @@ function cpModalUpdateAgent(opts: { agentType: string; agentId: string; apiHeade
         }
         var fetchImpl = (window as any).fetch;
         try {
-            fetchImpl("/api/tmux/panes/" + opts.agentId + "/relaunch-agent", { method: "POST", headers: headers }).catch(function(): void {});
+            fetchImpl("/api/tmux/panes/" + opts.agentId + "/restart", { method: "POST", headers: headers }).catch(function(): void {});
         } catch (_e) {}
         close();
     }

@@ -203,5 +203,12 @@
     "noMatches": "一致するモデルなし",
     "routes": "{{n}} 経路",
     "default": "デフォルト"
-  }
+  },
+  "marketGroupPublic": "公開",
+  "marketGroupTeam": "チーム",
+  "marketGroupLocal": "ローカル",
+  "subscribeNoSkills": "（このソースにスキルなし）",
+  "subscribeNoSources": "まだチームソースを登録していません",
+  "subscribeRemoveTitle": "このチームの購読を解除しますか？",
+  "subscribeRemoveConfirm": "チームソース「{{name}}」を削除します。インストール済みスキルは残りますが、このソースからの更新は受け取れません。"
 }

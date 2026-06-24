@@ -203,5 +203,12 @@
     "noMatches": "Aucun modèle correspondant",
     "routes": "{{n}} routes",
     "default": "défaut"
-  }
+  },
+  "marketGroupPublic": "Public",
+  "marketGroupTeam": "Équipe",
+  "marketGroupLocal": "Local",
+  "subscribeNoSkills": "(aucune compétence de cette source)",
+  "subscribeNoSources": "Aucune source d'équipe abonnée",
+  "subscribeRemoveTitle": "Se désabonner de cette équipe ?",
+  "subscribeRemoveConfirm": "Supprimer la source « {{name}} ». Les compétences installées restent mais ne seront plus mises à jour."
 }

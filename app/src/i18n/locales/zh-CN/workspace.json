@@ -207,5 +207,12 @@
     "availOk": "可用",
     "availPaid": "需付费",
     "availQuota": "额度耗尽"
-  }
+  },
+  "marketGroupPublic": "公共库",
+  "marketGroupTeam": "团队",
+  "marketGroupLocal": "本地",
+  "subscribeNoSkills": "（该来源暂无技能）",
+  "subscribeNoSources": "还没有订阅任何团队源",
+  "subscribeRemoveTitle": "取消订阅该团队?",
+  "subscribeRemoveConfirm": "将移除团队源「{{name}}」。已安装的技能会保留在本地,但不再随该源更新。"
 }
