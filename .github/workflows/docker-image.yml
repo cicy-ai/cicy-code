@@ -18,10 +18,10 @@ on:
       base_tag:
         description: 'Base-env image tag (e.g. 1.1.0)'
         required: false
-        default: '1.1.0'
+        default: '1.1.1'
 
 env:
-  BASE_TAG: ${{ github.event.inputs.base_tag || '1.1.0' }}
+  BASE_TAG: ${{ github.event.inputs.base_tag || '1.1.1' }}
 
 jobs:
   docker:

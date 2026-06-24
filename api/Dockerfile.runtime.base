@@ -20,30 +20,26 @@ ENV CICY_HOME=/home/cicy \
     CS_PORT=8002 \
     CICY_NO_BROWSER=1
 
+# Use the image's default Debian sources (deb.debian.org). The previous tuna
+# mirror rewrite started failing (http → 403, https → unreachable from the build
+# host), which silently broke base/runtime image builds. The default mirror builds
+# reliably both in CI and locally; switch back to a CN mirror here only if CI needs
+# the speed and that mirror is reachable from the build network.
 RUN set -eux; \
-    printf '%s\n' \
-        'Types: deb' \
-        'URIs: http://mirrors.tuna.tsinghua.edu.cn/debian' \
-        'Suites: bookworm bookworm-updates' \
-        'Components: main' \
-        'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
-        '' \
-        'Types: deb' \
-        'URIs: http://mirrors.tuna.tsinghua.edu.cn/debian-security' \
-        'Suites: bookworm-security' \
-        'Components: main' \
-        'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
-        > /etc/apt/sources.list.d/debian.sources; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         ca-certificates \
+        cron \
         curl \
         git \
         jq \
         openssh-client \
+        openssh-server \
         python3 \
         ripgrep \
         sudo \
+        supervisor \
+        tini \
         tmux \
         unzip \
         vim \

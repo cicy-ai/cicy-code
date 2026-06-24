@@ -1,34 +1,17 @@
-ARG BASE_IMAGE=ghcr.io/cicy-ai/cicy-code-base:1.0.8
+ARG BASE_IMAGE=docker.io/cicybot/cicy-code-base:1.1.1
 FROM ${BASE_IMAGE}
 
 USER root
 
+# supervisor / tini / cron / openssh-server are pre-installed in the base image
+# (Dockerfile.runtime.base) — supervisord runs as PID 1's child behind tini and
+# manages cicy-code, cron, sshd, and user daemons. This layer only prepares their
+# config dirs and drops baked SSH host keys so each container regenerates its own.
+# No apt here: keeps DEV image builds (dev.py --docker) offline and free of the
+# apt-mirror flakiness that used to silently break the runtime build.
 RUN set -eux; \
-    printf '%s\n' \
-        'Types: deb' \
-        'URIs: http://mirrors.tuna.tsinghua.edu.cn/debian' \
-        'Suites: bookworm bookworm-updates' \
-        'Components: main' \
-        'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
-        '' \
-        'Types: deb' \
-        'URIs: http://mirrors.tuna.tsinghua.edu.cn/debian-security' \
-        'Suites: bookworm-security' \
-        'Components: main' \
-        'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
-        > /etc/apt/sources.list.d/debian.sources
-
-# supervisord is now PID 1's child (behind tini): it manages cicy-code, the
-# cron daemon, the SSH server, and any user daemons — with autorestart, log
-# capture, and per-program `supervisorctl restart` for hot updates. tini reaps
-# zombies and forwards signals — important once arbitrary user daemons may fork
-# under PID 1. cron + openssh-server let users schedule jobs and SSH in.
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends supervisor tini cron openssh-server; \
     mkdir -p /etc/supervisor/conf.d /etc/ssh/sshd_config.d; \
-    rm -f /etc/ssh/ssh_host_*; \
-    rm -rf /var/lib/apt/lists/*
+    rm -f /etc/ssh/ssh_host_*
 
 # supervisord main config + the bundled programs (cicy-code, cron, sshd). User
 # daemons are added at runtime via the include dir (see supervisord.conf).
