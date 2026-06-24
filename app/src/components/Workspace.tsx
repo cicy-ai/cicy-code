@@ -2940,6 +2940,18 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
         />
       </button>
       {open ? (
+        // Full-screen backdrop: ttyd/code-server panes are iframes, so clicks
+        // inside them never reach `document` and the pointerdown listener above
+        // can't see them. This real DOM element sits above the iframes (below the
+        // popover) and closes the picker on any click outside the panel.
+        <div
+          data-id="model-picker-backdrop"
+          aria-hidden="true"
+          className="fixed inset-0 z-[179]"
+          onPointerDown={() => setOpen(false)}
+        />
+      ) : null}
+      {open ? (
         <div
           data-id="model-picker-popover"
           role="dialog"
