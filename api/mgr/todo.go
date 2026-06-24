@@ -72,7 +72,12 @@ func requesterPaneID(r *http.Request) string {
 }
 
 func todoFilePath(workspace string) string {
-	return filepath.Join(workspaceRuntimeDir(workspace), "todos.yaml")
+	// Single store relocated to ~/cicy-ai/db/todos.yaml (was
+	// <masterWs>/.cicy/todos.yaml) so it lives alongside the other syncable
+	// config under ~/cicy-ai/db. The workspace arg is now unused but kept for
+	// call-site compatibility.
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "cicy-ai", "db", "todos.yaml")
 }
 
 func loadTodos(workspace string) ([]Todo, error) {
@@ -181,6 +186,9 @@ func saveTodos(workspace string, todos []Todo) error {
 		return err
 	}
 	final := todoFilePath(workspace)
+	if err := os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
+		return err
+	}
 	tmp := final + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
 		return err
