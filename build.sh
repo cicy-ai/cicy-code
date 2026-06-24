@@ -309,11 +309,20 @@ build_docker() {
     echo "❌ Missing $API_DIR/cicy-code. Run ./build.sh build linux amd64 first."
     exit 1
   fi
-  cp  $API_DIR/cicy-code  $API_DIR/cicy-code-docker
-  cd $API_DIR && docker build -f Dockerfile.runtime \
+  cp "$API_DIR/cicy-code" "$API_DIR/cicy-code-docker"
+  # Run in a subshell so cwd stays put, and capture the real exit code with
+  # `|| rc=$?` so a failed build doesn't get swallowed by set -e's && exception
+  # (the old `docker build && cd` made the build a non-final && operand, so its
+  # failure was ignored and we'd falsely print "built" + reuse the stale image).
+  local rc=0
+  ( cd "$API_DIR" && docker build -f Dockerfile.runtime \
     --build-arg BASE_IMAGE="$base_image" \
-    -t cicy-code:${tag} . "${docker_args[@]}" && cd "$ROOT_DIR"
-  rm -f $API_DIR/cicy-code-docker
+    -t "cicy-code:${tag}" . "${docker_args[@]}" ) || rc=$?
+  rm -f "$API_DIR/cicy-code-docker"
+  if [ "$rc" -ne 0 ]; then
+    echo "❌ Docker image build FAILED (exit $rc): cicy-code:${tag}"
+    exit "$rc"
+  fi
   echo "✅ Docker image built: cicy-code:${tag}"
 }
 
@@ -327,9 +336,14 @@ build_docker_base() {
   base_dockerfile_hash="$(file_hash "$API_DIR/Dockerfile.runtime.base")"
   echo "📦 Building base Docker image cicy-code-base:${tag}..."
   echo "   BASE_DOCKERFILE_HASH=${base_dockerfile_hash:0:12}"
-  cd $API_DIR && docker build -f Dockerfile.runtime.base \
+  local rc=0
+  ( cd "$API_DIR" && docker build -f Dockerfile.runtime.base \
     --build-arg BASE_DOCKERFILE_HASH="$base_dockerfile_hash" \
-    -t cicy-code-base:${tag} . "${docker_args[@]}" && cd "$ROOT_DIR"
+    -t "cicy-code-base:${tag}" . "${docker_args[@]}" ) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "❌ Base Docker image build FAILED (exit $rc): cicy-code-base:${tag}"
+    exit "$rc"
+  fi
   echo "✅ Base Docker image built: cicy-code-base:${tag}"
 }
 
