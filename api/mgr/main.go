@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strings"
 	"syscall"
 	"time"
@@ -40,7 +41,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.23"
+const version = "2.3.24"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -634,6 +635,26 @@ Options:
 	// synchronously BEFORE listen: no new turn can be writing yet, so the sweep
 	// can't race a live one.
 	aiGatewaySweepStaleReplies()
+
+	// Private heap/goroutine profiling endpoint for leak diagnosis. Bound to
+	// 127.0.0.1 ONLY — never the public listener, so it is unreachable via :8008
+	// or any tunnel. Uses runtime/pprof (not net/http/pprof) so DefaultServeMux
+	// (the public mux) is never polluted with /debug/pprof handlers.
+	//   curl 127.0.0.1:6060/heap > heap.prof && go tool pprof heap.prof
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/heap", func(w http.ResponseWriter, r *http.Request) {
+			runtime.GC()
+			_ = pprof.WriteHeapProfile(w)
+		})
+		mux.HandleFunc("/goroutine", func(w http.ResponseWriter, r *http.Request) {
+			_ = pprof.Lookup("goroutine").WriteTo(w, 0)
+		})
+		mux.HandleFunc("/allocs", func(w http.ResponseWriter, r *http.Request) {
+			_ = pprof.Lookup("allocs").WriteTo(w, 0)
+		})
+		_ = http.ListenAndServe("127.0.0.1:6060", mux)
+	}()
 
 	log.Fatal(http.ListenAndServe(bind+":"+port, globalCORS(withGzip(http.DefaultServeMux))))
 }
