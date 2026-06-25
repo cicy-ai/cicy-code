@@ -124,7 +124,11 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
         return;
       }
       const groups = Array.isArray(list.groups) ? list.groups : [];
-      const primary = groups.find((g) => g.name === DEFAULT_GROUP) || groups[0] || null;
+      // Strictly bind the node switcher to default_proxy_group (worker/global-proxy
+      // traffic flows through it). No groups[0] fallback — if it's absent we show
+      // "暂无可选节点" rather than leaking some other group's nodes (e.g. a
+      // chrome-profile-*-group with members the global switch must not touch).
+      const primary = groups.find((g) => g.name === DEFAULT_GROUP) || null;
       setGroup(primary);
     } catch {
       setGroup(null);
