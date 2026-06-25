@@ -35,6 +35,13 @@ var aiGatewayOutboundSnapshots = struct {
 	items map[string]*aiGatewayOutboundSnapshot
 }{items: map[string]*aiGatewayOutboundSnapshot{}}
 
+// aiGatewayOutboundMaxRounds bounds how many outbound request bodies are kept
+// per conversation (in memory AND in outbound.json). Each body is the full wire
+// request, so an uncapped slice grew without bound on long tool-loop
+// conversations. The most recent rounds are the useful diagnostic; older ones
+// are trimmed and freed.
+const aiGatewayOutboundMaxRounds = 20
+
 func aiGatewayOutboundSnapshotPath(agentID string) string {
 	return filepath.Join(aiGatewayHistoryDir(agentID), "outbound.json")
 }
@@ -58,14 +65,28 @@ func aiGatewayAppendOutbound(agentID, conversationID, turnID, requestID string, 
 		snap = &aiGatewayOutboundSnapshot{ConversationID: conversationID, AgentID: agentID}
 		aiGatewayOutboundSnapshots.items[agentID] = snap
 	}
+	nextSeq := 1
+	if n := len(snap.Requests); n > 0 {
+		nextSeq = snap.Requests[n-1].Seq + 1 // monotonic even after trimming
+	}
 	snap.Requests = append(snap.Requests, aiGatewayOutboundRequestSnap{
-		Seq:       len(snap.Requests) + 1,
+		Seq:       nextSeq,
 		TurnID:    turnID,
 		RequestID: requestID,
 		Timestamp: ts.UTC().Format(time.RFC3339Nano),
 		NewTurn:   newTurn,
 		Body:      parsed,
 	})
+	// MEMORY LEAK FIX: each entry's Body is the FULL outbound request (the entire
+	// growing message history sent to the model that round). Accumulating EVERY
+	// round of a long conversation kept O(N) full-history copies resident per
+	// agent (≈2GB/hr under load). Cap to the most recent rounds and copy into a
+	// fresh slice so the trimmed-off bodies are actually released (reslicing alone
+	// keeps them alive in the backing array).
+	if len(snap.Requests) > aiGatewayOutboundMaxRounds {
+		snap.Requests = append([]aiGatewayOutboundRequestSnap(nil),
+			snap.Requests[len(snap.Requests)-aiGatewayOutboundMaxRounds:]...)
+	}
 	snap.UpdatedAt = ts.UTC().Format(time.RFC3339Nano)
 	out := *snap // copy for writing outside the lock
 	aiGatewayOutboundSnapshots.mu.Unlock()
