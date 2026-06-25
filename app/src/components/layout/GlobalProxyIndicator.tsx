@@ -47,8 +47,11 @@ function viaLabel(via?: string) {
   return '出口 IP';
 }
 
+// Show each proxy-group member by its RAW mihomo name (cicy-gw-us, default_proxy,
+// us_proxy, DIRECT, …). No relabeling: default_proxy and DIRECT used to BOTH be
+// rendered as "直连", which made default_proxy_group show two identical "直连"
+// entries. Raw names keep every member distinct.
 function memberLabel(member: string) {
-  if (member === 'default_proxy' || member === 'DIRECT') return '直连';
   return member;
 }
 

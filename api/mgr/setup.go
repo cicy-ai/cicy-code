@@ -1066,7 +1066,7 @@ func checkEnv() {
 
 var preinstalledSkills = []string{
 	"agent-chrome", "agent-editor", "agent-desktop", "agent-webpage",
-	"cicy-agent", "cicy-todo", "cicy-mihomo", "cicy-ssh", "proxy_ssh", "globalApiToken",
+	"cicy-agent", "cicy-todo", "cicy-mihomo", "cicy-ssh", "proxy_ssh", "global-api-token",
 	"agent-summary",
 	// Team knowledge Layer 2 store CLI (add/list/recall/promote/...) — fresh
 	// installs get it so agents can record/recall team knowledge out of the box.

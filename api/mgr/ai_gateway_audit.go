@@ -1830,7 +1830,19 @@ func aiGatewayWriteReplySnapshot(agentID string, reply aiGatewayReplySnapshot) e
 		CostCredit:               reply.CostCredit,
 		LastStopReason:           reply.LastStopReason,
 	}
-	return aiGatewayWriteSnapshotFile(agentID, "reply.json", reply.ConversationID, lite)
+	err := aiGatewayWriteSnapshotFile(agentID, "reply.json", reply.ConversationID, lite)
+	// MEMORY LEAK FIX: the in-memory live-snapshot cache only needs replies that
+	// are still STREAMING. Once a reply is terminal, the on-disk reply.json is the
+	// source of truth (aiGatewayLoadReplySnapshot reads the file first), so drop
+	// the in-memory copy. Without this, aiGatewayDeleteLiveReplySnapshot was never
+	// called anywhere, so every agent/fork ever seen kept its full parsed reply
+	// (Items []map[string]interface{}) resident forever — an unbounded heap leak
+	// (observed ~700MB/hr under load). Only delete after a successful write so a
+	// write failure keeps the in-memory copy as a fallback.
+	if err == nil && isAIGatewayReplyTerminal(strings.ToLower(strings.TrimSpace(reply.Status))) {
+		aiGatewayDeleteLiveReplySnapshot(agentID)
+	}
+	return err
 }
 
 func aiGatewayReadReplySnapshotFile(agentID string) (aiGatewayReplySnapshot, error) {
