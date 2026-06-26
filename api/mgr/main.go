@@ -41,7 +41,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.26"
+const version = "2.3.27"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -597,9 +597,14 @@ Options:
 	log.Printf("")
 	log.Printf("============================================================")
 	log.Printf("")
-	log.Printf("  >>> CICY CODE <<<")
+	log.Printf("  >>> CICY CODE v%s <<<", version)
 	log.Printf("============================================================")
 	log.Printf("  Token: %s", token)
+	// Actual listen address — 0.0.0.0:port under --public (network-exposed),
+	// 127.0.0.1:port otherwise (loopback). Shown ABOVE the URL so you can tell at
+	// a glance whether this instance is public; the URL line below stays 127.0.0.1
+	// because that's the address you click locally even when bound to 0.0.0.0.
+	log.Printf("  Listen: %s:%s%s", bind, port, map[bool]string{true: "  (--public)", false: "  (loopback)"}[publicMode])
 	log.Printf("  URL:   %s", openURL)
 	log.Printf("============================================================")
 	log.Printf("")
