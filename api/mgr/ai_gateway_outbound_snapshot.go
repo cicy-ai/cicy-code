@@ -40,7 +40,7 @@ var aiGatewayOutboundSnapshots = struct {
 // request, so an uncapped slice grew without bound on long tool-loop
 // conversations. The most recent rounds are the useful diagnostic; older ones
 // are trimmed and freed.
-const aiGatewayOutboundMaxRounds = 20
+const aiGatewayOutboundMaxRounds = 10
 
 func aiGatewayOutboundSnapshotPath(agentID string) string {
 	return filepath.Join(aiGatewayHistoryDir(agentID), "outbound.json")
@@ -53,9 +53,16 @@ func aiGatewayAppendOutbound(agentID, conversationID, turnID, requestID string, 
 	if agentID == "" || len(body) == 0 {
 		return
 	}
-	var parsed interface{}
-	if json.Unmarshal(body, &parsed) != nil {
-		parsed = string(body)
+	// Store the RAW request bytes, not a parsed interface{} tree. Unmarshaling
+	// into nested map[string]interface{} inflates memory 2–5× over the raw bytes
+	// (bytes.growSlice + json.unquote dominated the heap). json.RawMessage marshals
+	// back verbatim, so outbound.json is byte-identical — we just stop paying the
+	// parse-tree overhead for every retained round.
+	var bodyVal interface{}
+	if json.Valid(body) {
+		bodyVal = json.RawMessage(append([]byte(nil), body...))
+	} else {
+		bodyVal = string(body)
 	}
 	newTurn := aiGatewayOutboundIsNewTurn(body)
 
@@ -75,7 +82,7 @@ func aiGatewayAppendOutbound(agentID, conversationID, turnID, requestID string, 
 		RequestID: requestID,
 		Timestamp: ts.UTC().Format(time.RFC3339Nano),
 		NewTurn:   newTurn,
-		Body:      parsed,
+		Body:      bodyVal,
 	})
 	// MEMORY LEAK FIX: each entry's Body is the FULL outbound request (the entire
 	// growing message history sent to the model that round). Accumulating EVERY
