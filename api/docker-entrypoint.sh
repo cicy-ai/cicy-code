@@ -5,6 +5,7 @@ set -euo pipefail
 HOME_DIR="${HOME:-/home/cicy}"
 CICY_ROOT_DIR="$HOME_DIR/cicy-ai"
 STATE_DIR="$CICY_ROOT_DIR/.cicy"
+LOG_DIR="$HOME_DIR/logs" # logs (supervisord) + the cicy-code launch args live here, not under cicy-ai/.cicy
 GLOBAL_JSON_PATH="$CICY_ROOT_DIR/global.json"
 
 log() {
@@ -160,13 +161,14 @@ main() {
   ensure_cicy_code
   ensure_ssh
 
-  mkdir -p "$STATE_DIR/logs" "$CICY_ROOT_DIR/supervisor"
+  mkdir -p "$LOG_DIR" "$CICY_ROOT_DIR/supervisor"
 
   # Capture any extra container args for the cicy-code wrapper. The env-derived
   # flags (--public/--cdn) are added by the wrapper itself; these are the
   # positional extras that used to be forwarded via `exec cicy-code "$@"`.
-  : >"$STATE_DIR/cicy-code.args"
-  for arg in "$@"; do printf '%s\n' "$arg" >>"$STATE_DIR/cicy-code.args"; done
+  # Lives under ~/logs (kept in sync with ARGS_FILE in cicy-code-run.sh).
+  : >"$LOG_DIR/cicy-code.args"
+  for arg in "$@"; do printf '%s\n' "$arg" >>"$LOG_DIR/cicy-code.args"; done
 
   log "starting supervisord (cicy-code + cron + sshd + user daemons)"
   exec supervisord -c /etc/supervisor/supervisord.conf

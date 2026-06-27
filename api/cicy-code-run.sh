@@ -11,7 +11,7 @@ set -euo pipefail
 
 HOME_DIR="${HOME:-/home/cicy}"
 BIN="$HOME_DIR/.local/bin/cicy-code"
-ARGS_FILE="$HOME_DIR/cicy-ai/.cicy/cicy-code.args"
+ARGS_FILE="$HOME_DIR/logs/cicy-code.args" # written by docker-entrypoint.sh (keep paths in sync)
 
 args=()
 case " ${CICY_PUBLIC:-} " in *" 1 "*|*" true "*|*" TRUE "*|*" True "*|*" yes "*|*" YES "*|*" on "*|*" ON "*) args+=(--public);; esac
