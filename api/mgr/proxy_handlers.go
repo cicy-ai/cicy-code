@@ -200,6 +200,31 @@ func handleProxyList(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"success": true, "groups": groups, "nodes": nodes})
 }
 
+// directExitIPCache memoizes the DIRECT (no-proxy) exit IP so a "test all" that
+// probes N nodes only hits the network ONCE for direct — the direct egress is
+// the same regardless of which proxy node is being tested. A short TTL still
+// picks up a network change between batches.
+var directExitIPCache = struct {
+	mu      sync.Mutex
+	val     M
+	fetched time.Time
+}{}
+
+func cachedDirectExitIP(ctx context.Context) M {
+	const ttl = 60 * time.Second
+	directExitIPCache.mu.Lock()
+	defer directExitIPCache.mu.Unlock()
+	if directExitIPCache.val != nil && time.Since(directExitIPCache.fetched) < ttl {
+		return directExitIPCache.val
+	}
+	v := curlExitIP(ctx, "direct", "")
+	if ok, _ := v["ok"].(bool); ok { // only cache a successful probe so a blip re-probes
+		directExitIPCache.val = v
+		directExitIPCache.fetched = time.Now()
+	}
+	return v
+}
+
 // handleProxyTest — POST /api/proxy/test
 //
 // Body: {"name": "<proxy_or_group>", "urls": ["https://...", ...]}
@@ -244,7 +269,7 @@ func handleProxyTest(w http.ResponseWriter, r *http.Request) {
 	// Also probe the DIRECT exit IP (no proxy, no group mutation) so the UI can
 	// show proxy-vs-direct: same IP → one shown, different → both. curlExitIP with
 	// proxyURL="" goes out with --noproxy.
-	ipDirect := curlExitIP(r.Context(), "direct", "")
+	ipDirect := cachedDirectExitIP(r.Context())
 	J(w, M{
 		"success":   true,
 		"name":      name,

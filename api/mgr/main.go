@@ -41,7 +41,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.35"
+const version = "2.3.36"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
