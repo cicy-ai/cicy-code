@@ -296,10 +296,12 @@ func mihomoDelayProbe(parent context.Context, name, target string) M {
 // curl is used inside the race (vs http.Client) so we get robust auth +
 // CONNECT semantics without re-implementing CONNECT-via-proxy here.
 func mihomoExitIPProbe(name string) M {
+	// globalPassword is empty when mihomo runs in localhost-skip-auth mode
+	// (skip-auth-prefixes 127.0.0.1) instead of the cloud's w-<id> auth model.
+	// The probe goes out from localhost, so it can connect WITHOUT credentials in
+	// that case — exactly like the exit-info dual probe (curlExitIP with a bare
+	// http://<mixed> URL). So don't bail on an empty password; just omit the auth.
 	password := readMihomoGlobalPasswordFromYAML()
-	if password == "" {
-		return M{"ok": false, "error": "no globalPassword in mihomo.yaml"}
-	}
 
 	// `default_proxy_group` is the group that worker traffic flows through
 	// (see IN-USER-PREFIX,w-,default_proxy_group). Switching it to itself is a
@@ -328,7 +330,10 @@ func mihomoExitIPProbe(name string) M {
 		}
 	}()
 
-	proxyURL := fmt.Sprintf("http://w-proxytest:%s@%s", password, mihomoMixedAddr())
+	proxyURL := "http://" + mihomoMixedAddr()
+	if password != "" {
+		proxyURL = fmt.Sprintf("http://w-proxytest:%s@%s", password, mihomoMixedAddr())
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	base := []string{"-sS", "-m", "8", "-x", proxyURL}
