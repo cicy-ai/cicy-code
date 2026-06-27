@@ -865,20 +865,18 @@ function ProxyTableRow({
           if (!(proxy.ok && proxy.ip)) {
             return <span data-id={`proxy-manager-cell-${entry.name}-ip-fail`} className="text-red-400" title={proxy.error}>fail</span>;
           }
-          // ping0.cc link; title carries the full IP so hover always reveals it.
+          // Plain IP text (no external link); title carries the full IP so hover
+          // always reveals it even when the cell truncates.
           const ipLink = (res: IPResult, slot: string, label?: string) => (
-            <a
+            <span
               data-id={`proxy-manager-cell-${entry.name}-ip-${slot}`}
-              href={`https://ping0.cc/ip/${encodeURIComponent(res.ip!)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={`ping0.cc / ${res.ip}`}
-              className="inline-flex items-center text-emerald-400 underline decoration-emerald-500/30 underline-offset-2 hover:decoration-emerald-300"
+              title={res.ip}
+              className="inline-flex items-center text-emerald-400"
             >
               {label ? <span className="mr-1 text-[10px] text-zinc-500">{label}</span> : null}
               {res.ip}
               {res.cc ? <span className="ml-1 text-zinc-500">{res.cc}</span> : null}
-            </a>
+            </span>
           );
           const directOk = !!(direct && direct.ok && direct.ip);
           // Proxy and direct egress identical (or no direct probe) → show ONE IP.
