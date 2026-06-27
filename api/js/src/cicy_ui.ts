@@ -1739,6 +1739,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var svgUpdate  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13"/><path d="m6 10 6-6 6 6"/><path d="M5 21h14"/></svg>';
     var svgRestart = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>';
     var svgReload  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>';
+    var svgGpu     = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>';
 
     // All buttons share the same tooltip stack: bottom-right anchored,
     // multiline (cp-tooltip-multiline = pre-line + min-width 164). Tooltips
@@ -1751,6 +1752,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         '<button id="cp-agent-launch" class="' + tipCls + '" data-tooltip="' + ttydT("tipLaunchAgent") + '">' + svgPlay + '</button>' +
         '<button id="cp-agent-update" class="' + tipCls + '" data-tooltip="' + ttydT("tipUpdateAgent") + '">' + svgUpdate + '</button>' +
         '<button id="cp-win-restart" class="' + tipCls + '" data-tooltip="' + ttydT("tipRestartAgent") + '">' + svgRestart + '</button>' +
+        '<button id="cp-webgl" class="' + tipCls + '" data-tooltip="WebGL 终端渲染\n默认关 · 点击切换(需刷新)">' + svgGpu + '</button>' +
         '<button id="cp-reload" class="' + tipCls + '" data-tooltip="' + ttydT("tipReloadPage") + '" onclick="location.reload()">' + svgReload + '</button>';
 
     // Action buttons live inside the floating bar (as its rightmost flex
@@ -1782,6 +1784,21 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var launchBtn = document.getElementById("cp-agent-launch") as HTMLButtonElement;
     var updateBtn = document.getElementById("cp-agent-update") as HTMLButtonElement;
     var kbdBtn = document.getElementById("cp-kbd") as HTMLButtonElement;
+
+    // WebGL terminal-renderer toggle (default OFF — xterm.ts reads
+    // localStorage "cicy:webgl" at terminal creation and only loads the WebGL
+    // addon when it is "1"; otherwise the robust DOM renderer is used). The flag
+    // is read once per terminal, so flip it and reload to apply.
+    var webglBtn = document.getElementById("cp-webgl") as HTMLButtonElement;
+    if (webglBtn) {
+        try { webglBtn.classList.toggle("active", localStorage.getItem("cicy:webgl") === "1"); } catch (_e) {}
+        webglBtn.addEventListener("click", function(): void {
+            var on = false;
+            try { on = localStorage.getItem("cicy:webgl") === "1"; } catch (_e) {}
+            try { localStorage.setItem("cicy:webgl", on ? "0" : "1"); } catch (_e) {}
+            location.reload();
+        });
+    }
 
     // Resolve this pane's agent_type once on init so the Launch/Update confirm
     // dialogs can show the concrete agent name ("启动 codex" / "Update claude").

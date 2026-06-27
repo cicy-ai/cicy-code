@@ -321,21 +321,17 @@ export class Xterm {
 
         this.term.open(elem);
 
-        // GPU-accelerated renderer. The WebGL addon must load AFTER open().
-        // 5-10x render throughput over the default DOM renderer — visible as
-        // smooth scrolling under heavy tmux output. On context loss (driver
-        // reset, too many live WebGL canvases) dispose the addon and xterm
-        // falls back to the DOM renderer transparently; same if the platform
-        // has no WebGL2 at all (loadAddon throws → caught → DOM renderer).
-        //
-        // EXCEPTION: codex-on-gateway panes (config.js sets window.cicyModelMask)
-        // force the DOM renderer. Their leaked model status row is hidden by a CSS
-        // rule that matches the DOM terminal rows (cicy_ui.ts) — WebGL draws to a
-        // canvas with no DOM rows, so that whole-row hide can't work under WebGL.
-        // DOM renderer here is what makes the row vanish cleanly (no blanked gap).
-        var forceDomRenderer = false;
+        // WebGL renderer is OPT-IN, DEFAULT OFF (主人指令). The DOM renderer is the
+        // robust default — no WebGL context-loss, no GPU live-canvas limit (too
+        // many panes), and the codex-model-mask CSS row-hide works (WebGL draws to
+        // a canvas with no DOM rows). Users can turn WebGL on (5-10x throughput
+        // under heavy output) via the gotty control-panel toggle, which sets
+        // localStorage "cicy:webgl"="1". Codex-model-mask panes always force DOM.
+        let webglEnabled = false;
+        try { webglEnabled = localStorage.getItem("cicy:webgl") === "1"; } catch (_e) {}
+        let forceDomRenderer = false;
         try { forceDomRenderer = !!(window as any).cicyModelMask; } catch (_e) {}
-        if (!forceDomRenderer) {
+        if (webglEnabled && !forceDomRenderer) {
             try {
                 const webgl = new WebglAddon();
                 webgl.onContextLoss(() => {
