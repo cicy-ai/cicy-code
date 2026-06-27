@@ -37,6 +37,7 @@ RUN set -eux; \
         openssh-server \
         python3 \
         ripgrep \
+        rsync \
         sudo \
         supervisor \
         tini \
