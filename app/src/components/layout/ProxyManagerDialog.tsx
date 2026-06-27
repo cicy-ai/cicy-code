@@ -58,7 +58,7 @@ type TestResult = {
 const PROBE_COLUMNS: Array<{ url: string; short: string }> = [
   { url: 'https://api.anthropic.com', short: 'anthropic' },
   { url: 'https://chatgpt.com', short: 'chatgpt' },
-  { url: 'https://api.myip.com', short: 'myip' },
+  { url: 'https://www.cloudflare.com', short: 'cloudflare' },
 ];
 
 export function ProxyManagerDialog({
@@ -466,25 +466,6 @@ export function ProxyManagerDialog({
           </div>
         </header>
 
-        <div
-          data-id="proxy-manager-drawer-config-alert"
-          className="flex items-start gap-2 border-b border-red-900/50 bg-red-950/40 px-5 py-2.5 text-[11px] text-red-300/90"
-        >
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400/90" />
-          <div className="min-w-0">
-            <div>
-              {t('proxyManagerConfigLabel')}：
-              <code data-id="proxy-manager-drawer-config-path" className="select-text break-all font-mono text-red-200">
-                {status?.config || '~/cicy-ai/db/mihomo.yaml'}
-              </code>
-            </div>
-            <div data-id="proxy-manager-drawer-config-warn" className="mt-0.5 text-red-400/90">{t('proxyManagerConfigWarn')}</div>
-            {resetMsg && !resetConfirm && (
-              <div data-id="proxy-manager-drawer-reset-msg" className="mt-1 break-all text-emerald-400/90">{resetMsg}</div>
-            )}
-          </div>
-        </div>
-
         {resetConfirm && (
           <div data-id="proxy-manager-reset-modal" className="fixed inset-0 z-[200] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/60" onClick={() => { if (!resetting) setResetConfirm(false); }} />
@@ -713,6 +694,25 @@ export function ProxyManagerDialog({
               </tbody>
             </table>
           )}
+        </div>
+
+        <div
+          data-id="proxy-manager-drawer-config-alert"
+          className="flex items-start gap-2 border-t border-red-900/50 bg-red-950/40 px-5 py-2.5 text-[11px] text-red-300/90"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400/90" />
+          <div className="min-w-0">
+            <div>
+              {t('proxyManagerConfigLabel')}：
+              <code data-id="proxy-manager-drawer-config-path" className="select-text break-all font-mono text-red-200">
+                {status?.config || '~/cicy-ai/db/mihomo.yaml'}
+              </code>
+            </div>
+            <div data-id="proxy-manager-drawer-config-warn" className="mt-0.5 text-red-400/90">{t('proxyManagerConfigWarn')}</div>
+            {resetMsg && !resetConfirm && (
+              <div data-id="proxy-manager-drawer-reset-msg" className="mt-1 break-all text-emerald-400/90">{resetMsg}</div>
+            )}
+          </div>
         </div>
       </aside>
     </div>

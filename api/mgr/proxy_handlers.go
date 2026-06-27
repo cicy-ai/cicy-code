@@ -232,7 +232,7 @@ func handleProxyTest(w http.ResponseWriter, r *http.Request) {
 		req.URLs = []string{
 			"https://api.anthropic.com",
 			"https://chatgpt.com",
-			"https://api.myip.com",
+			"https://www.cloudflare.com", // was api.myip.com (flaky/down) — cloudflare is a reliable reachability target; keep in sync with PROBE_COLUMNS in ProxyManagerDialog.tsx
 		}
 	}
 
@@ -462,16 +462,26 @@ type ipExitProbe struct {
 
 var ipExitProbes = []ipExitProbe{
 	{
-		name: "myip.com",
-		url:  "https://api.myip.com",
+		// Cloudflare trace — first because it's the most reliable + fastest source
+		// and, crucially, works through proxies where the foreign api.myip.com /
+		// api.ip.sb are slow/blocked and ipip.net is geo-flaky from a non-CN exit
+		// (that combo made the proxy-side exit-IP probe time out → "all probes
+		// failed"). Plain text key=value lines; we read ip= and loc= (country code).
+		name: "cf-trace",
+		url:  "https://www.cloudflare.com/cdn-cgi/trace",
 		parse: func(body []byte) (M, bool) {
-			var p struct {
-				IP, Country, CC string
+			ip, cc := "", ""
+			for _, line := range strings.Split(string(body), "\n") {
+				if v, ok := strings.CutPrefix(line, "ip="); ok {
+					ip = strings.TrimSpace(v)
+				} else if v, ok := strings.CutPrefix(line, "loc="); ok {
+					cc = strings.TrimSpace(v)
+				}
 			}
-			if json.Unmarshal(body, &p) != nil || p.IP == "" {
+			if ip == "" {
 				return nil, false
 			}
-			return M{"ip": p.IP, "country": p.Country, "cc": p.CC, "source": "myip.com"}, true
+			return M{"ip": ip, "country": cc, "cc": cc, "source": "cf-trace"}, true
 		},
 	},
 	{
