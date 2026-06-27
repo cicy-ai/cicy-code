@@ -48,7 +48,8 @@ type IPResult = {
 
 type TestResult = {
   results: DelayRow[];
-  ip?: IPResult;
+  ip?: IPResult;        // exit IP via the proxy node
+  ipDirect?: IPResult;  // exit IP WITHOUT proxy (direct) — for proxy-vs-direct compare
   running?: boolean;
 };
 
@@ -240,12 +241,13 @@ export function ProxyManagerDialog({
     }));
     try {
       const resp = await apiService.testProxy(name);
-      const data = (resp?.data || {}) as { results?: DelayRow[]; ip?: IPResult };
+      const data = (resp?.data || {}) as { results?: DelayRow[]; ip?: IPResult; ip_direct?: IPResult };
       setResults((prev) => ({
         ...prev,
         [name]: {
           results: data.results || [],
           ip: data.ip,
+          ipDirect: data.ip_direct,
           running: false,
         },
       }));
@@ -851,27 +853,46 @@ function ProxyTableRow({
         );
       })}
       <td data-id={`proxy-manager-cell-${entry.name}-ip`} className="border-b border-white/[0.04] px-2 py-2 align-top font-mono">
-        {result?.running && !result?.ip ? (
-          <span data-id={`proxy-manager-cell-${entry.name}-ip-pending`} className="text-zinc-700">...</span>
-        ) : result?.ip ? (
-          result.ip.ok && result.ip.ip ? (
+        {(() => {
+          if (result?.running && !result?.ip) {
+            return <span data-id={`proxy-manager-cell-${entry.name}-ip-pending`} className="text-zinc-700">...</span>;
+          }
+          if (!result?.ip) {
+            return <span data-id={`proxy-manager-cell-${entry.name}-ip-empty`} className="text-zinc-700">-</span>;
+          }
+          const proxy = result.ip;
+          const direct = result.ipDirect;
+          if (!(proxy.ok && proxy.ip)) {
+            return <span data-id={`proxy-manager-cell-${entry.name}-ip-fail`} className="text-red-400" title={proxy.error}>fail</span>;
+          }
+          // ping0.cc link; title carries the full IP so hover always reveals it.
+          const ipLink = (res: IPResult, slot: string, label?: string) => (
             <a
-              data-id={`proxy-manager-cell-${entry.name}-ip-ok`}
-              href={`https://ping0.cc/ip/${encodeURIComponent(result.ip.ip)}`}
+              data-id={`proxy-manager-cell-${entry.name}-ip-${slot}`}
+              href={`https://ping0.cc/ip/${encodeURIComponent(res.ip!)}`}
               target="_blank"
               rel="noopener noreferrer"
-              title={`ping0.cc / ${result.ip.ip}`}
-              className="text-emerald-400 underline decoration-emerald-500/30 underline-offset-2 hover:decoration-emerald-300"
+              title={`ping0.cc / ${res.ip}`}
+              className="inline-flex items-center text-emerald-400 underline decoration-emerald-500/30 underline-offset-2 hover:decoration-emerald-300"
             >
-              {result.ip.ip}
-              {result.ip.cc && <span data-id={`proxy-manager-cell-${entry.name}-ip-cc`} className="ml-1 text-zinc-500">{result.ip.cc}</span>}
+              {label ? <span className="mr-1 text-[10px] text-zinc-500">{label}</span> : null}
+              {res.ip}
+              {res.cc ? <span className="ml-1 text-zinc-500">{res.cc}</span> : null}
             </a>
-          ) : (
-            <span data-id={`proxy-manager-cell-${entry.name}-ip-fail`} className="text-red-400" title={result.ip.error}>fail</span>
-          )
-        ) : (
-          <span data-id={`proxy-manager-cell-${entry.name}-ip-empty`} className="text-zinc-700">-</span>
-        )}
+          );
+          const directOk = !!(direct && direct.ok && direct.ip);
+          // Proxy and direct egress identical (or no direct probe) → show ONE IP.
+          // Different → show both, labeled 代理 / 直连.
+          if (!directOk || direct!.ip === proxy.ip) {
+            return ipLink(proxy, 'ok');
+          }
+          return (
+            <div data-id={`proxy-manager-cell-${entry.name}-ip-pair`} className="flex flex-col gap-0.5">
+              {ipLink(proxy, 'proxy', '代理')}
+              {ipLink(direct!, 'direct', '直连')}
+            </div>
+          );
+        })()}
       </td>
       <td data-id={`proxy-manager-cell-${entry.name}-action`} className="border-b border-white/[0.04] px-2 py-2 text-right align-top">
         <button

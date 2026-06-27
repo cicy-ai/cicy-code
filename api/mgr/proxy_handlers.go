@@ -241,11 +241,16 @@ func handleProxyTest(w http.ResponseWriter, r *http.Request) {
 		results = append(results, mihomoDelayProbe(r.Context(), name, target))
 	}
 	ip := mihomoExitIPProbe(name)
+	// Also probe the DIRECT exit IP (no proxy, no group mutation) so the UI can
+	// show proxy-vs-direct: same IP → one shown, different → both. curlExitIP with
+	// proxyURL="" goes out with --noproxy.
+	ipDirect := curlExitIP(r.Context(), "direct", "")
 	J(w, M{
-		"success": true,
-		"name":    name,
-		"results": results,
-		"ip":      ip,
+		"success":   true,
+		"name":      name,
+		"results":   results,
+		"ip":        ip,
+		"ip_direct": ipDirect,
 	})
 }
 

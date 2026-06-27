@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Globe, Loader2, RefreshCw, SlidersHorizontal } from 'lucide-react';
+import { Globe, Loader2, RefreshCw, Zap, SlidersHorizontal } from 'lucide-react';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
 
@@ -41,6 +41,12 @@ type ProxyList = {
   nodes?: Array<{ name: string; type?: string; last_delay_ms?: number }>;
 };
 
+function viaLabel(via?: string) {
+  if (via === 'proxy') return '代理出口';
+  if (via === 'direct') return '直连出口';
+  return '出口 IP';
+}
+
 // Show each proxy-group member by its RAW mihomo name (cicy-gw-us, default_proxy,
 // us_proxy, DIRECT, …). No relabeling: default_proxy and DIRECT used to BOTH be
 // rendered as "直连", which made default_proxy_group show two identical "直连"
@@ -49,24 +55,38 @@ function memberLabel(member: string) {
   return member;
 }
 
-// Compact exit-IP chip: shows the IP (mono, truncated) with the full value in
-// title= so hover reveals it. Optional label (代理/直连) when proxy and direct
-// egress differ. Falls back to a red "探测失败" when the probe had no IP.
-function ExitIPBadge({ ip, label, error }: { ip: string; label?: string; error?: string }) {
-  const failed = !ip;
+function ExitRow({ group, highlight }: { group: ExitGroup; highlight?: boolean }) {
+  const failed = group.ok === false;
+  const elapsed = typeof group.elapsed_ms === 'number' ? `${group.elapsed_ms}ms` : '';
   return (
-    <span
-      data-id="global-proxy-exit-ip"
-      title={ip || error || ''}
-      className={`inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2.5 py-2 ${
-        failed ? 'bg-red-500/10' : 'bg-white/[0.04]'
+    <div
+      data-id="global-proxy-exit-row"
+      className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 ${
+        highlight
+          ? 'bg-emerald-500/10 ring-1 ring-emerald-500/30'
+          : 'bg-white/[0.03]'
       }`}
     >
-      {label ? <span className="shrink-0 text-[10px] uppercase tracking-[0.12em] text-zinc-500">{label}</span> : null}
-      <span className={`truncate font-mono text-[12px] font-medium ${failed ? 'text-red-300' : 'text-zinc-100'}`}>
-        {ip || (error ? '探测失败' : '--')}
-      </span>
-    </span>
+      <div data-id="global-proxy-exit-row-main" className="min-w-0">
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-zinc-500">
+          {highlight ? <Zap className="h-3 w-3 text-emerald-400" /> : <Globe className="h-3 w-3" />}
+          <span>{viaLabel(group.via)}</span>
+        </div>
+        {failed ? (
+          <div className="mt-0.5 truncate text-[12px] font-medium text-red-300">
+            {group.error || '探测失败'}
+          </div>
+        ) : (
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <span className="font-mono text-[12px] font-medium text-zinc-100">{group.ip || '--'}</span>
+            {group.area ? <span className="truncate text-[11px] text-zinc-400">{group.area}</span> : null}
+          </div>
+        )}
+      </div>
+      {elapsed ? (
+        <span className={`shrink-0 font-mono text-[11px] ${failed ? 'text-red-400/70' : 'text-zinc-500'}`}>{elapsed}</span>
+      ) : null}
+    </div>
   );
 }
 
@@ -231,27 +251,12 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
               <div className="rounded-lg bg-red-500/10 px-2.5 py-3 text-[12px] text-red-300">{exitError}</div>
             ) : groups.length === 0 ? (
               <div className="rounded-lg bg-white/[0.03] px-2.5 py-3 text-[12px] text-zinc-500">暂无数据</div>
+            ) : isMatch ? (
+              <ExitRow group={groups[0]} />
             ) : (
-              (() => {
-                const proxy = groups.find((g) => g.via === 'proxy');
-                const direct = groups.find((g) => g.via === 'direct');
-                const pIP = proxy?.ok ? (proxy.ip || '') : '';
-                const dIP = direct?.ok ? (direct.ip || '') : '';
-                // Same exit IP (proxy and direct egress identical, or backend
-                // flagged match) → show ONE ip. Different → show both (ip1 ip2).
-                // The full IP is always in title= so hover reveals it even when
-                // the inline value is truncated (long IPv6).
-                const same = isMatch || (!!pIP && pIP === dIP);
-                if (same && (pIP || dIP)) {
-                  return <ExitIPBadge ip={pIP || dIP} />;
-                }
-                return (
-                  <div data-id="global-proxy-exit-ips" className="flex items-center gap-1.5 px-1">
-                    <ExitIPBadge ip={pIP} label="代理" error={proxy?.error} />
-                    <ExitIPBadge ip={dIP} label="直连" error={direct?.error} />
-                  </div>
-                );
-              })()
+              groups.map((g, idx) => (
+                <ExitRow key={`${g.via || 'g'}-${idx}`} group={g} highlight={g.via === 'proxy'} />
+              ))
             )}
           </div>
 
