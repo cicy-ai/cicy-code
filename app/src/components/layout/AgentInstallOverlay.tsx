@@ -3,6 +3,11 @@ import config from '../../config'
 import apiService from '../../services/api'
 import { TokenManager } from '../../services/tokenManager'
 import { isCicyLiteAgent } from '../../lib/agentType'
+import i18n from '../../i18n'
+
+// All copy lives under the `workspace` namespace's `agentInstall.*` keys.
+const t = (k: string, o?: Record<string, unknown>) =>
+  i18n.t(`agentInstall.${k}`, { ns: 'workspace', ...o }) as string
 
 // AgentInstallOverlay sits ON TOP of one un-installed coding-CLI agent's frame.
 // Auto-install in the terminal was removed; instead this overlay prompts the user
@@ -32,10 +37,14 @@ interface InstallStatus {
 function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props) {
   const [status, setStatus] = useState<InstallStatus | null>(null)
   const [phase, setPhase] = useState<Phase>('idle')
-  const [phaseText, setPhaseText] = useState('')
   const [percent, setPercent] = useState(0)
   const [log, setLog] = useState<string[]>([])
+  // Backend errors arrive as a localizable {code, cli}; only raw network errors
+  // (fetch threw) fall back to a literal message. Keep them apart so the rendered
+  // error is fully i18n'd off the code, never the backend's zh `error` string.
   const [error, setError] = useState('')
+  const [errCode, setErrCode] = useState('')
+  const [errCli, setErrCli] = useState('')
   const [restarting, setRestarting] = useState(false)
   const [dismissed, setDismissed] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
@@ -72,10 +81,11 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
 
   const runInstall = useCallback(async (registry: string) => {
     setPhase('detect')
-    setPhaseText('准备安装…')
     setPercent(0)
     setLog([])
     setError('')
+    setErrCode('')
+    setErrCli('')
     const ctrl = new AbortController()
     abortRef.current = ctrl
     const token = TokenManager.getToken()
@@ -114,15 +124,17 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
     } catch (e: any) {
       if (ctrl.signal.aborted) return
       setPhase('error')
-      setError(e?.message || '安装失败')
+      setErrCode('')
+      setError(e?.message || t('failInstall'))
     }
   }, [paneId])
 
   const handleEvent = useCallback((ev: any) => {
     switch (ev?.type) {
       case 'phase':
+        // Render the phase label from the phase KEY (see busyText), not ev.text —
+        // ev.text is the backend's zh string and would bypass i18n.
         setPhase((ev.phase as Phase) || 'install')
-        setPhaseText(ev.text || '')
         if (typeof ev.percent === 'number') setPercent(ev.percent)
         break
       case 'log':
@@ -139,12 +151,15 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
         // screen with the restart button; dismiss only after the user restarts.
         setPhase('done')
         setPercent(100)
-        setPhaseText('安装完成')
         break
       case 'error':
         if (ev.registry_used) lastRegistryRef.current = ev.registry_used
         setPhase('error')
-        setError(ev.error || '安装失败')
+        // Prefer the localizable code; only keep the literal `error` when the
+        // backend sent no code (so nothing is shown in zh by accident).
+        setErrCode(ev.code || '')
+        setErrCli(ev.cli || '')
+        setError(ev.code ? '' : (ev.error || ''))
         break
     }
   }, [refreshStatus])
@@ -181,6 +196,16 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
 
   const label = status.label || status.cli || 'CLI'
   const busy = phase === 'detect' || phase === 'install' || phase === 'verify'
+  // Phase label derived from the phase KEY → always i18n'd, never the backend zh.
+  const busyText =
+    phase === 'detect' ? t('phaseDetect')
+    : phase === 'install' ? t('phaseInstall', { label })
+    : phase === 'verify' ? t('phaseVerify')
+    : t('subtitleBusy')
+  // Backend error → localized off its code; raw network error → literal; else generic.
+  const errorText = errCode
+    ? t(errCode, { cli: errCli || status.cli || label, label })
+    : (error || t('subtitleError'))
 
   return (
     <div
@@ -199,13 +224,13 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
         className="pointer-events-auto relative w-full max-w-md rounded-2xl border border-white/10 bg-zinc-900/90 p-6 shadow-2xl backdrop-blur-sm"
       >
         <div data-id={`agent-install-overlay-title-${paneId}`} className="text-base font-medium text-zinc-100">
-          {phase === 'done' ? `${label} 安装完成` : `${label} 还没安装`}
+          {phase === 'done' ? t('titleDone', { label }) : t('titleNeed', { label })}
         </div>
         <div data-id={`agent-install-overlay-subtitle-${paneId}`} className="mt-1 text-sm text-zinc-400">
-          {phase === 'idle' && `这个 agent 需要 ${label}。点击下方按钮安装,装好后重启即可使用。`}
-          {busy && (phaseText || '安装中…')}
-          {phase === 'done' && '点击「重启 agent」让它使用刚装好的 CLI。'}
-          {phase === 'error' && (error || '安装失败,可切换镜像源重试。')}
+          {phase === 'idle' && t('subtitleIdle', { label })}
+          {busy && busyText}
+          {phase === 'done' && t('subtitleDone')}
+          {phase === 'error' && errorText}
         </div>
 
         {(busy || phase === 'done') && (
@@ -237,7 +262,7 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
               onClick={onInstall}
               className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500"
             >
-              安装 {label}
+              {t('installBtn', { label })}
             </button>
           )}
           {busy && (
@@ -246,7 +271,7 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
               disabled
               className="flex-1 cursor-default rounded-lg bg-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300"
             >
-              安装中…
+              {t('installingBtn')}
             </button>
           )}
           {phase === 'error' && (
@@ -255,7 +280,7 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
               onClick={onRetry}
               className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500"
             >
-              切换镜像源重试
+              {t('retryBtn')}
             </button>
           )}
           {phase === 'done' && (
@@ -265,7 +290,7 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
               disabled={restarting}
               className="flex-1 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-60"
             >
-              {restarting ? '重启中…' : '重启 agent'}
+              {restarting ? t('restartingBtn') : t('restartBtn')}
             </button>
           )}
         </div>

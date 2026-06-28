@@ -214,5 +214,26 @@
   "subscribeNoSkills": "(no skills from this source)",
   "subscribeNoSources": "No team sources subscribed yet",
   "subscribeRemoveTitle": "Unsubscribe this team?",
-  "subscribeRemoveConfirm": "Remove team source \"{{name}}\". Installed skills stay on disk but won't update from this source."
+  "subscribeRemoveConfirm": "Remove team source \"{{name}}\". Installed skills stay on disk but won't update from this source.",
+  "agentInstall": {
+    "titleDone": "{{label}} installed",
+    "titleNeed": "{{label}} not installed yet",
+    "subtitleIdle": "This agent needs {{label}}. Click below to install it, then restart to use it.",
+    "subtitleBusy": "Installing…",
+    "subtitleDone": "Click “Restart agent” to use the CLI you just installed.",
+    "subtitleError": "Install failed. Try switching the mirror and retry.",
+    "prepare": "Preparing install…",
+    "doneText": "Install complete",
+    "failInstall": "Install failed",
+    "installBtn": "Install {{label}}",
+    "installingBtn": "Installing…",
+    "retryBtn": "Switch mirror & retry",
+    "restartBtn": "Restart agent",
+    "restartingBtn": "Restarting…",
+    "phaseDetect": "Checking network & mirror…",
+    "phaseInstall": "Installing {{label}}…",
+    "phaseVerify": "Verifying install…",
+    "errInstallCmd": "Install command failed. Try switching the mirror and retry.",
+    "errVerifyNotFound": "{{cli}} executable still not found after install."
+  }
 }

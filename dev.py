@@ -1303,27 +1303,11 @@ def run_docker(
     if run_result.returncode != 0:
         print("[dev] docker run failed")
         sys.exit(run_result.returncode or 1)
-    subprocess.run(
-        [
-            "docker",
-            "cp",
-            dev_global_json_path,
-            f"{container_name}:{CICY_GLOBAL_JSON_PATH}",
-        ],
-        capture_output=True,
-        cwd=ROOT_DIR,
-    )
-    if dev_proxy_json_path:
-        subprocess.run(
-            [
-                "docker",
-                "cp",
-                dev_proxy_json_path,
-                f"{container_name}:{CICY_PROXY_JSON_PATH}",
-            ],
-            capture_output=True,
-            cwd=ROOT_DIR,
-        )
+    # No longer cp global.json or proxy.json into the container — it boots a fully
+    # clean environment. The api_token goes in via -e CICY_API_TOKEN and the
+    # gateway LLM creds via -e CICY_AI_GATEWAY_*, so global.json self-seeds (Go
+    # seeds providers on first boot); proxy nodes are not injected. Both files are
+    # still written on the host (dev_global_json_path is read for the token below).
     print(f"[dev] Docker started on port {ports}")
 
     probe_url = f"http://localhost:{ports}/api/health"
@@ -1335,18 +1319,6 @@ def run_docker(
         print(f"[dev] Probe failed: {e}")
         probe_elapsed = time.time() - docker_run_started_at
         print(f"[dev] Elapsed since docker run: {probe_elapsed:.1f}s")
-
-    version_result = subprocess.run(
-        ["docker", "exec", container_name, "sh", "-lc", "openclaw --version"],
-        capture_output=True,
-        text=True,
-    )
-    if version_result.returncode == 0 and version_result.stdout.strip():
-        print(f"[dev] OpenClaw: {version_result.stdout.strip()}")
-    else:
-        version_err = (version_result.stderr or "").strip()
-        if version_err:
-            print(f"[dev] OpenClaw version check failed: {version_err}")
 
     token = read_api_token_from_file(dev_global_json_path)
     if token:
@@ -1410,15 +1382,6 @@ def test_agents(container_name, token, port):
         active = pane.get("active", 0)
         status = "OK" if active == 1 else "DOWN"
         print(f"  {status} {title} (type: {agent_type}, port: {ttyd_port})")
-        if ttyd_port > 0:
-            try:
-                req = urllib.request.Request(f"http://localhost:{ttyd_port}")
-                urllib.request.urlopen(req, timeout=5)
-                print(f"     ttyd port {ttyd_port} is accessible")
-            except urllib.error.URLError:
-                print(f"     ttyd port {ttyd_port} not accessible")
-            except Exception as e:
-                print(f"     ttyd port {ttyd_port} error: {e}")
 
     print("\n[dev] Agent test completed.")
 

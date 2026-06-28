@@ -210,5 +210,26 @@
   "subscribeNoSkills": "（このソースにスキルなし）",
   "subscribeNoSources": "まだチームソースを登録していません",
   "subscribeRemoveTitle": "このチームの購読を解除しますか？",
-  "subscribeRemoveConfirm": "チームソース「{{name}}」を削除します。インストール済みスキルは残りますが、このソースからの更新は受け取れません。"
+  "subscribeRemoveConfirm": "チームソース「{{name}}」を削除します。インストール済みスキルは残りますが、このソースからの更新は受け取れません。",
+  "agentInstall": {
+    "titleDone": "{{label}} のインストール完了",
+    "titleNeed": "{{label}} は未インストールです",
+    "subtitleIdle": "このエージェントには {{label}} が必要です。下のボタンでインストールし、再起動すると使えます。",
+    "subtitleBusy": "インストール中…",
+    "subtitleDone": "「エージェントを再起動」をクリックして、インストールした CLI を使用します。",
+    "subtitleError": "インストールに失敗しました。ミラーを切り替えて再試行できます。",
+    "prepare": "インストールの準備中…",
+    "doneText": "インストール完了",
+    "failInstall": "インストールに失敗しました",
+    "installBtn": "{{label}} をインストール",
+    "installingBtn": "インストール中…",
+    "retryBtn": "ミラーを切り替えて再試行",
+    "restartBtn": "エージェントを再起動",
+    "restartingBtn": "再起動中…",
+    "phaseDetect": "ネットワークとミラーを確認中…",
+    "phaseInstall": "{{label}} をインストール中…",
+    "phaseVerify": "インストール結果を検証中…",
+    "errInstallCmd": "インストールコマンドが失敗しました。ミラーを切り替えて再試行できます。",
+    "errVerifyNotFound": "インストール後も {{cli}} の実行ファイルが見つかりません。"
+  }
 }

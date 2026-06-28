@@ -161,10 +161,6 @@ configure_cdn_env() {
   if [ -n "$ttyd_version" ]; then
     export CICY_TTYD_CDN_PREFIX="${r2_base}/ttyd/v${ttyd_version}"
   fi
-
-  echo "🌐 CDN prefixes baked (activate at runtime with: cicy-code --cdn)"
-  echo "   APP_CDN_PREFIX=${CICY_APP_CDN_PREFIX:-<none>}"
-  echo "   TTYD_CDN_PREFIX=${CICY_TTYD_CDN_PREFIX:-<none>}"
 }
 
 acquire_build_embed_lock() {
@@ -317,7 +313,7 @@ build_docker() {
   local rc=0
   ( cd "$API_DIR" && docker build -f Dockerfile.runtime \
     --build-arg BASE_IMAGE="$base_image" \
-    -t "cicy-code:${tag}" . "${docker_args[@]}" ) || rc=$?
+    -t "cicy-code:${tag}" . ${docker_args[@]+"${docker_args[@]}"} ) || rc=$?
   rm -f "$API_DIR/cicy-code-docker"
   if [ "$rc" -ne 0 ]; then
     echo "❌ Docker image build FAILED (exit $rc): cicy-code:${tag}"
@@ -339,7 +335,7 @@ build_docker_base() {
   local rc=0
   ( cd "$API_DIR" && docker build -f Dockerfile.runtime.base \
     --build-arg BASE_DOCKERFILE_HASH="$base_dockerfile_hash" \
-    -t "cicy-code-base:${tag}" . "${docker_args[@]}" ) || rc=$?
+    -t "cicy-code-base:${tag}" . ${docker_args[@]+"${docker_args[@]}"} ) || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "❌ Base Docker image build FAILED (exit $rc): cicy-code-base:${tag}"
     exit "$rc"

@@ -214,5 +214,26 @@
   "subscribeNoSkills": "（该来源暂无技能）",
   "subscribeNoSources": "还没有订阅任何团队源",
   "subscribeRemoveTitle": "取消订阅该团队?",
-  "subscribeRemoveConfirm": "将移除团队源「{{name}}」。已安装的技能会保留在本地,但不再随该源更新。"
+  "subscribeRemoveConfirm": "将移除团队源「{{name}}」。已安装的技能会保留在本地,但不再随该源更新。",
+  "agentInstall": {
+    "titleDone": "{{label}} 安装完成",
+    "titleNeed": "{{label}} 还没安装",
+    "subtitleIdle": "这个 agent 需要 {{label}}。点击下方按钮安装，装好后重启即可使用。",
+    "subtitleBusy": "安装中…",
+    "subtitleDone": "点击「重启 agent」让它使用刚装好的 CLI。",
+    "subtitleError": "安装失败，可切换镜像源重试。",
+    "prepare": "准备安装…",
+    "doneText": "安装完成",
+    "failInstall": "安装失败",
+    "installBtn": "安装 {{label}}",
+    "installingBtn": "安装中…",
+    "retryBtn": "切换镜像源重试",
+    "restartBtn": "重启 agent",
+    "restartingBtn": "重启中…",
+    "phaseDetect": "检测网络与镜像源…",
+    "phaseInstall": "正在安装 {{label}}…",
+    "phaseVerify": "校验安装结果…",
+    "errInstallCmd": "安装命令失败，可切换镜像源重试。",
+    "errVerifyNotFound": "安装后仍未检测到 {{cli}} 可执行文件。"
+  }
 }

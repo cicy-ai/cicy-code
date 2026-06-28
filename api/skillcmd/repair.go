@@ -134,7 +134,7 @@ func EnsureBinSymlinks() (repaired []string, errs []error) {
 	return repaired, errs
 }
 
-// EnsureAgentSurfacing re-surfaces every installed skill into each *detected*
+// EnsureAgentSurfacing re-surfaces every installed skill into each configured
 // agent's skills dir (~/.<agent>/skills/<name>/). Idempotent — syncToAgents
 // rewrites the symlinks each call.
 //

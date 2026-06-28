@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -72,18 +71,17 @@ func writeAgentsConfig(cfg *AgentsConfig) error {
 	return os.WriteFile(agentsJSONPath(), buf, 0o644)
 }
 
-// detectAgent returns true if the agent's detect.command exists on PATH.
-// Empty/missing detect → assume present (some agents may not have a stable CLI).
-func detectAgent(a Agent) bool {
-	if a.Detect == nil || a.Detect.Command == "" {
-		return true
-	}
-	_, err := exec.LookPath(a.Detect.Command)
-	return err == nil
-}
-
 // syncToAgents copies (symlinks) skill doc files into each agent's
 // skills_dir/<name>/. Returns the list of agent IDs successfully synced.
+//
+// Surfacing is UNCONDITIONAL — we no longer gate on the agent CLI being present
+// on PATH. cicy ships a fixed, self-managed agent roster (claude/codex/opencode/
+// kiro), and the coding CLIs are installed on demand AFTER the box boots. Gating
+// on `exec.LookPath(<cli>)` meant a fresh box never linked skills into
+// ~/.claude/skills etc. (the CLI isn't there yet), so a freshly-installed CLI came
+// up with zero skills until the next restart. The skills dir is just a symlink
+// tree into ~/cicy-ai/skills; pre-creating it for a not-yet-installed CLI is
+// harmless and gives true out-of-the-box behavior.
 func syncToAgents(name, sourceDir string, manifest *Manifest, cfg *AgentsConfig) []string {
 	if !skillCompatibleWithAny(manifest, cfg) {
 		return nil
@@ -94,9 +92,6 @@ func syncToAgents(name, sourceDir string, manifest *Manifest, cfg *AgentsConfig)
 	synced := []string{}
 	for _, a := range cfg.Agents {
 		if !skillCompatibleWith(manifest, a.ID) {
-			continue
-		}
-		if !detectAgent(a) {
 			continue
 		}
 		dst := filepath.Join(expandHome(a.SkillsDir), name)

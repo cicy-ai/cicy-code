@@ -28,6 +28,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"ttyd-go/skillcmd"
 )
 
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
@@ -280,7 +282,8 @@ func runCliInstall(emit func(cliInstallEvent), spec cliInstallSpec, registryChoi
 	phase("install", "正在安装 "+spec.label+"…", 35)
 	exitOK := streamShellInstall(emit, logln, cmd, cancelCh)
 	if !exitOK {
-		emit(cliInstallEvent{"type": "error", "error": "安装命令失败", "registry_used": registryLabel})
+		// code lets the overlay render a localized message; error is the zh fallback.
+		emit(cliInstallEvent{"type": "error", "code": "errInstallCmd", "error": "安装命令失败", "registry_used": registryLabel})
 		return
 	}
 
@@ -290,7 +293,7 @@ func runCliInstall(emit func(cliInstallEvent), spec cliInstallSpec, registryChoi
 	rec := cliInstallRecord{Installed: installed, Version: version, Path: path, CheckedAt: nowRFC3339()}
 	setCliInstallRecord(spec.cliName, rec)
 	if !installed {
-		emit(cliInstallEvent{"type": "error", "error": "安装后仍未检测到 " + spec.cliName + " 可执行文件", "registry_used": registryLabel})
+		emit(cliInstallEvent{"type": "error", "code": "errVerifyNotFound", "cli": spec.cliName, "error": "安装后仍未检测到 " + spec.cliName + " 可执行文件", "registry_used": registryLabel})
 		return
 	}
 
@@ -403,9 +406,13 @@ func handleAgentInstall(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	flusher, _ := w.(http.Flusher)
 	var mu sync.Mutex
+	var installedOK bool
 	emit := func(ev cliInstallEvent) {
 		mu.Lock()
 		defer mu.Unlock()
+		if t, _ := ev["type"].(string); t == "done" {
+			installedOK = true
+		}
 		b, _ := json.Marshal(ev)
 		fmt.Fprintf(w, "data: %s\n\n", b)
 		if flusher != nil {
@@ -419,5 +426,14 @@ func handleAgentInstall(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 	runCliInstall(emit, spec, req.Registry, r.Context().Done())
+	// B: the CLI just landed on PATH — re-surface installed skills into its
+	// ~/.<agent>/skills/ NOW, so the user gets skills without waiting for the next
+	// cicy-code restart (surfacing otherwise only runs at startup). Idempotent;
+	// also repairs a skills dir the CLI's own installer may have reset.
+	if installedOK {
+		if surfaced, _ := skillcmd.EnsureAgentSurfacing(); len(surfaced) > 0 {
+			emit(cliInstallEvent{"type": "log", "line": fmt.Sprintf("已补齐技能到新装的 CLI: %v", surfaced)})
+		}
+	}
 	emit(cliInstallEvent{"type": "end"})
 }

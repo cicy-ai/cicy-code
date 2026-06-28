@@ -94,7 +94,6 @@ func bootstrapCicyPaths() {
 	paths := []string{
 		cicyRootDir,
 		cicyDBDir,
-		cicyStateDir,
 		cicyProjectsDir,
 		cicyWorkersDir,
 		cicySkillsDir,

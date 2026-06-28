@@ -210,5 +210,26 @@
   "subscribeNoSkills": "(aucune compétence de cette source)",
   "subscribeNoSources": "Aucune source d'équipe abonnée",
   "subscribeRemoveTitle": "Se désabonner de cette équipe ?",
-  "subscribeRemoveConfirm": "Supprimer la source « {{name}} ». Les compétences installées restent mais ne seront plus mises à jour."
+  "subscribeRemoveConfirm": "Supprimer la source « {{name}} ». Les compétences installées restent mais ne seront plus mises à jour.",
+  "agentInstall": {
+    "titleDone": "{{label}} installé",
+    "titleNeed": "{{label}} pas encore installé",
+    "subtitleIdle": "Cet agent nécessite {{label}}. Cliquez ci-dessous pour l’installer, puis redémarrez pour l’utiliser.",
+    "subtitleBusy": "Installation…",
+    "subtitleDone": "Cliquez sur « Redémarrer l’agent » pour utiliser la CLI que vous venez d’installer.",
+    "subtitleError": "Échec de l’installation. Essayez de changer de miroir et de réessayer.",
+    "prepare": "Préparation de l’installation…",
+    "doneText": "Installation terminée",
+    "failInstall": "Échec de l’installation",
+    "installBtn": "Installer {{label}}",
+    "installingBtn": "Installation…",
+    "retryBtn": "Changer de miroir et réessayer",
+    "restartBtn": "Redémarrer l’agent",
+    "restartingBtn": "Redémarrage…",
+    "phaseDetect": "Vérification du réseau et du miroir…",
+    "phaseInstall": "Installation de {{label}}…",
+    "phaseVerify": "Vérification de l’installation…",
+    "errInstallCmd": "La commande d’installation a échoué. Essayez de changer de miroir et réessayez.",
+    "errVerifyNotFound": "L’exécutable {{cli}} reste introuvable après l’installation."
+  }
 }
