@@ -1568,7 +1568,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         onMouseDown={handleCliDrawerResizeStart}
       />
       <div data-id="cli-content-tabs-wrap" className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--vsc-border)] px-3">
-        <div data-id="cli-content-tabs" className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-hairline">
+        <div data-id="cli-content-tabs" className="flex min-w-0 flex-1 gap-1 overflow-x-auto whitespace-nowrap scrollbar-hairline">
           {cliContentTabs.map((item) => {
             const active = item.id === 'session' ? isSessionTab(cliContentTab) : cliContentTab === item.id;
             return (

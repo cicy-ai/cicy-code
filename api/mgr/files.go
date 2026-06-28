@@ -1398,7 +1398,11 @@ func handleFsSendPath(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "missing_path")
 		return
 	}
-	workspace, err := agentWorkspace(r.URL.Query().Get("agent_id"))
+	// Resolve against the request's "root" (workspace | projects | skills | home),
+	// not always the agent workspace — otherwise an extra-root node's relative path
+	// gets joined onto the workspace and the agent receives a wrong absolute path.
+	// Mirrors every other root-aware fs op (list/read/rename/delete).
+	workspace, err := fsRootBase(r)
 	if err != nil {
 		fsErr(w, err)
 		return

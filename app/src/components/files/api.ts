@@ -506,6 +506,10 @@ export const fsApi = {
       fileName?: string;
       pageClientId?: string;
       selectionText?: string;
+      /** Which fs root `path` is relative to (workspace | projects | skills |
+       *  home). Defaults to workspace; the backend resolves the absolute path
+       *  against this root, so extra-root nodes send the correct path. */
+      root?: string;
       range?: {
         startLine: number;
         startCharacter: number;
@@ -524,7 +528,7 @@ export const fsApi = {
           selection_text: opts.selectionText,
           range: opts.range,
         },
-        { params: { agent_id: agentId } },
+        { params: { agent_id: agentId, ...(opts.root ? { root: opts.root } : {}) } },
       );
     } catch (e) {
       throw toFsError(e);

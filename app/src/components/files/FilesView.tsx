@@ -149,6 +149,11 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
   const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [reloadKeys, setReloadKeys] = useState<Record<string, number>>({});
   const [explorerNonce, setExplorerNonce] = useState<Record<string, number>>({});
+  // Refreshes the extra-root sections (projects/skills/home), which have no
+  // fsnotify watcher: bumped on panel open / agent switch (below) and after any
+  // mutation so their listings re-loop to fresh state.
+  const [remoteReloadNonce, setRemoteReloadNonce] = useState(0);
+  const bumpRemoteReload = useCallback(() => setRemoteReloadNonce((n) => n + 1), []);
   const watchRef = useRef<FsWatch | null>(null);
   const subscribedRef = useRef<Set<string>>(new Set());
   const cursorRef = useRef<Record<string, { line: number; col: number }>>({});
@@ -157,6 +162,13 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
   const [renameTarget, setRenameTarget] = useState<{ path: string; isDir: boolean; root: string } | null>(null);
   const [createTarget, setCreateTarget] = useState<{ parentDir: string; kind: 'file' | 'dir'; root: string } | null>(null);
   const { confirm, node: dialogsNode } = useDialogs();
+
+  // On panel open / agent switch, loop the extra-root sections back to fresh —
+  // they're lazy and watcher-less, so otherwise an expanded section keeps stale
+  // file/folder state from a previous mount.
+  useEffect(() => {
+    bumpRemoteReload();
+  }, [agentId, bumpRemoteReload]);
 
   // --- watcher lifecycle --------------------------------------------------
 
@@ -388,6 +400,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
       fsCacheInvalidatePath(agentId, oldPath);
       fsCacheInvalidatePath(agentId, newPath);
       rebumpDir(parent);
+      bumpRemoteReload(); // extra-root sections have no watcher → refresh explicitly
       // Sync any open tab in the SAME root whose path was renamed (the file
       // itself or a parent dir).
       setTabs((prev) =>
@@ -414,7 +427,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
       });
       setRenameTarget(null);
     },
-    [agentId, renameTarget, tabs, rebumpDir],
+    [agentId, renameTarget, tabs, rebumpDir, bumpRemoteReload],
   );
 
   // Drag-and-drop move: relocate each source into destDir via fsApi.rename
@@ -448,6 +461,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
         }
       }
       affectedDirs.forEach((d) => rebumpDir(d));
+      bumpRemoteReload();
       if (moved.length === 0) return;
       // Rewrite open tabs / active id whose path (or ancestor) just moved.
       const remap = (p: string): string | null => {
@@ -472,7 +486,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
         return np ? makeTabId(oldTab.kind, oldTab.root, np) : prev;
       });
     },
-    [agentId, fsRoot, rebumpDir, tabs],
+    [agentId, fsRoot, rebumpDir, tabs, bumpRemoteReload],
   );
 
   // Confirm-then-delete. Renders the standard modal confirm with a path
@@ -518,6 +532,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
         }
       }
       parentDirs.forEach((d) => rebumpDir(d));
+      bumpRemoteReload();
       setTabs((prev) =>
         prev.filter((t) => {
           if (t.root !== root) return true; // only close tabs in the affected root
@@ -540,7 +555,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
         return next;
       });
     },
-    [agentId, confirm, rebumpDir, fsRoot],
+    [agentId, confirm, rebumpDir, fsRoot, bumpRemoteReload],
   );
 
   const handleUpload = useCallback(
@@ -558,8 +573,9 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
         }
       }
       rebumpDir(parentDir);
+      bumpRemoteReload();
     },
-    [agentId, rebumpDir, fsRoot],
+    [agentId, rebumpDir, fsRoot, bumpRemoteReload],
   );
 
   const handleDownload = useCallback((path: string, root: string = fsRoot) => {
@@ -578,12 +594,13 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
       }
       fsCacheInvalidatePath(agentId, newPath);
       rebumpDir(createTarget.parentDir);
+      bumpRemoteReload();
       if (createTarget.kind === 'file') {
         openFileTab(newPath, root);
       }
       setCreateTarget(null);
     },
-    [agentId, createTarget, rebumpDir, openFileTab],
+    [agentId, createTarget, rebumpDir, openFileTab, bumpRemoteReload],
   );
 
   // --- global hotkeys -----------------------------------------------------
@@ -662,6 +679,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
           onOpenFile={handleOpenFromExplorer}
           onDirLoaded={subscribeDir}
           dirRefreshNonce={explorerNonce}
+          remoteReloadNonce={remoteReloadNonce}
           pageClientId={pageClientId}
           onShowFileInfo={setInfoPath}
           onAddFavorite={handleAddFavorite}

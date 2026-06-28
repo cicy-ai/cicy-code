@@ -49,6 +49,9 @@ interface FileExplorerProps {
   onDirLoaded?: (path: string) => void;
   /** Map of dirPath → nonce. When a dir's nonce bumps, the explorer reloads it. */
   dirRefreshNonce?: Record<string, number>;
+  /** Bump to refresh the extra-root sections (projects/skills/home), which have
+   *  no fsnotify watcher. Driven on panel open / agent switch / mutation. */
+  remoteReloadNonce?: number;
   /** Page chat-ws client id; passed through to send-path so the broadcast
    *  comes back to this exact tab. */
   pageClientId?: string;
@@ -136,6 +139,7 @@ export default function FileExplorer({
   onOpenFile,
   onDirLoaded,
   dirRefreshNonce,
+  remoteReloadNonce,
   pageClientId,
   onShowFileInfo,
   onAddFavorite,
@@ -550,9 +554,9 @@ export default function FileExplorer({
   }, [menu]);
 
   const handleSendToAgent = useCallback(
-    async (path: string) => {
+    async (path: string, root?: string) => {
       try {
-        await fsApi.sendPathToAgent(agentId, path, { pageClientId });
+        await fsApi.sendPathToAgent(agentId, path, { pageClientId, root });
       } catch {}
     },
     [agentId, pageClientId],
@@ -735,6 +739,7 @@ export default function FileExplorer({
             onOpenFile={(path, entry) => onOpenFile(path, entry, r.id)}
             onContextMenu={handleRemoteContextMenu}
             onMove={onMove}
+            reloadNonce={remoteReloadNonce}
           />
         ))}
       </div>
@@ -749,7 +754,9 @@ export default function FileExplorer({
           x={menu.x}
           y={menu.y}
           selectionCount={1}
-          onSendToAgent={() => handleSendToAgent(menu.path)}
+          // Pass the root id so the backend resolves the absolute path against
+          // this extra root, not the agent workspace (same as copy/rename/delete).
+          onSendToAgent={() => handleSendToAgent(menu.path, menu.root!.id)}
           // Copy-path resolves against the extra root's absolute base so the
           // copied path points at the actual file (not under workspaceFolder).
           onCopyPath={() => handleCopyPath([menu.path], menu.root!.path)}
@@ -1113,6 +1120,10 @@ interface RemoteSectionProps {
   /** Drag-to-move within this root (root-aware). Mirrors the workspace tree:
    *  drop a node onto a directory to relocate it there. Undefined ⇒ disabled. */
   onMove?: (sources: string[], destDir: string, root?: string) => void | Promise<void>;
+  /** Bump to force-reload every already-loaded dir in this section (keeping
+   *  collapse state). Driven by the parent on panel open / agent switch and
+   *  after a mutation, since this section has no fsnotify watcher of its own. */
+  reloadNonce?: number;
 }
 
 // Lazy-loaded subtree for a non-workspace root (projects / skills / home).
@@ -1124,7 +1135,7 @@ interface RemoteSectionProps {
 // locations where dot-prefixed entries (`.bashrc`, `.config`, `.git`, …)
 // are usually the whole point. The workspace tree's eye-toggle still gates
 // dot-files for the active project.
-function RemoteSection({ agentId, root, onOpenFile, onContextMenu, onMove }: RemoteSectionProps) {
+function RemoteSection({ agentId, root, onOpenFile, onContextMenu, onMove, reloadNonce }: RemoteSectionProps) {
   const [expanded, setExpanded] = useState(false);
   // dirs keyed by root-relative path; '' is the root listing.
   const [dirs, setDirs] = useState<Map<string, DirState>>(new Map());
@@ -1177,6 +1188,20 @@ function RemoteSection({ agentId, root, onOpenFile, onContextMenu, onMove }: Rem
       return next;
     });
   }, [dirs, loadDir]);
+
+  // Parent-driven refresh: re-fetch every dir we've already loaded (root + any
+  // expanded subdir), keeping collapse state. This section has no fsnotify
+  // watcher, so without this its file/folder state goes stale after external
+  // changes or mutations — the nonce bumps on panel open / agent switch / a
+  // rename/delete/move, looping the loaded dirs back to fresh.
+  const lastReloadRef = useRef(reloadNonce);
+  useEffect(() => {
+    if (reloadNonce === undefined || reloadNonce === lastReloadRef.current) return;
+    lastReloadRef.current = reloadNonce;
+    for (const [path, d] of dirs) {
+      if (d.loaded || d.loading) loadDir(path, true);
+    }
+  }, [reloadNonce, dirs, loadDir]);
 
   // Drop `dragPath` into `destDir` (root-relative). Guards against no-op and
   // moving a dir into itself / its own descendant, then force-reloads the

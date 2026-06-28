@@ -30,3 +30,8 @@ api/mgr/.tmux.conf
 api/mgr/.cicy_tmux.conf
 .gstack/
 .build-embed.lock/
+
+# stray go-build artifacts (go build ./mgr/ names the binary after the package dir)
+/mgr
+/mgr.exe
+/api/mgr/mgr
