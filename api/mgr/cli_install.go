@@ -249,8 +249,14 @@ func resolveNpmRegistry(choice string) (url, label string) {
 // "not live". Foregrounding the scripts makes that download progress stream in.
 func npmInstallCmdRegistry(pkg, registry string) string {
 	rmOld := `rm -rf "$HOME/.npm-global/lib/node_modules/` + npmPkgDir(pkg) + `"`
+	// Fetch resilience: that large platform-native binary is an OPTIONAL
+	// dependency, so when its (~70MB) tarball is slow / the mirror CDN stalls,
+	// npm hits the default 5-min fetch timeout and SILENTLY SKIPS it — the
+	// wrapper lands without its native binary ("native binary not installed").
+	// A long timeout + retries lets it actually complete.
+	fetchOpts := `--fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=120000 --fetch-timeout=900000`
 	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && ` +
-		rmOld + ` && npm install -g --include=optional --foreground-scripts --loglevel verbose --no-progress --registry=` + registry + ` --prefix "$HOME/.npm-global" ` + pkg
+		rmOld + ` && npm install -g --include=optional ` + fetchOpts + ` --foreground-scripts --loglevel verbose --no-progress --registry=` + registry + ` --prefix "$HOME/.npm-global" ` + pkg
 }
 
 // runCliInstall executes the install, emitting phase/log/done/error events. It is
@@ -273,9 +279,11 @@ func runCliInstall(emit func(cliInstallEvent), spec cliInstallSpec, registryChoi
 	if spec.npmPkg != "" {
 		registryURL, registryLabel = resolveNpmRegistry(registryChoice)
 		cmd = npmInstallCmdRegistry(spec.npmPkg, registryURL)
-		logln(fmt.Sprintf("使用镜像源:%s (%s)", registryLabel, registryURL))
+		// Structured so the overlay localizes it off `code` (+ params); raw `line`
+		// logs (npm's own output) stay as-is.
+		emit(cliInstallEvent{"type": "log", "code": "logUsingRegistry", "label": registryLabel, "url": registryURL})
 	} else {
-		logln("使用官方安装脚本")
+		emit(cliInstallEvent{"type": "log", "code": "logOfficialScript"})
 	}
 
 	// Phase 2: run the installer, streaming output.

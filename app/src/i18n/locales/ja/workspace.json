@@ -230,7 +230,9 @@
     "phaseInstall": "{{label}} をインストール中…",
     "phaseVerify": "インストール結果を検証中…",
     "errInstallCmd": "インストールコマンドが失敗しました。ミラーを切り替えて再試行できます。",
-    "errVerifyNotFound": "インストール後も {{cli}} の実行ファイルが見つかりません。"
+    "errVerifyNotFound": "インストール後も {{cli}} の実行ファイルが見つかりません。",
+    "logUsingRegistry": "レジストリを使用:{{label}} ({{url}})",
+    "logOfficialScript": "公式インストールスクリプトを使用"
   },
   "fileExplorer": {
     "sendToAgent": "現在のエージェントに送信",

@@ -116,10 +116,10 @@ const api = {
   // Used by the inspector to nudge non-gateway codex/kiro users to install it.
   getMitmCaStatus: () => http.get('/api/mitm/ca-status'),
 
-  // Projects (first-class: name + dir + rules). Same-project claude agents share memory.
+  // Projects (first-class: name + rules). Same-project claude agents share memory.
   listProjects: () => http.get('/api/projects'),
-  createProject: (name: string, dir: string, rules?: string) =>
-    http.post('/api/projects', { name, dir, rules }),
+  createProject: (name: string, rules?: string) =>
+    http.post('/api/projects', { name, rules }),
   // Memory templates (global + project) — backs the create-agent dialog.
   listMemoryTemplates: () => http.get('/api/memory/templates'),
   getMemoryTemplate: (scope: string, name?: string) => {

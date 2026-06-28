@@ -324,16 +324,18 @@ func resetLiteConfigCache() {
 }
 
 // resolveSystemBase turns a profile's SystemBase reference into prompt text.
+// All persona/base text lives in ~/cicy-ai/memory/agents/ (seeded from
+// embed/agent-roles/), so the system base is loaded from there too — there is
+// no hardcoded prompt text in Go.
 func resolveSystemBase(ref string) string {
 	switch ref {
 	case "@dispatcher":
-		return cicySystemPromptBase
+		return roleTemplateBody("base-dispatcher")
 	case "@assistant":
-		return assistantSystemPromptBase
+		return roleTemplateBody("base-assistant")
 	}
 	if slug := strings.TrimPrefix(ref, "@role:"); slug != ref {
-		raw := loadTemplateFile(roleTemplatePath(sanitizeTemplateSlug(slug)))
-		return strings.TrimSpace(parseLiteFrontmatter(raw).body)
+		return roleTemplateBody(slug)
 	}
 	return ref // literal prompt text
 }

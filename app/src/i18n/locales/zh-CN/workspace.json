@@ -234,7 +234,9 @@
     "phaseInstall": "正在安装 {{label}}…",
     "phaseVerify": "校验安装结果…",
     "errInstallCmd": "安装命令失败，可切换镜像源重试。",
-    "errVerifyNotFound": "安装后仍未检测到 {{cli}} 可执行文件。"
+    "errVerifyNotFound": "安装后仍未检测到 {{cli}} 可执行文件。",
+    "logUsingRegistry": "使用镜像源:{{label}} ({{url}})",
+    "logOfficialScript": "使用官方安装脚本"
   },
   "fileExplorer": {
     "sendToAgent": "发送给当前 agent",

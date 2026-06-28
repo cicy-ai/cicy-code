@@ -739,9 +739,14 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
               </Field>
               <div className="grid gap-3.5 sm:grid-cols-[150px_1fr]">
                 <Field label={t('fieldProtocol')}>
-                  <select value={proto(draft) || 'openai'} onChange={(e) => patchDraft({ protocol: e.target.value })} className={cn(INPUT, !isNew && 'cursor-not-allowed opacity-60')} disabled={!isNew}>
-                    {PROTOCOLS.map((p) => <option key={p} value={p}>{p}</option>)}
-                  </select>
+                  <Select
+                    dataId="provider-protocol-select"
+                    className="w-full"
+                    disabled={!isNew}
+                    value={proto(draft) || 'openai'}
+                    onChange={(v) => patchDraft({ protocol: v })}
+                    options={PROTOCOLS.map((p) => ({ value: p, label: p }))}
+                  />
                 </Field>
                 <Field label="API Key">
                   <div className="relative">

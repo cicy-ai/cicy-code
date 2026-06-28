@@ -2542,6 +2542,9 @@ export default function CurrentHistoryView({
   // failures (the render falls back to the static placeholder).
   useEffect(() => {
     setGreeting('');
+    // Only cicy (lite) agents show an opening greeting in the chat view; coding
+    // agents (claude/codex/…) start with a blank empty-history state.
+    if (!isCicyLiteAgent(agentType)) return;
     const id = String(paneId || '').trim();
     if (!id) return;
     let alive = true;
@@ -2549,7 +2552,7 @@ export default function CurrentHistoryView({
       .then((res: any) => { if (alive) setGreeting(String(res?.data?.greeting || '').trim()); })
       .catch(() => {});
     return () => { alive = false; };
-  }, [paneId]);
+  }, [paneId, agentType]);
 
   useEffect(() => {
     const el = scrollRef.current;

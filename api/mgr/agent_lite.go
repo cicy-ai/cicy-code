@@ -29,17 +29,9 @@ import (
 // profile's compiled base prompt, so users can refine any role inline and it
 // takes effect next turn — no restart.
 
-// assistantSystemPromptBase — a neutral, customer/audience-facing conversational
-// agent with NO internal coordination tools. The intended base for support,
-// sales, PR and similar roles; the concrete persona comes from AGENTS.md body.
-const assistantSystemPromptBase = `你是一个轻量对话助理。具体身份、语气和职责由下面的角色说明决定。
-
-通用准则:
-- 紧扣角色说明设定的身份与边界,不要自称 AI 或跳出人设,除非角色说明要求。
-- 默认中文;用户用其他语言则跟随。
-- 简洁、直接、礼貌;先给结论或答案,必要时再展开。
-- 只在角色说明授权的范围内承诺或回答;不确定或超出范围时如实说明并给出下一步建议。
-- 不编造事实、价格、政策或承诺。`
+// The assistant/dispatcher system-prompt base is NOT a Go const — it lives in
+// ~/cicy-ai/memory/agents/base-assistant.md / base-dispatcher.md (seeded from
+// embed/agent-roles/) and is loaded via resolveSystemBase. Single source.
 
 // Profiles / tool groups / custom tools / grants are no longer Go consts — they
 // live in ~/cicy-ai/db/lite-config.json (see lite_config.go), with baked
@@ -162,11 +154,18 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 
 	// selected groups, in priority order:
 	//   employees.yaml template `tools:` (this employee's role) >
-	//   workspace AGENTS.md frontmatter `tools:` > profile default.
-	// Still narrowed by `grantable` below — the security model (effective =
-	// selected ∩ grantable, L3 narrow-only) is unchanged regardless of source.
-	roleSlug := employeeRoleSlug(shortID) // this employee's role-template slug (for employees.yaml lookups)
+	//   workspace AGENTS.md frontmatter `tools:` >
+	//   role template (~/cicy-ai/memory/agents/<slug>.md) frontmatter `tools:` >
+	//   profile default.
+	// The role-template source means the composed AGENTS.md no longer has to carry
+	// the frontmatter at the very top — it can be pure global → project → role —
+	// while tools still resolve. Still narrowed by `grantable` below (security
+	// model effective = selected ∩ grantable, L3 narrow-only, unchanged).
+	roleSlug := employeeRoleSlug(shortID) // this employee's role-template slug
 	selectGroups := prof.DefaultGroups
+	if rtfm := parseLiteFrontmatter(roleTemplateRaw(roleSlug)); rtfm.hasTools {
+		selectGroups = rtfm.tools
+	}
 	if fm.hasTools {
 		selectGroups = fm.tools
 	}

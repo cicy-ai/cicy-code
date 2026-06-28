@@ -10,9 +10,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Project = a first-class, user-created project: name + directory + rules.
-// Stored as ~/cicy-ai/memory/projects/<slug>.md with YAML frontmatter
-// (name/dir) and the body as the project rules (composed into agents' CLAUDE.md).
+// Project = a first-class, user-created project: name + rules.
+// Stored as ~/cicy-ai/memory/projects/<slug>.md with a YAML frontmatter
+// (name) and the body as the project rules (composed into agents' CLAUDE.md).
 // Each project also owns a shared claude memory pool at
 // ~/cicy-ai/memory/project-mem/<slug>/ — claude workers whose project_template
 // is <slug> get CLAUDE_COWORK_MEMORY_PATH_OVERRIDE pointed there, so the same
@@ -21,7 +21,6 @@ import (
 type projectMeta struct {
 	Slug string `json:"slug"`
 	Name string `json:"name"`
-	Dir  string `json:"dir"`
 }
 
 // defaultProjectSlug is the out-of-the-box project every agent belongs to until
@@ -43,8 +42,8 @@ func ensureDefaultProject() {
 	path := projectTemplatePath(defaultProjectSlug)
 	if path != "" {
 		if _, err := os.Stat(path); err != nil {
-			body := "---\nname: " + yamlScalar("default") + "\ndir: \"\"\n---\n" +
-				"# 默认项目\n\n<!-- 开箱即用的默认项目:所有未分配项目的 agent 共享这一个记忆池。 -->\n"
+			body := "---\nname: " + yamlScalar("default") + "\n---\n" +
+				"# Default Project\n\n<!-- Out-of-the-box default project: every agent not assigned to a real project shares this one memory pool. -->\n"
 			_ = os.MkdirAll(filepath.Dir(path), 0o755)
 			_ = os.WriteFile(path, []byte(body), 0o644)
 		}
@@ -80,7 +79,6 @@ func ensureProjectMemDir(slug string) string {
 // projectFrontmatter is the YAML header of a project .md.
 type projectFrontmatter struct {
 	Name string `yaml:"name"`
-	Dir  string `yaml:"dir"`
 }
 
 // splitFrontmatter separates a leading `---\n…\n---\n` YAML block from the body.
@@ -118,8 +116,8 @@ func projectRulesBody(slug string) string {
 	return strings.TrimSpace(body)
 }
 
-// readProjectMeta parses a project's {slug, name, dir} from its .md frontmatter.
-// Missing name falls back to the slug; missing dir is "".
+// readProjectMeta parses a project's {slug, name} from its .md frontmatter.
+// Missing name falls back to the slug.
 func readProjectMeta(slug string) projectMeta {
 	clean := sanitizeTemplateSlug(slug)
 	meta := projectMeta{Slug: clean, Name: clean}
@@ -134,7 +132,6 @@ func readProjectMeta(slug string) projectMeta {
 			if n := strings.TrimSpace(pf.Name); n != "" {
 				meta.Name = n
 			}
-			meta.Dir = strings.TrimSpace(pf.Dir)
 		}
 	}
 	return meta
@@ -152,8 +149,8 @@ func listProjectsWithMeta() []projectMeta {
 
 // handleProjects backs the create-agent dialog's project picker.
 //
-//	GET  /api/projects               → [{slug,name,dir}]
-//	POST /api/projects {name,dir,rules?} → creates projects/<slug>.md + pool dir
+//	GET  /api/projects               → [{slug,name}]
+//	POST /api/projects {name,rules?} → creates projects/<slug>.md + pool dir
 func handleProjects(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -161,7 +158,6 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var req struct {
 			Name  string `json:"name"`
-			Dir   string `json:"dir"`
 			Rules string `json:"rules"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -179,7 +175,6 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, http.StatusBadRequest, "bad_name")
 			return
 		}
-		dir := strings.TrimSpace(req.Dir)
 		rules := strings.TrimSpace(req.Rules)
 		if rules == "" {
 			rules = "# " + name + "\n\n<!-- 项目规则:agents 选了本项目会把下面内容并入 CLAUDE.md。 -->\n"
@@ -187,7 +182,6 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 		var b strings.Builder
 		b.WriteString("---\n")
 		b.WriteString("name: " + yamlScalar(name) + "\n")
-		b.WriteString("dir: " + yamlScalar(dir) + "\n")
 		b.WriteString("---\n")
 		b.WriteString(rules)
 		if !strings.HasSuffix(rules, "\n") {
@@ -202,7 +196,7 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ensureProjectMemDir(slug)
-		J(w, projectMeta{Slug: slug, Name: name, Dir: dir})
+		J(w, projectMeta{Slug: slug, Name: name})
 	default:
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}

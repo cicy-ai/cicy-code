@@ -33,6 +33,11 @@ interface Props {
   dropdownClassName?: string;
   triggerIcon?: React.ReactNode;
   footer?: React.ReactNode;
+  /** data-id on the root element so a specific Select instance is addressable. */
+  dataId?: string;
+  /** Render the trigger more compact (smaller height/text) for inline/toolbar use. */
+  compact?: boolean;
+  disabled?: boolean;
   /** CSS selector for an ancestor whose width the dropdown should match. When set, the dropdown is portaled and positioned to span the matched element horizontally. */
   dropdownMatchSelector?: string;
 }
@@ -49,6 +54,9 @@ export default function Select({
   dropdownClassName = '',
   triggerIcon,
   footer,
+  dataId,
+  compact = false,
+  disabled = false,
   dropdownMatchSelector,
 }: Props) {
   const { t } = useTranslation('ui');
@@ -189,18 +197,20 @@ export default function Select({
   }, [open, filtered, activeIndex, onChange, closeDropdown, setDropdownOpen]);
 
   return (
-    <div data-id="select-auto-1" ref={ref} className={`relative ${className}`} onKeyDown={handleKeyDown}>
+    <div data-id={dataId ?? 'select-auto-1'} ref={ref} className={`relative ${className}`} onKeyDown={disabled ? undefined : handleKeyDown}>
       <button data-id="select-auto-2"
         type="button"
+        disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => {
+          if (disabled) return;
           if (open) { closeDropdown(); return; }
           setDropdownOpen(true);
           setSearch('');
           setActionMenu(null);
         }}
-        className={`group/trigger w-full flex items-center gap-2 h-9 text-[13px] rounded-lg px-3 text-left transition-colors duration-150 cursor-pointer
+        className={`group/trigger w-full flex items-center gap-2 ${compact ? 'h-8 text-[12px]' : 'h-9 text-[13px]'} rounded-lg px-3 text-left transition-colors duration-150 ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}
           ${open
             ? 'bg-white/[0.045] border border-blue-500/55 ring-1 ring-blue-500/15'
             : 'bg-white/[0.025] border border-white/[0.09] hover:bg-white/[0.04] hover:border-white/[0.14]'}

@@ -201,6 +201,16 @@
 .cicy-select:focus { border-color: var(--vsc-accent); }
 .cicy-select option { background: #1a1a1a; color: #ccc; }
 
+/* Native <select> dropdown options (global). On Windows/Linux the OS-drawn popup
+   inherits poorly from a dark-themed <select>: unselected options render with a
+   dim gray that's hard to read. Force every native select's option popup to a
+   readable dark bg + light text. (macOS draws its own menu and ignores this.) */
+select option,
+select optgroup {
+  background-color: #1f1f1f;
+  color: #e4e4e7;
+}
+
 /* Chat Markdown — full GFM support */
 .chat-markdown h1, .chat-markdown h2, .chat-markdown h3, .chat-markdown h4 { font-weight: 600; margin: 0.8em 0 0.4em; color: rgba(255,255,255,0.9); }
 .chat-markdown h1 { font-size: 1.3em; }

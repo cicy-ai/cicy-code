@@ -234,7 +234,9 @@
     "phaseInstall": "Installing {{label}}…",
     "phaseVerify": "Verifying install…",
     "errInstallCmd": "Install command failed. Try switching the mirror and retry.",
-    "errVerifyNotFound": "{{cli}} executable still not found after install."
+    "errVerifyNotFound": "{{cli}} executable still not found after install.",
+    "logUsingRegistry": "Using registry: {{label}} ({{url}})",
+    "logOfficialScript": "Using the official install script"
   },
   "fileExplorer": {
     "sendToAgent": "Send to current agent",

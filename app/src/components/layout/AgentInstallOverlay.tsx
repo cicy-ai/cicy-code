@@ -139,7 +139,10 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
         break
       case 'log':
         setLog((prev) => {
-          const next = prev.concat(ev.line ?? '')
+          // cicy's own annotations come as a localizable `code` (+ params); raw
+          // installer output comes as `line` and is shown verbatim.
+          const line = ev.code ? t(ev.code, { label: ev.label, url: ev.url }) : (ev.line ?? '')
+          const next = prev.concat(line)
           return next.length > 300 ? next.slice(next.length - 300) : next
         })
         break

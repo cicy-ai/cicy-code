@@ -140,7 +140,14 @@ func npmGlobalInstallCmd(pkg string) string {
 	// Pre-remove the old package directory so npm's atomic rename-to-temp
 	// doesn't fail with ENOTEMPTY on macOS when the directory is non-empty.
 	rmOld := `rm -rf "$HOME/.npm-global/lib/node_modules/` + npmPkgDir(pkg) + `"`
-	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && ` + rmOld + ` && npm install -g --include=optional --registry=` + registry + ` --prefix "$HOME/.npm-global" ` + pkg
+	// Fetch resilience: modern CLIs (e.g. claude-code) ship the real binary as a
+	// large (~70MB) platform-native OPTIONAL dependency. On a slow link / flaky
+	// mirror CDN the default 5-min fetch timeout is hit and — because it's
+	// optional — npm SILENTLY SKIPS it, leaving the wrapper without its native
+	// binary ("native binary not installed"). Give big optional tarballs a long
+	// timeout + several retries so they actually land.
+	fetchOpts := `--fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=120000 --fetch-timeout=900000`
+	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && ` + rmOld + ` && npm install -g --include=optional ` + fetchOpts + ` --registry=` + registry + ` --prefix "$HOME/.npm-global" ` + pkg
 }
 
 func preinstalledRuntimeInstallCmd(cmd string) string {
@@ -857,6 +864,43 @@ func ensureMissingRosterMembers(selected []string) {
 	}
 }
 
+// reseedBuiltinGuidance regenerates each existing built-in roster agent's
+// composed guidance file (CLAUDE.md / AGENTS.md) from the CURRENT templates on
+// every startup. A roster agent's persona lives in its role template
+// (~/cicy-ai/memory/agents/<slug>.md) and global/project are managed templates,
+// so the workspace file is just a derived composition — the create-time seed is
+// write-once and would otherwise stay frozen at whatever the binary produced on
+// first boot (stale order / missing global+project after a version bump). Only
+// touches roster members that already exist; user-created agents are never
+// regenerated (their workspace file may carry hand edits).
+func reseedBuiltinGuidance(selected []string) {
+	for _, w := range selectedBuiltinWorkers(selected) {
+		rel := guidanceFilenameForAgentType(w.AgentType)
+		if rel == "" {
+			continue
+		}
+		session := builtinWorkerSession(w.Port)
+		paneID := session + ":main.0"
+		var cnt int
+		store.QueryRow("SELECT COUNT(1) FROM agent_config WHERE pane_id=?", paneID).Scan(&cnt)
+		if cnt == 0 {
+			continue
+		}
+		ws := builtinWorkerWorkspace(session)
+		if strings.TrimSpace(ws) == "" {
+			continue
+		}
+		content := composeGuidanceContent(ws, w.AgentType, paneID, "", w.RoleTemplate)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		if err := os.MkdirAll(ws, 0755); err != nil {
+			continue
+		}
+		_ = os.WriteFile(filepath.Join(ws, rel), []byte(content), 0644)
+	}
+}
+
 func createBuiltinWorker(w builtinWorker) {
 	session := fmt.Sprintf("w-%d", w.Port)
 	token := getFirstToken()
@@ -1043,6 +1087,9 @@ func checkEnv() {
 	// for non-official layouts (--agents/lab/dev manage their own).
 	if usesOfficialRoster() {
 		ensureMissingRosterMembers(selectedAgents)
+		// Keep preset roster guidance in sync with the current templates/order
+		// (the create-time seed is write-once and goes stale across versions).
+		reseedBuiltinGuidance(selectedAgents)
 	}
 	// Bring up the local mihomo proxy in the BACKGROUND. It used to run
 	// synchronously here (so proxy-routed workers wouldn't dial a dead :9001

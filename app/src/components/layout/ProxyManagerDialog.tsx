@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { X, RefreshCw, Play, Square, RotateCw, RefreshCcw, Sparkles, Globe, Copy, Check, AlertTriangle, ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
+import Select from '../ui/Select';
 import { sendToAgent as dispatchToAgent } from '../../services/agentSend';
 import { useApp } from '../../contexts/AppContext';
 
@@ -816,16 +817,19 @@ function ProxyTableRow({
         {kind === 'group' ? (
           entry.members && entry.members.length > 0 ? (
             <div data-id={`proxy-manager-cell-${entry.name}-now-select-wrap`} className="flex items-center gap-1.5">
-              <select
-                data-id={`proxy-manager-cell-${entry.name}-now-select`}
-                value={entry.now || ''}
+              <Select
+                dataId={`proxy-manager-cell-${entry.name}-now-select`}
+                className="max-w-[160px]"
+                compact
+                searchable
                 disabled={switching}
-                onChange={(e) => { if (e.target.value && e.target.value !== entry.now) onSelectNode(entry.name, e.target.value); }}
-                className="max-w-[160px] rounded-md border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-zinc-200 outline-none transition-colors hover:border-white/[0.16] focus:border-blue-500/40 disabled:opacity-50"
-              >
-                {!entry.members.includes(entry.now || '') && entry.now ? <option value={entry.now}>{entry.now}</option> : null}
-                {entry.members.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
+                value={entry.now || ''}
+                onChange={(v) => { if (v && v !== entry.now) onSelectNode(entry.name, v); }}
+                options={[
+                  ...(!entry.members.includes(entry.now || '') && entry.now ? [{ value: entry.now, label: entry.now }] : []),
+                  ...entry.members.map((m) => ({ value: m, label: m })),
+                ]}
+              />
               {switching ? <RefreshCw data-id={`proxy-manager-cell-${entry.name}-switching`} className="h-3 w-3 animate-spin text-zinc-500" /> : null}
             </div>
           ) : (

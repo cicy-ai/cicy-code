@@ -746,23 +746,48 @@ func writeAgentGuidanceFile(workspace, agentType, paneID, projectTemplate, roleT
 // the CURRENT templates. Shared by the create-time seed (writeAgentGuidanceFile)
 // and the reseed CLI (reseed_memory.go).
 //
-// The dispatcher is a lite customizable agent, not a coding CLI — the global
-// template's tmux/skill instructions don't apply. Its AGENTS.md IS its role
-// definition (profile frontmatter + persona, see agent_lite.go). Seed it
-// from the chosen role template (客服/销售/宣传/…) when one is picked,
-// otherwise the default dispatcher (PM) charter.
+// The dispatcher is a lite customizable agent: its AGENTS.md IS its role
+// definition (profile frontmatter + persona, see agent_lite.go), seeded from the
+// chosen role template (客服/销售/宣传/…) when one is picked, otherwise the
+// default dispatcher (PM) charter. Like coding agents it also carries the
+// project rules + global memory — but its frontmatter (`tools:`, parsed by
+// resolveLiteConfig) MUST stay at the very top of the file, so project + global
+// are APPENDED after the persona body rather than prepended (the reverse of
+// composeAgentMemory's order, which is fine because they're plain context).
 func composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleTemplate string) string {
 	if normalizeAgentType(agentType) == "cicy" {
-		seed := defaultCicyCharter
+		ensureRoleMemoryTemplates()
+		// No-role default persona: the "default-charter" template (one source,
+		// memory/agents/, no hardcoded Go text).
+		seed := roleTemplateRaw("default-charter")
 		if slug := sanitizeTemplateSlug(roleTemplate); slug != "" {
-			if rt := strings.TrimSpace(loadTemplateFile(roleTemplatePath(slug))); rt != "" {
+			if rt := strings.TrimSpace(roleTemplateRaw(slug)); rt != "" {
 				seed = rt
 			} else if ca, ok := customAgentFor(slug); ok && strings.TrimSpace(ca.Body) != "" {
 				// User-authored custom agent: persona is its AGENT.md body.
 				seed = strings.TrimSpace(ca.Body)
 			}
 		}
-		return substituteTemplatePlaceholders(seed, paneID, workspace, agentType)
+		ensureGlobalMemoryTemplate()
+		ensureDefaultProject()
+		// Pure global → project → role, in that order — NO frontmatter at the top.
+		// The role template's `tools:` frontmatter is NOT written into AGENTS.md;
+		// resolveLiteConfig sources tools straight from the role template
+		// (memory/agents/<slug>.md) by the agent's role_template, so the composed
+		// file can follow the requested order without breaking tool resolution.
+		// Unassigned agents fall back to the "default" project (projectSlugOrDefault).
+		_, body := splitFrontmatter(seed)
+		parts := []string{}
+		if global := strings.TrimSpace(loadTemplateFile(globalMemoryTemplatePath())); global != "" {
+			parts = append(parts, global)
+		}
+		if project := projectRulesBody(projectSlugOrDefault(projectTemplate)); project != "" {
+			parts = append(parts, project)
+		}
+		if rb := strings.TrimSpace(body); rb != "" {
+			parts = append(parts, rb)
+		}
+		return substituteTemplatePlaceholders(strings.Join(parts, "\n\n"), paneID, workspace, agentType)
 	}
 	return composeAgentMemory(paneID, workspace, agentType, projectTemplate, roleTemplate)
 }

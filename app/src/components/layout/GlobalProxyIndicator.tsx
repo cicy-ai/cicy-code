@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Globe, Loader2, RefreshCw, Zap, SlidersHorizontal } from 'lucide-react';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
+import Select from '../ui/Select';
 
 // 🌍 Global-proxy / exit-IP indicator. Lives on the right side of the Workspace
 // top toolbar. Opening it (or hitting 测速) hits GET /api/proxy/exit-info to
@@ -266,19 +267,16 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
               <div className="px-1 py-1.5 text-[12px] text-zinc-500">暂无可选节点</div>
             ) : (
               <div className="flex items-center gap-2 px-1 pb-1">
-                <select
-                  data-id="global-proxy-node-select"
-                  value={now}
-                  onChange={(e) => { void handleSelect(e.target.value); }}
+                <Select
+                  dataId="global-proxy-node-select"
+                  className="min-w-0 flex-1"
+                  compact
+                  searchable
                   disabled={!!switching}
-                  className="min-w-0 flex-1 cursor-pointer rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-[12px] text-zinc-200 outline-none transition-colors hover:bg-white/[0.06] focus:border-white/[0.2] disabled:opacity-50"
-                >
-                  {members.map((member) => (
-                    <option key={member} value={member} className="bg-[#111113] text-zinc-200">
-                      {memberLabel(member)}
-                    </option>
-                  ))}
-                </select>
+                  value={now}
+                  onChange={(v) => { void handleSelect(v); }}
+                  options={members.map((member) => ({ value: member, label: memberLabel(member) }))}
+                />
                 {switching ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-zinc-400" /> : null}
               </div>
             )}

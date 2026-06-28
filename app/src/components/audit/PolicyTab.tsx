@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ShieldCheck, ShieldX, EyeOff, Bell, FileText, Zap, Mail, ListChecks, AlertTriangle, X, SlidersHorizontal, RotateCcw, Plus, Trash2, ChevronLeft } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
+import Select from '../ui/Select';
 import apiService from '../../services/api';
 
 // Configurable view of the EFFECTIVE policy.json (GET/POST /api/audit/policy).
@@ -405,13 +406,14 @@ export default function PolicyTab() {
 
                     <div className="flex items-center gap-2">
                       <div className="text-[12px] text-[var(--vsc-text-muted)]">{t('policySeverity', '严重度')}</div>
-                      <select
+                      <Select
+                        dataId="policy-severity-select"
+                        className="min-w-[200px]"
+                        compact
                         value={ed.severity || 'medium'}
-                        onChange={(e) => setNewRule({ ...ed, severity: e.target.value })}
-                        className={`rounded border px-2 py-1 text-[13px] bg-[var(--vsc-bg)] ${sevColor[ed.severity || 'medium']}`}
-                      >
-                        {SEV_OPTS.map((s) => <option key={s.value} value={s.value}>{s.label}（{s.help}）</option>)}
-                      </select>
+                        onChange={(v) => setNewRule({ ...ed, severity: v })}
+                        options={SEV_OPTS.map((s) => ({ value: s.value, label: `${s.label}（${s.help}）` }))}
+                      />
                     </div>
 
                     <div className="space-y-1.5">
@@ -456,10 +458,17 @@ export default function PolicyTab() {
                       return (
                         <div key={idx} className="rounded border border-[var(--vsc-border-subtle)] bg-[var(--vsc-bg-secondary)] p-2 space-y-1">
                           <div className="flex items-center gap-2">
-                            <select value={tc.expect || 'hit'} onChange={(e) => updTest(idx, { expect: e.target.value })} className="rounded border border-[var(--vsc-border)] bg-[var(--vsc-bg)] px-1.5 py-0.5 text-[12px] text-white">
-                              <option value="hit">{t('policyExpectHit', '应命中')}</option>
-                              <option value="miss">{t('policyExpectMiss', '不应命中')}</option>
-                            </select>
+                            <Select
+                              dataId="policy-test-expect-select"
+                              className="min-w-[120px]"
+                              compact
+                              value={tc.expect || 'hit'}
+                              onChange={(v) => updTest(idx, { expect: v })}
+                              options={[
+                                { value: 'hit', label: t('policyExpectHit', '应命中') },
+                                { value: 'miss', label: t('policyExpectMiss', '不应命中') },
+                              ]}
+                            />
                             <button onClick={() => runOne(idx)} className="rounded bg-blue-500/15 px-2 py-0.5 text-[12px] text-blue-300 border border-blue-500/30 hover:bg-blue-500/25">{t('policyRunTest', '测试')}</button>
                             {res && (res.error ? <span className="text-[12px] text-red-400">{res.error}</span> : <span className={`text-[12px] ${res.pass ? 'text-emerald-400' : 'text-red-400'}`}>{res.pass ? t('policyTestPass', '✓ 通过') : t('policyTestFailMark', '✗ 未通过')} ({t('policyTestHits', '命中 {{n}} 处', { n: res.count || 0 })})</span>)}
                             <button onClick={() => delTest(idx)} className="ml-auto text-zinc-500 hover:text-red-400"><Trash2 size={12} /></button>

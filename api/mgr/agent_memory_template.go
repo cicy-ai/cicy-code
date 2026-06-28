@@ -83,7 +83,18 @@ func roleTemplatePath(slug string) string {
 	return filepath.Join(agentTemplatesDir(), clean+".md")
 }
 
-// listTemplateSlugs returns the .md slugs in dir (sorted).
+// reservedTemplateSlugs are system base/default templates that live in
+// ~/cicy-ai/memory/agents/ (so there's ONE template source, editable on disk)
+// but must NOT show up in the role picker — they're the cicy system-prompt base
+// and the no-role default charter, not selectable personas.
+var reservedTemplateSlugs = map[string]bool{
+	"base-assistant":  true,
+	"base-dispatcher": true,
+	"default-charter": true,
+}
+
+// listTemplateSlugs returns the user-selectable .md slugs in dir (sorted),
+// excluding reserved system templates.
 func listTemplateSlugs(dir string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -94,10 +105,38 @@ func listTemplateSlugs(dir string) []string {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		out = append(out, strings.TrimSuffix(e.Name(), ".md"))
+		slug := strings.TrimSuffix(e.Name(), ".md")
+		if reservedTemplateSlugs[slug] {
+			continue
+		}
+		out = append(out, slug)
 	}
 	sort.Strings(out)
 	return out
+}
+
+// roleTemplateRaw returns a role template's RAW markdown (frontmatter intact),
+// preferring the user-editable ~/cicy-ai/memory/agents/<slug>.md and falling
+// back to the embedded seed so a base/default template is never empty before
+// first-boot seeding. This keeps memory/agents/ the single template source.
+func roleTemplateRaw(slug string) string {
+	clean := sanitizeTemplateSlug(slug)
+	if clean == "" {
+		return ""
+	}
+	if raw := loadTemplateFile(roleTemplatePath(clean)); strings.TrimSpace(raw) != "" {
+		return raw
+	}
+	if b, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + clean + ".md"); err == nil {
+		return string(b)
+	}
+	return ""
+}
+
+// roleTemplateBody returns a role template's body (frontmatter stripped) via the
+// same disk-or-embed source as roleTemplateRaw.
+func roleTemplateBody(slug string) string {
+	return strings.TrimSpace(parseLiteFrontmatter(roleTemplateRaw(slug)).body)
 }
 
 func listProjectTemplates() []string { return listTemplateSlugs(projectTemplatesDir()) }
@@ -105,28 +144,14 @@ func listRoleTemplates() []string    { return listTemplateSlugs(agentTemplatesDi
 
 // defaultGlobalMemoryTemplate seeds ~/cicy-ai/memory/global.md the first time
 // it is needed.
-const defaultGlobalMemoryTemplate = `# Agent Memory
+const defaultGlobalMemoryTemplate = `## Collaboration
 
-- Your AGENT_ID is ` + "`{{AGENT_ID}}`" + `
-- Your current directory is ` + "`{{WORKSPACE}}`" + `
-- Your agent_type is ` + "`{{AGENT_TYPE}}`" + `
-- Ask the user to set your project directory
-
-## Collaboration
-
-You run inside tmux and can collaborate with other agents through the ` + "`cicy-agent`" + ` skill:
-- ` + "`cicy-agent ls`" + ` — discover other panes
-- ` + "`cicy-agent msg <pane> <text>`" + ` — dispatch a task or ask for help
-- ` + "`cicy-agent capture <pane>`" + ` — check another agent's progress
+You can collaborate with other agents through the ` + "`cicy-agent`" + ` skill:
+- ` + "`cicy-agent ls`" + ` — discover other agents
+- ` + "`cicy-agent msg <agent> <text>`" + ` — dispatch a task or ask for help
+- ` + "`cicy-agent capture <agent>`" + ` — check another agent's progress
 
 Run ` + "`cicy-agent help`" + ` first to see all subcommands (note it is ` + "`help`" + `, not ` + "`--help`" + `).
-
-## Tool routing (intent → which tool to use)
-
-- todo / task list / "what's left" → ` + "`cicy-todo`" + ` (` + "`cicy-todo add/start/done/drop`" + `); don't write these into scratch notes
-- message another agent → ` + "`cicy-agent msg`" + `
-- fork / inherit an agent → ` + "`cicy-agent fork`" + `
-- read the raw conversation / feed context to a fork → ` + "`agent-summary`" + `
 
 ## Constraints
 
@@ -218,6 +243,11 @@ func agentOpeningGreeting(shortID string) string {
 		"SELECT COALESCE(role_template,''), COALESCE(title,''), COALESCE(agent_type,''), COALESCE(workspace,'') FROM agent_config WHERE pane_id=?",
 		shortID+":main.0",
 	).Scan(&roleTemplate, &title, &agentType, &workspace)
+	// Only cicy (lite) agents have an opening greeting; coding agents
+	// (claude/codex/…) get none so the chat view stays blank for them.
+	if normalizeAgentType(agentType) != "cicy" {
+		return ""
+	}
 	if slug := sanitizeTemplateSlug(roleTemplate); slug != "" {
 		// 1) employees.yaml template greeting (the configurable source)
 		if g := strings.TrimSpace(employeeTemplateGreeting(slug)); g != "" {
@@ -289,17 +319,18 @@ func platformSetupGuidance() string {
 // on disk so creation never produces an empty file.
 func composeAgentMemory(agentID, workspace, agentType, projectSlug, roleSlug string) string {
 	ensureGlobalMemoryTemplate()
+	ensureDefaultProject()
 
 	parts := []string{}
 	if global := strings.TrimSpace(loadTemplateFile(globalMemoryTemplatePath())); global != "" {
 		parts = append(parts, global)
 	}
-	if slug := sanitizeTemplateSlug(projectSlug); slug != "" {
-		// projectRulesBody strips the YAML frontmatter (name/dir) so only the
-		// rules body lands in the agent's CLAUDE.md — never the metadata header.
-		if project := projectRulesBody(slug); project != "" {
-			parts = append(parts, project)
-		}
+	// Every agent carries a project's rules; an unassigned agent falls back to the
+	// "default" project (projectSlugOrDefault), so default.md reaches everyone.
+	// projectRulesBody strips the YAML frontmatter (name) so only the rules body
+	// lands in the agent's CLAUDE.md — never the metadata header.
+	if project := projectRulesBody(projectSlugOrDefault(projectSlug)); project != "" {
+		parts = append(parts, project)
 	}
 	if slug := sanitizeTemplateSlug(roleSlug); slug != "" {
 		if role := strings.TrimSpace(loadTemplateFile(roleTemplatePath(slug))); role != "" {
