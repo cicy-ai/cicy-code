@@ -2977,6 +2977,15 @@ EOF
 		lines := []string{
 			ensureAgentCommandLine("codex", "Codex", codexInstallCmd(), installLog),
 		}
+		// Pre-trust this workspace in ~/.codex/config.toml so Codex skips its
+		// "Do you trust the contents of this directory?" prompt — same format Codex
+		// itself persists (`[projects."<dir>"] trust_level = "trusted"`). A config
+		// write (not auto-confirm send-keys); idempotent, runs before launch.
+		lines = append(lines,
+			`mkdir -p "$HOME/.codex"`,
+			`__codex_cfg="$HOME/.codex/config.toml"; touch "$__codex_cfg"`,
+			`grep -qF "[projects.\"$WORKSPACE\"]" "$__codex_cfg" 2>/dev/null || printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$WORKSPACE" >> "$__codex_cfg"`,
+		)
 		// Resume this workspace's most recent codex session when one exists
 		// (sets $CODEX_RESUME = "resume --last" or empty). Decided in boot.sh.
 		lines = append(lines, codexResumeBootLines()...)
@@ -4479,135 +4488,9 @@ func autoSendReplyInChinese(paneID, agentType string, enabled bool) {
 	replyInChineseStartupQueue.enqueue(paneID, agentType)
 }
 
-func autoConfirmClaudeStartup(paneID string, allowAllActions bool) {
-	go func() {
-		state := claudeAutoConfirmState{}
-		// maxPolls: 6000 × 200ms = 20 minutes — enough for a slow npm install.
-		// We also reset the counter once we detect the claude process is running
-		// to avoid timing out during a long install before claude even starts.
-		claudeStarted := false
-		for i := 0; i < 6000; i++ {
-			pollInterval := 200 * time.Millisecond
-			if state.currentStage == claudeStageBypassChoice || state.currentStage == claudeStageBypassConfirm {
-				pollInterval = 20 * time.Millisecond
-			}
-			time.Sleep(pollInterval)
-			out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-160")
-			if err != nil {
-				continue
-			}
-			currentCmd, _ := runTmux("display-message", "-p", "-t", paneID, "#{pane_current_command}")
-			cmd := strings.ToLower(strings.TrimSpace(currentCmd))
-			// Reset counter once claude process actually appears, so the
-			// install phase doesn't eat into the timeout budget.
-			if !claudeStarted && (cmd == "claude" || cmd == "cicy-claude") {
-				claudeStarted = true
-				i = 0
-			}
-			action := nextClaudeAutoConfirmAction(&state, out, currentCmd, allowAllActions, time.Now())
-			switch action {
-			case claudeActionStop:
-				log.Printf("[claude-auto-confirm] %s stop: current command=%s", paneID, currentCmd)
-				return
-			case claudeActionReady:
-				go clearClaudeStartupScreen(paneID)
-				log.Printf("[claude-auto-confirm] %s ready", paneID)
-				return
-			case claudeActionNone:
-				continue
-			case claudeActionEnter:
-				switch state.currentStage {
-				case claudeStageTheme:
-					log.Printf("[claude-auto-confirm] %s theme selected", paneID)
-				case claudeStageSecurityNotes:
-					log.Printf("[claude-auto-confirm] %s security notes continue", paneID)
-				case claudeStageTrust:
-					log.Printf("[claude-auto-confirm] %s trust workspace", paneID)
-				case claudeStageBypassChoice:
-					log.Printf("[claude-auto-confirm] %s confirm selected bypass accept option", paneID)
-				case claudeStageBypassConfirm:
-					log.Printf("[claude-auto-confirm] %s confirm bypass mode", paneID)
-				}
-				runTmux("send-keys", "-t", paneID, "Enter")
-			case claudeActionDown:
-				log.Printf("[claude-auto-confirm] %s move selection to accept bypass mode", paneID)
-				runTmux("send-keys", "-t", paneID, "Down")
-			}
-		}
-		log.Printf("[claude-auto-confirm] %s timeout", paneID)
-	}()
-}
-
-func clearClaudeStartupScreen(paneID string) {
-	for i := 0; i < 3; i++ {
-		runTmux("send-keys", "-t", paneID, "C-l")
-		time.Sleep(80 * time.Millisecond)
-	}
-	runTmux("clear-history", "-t", paneID)
-}
-
-func autoConfirmCodexTrust(paneID string) {
-	go func() {
-		var lastAction time.Time
-		enterCount := 0
-		updateSkipCount := 0
-		codexStarted := false
-		for i := 0; i < 6000; i++ {
-			time.Sleep(200 * time.Millisecond)
-			out, err := runTmux("capture-pane", "-t", paneID, "-p")
-			if err != nil {
-				continue
-			}
-			currentCmd, _ := runTmux("display-message", "-p", "-t", paneID, "#{pane_current_command}")
-			cmd := strings.ToLower(strings.TrimSpace(currentCmd))
-			if !codexStarted && cmd == "codex" {
-				codexStarted = true
-				i = 0
-			}
-			if isCodexInputReady(out) {
-				log.Printf("[codex-auto-confirm] %s ready", paneID)
-				return
-			}
-			if isCodexUpdatePrompt(out) {
-				if updateSkipCount >= 2 || time.Since(lastAction) < 1500*time.Millisecond {
-					continue
-				}
-				log.Printf("[codex-auto-confirm] %s dismiss update prompt #%d", paneID, updateSkipCount+1)
-				runTmux("send-keys", "-t", paneID, "2")
-				time.Sleep(150 * time.Millisecond)
-				runTmux("send-keys", "-t", paneID, "Enter")
-				lastAction = time.Now()
-				updateSkipCount++
-				continue
-			}
-			if !isCodexTrustPrompt(out) {
-				continue
-			}
-			if enterCount >= 4 || time.Since(lastAction) < 800*time.Millisecond {
-				continue
-			}
-			log.Printf("[codex-auto-confirm] %s trust workspace 1+Enter #%d", paneID, enterCount+1)
-			runTmux("send-keys", "-t", paneID, "-l", "--", "1")
-			time.Sleep(120 * time.Millisecond)
-			runTmux("send-keys", "-t", paneID, "Enter")
-			lastAction = time.Now()
-			enterCount++
-		}
-		log.Printf("[codex-auto-confirm] %s timeout", paneID)
-	}()
-}
-
 func initPaneEnv(opts paneEnvOpts) {
 	pid := opts.paneID
 	shortID := strings.Split(pid, ":")[0]
-
-	// Windows native ConPTY backend: the pane is cmd.exe (not bash) and cygwin
-	// bash can't spawn the native node CLIs anyway, so we don't `source boot.sh`.
-	// Go writes the agent config files and sends the native launch command.
-	// No-op off Windows / backend off (nativePtyActive() is false there).
-	if nativePtyActive() && nativeBoot(opts) {
-		return
-	}
 
 	aiCfg := loadRuntimeAIConfig()
 	// proxyURL := fmt.Sprintf("http://%s:x@127.0.0.1:17080", shortID)
@@ -4798,11 +4681,9 @@ func initPaneEnv(opts paneEnvOpts) {
 		log.Printf("[init] shell prompt not confirmed for %s, skip auto source .cicy/boot.sh", shortPaneID(pid))
 		return
 	}
-	if (normalizeAgentType(opts.agentType) == "claude" || normalizeAgentType(opts.agentType) == "cicy-claude") && useCustomGateway {
-		autoConfirmClaudeStartup(pid, opts.allowAllActions)
-	} else if normalizeAgentType(opts.agentType) == "codex" {
-		autoConfirmCodexTrust(pid)
-	}
+	// First-launch auto-confirm send-keys removed by design: the user goes through
+	// the CLI's own first-run prompts (theme / trust / Bypass) themselves instead
+	// of cicy auto-pressing Enter for them.
 }
 
 func handleRestartAll(w http.ResponseWriter, r *http.Request) {

@@ -232,24 +232,16 @@ func serveTTY(w http.ResponseWriter, r *http.Request, tmuxTarget, title, apiPane
 		return nil
 	})
 
-	// When the native pty backend is active (Windows), bridge directly to the
-	// live pane — `tmux attach` has no server to attach to and would show "no
-	// session". Off Windows / backend off, fall back to tmux attach unchanged.
 	var factory server.Factory
-	if f, ok := customTTYFactory(tmuxTarget); ok {
-		factory = f
-		log.Printf("[ttyd] %s: native pty backend (ptymux)", tmuxTarget)
-	} else {
-		lf, err := localcommand.NewFactory(
-			"tmux", []string{"attach", "-t", tmuxTarget},
-			&localcommand.Options{CloseSignal: 1, CloseTimeout: -1},
-		)
-		if err != nil {
-			log.Printf("[ttyd] factory error: %v", err)
-			return
-		}
-		factory = lf
+	lf, err := localcommand.NewFactory(
+		"tmux", []string{"attach", "-t", tmuxTarget},
+		&localcommand.Options{CloseSignal: 1, CloseTimeout: -1},
+	)
+	if err != nil {
+		log.Printf("[ttyd] factory error: %v", err)
+		return
 	}
+	factory = lf
 
 	l := newLocalTTY()
 	defer l.Close()
