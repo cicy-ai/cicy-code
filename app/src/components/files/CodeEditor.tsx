@@ -39,6 +39,10 @@ import { fsApi, fsBasename, FsError, FsReadResult, FsStatResponse, friendlyFsErr
 import { languageForPath } from './language';
 import { cicySearch } from './cmSearchPanel';
 import MarkdownPreview from './MarkdownPreview';
+import i18n from '../../i18n';
+
+const t = (k: string, o?: Record<string, unknown>) =>
+  i18n.t(`fileExplorer.${k}`, { ns: 'workspace', ...o }) as string;
 
 function isMarkdownPath(path: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(path);
@@ -635,7 +639,7 @@ export default function CodeEditor({
         data-id={active ? 'code-editor-empty' : 'code-editor-inactive'}
         className={`flex items-center justify-center h-full text-sm text-zinc-500 ${className || ''}`}
       >
-        选择一个文件
+        {t('editorSelectFile')}
       </div>
     );
   }
@@ -646,7 +650,7 @@ export default function CodeEditor({
         data-id={active ? 'code-editor-loading' : 'code-editor-inactive'}
         className={`flex items-center justify-center h-full text-sm text-zinc-500 ${className || ''}`}
       >
-        加载中…
+        {t('editorLoading')}
       </div>
     );
   }
@@ -767,17 +771,17 @@ export default function CodeEditor({
             </div>
             <div className="mt-1 text-xs text-zinc-600">
               {tooLarge
-                ? '文件超过 5MB,无法在编辑器内打开'
+                ? t('editorTooLarge')
                 : buf.mode === 'image'
-                  ? '图片较大,不内联预览'
-                  : '二进制文件,不在编辑器内打开'}
+                  ? t('editorImageTooLarge')
+                  : t('editorBinary')}
             </div>
             <button
               data-id="code-editor-binary-download"
               onClick={handleDownload}
               className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs"
             >
-              <Download className="w-3.5 h-3.5" /> 下载
+              <Download className="w-3.5 h-3.5" /> {t('download')}
             </button>
           </div>
         </div>
@@ -824,7 +828,7 @@ export default function CodeEditor({
           // — translucent border, no fill, brightens on hover. Pulls slightly
           // farther from the right edge when dirty-dot is visible.
           className={`absolute top-1 ${dirty ? 'right-6' : 'right-2'} z-10 inline-flex items-center justify-center p-1 rounded border border-zinc-700/60 bg-zinc-900/70 hover:bg-zinc-800 hover:border-zinc-600 text-zinc-300 hover:text-zinc-100 transition-colors`}
-          title={previewMd ? '切换到源码' : '切换到预览'}
+          title={previewMd ? t('editorToggleSource') : t('editorTogglePreview')}
           aria-pressed={previewMd}
         >
           {previewMd ? <FileCode className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
@@ -833,26 +837,26 @@ export default function CodeEditor({
       {heavy && (
         <div data-id="code-editor-heavy-banner" className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/20 border-b border-amber-800/40 text-xs text-amber-200">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          <span>大文件 ({formatBytes(buf.size)}) — 只读模式,已关闭语法高亮</span>
+          <span>{t('editorHeavyBanner', { size: formatBytes(buf.size) })}</span>
         </div>
       )}
       {conflict && (
         <div className="flex items-center gap-3 px-3 py-2 bg-amber-900/30 border-b border-amber-700/40 text-xs text-amber-200">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span className="flex-1">
-            磁盘上的版本已被外部修改 (mtime {conflict.actualMtime})。覆盖将丢弃外部改动,重新加载将丢弃当前未保存的编辑。
+            {t('editorConflictMsg', { mtime: conflict.actualMtime })}
           </span>
           <button
             className="px-2 py-1 rounded bg-amber-700/60 hover:bg-amber-700 text-white"
             onClick={handleForceSave}
           >
-            强制覆盖
+            {t('editorForceOverwrite')}
           </button>
           <button
             className="px-2 py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
             onClick={handleReload}
           >
-            重新加载
+            {t('editorReload')}
           </button>
         </div>
       )}
@@ -860,19 +864,19 @@ export default function CodeEditor({
         <div className="flex items-center gap-3 px-3 py-2 bg-sky-900/30 border-b border-sky-700/40 text-xs text-sky-200">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span className="flex-1">
-            文件已被外部修改,你当前还有未保存的改动。
+            {t('editorExternalChangeMsg')}
           </span>
           <button
             className="px-2 py-1 rounded bg-sky-700/60 hover:bg-sky-700 text-white"
             onClick={handleReload}
           >
-            放弃我的改动并重新加载
+            {t('editorDiscardReload')}
           </button>
           <button
             className="px-2 py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
             onClick={() => setExternalChange(false)}
           >
-            忽略
+            {t('editorIgnore')}
           </button>
         </div>
       )}
@@ -968,7 +972,7 @@ function EditorContextMenu({
           onClick={() => { onSave(); onClose(); }}
           shortcut="Cmd+S"
         >
-          保存
+          {t('editorSave')}
         </Item>
       )}
       {canPreviewMd && onTogglePreview && (
@@ -976,27 +980,27 @@ function EditorContextMenu({
           icon={previewing ? <FileCode className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           onClick={() => { onTogglePreview(); onClose(); }}
         >
-          {previewing ? '显示源码' : '预览 Markdown'}
+          {previewing ? t('editorShowSource') : t('editorPreviewMarkdown')}
         </Item>
       )}
       <Item
         icon={<Send className="w-3.5 h-3.5" />}
         onClick={() => { onSendToAgent(); onClose(); }}
       >
-        发送给当前 agent
+        {t('sendToAgent')}
       </Item>
       <Item
         icon={<DownloadIcon className="w-3.5 h-3.5" />}
         onClick={() => { onDownload(); onClose(); }}
       >
-        下载
+        {t('download')}
       </Item>
       {canDiff && onShowDiff && (
         <Item
           icon={<GitCompare className="w-3.5 h-3.5" />}
           onClick={() => { onShowDiff(); onClose(); }}
         >
-          对比 HEAD
+          {t('editorDiffHead')}
         </Item>
       )}
       {onReload && (
@@ -1004,7 +1008,7 @@ function EditorContextMenu({
           icon={<RefreshCw className="w-3.5 h-3.5" />}
           onClick={() => { onReload(); onClose(); }}
         >
-          重新加载
+          {t('editorReload')}
         </Item>
       )}
     </div>

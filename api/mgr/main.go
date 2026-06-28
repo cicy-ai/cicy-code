@@ -41,7 +41,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.51"
+const version = "2.3.52"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -646,20 +646,28 @@ Options:
 	// or any tunnel. Uses runtime/pprof (not net/http/pprof) so DefaultServeMux
 	// (the public mux) is never polluted with /debug/pprof handlers.
 	//   curl 127.0.0.1:6060/heap > heap.prof && go tool pprof heap.prof
-	go func() {
-		mux := http.NewServeMux()
-		mux.HandleFunc("/heap", func(w http.ResponseWriter, r *http.Request) {
-			runtime.GC()
-			_ = pprof.WriteHeapProfile(w)
-		})
-		mux.HandleFunc("/goroutine", func(w http.ResponseWriter, r *http.Request) {
-			_ = pprof.Lookup("goroutine").WriteTo(w, 0)
-		})
-		mux.HandleFunc("/allocs", func(w http.ResponseWriter, r *http.Request) {
-			_ = pprof.Lookup("allocs").WriteTo(w, 0)
-		})
-		_ = http.ListenAndServe("127.0.0.1:6060", mux)
-	}()
+	// Port defaults to 6060; override with CICY_PPROF_PORT so a second instance on
+	// the same machine doesn't collide (set it to "off"/"0" to disable entirely).
+	pprofPort := strings.TrimSpace(os.Getenv("CICY_PPROF_PORT"))
+	if pprofPort == "" {
+		pprofPort = "6060"
+	}
+	if pprofPort != "off" && pprofPort != "0" {
+		go func() {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/heap", func(w http.ResponseWriter, r *http.Request) {
+				runtime.GC()
+				_ = pprof.WriteHeapProfile(w)
+			})
+			mux.HandleFunc("/goroutine", func(w http.ResponseWriter, r *http.Request) {
+				_ = pprof.Lookup("goroutine").WriteTo(w, 0)
+			})
+			mux.HandleFunc("/allocs", func(w http.ResponseWriter, r *http.Request) {
+				_ = pprof.Lookup("allocs").WriteTo(w, 0)
+			})
+			_ = http.ListenAndServe("127.0.0.1:"+pprofPort, mux)
+		}()
+	}
 
 	log.Fatal(http.ListenAndServe(bind+":"+port, globalCORS(withGzip(http.DefaultServeMux))))
 }

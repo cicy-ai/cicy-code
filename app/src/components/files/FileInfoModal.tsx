@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { X, RefreshCw } from 'lucide-react';
 import { fsApi, FsStatResponse, fsBasename } from './api';
+import i18n from '../../i18n';
+
+const t = (k: string, o?: Record<string, unknown>) =>
+  i18n.t(`fileExplorer.${k}`, { ns: 'workspace', ...o }) as string;
 
 interface Props {
   agentId: string;
@@ -25,11 +29,11 @@ function formatBytes(n: number): string {
 
 function formatRelative(unix: number): string {
   const diff = Date.now() - unix * 1000;
-  if (diff < 0) return '未来';
-  if (diff < 60_000) return '刚刚';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  if (diff < 30 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`;
+  if (diff < 0) return t('infoFuture');
+  if (diff < 60_000) return t('infoJustNow');
+  if (diff < 3_600_000) return t('infoMinutesAgo', { n: Math.floor(diff / 60_000) });
+  if (diff < 86_400_000) return t('infoHoursAgo', { n: Math.floor(diff / 3_600_000) });
+  if (diff < 30 * 86_400_000) return t('infoDaysAgo', { n: Math.floor(diff / 86_400_000) });
   return new Date(unix * 1000).toLocaleDateString();
 }
 
@@ -85,25 +89,25 @@ export default function FileInfoModal({ agentId, path, root, onClose }: Props) {
         <div className="p-4 text-xs text-zinc-300 space-y-2">
           {loading && (
             <div className="flex items-center gap-2 text-zinc-500">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" /> 读取中…
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" /> {t('infoReading')}
             </div>
           )}
           {error && <div className="text-red-400">{error}</div>}
           {stat && (
             <table className="w-full">
               <tbody>
-                <Row k="路径" v={<span className="font-mono break-all">{stat.path || '/'}</span>} />
-                <Row k="类型" v={stat.is_dir ? '目录' : 'file'} />
+                <Row k={t('infoPath')} v={<span className="font-mono break-all">{stat.path || '/'}</span>} />
+                <Row k={t('infoType')} v={stat.is_dir ? t('infoDir') : 'file'} />
                 <Row
-                  k="大小"
+                  k={t('infoSize')}
                   v={
                     <>
                       {formatBytes(stat.size)} <span className="text-zinc-500">({stat.size} B)</span>
                     </>
                   }
                 />
-                <Row k="修改时间" v={`${formatAbs(stat.mtime)} (${formatRelative(stat.mtime)})`} />
-                <Row k="权限" v={<span className="font-mono">{stat.mode}</span>} />
+                <Row k={t('infoMtime')} v={`${formatAbs(stat.mtime)} (${formatRelative(stat.mtime)})`} />
+                <Row k={t('infoMode')} v={<span className="font-mono">{stat.mode}</span>} />
                 {stat.mime && <Row k="MIME" v={<span className="font-mono">{stat.mime}</span>} />}
               </tbody>
             </table>

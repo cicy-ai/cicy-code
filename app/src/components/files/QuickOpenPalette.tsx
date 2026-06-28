@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import { fsApi, FsSearchMatch, fsBasename } from './api';
+import i18n from '../../i18n';
+
+const tr = (k: string, o?: Record<string, unknown>) =>
+  i18n.t(`fileExplorer.${k}`, { ns: 'workspace', ...o }) as string;
 
 interface Props {
   agentId: string;
@@ -110,7 +114,7 @@ export default function QuickOpenPalette({ agentId, open, onClose, onPick }: Pro
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKey}
-            placeholder="按文件名搜索…"
+            placeholder={tr('quickOpenPlaceholder')}
             className="flex-1 bg-transparent outline-none text-sm text-zinc-100 placeholder-zinc-600"
           />
           <button onClick={onClose} className="p-0.5 rounded hover:bg-zinc-800">
@@ -118,10 +122,10 @@ export default function QuickOpenPalette({ agentId, open, onClose, onPick }: Pro
           </button>
         </div>
         <div ref={listRef} className="max-h-80 overflow-auto text-sm">
-          {loading && <div className="px-3 py-2 text-xs text-zinc-500">搜索中…</div>}
+          {loading && <div className="px-3 py-2 text-xs text-zinc-500">{tr('quickOpenSearching')}</div>}
           {!loading && error && <div className="px-3 py-2 text-xs text-red-400">{error}</div>}
           {!loading && !error && q && matches.length === 0 && (
-            <div className="px-3 py-2 text-xs text-zinc-500">无匹配</div>
+            <div className="px-3 py-2 text-xs text-zinc-500">{tr('noMatches')}</div>
           )}
           {matches.map((m, i) => (
             <div
@@ -145,9 +149,9 @@ export default function QuickOpenPalette({ agentId, open, onClose, onPick }: Pro
           ))}
         </div>
         <div className="flex items-center justify-end gap-3 px-3 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-500">
-          <span>↑↓ 选择</span>
-          <span>↵ 打开</span>
-          <span>Esc 关闭</span>
+          <span>↑↓ {tr('quickOpenSelect')}</span>
+          <span>↵ {tr('quickOpenOpen')}</span>
+          <span>Esc {tr('closeTab')}</span>
         </div>
       </div>
     </div>

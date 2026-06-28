@@ -4,6 +4,10 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
 import { Check, Copy } from 'lucide-react';
+import i18n from '../../i18n';
+
+const t = (k: string, o?: Record<string, unknown>) =>
+  i18n.t(`fileExplorer.${k}`, { ns: 'workspace', ...o }) as string;
 
 interface Props {
   source: string;
@@ -51,17 +55,17 @@ function MarkdownPreview({ source, className = '' }: Props) {
       >
         <div className="max-w-md text-center">
           <div className="text-sm text-zinc-200 mb-1">
-            大文件 Markdown（{formatBytes(source.length)}）
+            {t('mdTooLargeTitle', { size: formatBytes(source.length) })}
           </div>
           <div className="text-xs text-zinc-500 mb-4 leading-5">
-            渲染整篇预览会卡住界面。建议切换到「源码」查看；如确需预览,可强制渲染（可能短暂卡顿）。
+            {t('mdTooLargeHint')}
           </div>
           <button
             type="button"
             onClick={() => setForceRender(true)}
             className="px-3 py-1.5 rounded-md border border-amber-700/50 bg-amber-900/20 text-amber-200 text-xs hover:bg-amber-900/40 transition-colors"
           >
-            仍要渲染预览
+            {t('mdForceRender')}
           </button>
         </div>
       </div>
@@ -303,10 +307,10 @@ function PreWithCopy(props: ComponentProps<'pre'>) {
         type="button"
         onClick={handleCopy}
         className="absolute top-2 right-2 opacity-0 group-hover/pre:opacity-100 transition-opacity text-xs px-2 py-1 rounded bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 inline-flex items-center gap-1"
-        title={copied ? '已复制' : '复制'}
+        title={copied ? t('mdCopied') : t('mdCopy')}
       >
         {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-        {copied ? '已复制' : '复制'}
+        {copied ? t('mdCopied') : t('mdCopy')}
       </button>
     </div>
   );

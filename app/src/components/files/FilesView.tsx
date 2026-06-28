@@ -12,6 +12,11 @@ import { languageNameForPath } from './language';
 import FileInfoModal from './FileInfoModal';
 import { PromptModal } from './Modals';
 import { useDialogs } from '../ui/Modal';
+import i18n from '../../i18n';
+
+// Shared with FileExplorer — all file-view copy lives under workspace.fileExplorer.*.
+const tr = (k: string, o?: Record<string, unknown>) =>
+  i18n.t(`fileExplorer.${k}`, { ns: 'workspace', ...o }) as string;
 
 interface FilesViewProps {
   agentId: string;
@@ -501,7 +506,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
         <div className="space-y-1">
           {paths.length > 1 ? (
             <>
-              <div>即将删除以下 {paths.length} 项:</div>
+              <div>{tr('deleteListIntro', { count: paths.length })}</div>
               <ul className="max-h-40 overflow-auto font-mono text-[11px] text-zinc-100 bg-zinc-950 border border-zinc-800 rounded p-2 space-y-0.5">
                 {paths.map((p) => (
                   <li key={p} className="truncate">{p}</li>
@@ -509,17 +514,17 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
               </ul>
             </>
           ) : (
-            <div>即将删除 <span className="font-mono text-zinc-100">{paths[0]}</span></div>
+            <div>{tr('deleteOnePrefix')} <span className="font-mono text-zinc-100">{paths[0]}</span></div>
           )}
           {isDir && (
-            <div className="text-amber-400">目录及其全部子项都会被递归删除,不可撤销。</div>
+            <div className="text-amber-400">{tr('deleteDirWarning')}</div>
           )}
         </div>
       );
       const title = paths.length > 1
-        ? `删除 ${paths.length} 项`
-        : `删除${isDir ? '文件夹' : '文件'}`;
-      const ok = await confirm({ title, body, confirmLabel: '删除', danger: true });
+        ? tr('deleteTitleN', { count: paths.length })
+        : (isDir ? tr('deleteTitleDir') : tr('deleteTitleFile'));
+      const ok = await confirm({ title, body, confirmLabel: tr('delete'), danger: true });
       if (!ok) return;
       const parentDirs = new Set<string>();
       // Sequential delete so errors on one don't poison the rest.
@@ -729,7 +734,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
               data-id="files-view-explorer-expand"
               className="shrink-0 flex items-center justify-center px-2 border-r border-zinc-800 bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
               onClick={() => setExplorerCollapsed(false)}
-              title="显示文件树"
+              title={tr('showFileTree')}
             >
               <PanelLeftOpen className="w-4 h-4" />
             </button>
@@ -754,15 +759,15 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/[0.06] bg-white/[0.02] text-zinc-600">
                   <Files size={28} strokeWidth={1.5} />
                 </div>
-                <div className="mt-4 text-sm font-medium text-zinc-300">没有打开的文件</div>
+                <div className="mt-4 text-sm font-medium text-zinc-300">{tr('noOpenFile')}</div>
                 <div className="mt-1.5 text-xs leading-relaxed text-zinc-500">
-                  在左侧文件树中选择文件,或用快捷键快速定位
+                  {tr('noOpenFileHint')}
                 </div>
                 <div className="mt-5 w-full space-y-1.5">
                   <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.05] bg-white/[0.015] px-3 py-2">
                     <span className="flex items-center gap-2 text-xs text-zinc-400">
                       <FileSearch size={14} strokeWidth={1.75} className="shrink-0 text-zinc-500" />
-                      按名称快速打开
+                      {tr('quickOpenByName')}
                     </span>
                     <span className="flex shrink-0 items-center gap-1">
                       <kbd className={KBD_CLS}>{MOD_KEY}</kbd>
@@ -772,7 +777,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
                   <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.05] bg-white/[0.015] px-3 py-2">
                     <span className="flex items-center gap-2 text-xs text-zinc-400">
                       <Search size={14} strokeWidth={1.75} className="shrink-0 text-zinc-500" />
-                      全文搜索内容
+                      {tr('fullTextSearch')}
                     </span>
                     <span className="flex shrink-0 items-center gap-1">
                       <kbd className={KBD_CLS}>{MOD_KEY}</kbd>
@@ -858,9 +863,9 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
 
       {renameTarget && (
         <PromptModal
-          title={`重命名 ${renameTarget.isDir ? '文件夹' : '文件'}`}
+          title={renameTarget.isDir ? tr('renameTitleDir') : tr('renameTitleFile')}
           initialValue={fsBasename(renameTarget.path)}
-          okLabel="重命名"
+          okLabel={tr('rename')}
           description={<span className="font-mono text-zinc-500">{renameTarget.path}</span>}
           onCancel={() => setRenameTarget(null)}
           onSubmit={handleRenameSubmit}
@@ -871,12 +876,12 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
 
       {createTarget && (
         <PromptModal
-          title={createTarget.kind === 'file' ? '新建文件' : '新建文件夹'}
+          title={createTarget.kind === 'file' ? tr('newFile') : tr('newFolder')}
           placeholder={createTarget.kind === 'file' ? 'new-file.ts' : 'new-folder'}
-          okLabel="创建"
+          okLabel={tr('create')}
           description={
             <span className="font-mono text-zinc-500">
-              在 {createTarget.parentDir || '/'} 下
+              {tr('createUnder', { dir: createTarget.parentDir || '/' })}
             </span>
           }
           onCancel={() => setCreateTarget(null)}
@@ -997,7 +1002,7 @@ function TabBar({ tabs, activeId, dirty, onSelect, onClose, onCloseOthers, onClo
                 onClose(t.id);
               }}
               className="shrink-0 opacity-50 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-700"
-              title="关闭 (Cmd/Ctrl+W)"
+              title={tr('closeTabTitle')}
             >
               <X className="w-3 h-3" />
             </button>
@@ -1068,22 +1073,22 @@ function TabContextMenu({ x, y, id, tabs, onClose, onCloseTab, onCloseOthers, on
       onClick={(e) => e.stopPropagation()}
     >
       <TabMenuItem
-        label="关闭"
+        label={tr('closeTab')}
         onClick={() => { onCloseTab(id); onClose(); }}
       />
       <TabMenuItem
-        label="关闭其它"
+        label={tr('closeOthers')}
         disabled={!hasOthers}
         onClick={() => { onCloseOthers(id); onClose(); }}
       />
       <TabMenuItem
-        label="关闭右侧"
+        label={tr('closeRight')}
         disabled={!hasRight}
         onClick={() => { onCloseRight(id); onClose(); }}
       />
       <div className="my-1 border-t border-zinc-800" />
       <TabMenuItem
-        label="全部关闭"
+        label={tr('closeAll')}
         onClick={() => { onCloseAll(); onClose(); }}
       />
     </div>

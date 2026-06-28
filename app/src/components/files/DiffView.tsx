@@ -7,6 +7,10 @@ import { X, RefreshCw } from 'lucide-react';
 import { fsApi, FsDiffResponse, fsBasename } from './api';
 import { fsCachePeek, fsCacheSet, fsKey } from './fsCache';
 import { languageForPath } from './language';
+import i18n from '../../i18n';
+
+const t = (k: string, o?: Record<string, unknown>) =>
+  i18n.t(`fileExplorer.${k}`, { ns: 'workspace', ...o }) as string;
 
 // Match CodeEditor: drop oneDark's #282c34/#21252b backgrounds so the diff
 // panes blend into the #0A0A0A chrome. !important is required because
@@ -130,7 +134,7 @@ export default function DiffView({ agentId, path, base = 'head', onClose, active
           <button
             className="p-1 rounded hover:bg-zinc-800"
             onClick={onClose}
-            title="关闭 diff"
+            title={t('diffClose')}
           >
             <X className="w-3.5 h-3.5" />
           </button>

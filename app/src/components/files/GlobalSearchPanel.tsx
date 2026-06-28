@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, CaseSensitive, X, RefreshCw } from 'lucide-react';
 import { fsApi, FsGrepMatch } from './api';
+import i18n from '../../i18n';
+
+const tr = (k: string, o?: Record<string, unknown>) =>
+  i18n.t(`fileExplorer.${k}`, { ns: 'workspace', ...o }) as string;
 
 interface Props {
   agentId: string;
@@ -60,7 +64,7 @@ export default function GlobalSearchPanel({ agentId, open, onClose, onPick }: Pr
         if ((e as Error).name !== 'CanceledError') {
           const msg = (e as Error).message || '';
           if (msg.includes('ripgrep_not_installed')) {
-            setError('主机未安装 ripgrep,无法做全文搜索');
+            setError(tr('searchNoRipgrep'));
           } else {
             setError(msg || 'search failed');
           }
@@ -106,7 +110,7 @@ export default function GlobalSearchPanel({ agentId, open, onClose, onPick }: Pr
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={onKey}
-          placeholder="全文搜索 (rg)…"
+          placeholder={tr('searchPlaceholder')}
           className="flex-1 bg-transparent outline-none text-zinc-100 placeholder-zinc-600"
         />
         <button onClick={onClose} className="p-0.5 rounded hover:bg-zinc-800">
@@ -116,14 +120,14 @@ export default function GlobalSearchPanel({ agentId, open, onClose, onPick }: Pr
       <div className="flex items-center gap-1 px-3 py-1.5 border-b border-zinc-800 text-[11px] text-zinc-400">
         <button
           onClick={() => setCaseSens((v) => !v)}
-          title="区分大小写"
+          title={tr('searchCaseSensitive')}
           className={`p-1 rounded hover:bg-zinc-800 ${caseSens ? 'bg-zinc-800 text-amber-200' : ''}`}
         >
           <CaseSensitive className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={() => setRegex((v) => !v)}
-          title="正则"
+          title={tr('searchRegex')}
           className={`p-1 rounded hover:bg-zinc-800 ${regex ? 'bg-zinc-800 text-amber-200' : ''}`}
         >
           <RegexBadge />
@@ -133,14 +137,14 @@ export default function GlobalSearchPanel({ agentId, open, onClose, onPick }: Pr
         {!loading && matches.length > 0 && (
           <span>
             {matches.length}
-            {truncated ? '+' : ''} 结果 · {elapsed}ms
+            {truncated ? '+' : ''} {tr('searchResults')} · {elapsed}ms
           </span>
         )}
       </div>
       <div className="flex-1 overflow-auto">
         {error && <div className="px-3 py-2 text-xs text-red-400">{error}</div>}
         {!error && grouped.length === 0 && q && !loading && (
-          <div className="px-3 py-2 text-xs text-zinc-500">无匹配</div>
+          <div className="px-3 py-2 text-xs text-zinc-500">{tr('noMatches')}</div>
         )}
         {grouped.map(([path, hits]) => (
           <div key={path} data-id="global-search-group" data-path={path} className="border-b border-zinc-900">

@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import i18n from '../../i18n';
+
+const t = (k: string, o?: Record<string, unknown>) =>
+  i18n.t(`fileExplorer.${k}`, { ns: 'workspace', ...o }) as string;
 
 interface PromptProps {
   title: string;
@@ -15,7 +19,7 @@ export function PromptModal({
   title,
   initialValue = '',
   placeholder,
-  okLabel = '确定',
+  okLabel = t('modalConfirm'),
   description,
   onCancel,
   onSubmit,
@@ -96,7 +100,7 @@ export function PromptModal({
               className="px-3 py-1.5 rounded text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
               disabled={busy}
             >
-              取消
+              {t('modalCancel')}
             </button>
             <button
               data-id="prompt-modal-ok"
