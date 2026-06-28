@@ -231,5 +231,24 @@
     "phaseVerify": "インストール結果を検証中…",
     "errInstallCmd": "インストールコマンドが失敗しました。ミラーを切り替えて再試行できます。",
     "errVerifyNotFound": "インストール後も {{cli}} の実行ファイルが見つかりません。"
+  },
+  "fileExplorer": {
+    "sendToAgent": "現在のエージェントに送信",
+    "addFavorite": "お気に入りに追加",
+    "removeFavorite": "お気に入りから削除",
+    "fileInfo": "ファイル情報",
+    "newFile": "新規ファイル",
+    "newFolder": "新規フォルダ",
+    "uploadFile": "ファイルをアップロード",
+    "download": "ダウンロード",
+    "rename": "名前を変更",
+    "delete": "削除",
+    "copyPath": "パスをコピー",
+    "copyPathN": "{{count}} 件のパスをコピー",
+    "emptyDir": "空",
+    "collapseTree": "ファイルツリーを折りたたむ",
+    "hideDotfiles": "隠しファイルを非表示",
+    "showDotfiles": "隠しファイルを表示",
+    "refresh": "更新"
   }
 }

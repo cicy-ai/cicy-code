@@ -231,5 +231,24 @@
     "phaseVerify": "Vérification de l’installation…",
     "errInstallCmd": "La commande d’installation a échoué. Essayez de changer de miroir et réessayez.",
     "errVerifyNotFound": "L’exécutable {{cli}} reste introuvable après l’installation."
+  },
+  "fileExplorer": {
+    "sendToAgent": "Envoyer à l’agent courant",
+    "addFavorite": "Ajouter aux favoris",
+    "removeFavorite": "Retirer des favoris",
+    "fileInfo": "Infos fichier",
+    "newFile": "Nouveau fichier",
+    "newFolder": "Nouveau dossier",
+    "uploadFile": "Téléverser un fichier",
+    "download": "Télécharger",
+    "rename": "Renommer",
+    "delete": "Supprimer",
+    "copyPath": "Copier le chemin",
+    "copyPathN": "Copier {{count}} chemins",
+    "emptyDir": "Vide",
+    "collapseTree": "Réduire l’arborescence",
+    "hideDotfiles": "Masquer les fichiers cachés",
+    "showDotfiles": "Afficher les fichiers cachés",
+    "refresh": "Actualiser"
   }
 }

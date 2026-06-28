@@ -35,3 +35,6 @@ api/mgr/.cicy_tmux.conf
 /mgr
 /mgr.exe
 /api/mgr/mgr
+
+# stray dev logs (current dev.py writes to ~/logs/.dev-logs, outside the repo)
+/.dev-logs/

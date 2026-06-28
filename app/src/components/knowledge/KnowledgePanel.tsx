@@ -5,14 +5,16 @@ interface KnowledgePanelProps {
   /** Absolute workspace folder (required by FilesView; the tree itself is
    *  anchored to the "knowledge" fs root via scopeRoot). */
   workspaceFolder: string;
+  /** Page chat-ws client id — forwarded so "send to agent" can route the path
+   *  back to this tab. FilesView only registers the :code-ext editor bridge when
+   *  NOT scoped, so passing it here is safe (no bridge collision). */
+  pageClientId?: string;
 }
 
 // KnowledgePanel hosts the team knowledge store (~/cicy-ai/knowledge) as a
 // scoped FileExplorer: browse/edit the markdown entries (_inbox = pending,
-// <domain>/ = canon, _archive/ = rejected). Note: no pageClientId is passed to
-// FilesView — the ":code-ext" editor bridge belongs to the workspace Files tab;
-// this view is for human governance, so a second registration would collide.
-export default function KnowledgePanel({ agentId, workspaceFolder }: KnowledgePanelProps) {
+// <domain>/ = canon, _archive/ = rejected).
+export default function KnowledgePanel({ agentId, workspaceFolder, pageClientId }: KnowledgePanelProps) {
   return (
     <div data-id="knowledge-panel" className="flex h-full w-full flex-col bg-[#0b0b0d]">
       <div
@@ -27,6 +29,7 @@ export default function KnowledgePanel({ agentId, workspaceFolder }: KnowledgePa
         <FilesView
           agentId={agentId}
           workspaceFolder={workspaceFolder}
+          pageClientId={pageClientId}
           scopeRoot="knowledge"
           className="h-full w-full"
         />

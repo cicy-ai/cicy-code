@@ -235,5 +235,24 @@
     "phaseVerify": "Verifying install…",
     "errInstallCmd": "Install command failed. Try switching the mirror and retry.",
     "errVerifyNotFound": "{{cli}} executable still not found after install."
+  },
+  "fileExplorer": {
+    "sendToAgent": "Send to current agent",
+    "addFavorite": "Add to favorites",
+    "removeFavorite": "Remove favorite",
+    "fileInfo": "File info",
+    "newFile": "New file",
+    "newFolder": "New folder",
+    "uploadFile": "Upload file",
+    "download": "Download",
+    "rename": "Rename",
+    "delete": "Delete",
+    "copyPath": "Copy path",
+    "copyPathN": "Copy {{count}} paths",
+    "emptyDir": "Empty",
+    "collapseTree": "Collapse file tree",
+    "hideDotfiles": "Hide dotfiles",
+    "showDotfiles": "Show hidden files",
+    "refresh": "Refresh"
   }
 }

@@ -32,6 +32,46 @@ For frontend changes: `dev.py` defaults to `SKIP_NPM=1` (uses cached `app/dist`)
 
 `make dev-api` currently runs plain `go run ./mgr/`; it does not pass `--dev --public`.
 
+## Local Mac desktop update (faster than an npm release)
+
+The Mac desktop runs `~/.local/bin/cicy-code --public`, where `~/.local/bin/cicy-code`
+is a **symlink** → `cicy-code-<ver>-darwin-<arch>` (a versioned binary). cicy-desktop's
+`src/sidecar/localbin.js` owns this layout; it also keeps a manifest at
+`~/.local/bin/.cicy-localbin.json` and reads the version from the symlink target.
+
+To ship a local build to the desktop WITHOUT going through commit→tag→push→CI→npm:
+
+**ALWAYS bump the version on every local iteration.** If you rebuild at the same
+version and overwrite the binary, the desktop shows the same number and the user
+cannot tell an update happened (and "检查更新" can't distinguish builds). Bump first:
+
+```bash
+# 0) Bump the version (pick the next patch) BEFORE building
+python3 scripts/sync-version.py --set 2.3.NN
+
+# 1) Build the native binary at the synced version (arm64 on Apple Silicon)
+./build.sh build darwin amd64                 # → api/cicy-code
+
+# 2) Drop it in ~/.local/bin under a versioned name
+VER=$(node -p "require('./npm/package.json').version")
+cp api/cicy-code ~/.local/bin/cicy-code-$VER-darwin-x64
+chmod +x ~/.local/bin/cicy-code-$VER-darwin-x64
+
+# 3) Atomically repoint the symlink (tmp + rename, like localbin.js does)
+ln -sf cicy-code-$VER-darwin-x64 ~/.local/bin/.cicy-code.tmp
+mv -f ~/.local/bin/.cicy-code.tmp ~/.local/bin/cicy-code
+
+# 4) Keep the manifest in sync so the desktop reports the right version
+node -e "const f=require('os').homedir()+'/.local/bin/.cicy-localbin.json';const j=require(f);j['cicy-code']=process.env.VER||require('./npm/package.json').version;require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+```
+
+Then restart cicy-code from cicy-desktop. The running process keeps the old binary
+until restart, so steps 1-4 are non-disruptive. Because `localbin.update()` skips the
+download when the installed version ≥ npm-latest and `sidecar.update()` restarts through
+the symlink regardless, clicking **更新** in the desktop also works: it finds the local
+build "已是最新", skips npm, and restarts into it. Old versioned binaries stay in
+`~/.local/bin` — roll back by repointing the symlink.
+
 ## Current repo truths
 
 - State root is `~/cicy-ai`

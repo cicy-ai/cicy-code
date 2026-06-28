@@ -55,6 +55,7 @@ import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTi
 import apiService from '../services/api';
 import { loadHandled, serverAckedIds, resolveStatus } from './audit/auditHandled';
 import { sendCommandToTmux } from '../services/mockApi';
+import { sendToAgent } from '../services/agentSend';
 import { chatWs } from '../services/chatWs';
 import { ApiSwitchDialog } from './layout/ApiSwitchDialog';
 import CreateAgentDialog, { CreateAgentValues } from './CreateAgentDialog';
@@ -433,6 +434,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [boundAgents, setBoundAgents] = useState<any[]>([]);
   const [pollStatuses, setPollStatuses] = useState<Record<string, any>>({});
   const [paneDetails, setPaneDetails] = useState<Record<string, any>>({});
+  // Fresh paneDetails for the chat-ws message handler (a stable useCallback that
+  // reads refs, not state) — used to route code.send_path by the target agent type.
+  const paneDetailsRef = useRef<Record<string, any>>({});
+  useEffect(() => { paneDetailsRef.current = paneDetails; }, [paneDetails]);
   const [activeTeamPaneId, setActiveTeamPaneId] = useState<Record<string, string>>(() => cache.get(TEAM_TERMINAL_ACTIVE_KEY, {}));
   const [inspectorPaneId, setInspectorPaneId] = useState(paneId);
   const [canvasLocateRequest, setCanvasLocateRequest] = useState<{ paneId: string; nonce: number; zoomToActual?: boolean } | null>(null);
@@ -611,8 +616,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const sendBrowserToAgent = useCallback((text: string) => {
     const tmuxTarget = activeCliPaneIdRef.current || paneId;
     // Insert into the agent's input WITHOUT submitting (no Enter) — the user edits/
-    // sends it themselves. So no chat-q-sent either (it isn't a submitted q yet).
-    sendCommandToTmux(text, tmuxTarget, false).catch(() => {});
+    // sends it themselves. Routes by type: cicy agents get it in their composer.
+    const at = String(paneDetailsRef.current[tmuxTarget.split(':')[0]]?.agent_type || '');
+    sendToAgent(tmuxTarget, text, { submit: false, agentType: at }).catch(() => {});
   }, [paneId]);
   const closeLeftPanel = useCallback(() => {
     setLeftPanelView(null);
@@ -1167,12 +1173,20 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         const tmuxTarget = runtimeActivePaneId || masterPaneId;
         const normalizedFilePath = `/${filePath.replace(/^\/+/, '')}`;
         const promptText = `file://${normalizedFilePath.replace(/^\/+/, '')}`;
-        window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
-        sendCommandToTmux(promptText, tmuxTarget, false).then(() => {
-          focusTmuxPaneFrame(tmuxTarget);
-        }).catch(() => {
-          window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastSendFilePathFailed') }));
-        });
+        // cicy-lite agents have no terminal — typing into tmux is a no-op. Fill
+        // their chat composer (DispatcherChat) instead so the path lands in the
+        // input box; terminal agents keep the type-into-tmux path.
+        const targetType = String(paneDetailsRef.current[tmuxTarget.split(':')[0]]?.agent_type || '');
+        if (isCicyLiteAgent(targetType)) {
+          window.dispatchEvent(new CustomEvent('cicy:fill-composer', { detail: { paneId: tmuxTarget, text: promptText } }));
+        } else {
+          window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
+          sendCommandToTmux(promptText, tmuxTarget, false).then(() => {
+            focusTmuxPaneFrame(tmuxTarget);
+          }).catch(() => {
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastSendFilePathFailed') }));
+          });
+        }
       }
     } else if (msg?.type === 'poll_data' && msg.data) {
       const data = msg.data;
@@ -1729,6 +1743,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <KnowledgePanel
             agentId={nativeFilesAgentId}
             workspaceFolder={nativeFilesWorkspace}
+            pageClientId={pageClientId}
           />
         </div>
         <div

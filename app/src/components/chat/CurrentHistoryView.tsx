@@ -1,5 +1,5 @@
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, AlertTriangle, Square, RotateCcw, Ban, User } from 'lucide-react';
+import { ChevronDown, ChevronRight, AlertTriangle, Square, RotateCcw, Ban, User, Copy, Check } from 'lucide-react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -1316,6 +1316,20 @@ function CollapsibleQ({ text, bare = false }: { text: string; bare?: boolean }) 
   const qAlign = useContext(QAlignContext);
   const qJustify = qAlign === 'left' ? 'justify-start' : 'justify-end';
   const qTail = qAlign === 'left' ? 'rounded-bl-sm' : 'rounded-br-sm';
+  const [qCopied, setQCopied] = useState(false);
+  const copyQ = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const value = String(text || '');
+    const done = () => { setQCopied(true); window.setTimeout(() => setQCopied(false), 1200); };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(value).then(done).catch(() => {
+        try { const ta = document.createElement('textarea'); ta.value = value; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done(); } catch { /* ignore */ }
+      });
+    } else {
+      try { const ta = document.createElement('textarea'); ta.value = value; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done(); } catch { /* ignore */ }
+    }
+  }, [text]);
   // Peel leading harness blocks (system-reminder / command echoes) into a small
   // collapsed fold, then render the real question below. Recurse on the rest so
   // the existing env-context / xml-block / bubble logic runs on the clean text.
@@ -1357,13 +1371,37 @@ function CollapsibleQ({ text, bare = false }: { text: string; bare?: boolean }) 
     );
   }
   return (
-    <div data-id="current-history-view-q" className={`mb-2.5 flex ${qJustify}`}>
+    <div data-id="current-history-view-q" className={`group mb-2.5 flex items-end gap-1 ${qJustify}`}>
       {environmentContext ? (
         <EnvironmentContextCard context={environmentContext} />
       ) : (
-        <div data-id="current-history-view-q-body" className={`max-w-[95%] select-text overflow-hidden rounded-2xl ${qTail} border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]`}>
-          <MarkdownBlock text={String(text || '').replace(/^\-\n/, '')} />
-        </div>
+        <>
+          {/* Copy button OUTSIDE the bubble so it never overlaps the text. Sits on
+              the bubble's left for right-aligned questions, right for left-aligned. */}
+          {qAlign !== 'left' && (
+            <button type="button" data-id="current-history-view-q-copy" onClick={copyQ} title="复制" aria-label="复制"
+              className="mb-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sky-200/50 opacity-0 transition-opacity hover:text-sky-100 group-hover:opacity-100">
+              {qCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+          )}
+          {/* Isolate pointer/click from the parent card so selecting text in the
+              bubble never bubbles up to a parent handler (which was toggling history). */}
+          <div
+            data-id="current-history-view-q-body"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            className={`max-w-[95%] select-text overflow-hidden rounded-2xl ${qTail} border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]`}
+          >
+            <MarkdownBlock text={String(text || '').replace(/^\-\n/, '')} />
+          </div>
+          {qAlign === 'left' && (
+            <button type="button" data-id="current-history-view-q-copy" onClick={copyQ} title="复制" aria-label="复制"
+              className="mb-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sky-200/50 opacity-0 transition-opacity hover:text-sky-100 group-hover:opacity-100">
+              {qCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+          )}
+        </>
       )}
     </div>
   );

@@ -207,9 +207,14 @@ function AgentStackCard({
     const bodyEl = document.querySelector<HTMLElement>(`[data-id="agent-stack-card-body-${item.paneId}"]`)
     if (!bodyEl) return
     const rect = bodyEl.getBoundingClientRect()
+    // The handle no longer sits on the overlay's bottom edge (the close footer is
+    // below it). Capture the pointer→bottom-edge gap at grab time and keep it, so
+    // the overlay tracks the pointer without a jump when the drag starts.
+    const overlayEl = document.querySelector<HTMLElement>(`[data-id="agent-stack-card-history-inline-${item.paneId}"]`)
+    const grabOffset = overlayEl ? event.clientY - overlayEl.getBoundingClientRect().bottom : 0
     setResizingHistory(true)
     const onMove = (ev: PointerEvent) => {
-      const frac = (ev.clientY - rect.top) / rect.height
+      const frac = (ev.clientY - grabOffset - rect.top) / rect.height
       // clamp so neither history nor the tmux strip below ever fully collapses.
       setHistoryHeightFrac(Math.min(0.9, Math.max(0.2, frac)))
     }
@@ -638,8 +643,13 @@ function AgentStackCard({
             className="absolute inset-x-0 top-0 z-30 flex flex-col border-b border-white/[0.1] bg-[#0c0d10] shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
             style={{ height: `${historyHeightFrac * 100}%` }}
           >
-            <div data-id={`agent-stack-card-history-inline-header-${item.paneId}`} className="flex shrink-0 items-center justify-end gap-2 border-b border-white/[0.06] px-4 py-2.5">
-              <span data-id={`agent-stack-card-history-inline-esc-hint-${item.paneId}`} className="select-none text-[11px] text-zinc-500">按 ESC 关闭</span>
+            <div data-id={`agent-stack-card-history-inline-body-${item.paneId}`} className="min-h-0 flex-1 overflow-hidden">
+              {/* Always prompts-only (no toggle) — this view IS the prompt list. */}
+              <CurrentHistoryView key={item.paneId} paneId={item.paneId} open promptsOnly fullWidth leftAlignQuestions agentType={item.agentType || ''} />
+            </div>
+            {/* Close centered; ESC hint pinned to the left. */}
+            <div data-id={`agent-stack-card-history-inline-header-${item.paneId}`} className="relative flex shrink-0 items-center justify-center border-t border-white/[0.06] px-4 py-2">
+              <span data-id={`agent-stack-card-history-inline-esc-hint-${item.paneId}`} className="absolute left-4 select-none text-[11px] text-zinc-500">按 ESC 关闭</span>
               <button
                 type="button"
                 data-id={`agent-stack-card-history-inline-close-${item.paneId}`}
@@ -651,15 +661,13 @@ function AgentStackCard({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div data-id={`agent-stack-card-history-inline-body-${item.paneId}`} className="min-h-0 flex-1 overflow-hidden">
-              {/* Always prompts-only (no toggle) — this view IS the prompt list. */}
-              <CurrentHistoryView key={item.paneId} paneId={item.paneId} open promptsOnly fullWidth leftAlignQuestions agentType={item.agentType || ''} />
-            </div>
-            {/* Draggable bottom edge: resize history vs the live tmux strip below. */}
+            {/* Draggable edge at the VERY bottom (below close): resize history vs the
+                live tmux strip below. Sitting on the bottom edge keeps the handle
+                under the pointer, so the drag starts with no jump. */}
             <div
               data-id={`agent-stack-card-history-inline-resize-${item.paneId}`}
               onPointerDown={startHistoryResize}
-              className="group absolute inset-x-0 -bottom-1.5 z-10 flex h-3 cursor-row-resize items-center justify-center"
+              className="group relative z-10 flex h-3 shrink-0 cursor-row-resize items-center justify-center"
               aria-label="拖拽调整历史高度"
             >
               <div className="h-1 w-10 rounded-full bg-white/20 transition-colors group-hover:bg-white/40" />

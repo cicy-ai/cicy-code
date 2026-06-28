@@ -158,7 +158,9 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
   const subscribedRef = useRef<Set<string>>(new Set());
   const cursorRef = useRef<Record<string, { line: number; col: number }>>({});
   const [favorites, setFavorites] = useState<FsFavorite[]>([]);
-  const [infoPath, setInfoPath] = useState<string | null>(null);
+  // Carry the fs root so file-info resolves against the right base in scoped
+  // (Knowledge/Memory) and extra-root views, not always the workspace.
+  const [infoPath, setInfoPath] = useState<{ path: string; root: string } | null>(null);
   const [renameTarget, setRenameTarget] = useState<{ path: string; isDir: boolean; root: string } | null>(null);
   const [createTarget, setCreateTarget] = useState<{ parentDir: string; kind: 'file' | 'dir'; root: string } | null>(null);
   const { confirm, node: dialogsNode } = useDialogs();
@@ -660,10 +662,13 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
   };
 
   useEffect(() => {
-    if (!pageClientId) return;
+    // Only the main Files tab owns the :code-ext editor bridge. Scoped views
+    // (Knowledge/Memory) still receive pageClientId so send-to-agent can route,
+    // but must NOT register a second bridge under the same id (it would collide).
+    if (!pageClientId || scopeRoot) return;
     const stop = installCodeExtBridge(pageClientId, opsRef);
     return stop;
-  }, [pageClientId]);
+  }, [pageClientId, scopeRoot]);
 
   // --- render -------------------------------------------------------------
 
@@ -681,7 +686,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
           dirRefreshNonce={explorerNonce}
           remoteReloadNonce={remoteReloadNonce}
           pageClientId={pageClientId}
-          onShowFileInfo={setInfoPath}
+          onShowFileInfo={(path, root) => setInfoPath({ path, root: root || fsRoot })}
           onAddFavorite={handleAddFavorite}
           favorites={favorites}
           onRemoveFavorite={handleRemoveFavorite}
@@ -845,7 +850,8 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
       {infoPath && (
         <FileInfoModal
           agentId={agentId}
-          path={infoPath}
+          path={infoPath.path}
+          root={infoPath.root}
           onClose={() => setInfoPath(null)}
         />
       )}

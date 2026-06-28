@@ -5,6 +5,8 @@ import { fsApi, FsStatResponse, fsBasename } from './api';
 interface Props {
   agentId: string;
   path: string;
+  /** fs root the path is relative to (workspace | knowledge | memory | …). */
+  root?: string;
   onClose: () => void;
 }
 
@@ -37,7 +39,7 @@ function formatAbs(unix: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-export default function FileInfoModal({ agentId, path, onClose }: Props) {
+export default function FileInfoModal({ agentId, path, root, onClose }: Props) {
   const [stat, setStat] = useState<FsStatResponse | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -46,11 +48,11 @@ export default function FileInfoModal({ agentId, path, onClose }: Props) {
     setLoading(true);
     setError('');
     fsApi
-      .stat(agentId, path)
+      .stat(agentId, path, { root })
       .then((s) => setStat(s))
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false));
-  }, [agentId, path]);
+  }, [agentId, path, root]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

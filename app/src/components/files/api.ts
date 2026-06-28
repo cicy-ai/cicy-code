@@ -359,8 +359,13 @@ export const fsApi = {
 
   /** Trigger a browser save dialog for the given path (optionally rooted). */
   download: (agentId: string, path: string, root?: string): void => {
+    // Plain anchor to the /api/fs/download URL. In cicy-desktop the main process'
+    // will-download handler recognizes that path and shows a native Save As
+    // dialog; normal browsers honor the download attribute. (Keep the real URL —
+    // a blob: URL would hide the fs-download path from the desktop handler.)
     const a = document.createElement('a');
     a.href = fsApi.downloadUrl(agentId, path, root);
+    a.download = String(path || '').split('/').filter(Boolean).pop() || 'download';
     a.rel = 'noopener';
     a.style.display = 'none';
     document.body.appendChild(a);

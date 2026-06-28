@@ -183,6 +183,24 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     return () => window.removeEventListener('cicy:dispatcher-busy', onBusy as EventListener);
   }, [paneId]);
 
+  // "Send to agent" for a cicy-lite agent (no terminal) lands here: append the
+  // file path into the composer input so the operator can send it like any prompt.
+  useEffect(() => {
+    const onFill = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail || {};
+      // Match on the short pane id so a "w-x:main.0" target still reaches the
+      // "w-x" composer (the sender's pane-id format varies by call site).
+      const id = String(detail.paneId || '').split(':')[0];
+      if (id && id !== paneId.split(':')[0]) return;
+      const insert = String(detail.text || '').trim();
+      if (!insert) return;
+      setText((prev) => (prev ? `${prev} ${insert}` : insert));
+      inputRef.current?.focus();
+    };
+    window.addEventListener('cicy:fill-composer', onFill as EventListener);
+    return () => window.removeEventListener('cicy:fill-composer', onFill as EventListener);
+  }, [paneId]);
+
   // 切换 PM 时清空忙态 + 附件,避免把上一个会话的状态带过来。
   useEffect(() => {
     setBusy(false);

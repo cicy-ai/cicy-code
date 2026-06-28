@@ -235,5 +235,24 @@
     "phaseVerify": "校验安装结果…",
     "errInstallCmd": "安装命令失败，可切换镜像源重试。",
     "errVerifyNotFound": "安装后仍未检测到 {{cli}} 可执行文件。"
+  },
+  "fileExplorer": {
+    "sendToAgent": "发送给当前 agent",
+    "addFavorite": "加入收藏",
+    "removeFavorite": "移除收藏",
+    "fileInfo": "文件信息",
+    "newFile": "新建文件",
+    "newFolder": "新建文件夹",
+    "uploadFile": "上传文件",
+    "download": "下载",
+    "rename": "重命名",
+    "delete": "删除",
+    "copyPath": "复制路径",
+    "copyPathN": "复制 {{count}} 个路径",
+    "emptyDir": "空目录",
+    "collapseTree": "收起文件树",
+    "hideDotfiles": "隐藏 .* 文件",
+    "showDotfiles": "显示隐藏文件",
+    "refresh": "刷新"
   }
 }

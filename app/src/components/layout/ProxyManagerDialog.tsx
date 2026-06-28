@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { X, RefreshCw, Play, Square, RotateCw, RefreshCcw, Sparkles, Globe, Copy, Check, AlertTriangle, ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
+import { sendToAgent as dispatchToAgent } from '../../services/agentSend';
 import { useApp } from '../../contexts/AppContext';
 
 type ProxyEntry = {
@@ -325,8 +326,10 @@ export function ProxyManagerDialog({
     let errorMessage = '';
     try {
       // submit=false: drop the prompt into the agent's input WITHOUT pressing
-      // Enter, so the user reviews/edits before sending.
-      resp = await apiService.sendCommand(target, prompt, false);
+      // Enter, so the user reviews/edits before sending. Routes by agent type —
+      // cicy-lite agents get it in their chat composer instead of a (nonexistent)
+      // terminal.
+      await dispatchToAgent(target, prompt, { submit: false });
     } catch (e: any) {
       errorMessage = String(e?.response?.data?.detail || e?.message || e);
     } finally {

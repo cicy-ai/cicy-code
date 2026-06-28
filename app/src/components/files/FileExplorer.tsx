@@ -10,6 +10,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronRight, ChevronDown, File as FileIcon, Folder, FolderOpen, RefreshCw, Send, Eye, EyeOff, Info, Star, Trash2, Edit3, FilePlus, FolderPlus, Upload, Download, Link as LinkIcon, PanelLeftClose } from 'lucide-react';
 import { fsApi, FsEntry, FsListResponse, FsFavorite, FsRoot, joinFsPath, fsParent, fsBasename } from './api';
 import { fsCachePeek, fsCacheSet, fsKey } from './fsCache';
+import i18n from '../../i18n';
 
 // Copy text to the clipboard, with an execCommand fallback for INSECURE origins
 // (navigator.clipboard is undefined over plain http://<ip>:port — which is how
@@ -56,7 +57,7 @@ interface FileExplorerProps {
    *  comes back to this exact tab. */
   pageClientId?: string;
   /** Right-click → show file info modal handler (provided by FilesView). */
-  onShowFileInfo?: (path: string) => void;
+  onShowFileInfo?: (path: string, root?: string) => void;
   /** Right-click → add to favorites handler. */
   onAddFavorite?: (path: string) => void;
   /** Persistent favorites for this agent's workspace. */
@@ -111,6 +112,12 @@ interface DirState {
 
 const ROOT_PATH = '';
 const HEAVY_DIR_NAMES = new Set(['node_modules', '.git', 'dist', 'build', 'target', '.cache']);
+// File-explorer copy lives under the `workspace` namespace's `fileExplorer.*` keys.
+const t = (k: string, o?: Record<string, unknown>) =>
+  i18n.t(`fileExplorer.${k}`, { ns: 'workspace', ...o }) as string;
+// Favorites are disabled for now — flip to true to bring the section + the
+// "add to favorites" context-menu action back.
+const FAVORITES_ENABLED = false;
 
 function emptyDirState(): DirState {
   return { loading: false, loaded: false, expanded: false, entries: [], error: '', truncated: false };
@@ -185,7 +192,10 @@ export default function FileExplorer({
   const [workspaceExpanded, setWorkspaceExpanded] = useState(true);
   // Multi-root sections (projects / skills / home). The workspace is always
   // rendered as the main tree above; this list excludes "workspace".
-  const [extraRoots, setExtraRoots] = useState<FsRoot[]>([]);
+  // Full roots list (workspace + knowledge + memory + cicy-ai + projects + home).
+  // We keep ALL of them so a scopeRoot view (Knowledge/Memory) can resolve its own
+  // absolute base for copy-path; the rendered RemoteSections filter most out below.
+  const [allRoots, setAllRoots] = useState<FsRoot[]>([]);
   useEffect(() => {
     if (!agentId) return;
     let cancelled = false;
@@ -193,16 +203,24 @@ export default function FileExplorer({
       .roots(agentId)
       .then((rs) => {
         if (cancelled) return;
-        // Exclude 'workspace' (rendered as the main tree above), 'memory'
-        // (managed via the dedicated Memory view), and 'knowledge' (managed via
-        // the dedicated Knowledge view) — none belong in the file explorer.
-        setExtraRoots(rs.filter((r) => r.id !== 'workspace' && r.id !== 'memory' && r.id !== 'knowledge'));
+        setAllRoots(rs);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [agentId]);
+  // RemoteSections: exclude 'workspace' (the main tree), 'memory' and 'knowledge'
+  // (dedicated views) — none belong in the file explorer's extra-root sections.
+  const extraRoots = useMemo(
+    () => allRoots.filter((r) => r.id !== 'workspace' && r.id !== 'memory' && r.id !== 'knowledge'),
+    [allRoots],
+  );
+  // Absolute base the workspace-tree menu resolves copy-path against: the scoped
+  // root's own path when a scopeRoot view (Knowledge/Memory), else the workspace.
+  const primaryBase = scopeRoot
+    ? (allRoots.find((r) => r.id === scopeRoot)?.path || workspaceFolder)
+    : workspaceFolder;
   // Multi-select state (independent of "active tab" highlighting).
   // selected.size >= 1 always when something is picked; anchor drives shift+click ranges.
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -632,7 +650,7 @@ export default function FileExplorer({
           <div className="px-3 py-2 text-xs text-red-400">{rootState.error}</div>
         )}
         {workspaceExpanded && !rootState?.loading && visible.length === 0 && rootState?.loaded && (
-          <div className="px-3 py-2 text-xs text-zinc-500">空目录</div>
+          <div className="px-3 py-2 text-xs text-zinc-500">{t('emptyDir')}</div>
         )}
         <div
           data-id="file-explorer-root-dropzone"
@@ -721,7 +739,7 @@ export default function FileExplorer({
             );
           })}
         </div>
-        {!scopeRoot && (
+        {!scopeRoot && FAVORITES_ENABLED && (
           <FavoritesSection
             favorites={favorites || []}
             onOpen={(path, name) => {
@@ -739,7 +757,9 @@ export default function FileExplorer({
             onOpenFile={(path, entry) => onOpenFile(path, entry, r.id)}
             onContextMenu={handleRemoteContextMenu}
             onMove={onMove}
-            reloadNonce={remoteReloadNonce}
+            // Header refresh (refreshKey) + parent-driven reload both bump this, so
+            // one refresh click reloads every section, not just the workspace tree.
+            reloadNonce={(remoteReloadNonce ?? 0) + refreshKey}
           />
         ))}
       </div>
@@ -773,17 +793,21 @@ export default function FileExplorer({
           x={menu.x}
           y={menu.y}
           selectionCount={selected.size}
-          onSendToAgent={() => handleSendToAgent(menu.path)}
+          // Pass the scoped root (Knowledge/Memory views) so the backend resolves
+          // the absolute path against it, not the agent workspace. undefined in the
+          // normal Files tab → backend defaults to workspace.
+          onSendToAgent={() => handleSendToAgent(menu.path, scopeRoot)}
           // Copy-path is the only multi-aware action right now; rename/delete/etc
-          // keep operating on the right-clicked node only.
+          // keep operating on the right-clicked node only. primaryBase is the
+          // scoped root's absolute base in a scopeRoot view, else the workspace.
           onCopyPath={() => {
             const targets = selected.size > 1 && selected.has(menu.path)
               ? Array.from(selected)
               : [menu.path];
-            handleCopyPath(targets, workspaceFolder);
+            handleCopyPath(targets, primaryBase);
           }}
-          onShowFileInfo={onShowFileInfo && !menu.isDir ? () => onShowFileInfo(menu.path) : undefined}
-          onAddFavorite={onAddFavorite ? () => onAddFavorite(menu.path) : undefined}
+          onShowFileInfo={onShowFileInfo && !menu.isDir ? () => onShowFileInfo(menu.path, scopeRoot) : undefined}
+          onAddFavorite={FAVORITES_ENABLED && onAddFavorite ? () => onAddFavorite(menu.path) : undefined}
           onRename={onRename ? () => onRename(menu.path, menu.isDir) : undefined}
           onDelete={onDelete ? () => {
             const targets = selected.size > 1 && selected.has(menu.path)
@@ -850,7 +874,7 @@ function Header({ showHidden, onToggleHidden, onRefresh, onNewFile, onNewFolder,
         data-id="file-explorer-collapse"
         className="flex items-center px-1.5 py-0.5 rounded hover:bg-zinc-800"
         onClick={onCollapse}
-        title="收起文件树"
+        title={t('collapseTree')}
       >
         <PanelLeftClose className="w-3.5 h-3.5" />
       </button>
@@ -860,7 +884,7 @@ function Header({ showHidden, onToggleHidden, onRefresh, onNewFile, onNewFolder,
           data-id="file-explorer-new-file"
           className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-zinc-800"
           onClick={onNewFile}
-          title="新建文件"
+          title={t('newFile')}
         >
           <FilePlus className="w-3.5 h-3.5" />
         </button>
@@ -870,7 +894,7 @@ function Header({ showHidden, onToggleHidden, onRefresh, onNewFile, onNewFolder,
           data-id="file-explorer-new-folder"
           className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-zinc-800"
           onClick={onNewFolder}
-          title="新建文件夹"
+          title={t('newFolder')}
         >
           <FolderPlus className="w-3.5 h-3.5" />
         </button>
@@ -879,7 +903,7 @@ function Header({ showHidden, onToggleHidden, onRefresh, onNewFile, onNewFolder,
         data-id="file-explorer-toggle-hidden"
         className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-zinc-800"
         onClick={onToggleHidden}
-        title={showHidden ? '隐藏 .* 文件' : '显示隐藏文件'}
+        title={showHidden ? t('hideDotfiles') : t('showDotfiles')}
       >
         {showHidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
       </button>
@@ -887,7 +911,7 @@ function Header({ showHidden, onToggleHidden, onRefresh, onNewFile, onNewFolder,
         data-id="file-explorer-refresh"
         className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-zinc-800"
         onClick={onRefresh}
-        title="刷新"
+        title={t('refresh')}
       >
         <RefreshCw className="w-3.5 h-3.5" />
       </button>
@@ -942,42 +966,42 @@ function ContextMenu({
       onPointerDown={(e) => e.stopPropagation()}
     >
       <MenuItem icon={<Send className="w-3.5 h-3.5" />} onClick={() => { onSendToAgent(); onClose(); }}>
-        发送给当前 agent
+        {t('sendToAgent')}
       </MenuItem>
       {onAddFavorite && (
         <MenuItem icon={<Star className="w-3.5 h-3.5" />} onClick={() => { onAddFavorite(); onClose(); }}>
-          加入收藏
+          {t('addFavorite')}
         </MenuItem>
       )}
       {onShowFileInfo && (
         <MenuItem icon={<Info className="w-3.5 h-3.5" />} onClick={() => { onShowFileInfo(); onClose(); }}>
-          文件信息
+          {t('fileInfo')}
         </MenuItem>
       )}
       <Divider />
       {onNewFile && (
         <MenuItem icon={<FilePlus className="w-3.5 h-3.5" />} onClick={() => { onNewFile(); onClose(); }}>
-          新建文件
+          {t('newFile')}
         </MenuItem>
       )}
       {onNewFolder && (
         <MenuItem icon={<FolderPlus className="w-3.5 h-3.5" />} onClick={() => { onNewFolder(); onClose(); }}>
-          新建文件夹
+          {t('newFolder')}
         </MenuItem>
       )}
       {onUpload && (
         <MenuItem icon={<Upload className="w-3.5 h-3.5" />} onClick={() => { onUpload(); onClose(); }}>
-          上传文件
+          {t('uploadFile')}
         </MenuItem>
       )}
       {onDownload && (
         <MenuItem icon={<Download className="w-3.5 h-3.5" />} onClick={() => { onDownload(); onClose(); }}>
-          下载
+          {t('download')}
         </MenuItem>
       )}
       {onRename && (
         <MenuItem icon={<Edit3 className="w-3.5 h-3.5" />} onClick={() => { onRename(); onClose(); }}>
-          重命名
+          {t('rename')}
         </MenuItem>
       )}
       {onDelete && (
@@ -986,7 +1010,7 @@ function ContextMenu({
           onClick={() => { onDelete(); onClose(); }}
           danger
         >
-          删除
+          {t('delete')}
         </MenuItem>
       )}
       <Divider />
@@ -994,7 +1018,7 @@ function ContextMenu({
         icon={<LinkIcon className="w-3.5 h-3.5" />}
         onClick={() => { onCopyPath(); onClose(); }}
       >
-        {multi ? `复制 ${selectionCount} 个路径` : '复制路径'}
+        {multi ? t('copyPathN', { count: selectionCount }) : t('copyPath')}
       </MenuItem>
     </div>
   );
@@ -1098,7 +1122,7 @@ function FavoritesSection({ favorites, onOpen, onRemove }: FavoritesSectionProps
             <button
               onClick={(e) => { e.stopPropagation(); onRemove(f.path); }}
               className="opacity-0 group-hover:opacity-60 hover:opacity-100 text-zinc-500 hover:text-red-400 text-xs px-1"
-              title="移除收藏"
+              title={t('removeFavorite')}
             >
               ×
             </button>
@@ -1333,7 +1357,7 @@ function RemoteSection({ agentId, root, onOpenFile, onContextMenu, onMove, reloa
             <div className="px-3 py-1.5 text-xs text-red-400">{rootDs.error}</div>
           )}
           {rootDs?.loaded && rootDs.entries.length === 0 && (
-            <div className="px-3 py-1.5 text-xs text-zinc-500">空目录</div>
+            <div className="px-3 py-1.5 text-xs text-zinc-500">{t('emptyDir')}</div>
           )}
           {rootDs?.loaded && renderDir('', 0)}
         </div>
