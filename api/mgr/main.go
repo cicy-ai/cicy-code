@@ -41,7 +41,20 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.56"
+const version = "2.3.57"
+
+// resolvePort returns the effective API port: --port flag > PORT env > 8008.
+// Single source of truth so the value pinned into PORT (before worker boot) and
+// the value the listener binds to can never diverge.
+func resolvePort() string {
+	if portFlag != "" {
+		return portFlag
+	}
+	if p := os.Getenv("PORT"); p != "" {
+		return p
+	}
+	return "8008"
+}
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -159,6 +172,15 @@ Options:
 	// --cdn activates the baked-in R2 prefixes for the ttyd bundle (the App SPA
 	// is handled in serveUI via cdnMode). Off → ttydStaticPrefix() returns ".".
 	ttydserver.CDNEnabled = cdnMode
+
+	// Pin PORT to the port THIS instance listens on, BEFORE any worker-booting
+	// path (startWatcher/startAutonomy below) regenerates pane boot.sh. Every
+	// runtime base-url derivation (runtimeAPIBasePort → ai-gateway / reply-history
+	// URLs, the CICY_API_PORT exported for cicy-agent) reads PORT; doing this only
+	// at the listener setup further down is TOO LATE — boot.sh would already be
+	// written with the 8008 fallback, routing a `--port 8208` instance's LLM +
+	// agent traffic into the host instance on 8008.
+	os.Setenv("PORT", resolvePort())
 
 	ensureRuntimeUnprivileged()
 	initKV()
@@ -512,14 +534,10 @@ Options:
 	// UI (SPA)
 	http.Handle("/", serveUI())
 
-	// Port precedence: --port flag > PORT env > 8008 default.
-	port := portFlag
-	if port == "" {
-		port = os.Getenv("PORT")
-	}
-	if port == "" {
-		port = "8008"
-	}
+	// Port precedence: --port flag > PORT env > 8008 default. Already pinned into
+	// PORT near the top of main (before worker boot); resolvePort() is the single
+	// source of truth.
+	port := resolvePort()
 
 	kvMode := "memory"
 	if useRedis {

@@ -3129,7 +3129,7 @@ EOF
 			model := resolveClaudeStartupModel(defaultModel, aiCfg, shortID)
 			settingsJSON := "{\n" + `  "env": {
     "ANTHROPIC_AUTH_TOKEN": "cicy-local-gateway",
-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8008/api/ai-gateway/anthropic/${X_AGENT_SHORT_ID}"
+    "ANTHROPIC_BASE_URL": "` + anthropicRuntimeBaseURL(shortID) + `"
   },
   "model": "` + model + `"
 }`
@@ -4568,6 +4568,10 @@ func initPaneEnv(opts paneEnvOpts) {
 	lines := []string{
 		fmt.Sprintf("export X_AGENT_ID=%s", tmuxShellQuote(pid)),
 		fmt.Sprintf("export X_AGENT_SHORT_ID=%s", tmuxShellQuote(shortID)),
+		// Pin the API port THIS instance listens on so cicy-agent (and any other
+		// in-pane tool) targets its own instance instead of cicy-agent's hardcoded
+		// 8008 fallback — otherwise a fresh instance on 8208 pushes into the host.
+		fmt.Sprintf("export CICY_API_PORT=%s", tmuxShellQuote(runtimeAPIBasePort())),
 	}
 	for key, value := range sessionEnv {
 		if value != "" {

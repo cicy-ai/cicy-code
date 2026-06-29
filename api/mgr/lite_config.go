@@ -117,10 +117,6 @@ func auditGroupToolNames() []string {
 	}
 }
 
-// auditAPIBase is the in-process API the audit tools call (the server serves it
-// on 8008 inside the container; the host maps it to a dev port).
-const auditAPIBase = "http://127.0.0.1:8008"
-
 // auditCustomTools declares the /api/audit/* endpoints as schema-checked custom
 // tools. Each runs `bash -lc <script> audit [args...]`: the script self-reads
 // the api_token from ~/cicy-ai/global.json (custom-tool env is washed of tokens,
@@ -129,6 +125,9 @@ const auditAPIBase = "http://127.0.0.1:8008"
 // positional $1/$2 (never interpolated into the script text) and POST bodies are
 // built with python3 json.dumps so values are escaped safely.
 func auditCustomTools() map[string]liteCustomTool {
+	// auditAPIBase is THIS instance's in-process API origin, derived from the live
+	// PORT (not a hardcoded 8008) so audit tools hit their own instance's gateway.
+	auditAPIBase := "http://127.0.0.1:" + runtimeAPIBasePort()
 	// shared bash prelude: TOK = api_token (read inside the subprocess).
 	const tok = `TOK=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/cicy-ai/global.json')))['api_token'])")` + "\n"
 	// auth pipe: write the bearer header to curl's stdin config (-K -).

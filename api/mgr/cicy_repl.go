@@ -22,7 +22,17 @@ import (
 // Defaults: agent = $X_AGENT_SHORT_ID, server = http://127.0.0.1:8008.
 func runCicyREPL(args []string) int {
 	agentID := strings.TrimSpace(os.Getenv("X_AGENT_SHORT_ID"))
-	server := "http://127.0.0.1:8008"
+	// Default to THIS instance's port. cicy-repl is a subcommand (separate
+	// process) so it can't see the server's in-memory PORT; it runs inside an
+	// agent pane, which exports CICY_API_PORT (falling back to PORT, then 8008).
+	replPort := strings.TrimSpace(os.Getenv("CICY_API_PORT"))
+	if replPort == "" {
+		replPort = strings.TrimSpace(os.Getenv("PORT"))
+	}
+	if replPort == "" {
+		replPort = "8008"
+	}
+	server := "http://127.0.0.1:" + replPort
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--agent":

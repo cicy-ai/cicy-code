@@ -62,7 +62,10 @@ func cliCommandForAgentType(agentType string) string {
 // Tools are executed in-process (todo store, pane list, tmux send/capture) —
 // no shell, no subprocesses beyond tmux itself.
 
-const cicyGatewayBase = "http://127.0.0.1:8008"
+// cicyGatewayBase is this instance's local gateway origin, derived from the live
+// PORT (not a hardcoded 8008) so a non-default-port instance routes its cicy
+// agents' LLM calls to ITS OWN gateway instead of the host instance on 8008.
+func cicyGatewayBase() string { return "http://127.0.0.1:" + runtimeAPIBasePort() }
 
 // cicy persona/base text is NOT hardcoded here. It lives in
 // ~/cicy-ai/memory/agents/ (seeded from embed/agent-roles/), the single template
@@ -1615,7 +1618,7 @@ func cicyCallGateway(ctx context.Context, shortID, sessionID, auxKind string, pa
 	if err != nil {
 		return nil, false, err
 	}
-	url := fmt.Sprintf("%s/api/ai-gateway/anthropic/%s/v1/messages", cicyGatewayBase, shortID)
+	url := fmt.Sprintf("%s/api/ai-gateway/anthropic/%s/v1/messages", cicyGatewayBase(), shortID)
 	client := &http.Client{Timeout: 10 * time.Minute}
 
 	// Claude Code-style auto-retry: transient failures (network drops, 408/409/429,

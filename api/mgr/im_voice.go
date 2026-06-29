@@ -13,7 +13,6 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -155,11 +154,7 @@ func imCallSTT(audio []byte, filename string) (string, error) {
 		return "", err
 	}
 
-	port := os.Getenv("CICY_PORT")
-	if port == "" {
-		port = "8008"
-	}
-	url := fmt.Sprintf("http://127.0.0.1:%s/api/stt", port)
+	url := fmt.Sprintf("http://127.0.0.1:%s/api/stt", runtimeAPIBasePort())
 
 	req, err := http.NewRequest(http.MethodPost, url, &body)
 	if err != nil {
