@@ -6,6 +6,7 @@
   "memSectionAgent": "This agent",
   "memSectionGlobal": "Global",
   "memSectionProject": "Project",
+  "memSectionTools": "Tools",
   "memSectionRole": "Role",
   "memAgentFallback": "Guidance file",
   "memNew": "New template",

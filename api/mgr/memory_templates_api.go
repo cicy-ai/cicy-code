@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -45,6 +46,10 @@ func resolveTemplatePath(suffix string) (scope, name, path string) {
 	}
 	parts := strings.SplitN(suffix, "/", 2)
 	switch parts[0] {
+	case "config":
+		// The tool/agent config (~/cicy-ai/db/lite-config.json) — a single fixed
+		// file edited from the memory view's Tools section.
+		return "config", "lite-config.json", liteConfigPath()
 	case "global":
 		return "global", "global", globalMemoryTemplatePath()
 	case "project":
@@ -166,6 +171,14 @@ func handleMemoryTemplateByName(w http.ResponseWriter, r *http.Request) {
 				rslug, rfile = name[:i], name[i+1:]
 			}
 			content = readRoleFile(rslug, rfile)
+		}
+		// lite-config falls back to the effective DEFAULT config (pretty JSON) when
+		// no file exists yet, so the editor shows what's actually in effect and a
+		// save materialises it for editing.
+		if scope == "config" && strings.TrimSpace(content) == "" {
+			if b, err := json.MarshalIndent(defaultLiteConfig(), "", "  "); err == nil {
+				content = string(b) + "\n"
+			}
 		}
 		J(w, M{"scope": scope, "name": name, "content": content, "path": path, "exists": fileExistsPlain(path)})
 	case http.MethodPut:

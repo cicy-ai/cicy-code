@@ -299,6 +299,7 @@
   "actBlockHelp": "直接阻断,不放行这次请求 / 回复",
   "dirOutboundHelp": "agent 发给模型的内容(prompt / 上下文)",
   "dirInboundHelp": "模型回给 agent 的回复",
+  "tabAudit": "审计",
   "tabAuditLog": "审计日志",
   "tabAuditPolicy": "审计策略",
   "matcherRegex": "正则",

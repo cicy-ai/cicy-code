@@ -14,7 +14,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, Folder, X, Settings, Brain, Search,
   LayoutList, Users, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen, Braces
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag } from '../lib/modelTag';
@@ -38,7 +38,6 @@ import { MobileDeviceColumn, type MobileSel } from './layout/MobileDevicesPanel'
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
 import AgentUsageLogView from './layout/AgentUsageLogView';
-import AuditLogTab from './audit/AuditLogTab';
 import PolicyTab from './audit/PolicyTab';
 import AgentUsageAnalysisView from './layout/AgentUsageAnalysisView';
 import TokenDialog from './layout/TokenDialog';
@@ -48,6 +47,7 @@ import AgentStack from './layout/AgentStack';
 import WeChatBindModal from './im/WeChatBindModal';
 import SettingsModal, { type SettingsSection } from './settings/SettingsModal';
 import { useDialogs } from './ui/Modal';
+import TipBelow from './ui/TipBelow';
 import config, { defaultWorkerWorkspace, syncHostHomeFromPath, urls } from '../config';
 import apiService from '../services/api';
 import { loadHandled, serverAckedIds, resolveStatus } from './audit/auditHandled';
@@ -282,11 +282,11 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'customAgents' | 'agents' | 'todo' | 'windows' | null;
-type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'knowledge' | 'log' | 'policy' | RequestViewTab;
+type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'knowledge' | 'audit' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'knowledge' || value === 'todo' || value === 'log' || value === 'policy') {
+  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'knowledge' || value === 'todo' || value === 'audit') {
     return value;
   }
   return 'files';
@@ -337,11 +337,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>(() => normalizeCliContentTab(cache.get(cliContentTabKey(paneId), 'files')));
   const [lastSessionSubTab, setLastSessionSubTab] = useState<RequestViewTab>(() => {
     const v = cache.get(cliContentTabKey(paneId), 'files');
-    return v === 'tools' || v === 'brain' || v === 'meta' || v === 'usage' || v === 'analysis' ? v : 'analysis';
+    return v === 'meta' || v === 'usage' || v === 'analysis' ? v : 'analysis';
   });
+  const [lastRequestSubTab, setLastRequestSubTab] = useState<RequestViewTab>('tools');
   useEffect(() => {
-    if (cliContentTab === 'tools' || cliContentTab === 'brain' || cliContentTab === 'meta' || cliContentTab === 'usage' || cliContentTab === 'analysis') {
+    if (cliContentTab === 'meta' || cliContentTab === 'usage' || cliContentTab === 'analysis') {
       setLastSessionSubTab(cliContentTab);
+    } else if (cliContentTab === 'tools' || cliContentTab === 'brain') {
+      setLastRequestSubTab(cliContentTab);
     }
   }, [cliContentTab]);
   const [cliContentMode, setCliContentMode] = useState<CliContentMode>('fixed');
@@ -1450,22 +1453,27 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     ...(todoSkillInstalled ? [{ id: 'todo', label: t('tabTodo', 'Todo'), icon: <ListTodo className="h-3.5 w-3.5" /> }] : []),
     { id: 'files', label: t('tabFiles'), icon: <Folder className="h-3.5 w-3.5" /> },
     { id: 'session', label: t('tabSession'), icon: <LineChart className="h-3.5 w-3.5" /> },
+    { id: 'request', label: t('tabRequest', '请求'), icon: <Braces className="h-3.5 w-3.5" /> },
     { id: 'knowledge', label: t('tabKnowledge', '知识库'), icon: <BookOpen className="h-3.5 w-3.5" /> },
     { id: 'memory', label: t('tabMemory'), icon: <Brain className="h-3.5 w-3.5" /> },
-    // Audit log + policy as normal right-panel tabs. 日志 = behaviour/secret
-    // hits, 策略 = policy rules. Always shown (no audit_enabled gate).
-    { id: 'log', label: t('tabAuditLog', { ns: 'audit', defaultValue: '审计日志' }), icon: <Activity className="h-3.5 w-3.5" /> },
-    { id: 'policy', label: t('tabAuditPolicy', { ns: 'audit', defaultValue: '审计策略' }), icon: <ShieldCheck className="h-3.5 w-3.5" /> },
+    // Audit as a single security tab — opens an embedded dashboard with three
+    // sub-tabs (守护 / 日志 / 策略). Always shown (no audit_enabled gate).
+    { id: 'audit', label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }), icon: <ShieldCheck className="h-3.5 w-3.5" /> },
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
   const sessionSubTabs: { id: RequestViewTab; label: string }[] = [
     { id: 'analysis', label: t('tabAnalysis', '分析') },
     { id: 'usage', label: t('tabUsage', '用量') },
     { id: 'meta', label: t('tabMeta') },
+  ];
+  // 请求 (request) top-level tab groups the per-request internals: 工具 + 提示词.
+  const requestSubTabs: { id: RequestViewTab; label: string }[] = [
     { id: 'tools', label: t('tabTools') },
     { id: 'brain', label: t('tabBrain') },
   ];
-  const isSessionTab = (tab: WorkspaceCliContentTab) => tab === 'tools' || tab === 'brain' || tab === 'meta' || tab === 'usage' || tab === 'analysis';
+  const isSessionTab = (tab: WorkspaceCliContentTab) => tab === 'meta' || tab === 'usage' || tab === 'analysis';
+  const isRequestTab = (tab: WorkspaceCliContentTab) => tab === 'tools' || tab === 'brain';
+  const activeSubTabs = isRequestTab(cliContentTab) ? requestSubTabs : sessionSubTabs;
   const renderCliContentPanel = () => (
     // The drawer keeps the FilesView mounted (and laid out off-screen when
     // closed) so its chat-ws :code-ext bridge stays connected — agents can
@@ -1513,24 +1521,25 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="cli-content-tabs-wrap" className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--vsc-border)] px-3">
         <div data-id="cli-content-tabs" className="flex min-w-0 flex-1 gap-1 overflow-x-auto whitespace-nowrap scrollbar-hairline">
           {cliContentTabs.map((item) => {
-            const active = item.id === 'session' ? isSessionTab(cliContentTab) : cliContentTab === item.id;
+            const active = item.id === 'session' ? isSessionTab(cliContentTab) : item.id === 'request' ? isRequestTab(cliContentTab) : cliContentTab === item.id;
             return (
+              <TipBelow key={item.id} label={item.label} className="shrink-0">
               <button
                 data-id={`cli-content-tab-${item.id}`}
-                key={item.id}
                 type="button"
-                className={`relative shrink-0 select-none rounded-md px-2.5 py-1.5 text-[12px] font-medium leading-5 tracking-[0.01em] transition-colors ${
+                className={`relative shrink-0 select-none rounded-md px-2.5 py-1.5 transition-colors ${
                   active
                     ? 'bg-white/[0.08] text-zinc-100'
                     : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
                 }`}
                 onClick={() => {
                   if (item.id === 'session') setCliContentTab(lastSessionSubTab);
+                  else if (item.id === 'request') setCliContentTab(lastRequestSubTab);
                   else setCliContentTab(item.id as WorkspaceCliContentTab);
                 }}
               >
-                <span className="inline-flex items-center">
-                  {item.label}
+                <span className="inline-flex h-5 items-center">
+                  {item.icon}
                 </span>
                 {item.id === 'todo' && todoCount > 0 && (
                   <span
@@ -1548,19 +1557,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     {knowledgePendingCount > 99 ? '99+' : knowledgePendingCount}
                   </span>
                 )}
-                {item.id === 'log' && auditAlertCount > 0 && (
+                {item.id === 'audit' && auditAlertCount > 0 && (
                   <span
-                    data-id="cli-content-tab-log-badge"
+                    data-id="cli-content-tab-audit-badge"
                     className="pointer-events-none absolute right-0 top-0 inline-flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-red-500 px-[3px] text-[9px] font-semibold leading-none text-white tabular-nums"
                   >
                     {auditAlertCount > 99 ? '99+' : auditAlertCount}
                   </span>
                 )}
               </button>
+              </TipBelow>
             );
           })}
         </div>
         <div data-id="cli-content-actions" className="ml-3 flex shrink-0 items-center gap-1">
+          <TipBelow label={t('close', { ns: 'common' })}>
           <button
             data-id="cli-content-close"
             type="button"
@@ -1568,16 +1579,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               setCliContentOpen(false);
             }}
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-            title={t('close', { ns: 'common' })}
             aria-label={t('close', { ns: 'common' })}
           >
             <X className="h-4 w-4" />
           </button>
+          </TipBelow>
         </div>
       </div>
-      {isSessionTab(cliContentTab) ? (
+      {isSessionTab(cliContentTab) || isRequestTab(cliContentTab) ? (
         <div data-id="cli-content-session-subtabs" className="flex shrink-0 items-center gap-1 border-b border-[var(--vsc-border)] px-3 py-1.5">
-          {sessionSubTabs.map((item) => (
+          {activeSubTabs.map((item) => (
             <button
               data-id={`cli-content-session-sub-${item.id}`}
               key={item.id}
@@ -1630,20 +1641,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <AgentUsageLogView paneId={activeCliPaneId} active={cliContentOpen && cliContentTab === 'usage'} />
         </div>
         <div
-          data-id="cli-content-log-host"
+          data-id="cli-content-audit-host"
           className="absolute inset-0"
-          style={{ display: cliContentTab === 'log' ? 'block' : 'none' }}
+          style={{ display: cliContentTab === 'audit' ? 'block' : 'none' }}
         >
-          {cliContentOpen && cliContentTab === 'log' && (
-            <div className="h-full overflow-auto p-3"><AuditLogTab /></div>
-          )}
-        </div>
-        <div
-          data-id="cli-content-policy-host"
-          className="absolute inset-0"
-          style={{ display: cliContentTab === 'policy' ? 'block' : 'none' }}
-        >
-          {cliContentOpen && cliContentTab === 'policy' && (
+          {cliContentOpen && cliContentTab === 'audit' && (
             <div className="h-full overflow-auto p-3"><PolicyTab /></div>
           )}
         </div>

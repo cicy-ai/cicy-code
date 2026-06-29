@@ -13,6 +13,7 @@
   "tabFiles": "Files",
   "tabSession": "Analysis",
   "tabHistory": "History",
+  "tabRequest": "Request",
   "tabTools": "Tools",
   "tabBrain": "Prompts",
   "tabMeta": "Metadata",

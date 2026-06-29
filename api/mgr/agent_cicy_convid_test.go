@@ -44,7 +44,7 @@ func TestCicySeededSnapshotReplacesOnlyMessages(t *testing.T) {
 		RequestIDs: []string{"req-1"},
 	}
 	summary := []M{{"role": "user", "content": "[summary] …"}}
-	out := cicySeededSnapshot(live, "w-9", "new-conv", "2026-06-10T01:00:00Z", summary)
+	out := cicySeededSnapshot(live, "w-9", "new-conv", "2026-06-10T01:00:00Z", summary, "", nil)
 
 	// Conversation-scoped fields carry over verbatim…
 	if out.Provider != "anthropic" || out.Model != "deepseek-v4-pro" || out.URL != live.URL ||
@@ -87,7 +87,7 @@ func TestCicySeededSnapshotKeepsChatShapeSystemMessage(t *testing.T) {
 			},
 		},
 	}
-	out := cicySeededSnapshot(live, "w-9", "c", "2026-06-10T01:00:00Z", []M{{"role": "user", "content": "[summary]"}})
+	out := cicySeededSnapshot(live, "w-9", "c", "2026-06-10T01:00:00Z", []M{{"role": "user", "content": "[summary]"}}, "", nil)
 	msgs := out.Body.(map[string]interface{})["messages"].([]interface{})
 	if len(msgs) != 2 {
 		t.Fatalf("chat-shape seed must keep the leading system message, got %d msgs", len(msgs))

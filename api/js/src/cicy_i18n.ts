@@ -21,6 +21,7 @@ function detectLang(): Lang {
 
 const STRINGS: Record<Lang, Record<string, string>> = {
   en: {
+    tipWebgl: "WebGL terminal rendering\nOff by default · click to toggle (refresh required)",
     tipAddCliWindow: "New CLI window\n\nOpen a fresh shell window tab in this session.",
     tipRestartAgent: "Restart Agent\n\nRestarts the Agent and its conversation.",
     tipLaunchAgent: "Launch Agent\n\nRe-source .cicy/boot.sh,\nlaunch Agent.",
@@ -88,6 +89,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     voiceMode: "Voice Mode",
   },
   "zh-CN": {
+    tipWebgl: "WebGL 终端渲染\n默认关 · 点击切换（需刷新）",
     tipAddCliWindow: "新建 CLI Window\n\n在当前 session 新开一个 shell window tab。",
     tipRestartAgent: "重启 Agent\n\n将重启 Agent 和对话。",
     tipLaunchAgent: "启动 Agent\n\n重新 source .cicy/boot.sh,\n启动 Agent。",

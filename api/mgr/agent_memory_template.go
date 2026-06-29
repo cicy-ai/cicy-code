@@ -88,6 +88,15 @@ func readRoleFile(slug, name string) string {
 	return ""
 }
 
+// cicySystemBase returns THIS role's system prompt — the `system` field sent on
+// every cicy turn. Each role owns its own system.md (one per role); the agent's
+// specific role/identity still lives in its AGENTS.md, carried as message context.
+// Prefers the user-editable ~/cicy-ai/memory/agents/<slug>/system.md, falls back
+// to the embedded per-role seed (via readRoleFile).
+func cicySystemBase(roleSlug string) string {
+	return strings.TrimSpace(readRoleFile(roleSlug, "system.md"))
+}
+
 // loadRoleMeta parses a role's meta.yaml (disk-or-embed). Empty struct if absent.
 func loadRoleMeta(slug string) roleMeta {
 	var m roleMeta

@@ -298,6 +298,7 @@
   "actBlockHelp": "Bloquer franchement — requête/réponse non transmise",
   "dirOutboundHelp": "Ce que l'agent envoie au modèle (prompt / contexte)",
   "dirInboundHelp": "La réponse du modèle à l'agent",
+  "tabAudit": "Audit",
   "tabAuditLog": "Journal d'audit",
   "tabAuditPolicy": "Politique d'audit",
   "matcherRegex": "Regex",

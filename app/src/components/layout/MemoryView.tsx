@@ -24,6 +24,7 @@ import {
   ClipboardPaste,
   WrapText,
   Check,
+  Wrench,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
@@ -42,7 +43,7 @@ import MarkdownPreview from '../files/MarkdownPreview';
 // editor (same form as the file editor: edit + Save + dirty indicator), backed
 // by the /api/memory/templates API.
 
-type Scope = 'agent' | 'global' | 'project' | 'role';
+type Scope = 'agent' | 'global' | 'project' | 'role' | 'config';
 
 interface Selection {
   scope: Scope;
@@ -630,6 +631,15 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
               />
             )}
           </>,
+        )}
+
+        {renderSection(
+          'tools',
+          t('memSectionTools', { defaultValue: '工具配置' }),
+          undefined,
+          undefined,
+          renderItem({ scope: 'config', name: 'lite-config.json' }, 'lite-config.json', <Wrench size={14} />),
+          true,
         )}
 
         {listLoading && (

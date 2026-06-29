@@ -299,6 +299,7 @@
   "actBlockHelp": "Block outright — request/reply not allowed through",
   "dirOutboundHelp": "What the agent sends to the model (prompt / context)",
   "dirInboundHelp": "The model's reply back to the agent",
+  "tabAudit": "Audit",
   "tabAuditLog": "Audit Log",
   "tabAuditPolicy": "Audit Policy",
   "matcherRegex": "Regex",

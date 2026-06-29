@@ -719,14 +719,26 @@ func cicyRestoreSessionMessages(shortID, convID string) []M {
 // system/tools/model) carries over verbatim, so the seed is indistinguishable
 // from a real wire snapshot. The annotator renumbers the messages.
 func cicySeedCurrentSnapshot(shortID, convID string, msgs []M) {
+	cicySeedCurrentSnapshotReq(shortID, convID, msgs, "", nil)
+}
+
+// cicySeedCurrentSnapshotReq seeds the display snapshot AND mirrors the turn's
+// wire system prompt + tool defs into it. cicy owns its current.json (it does
+// its own compaction, so the wire body may be a sliced sub-history that must not
+// clobber the full display history — hence X-Cicy-Current-Owned). But the
+// inspector reads the system/tools out of this snapshot, so without seeding them
+// here cicy alone shows no prompt/tools (CLI agents get them for free from the
+// gateway-captured wire body). systemPrompt is per-role (cfg.systemPrompt, from
+// resolveSystemBase) so each role's own prompt shows.
+func cicySeedCurrentSnapshotReq(shortID, convID string, msgs []M, systemPrompt string, tools []M) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	snap := cicySeededSnapshot(agentInspectorLoadCurrent(shortID), shortID, convID, now, msgs)
+	snap := cicySeededSnapshot(agentInspectorLoadCurrent(shortID), shortID, convID, now, msgs, systemPrompt, tools)
 	_ = aiGatewayWriteCurrentSnapshot(shortID, snap)
 }
 
 // cicySeededSnapshot is the pure clone-and-replace: take the live snapshot,
 // swap ONLY body.messages, keep everything else verbatim.
-func cicySeededSnapshot(snap aiGatewayCurrentSnapshot, shortID, convID, now string, msgs []M) aiGatewayCurrentSnapshot {
+func cicySeededSnapshot(snap aiGatewayCurrentSnapshot, shortID, convID, now string, msgs []M, systemPrompt string, tools []M) aiGatewayCurrentSnapshot {
 	body := make([]interface{}, len(msgs))
 	for i, m := range msgs {
 		body[i] = map[string]interface{}(m)
@@ -753,6 +765,28 @@ func cicySeededSnapshot(snap aiGatewayCurrentSnapshot, shortID, convID, now stri
 		snap.Status = "completed"
 		snap.StartedAt = now
 		snap.Timestamp = now
+	}
+	// Mirror the wire request's per-role system prompt + tool defs into the
+	// snapshot body so the inspector renders cicy's 提示词/工具 identically to a
+	// CLI agent. cicy's payload is ALWAYS Anthropic-shaped (top-level `system`
+	// block) regardless of upstream provider, so writing it here is canonical and
+	// unambiguous for the inspector (which reads body["system"]).
+	if systemPrompt != "" || len(tools) > 0 {
+		nb := aiGatewayMap(snap.Body)
+		if nb == nil {
+			nb = map[string]interface{}{}
+		}
+		if systemPrompt != "" {
+			nb["system"] = []interface{}{map[string]interface{}{"type": "text", "text": systemPrompt}}
+		}
+		if len(tools) > 0 {
+			ts := make([]interface{}, len(tools))
+			for i, td := range tools {
+				ts[i] = map[string]interface{}(td)
+			}
+			nb["tools"] = ts
+		}
+		snap.Body = nb
 	}
 	snap.AgentID = shortID
 	snap.ConversationID = convID
@@ -1566,6 +1600,49 @@ func cicyRequestMessages(history []M) []M {
 		return out
 	}
 	out[len(out)-1] = M{"role": role, "content": blocks}
+	return out
+}
+
+// cicyInjectRoleContext prepends the agent's role (its AGENTS.md body) to the
+// FIRST user message as a leading <role> context block — the same way a CLI
+// agent carries its AGENTS.md/CLAUDE.md into the conversation rather than the
+// system prompt. The system prompt stays the shared system.md base; the role is
+// message context. Wire-only: msgs maps are cloned so the persisted session
+// history is untouched. No-op when the role is empty or there's no user message.
+func cicyInjectRoleContext(msgs []M, roleContext string) []M {
+	roleContext = strings.TrimSpace(roleContext)
+	if roleContext == "" || len(msgs) == 0 {
+		return msgs
+	}
+	block := M{"type": "text", "text": "<role>\n" + roleContext + "\n</role>"}
+	out := make([]M, len(msgs))
+	copy(out, msgs)
+	for i, m := range out {
+		if role, _ := m["role"].(string); role != "user" {
+			continue
+		}
+		nm := M{}
+		for k, v := range m {
+			nm[k] = v
+		}
+		switch c := m["content"].(type) {
+		case string:
+			nm["content"] = []interface{}{block, M{"type": "text", "text": c}}
+		case []interface{}:
+			nm["content"] = append([]interface{}{block}, c...)
+		case []M:
+			merged := make([]interface{}, 0, len(c)+1)
+			merged = append(merged, block)
+			for _, b := range c {
+				merged = append(merged, b)
+			}
+			nm["content"] = merged
+		default:
+			nm["content"] = []interface{}{block}
+		}
+		out[i] = nm
+		break
+	}
 	return out
 }
 
@@ -2753,7 +2830,7 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 				"type": "text", "text": cfg.systemPrompt,
 				"cache_control": M{"type": "ephemeral"},
 			}},
-			"messages": cicyRequestMessages(session.messages),
+			"messages": cicyInjectRoleContext(cicyRequestMessages(session.messages), cfg.roleContext),
 		}
 		// Pure-chat roles (assistant/support/sales) enable no tools — omit the
 		// field entirely (an empty tools array is rejected by some upstreams).
@@ -2762,8 +2839,10 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 		}
 		// current.json (display) = the FULL conversation including the new q —
 		// seeded by us, NOT by the audit layer (the wire body below may be a
-		// post-compact slice and must not clobber the display history).
-		cicySeedCurrentSnapshot(shortID, session.convID, session.messages)
+		// post-compact slice and must not clobber the display history). Seed the
+		// per-role system prompt + tool defs too so the inspector's 提示词/工具
+		// panels match a CLI agent's.
+		cicySeedCurrentSnapshotReq(shortID, session.convID, session.messages, cfg.systemPrompt, cicyCachedToolDefs(cfg))
 		resp, streamed, err := cicyCallGateway(ctx, shortID, session.convID, "", payload, emit)
 		if err != nil {
 			// A mid-flight cancel surfaces here as a ctx error — record it as a

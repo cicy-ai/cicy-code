@@ -1752,7 +1752,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         '<button id="cp-agent-launch" class="' + tipCls + '" data-tooltip="' + ttydT("tipLaunchAgent") + '">' + svgPlay + '</button>' +
         '<button id="cp-agent-update" class="' + tipCls + '" data-tooltip="' + ttydT("tipUpdateAgent") + '">' + svgUpdate + '</button>' +
         '<button id="cp-win-restart" class="' + tipCls + '" data-tooltip="' + ttydT("tipRestartAgent") + '">' + svgRestart + '</button>' +
-        '<button id="cp-webgl" class="' + tipCls + '" data-tooltip="WebGL 终端渲染\n默认关 · 点击切换(需刷新)">' + svgGpu + '</button>' +
+        '<button id="cp-webgl" class="' + tipCls + '" data-tooltip="' + ttydT("tipWebgl") + '">' + svgGpu + '</button>' +
         '<button id="cp-reload" class="' + tipCls + '" data-tooltip="' + ttydT("tipReloadPage") + '" onclick="location.reload()">' + svgReload + '</button>';
 
     // Action buttons live inside the floating bar (as its rightmost flex

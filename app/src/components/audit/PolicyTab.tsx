@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Mail, ListChecks, AlertTriangle, X, SlidersHorizontal, RotateCcw, Plus, Trash2, ChevronLeft } from 'lucide-react';
+import { Mail, ListChecks, AlertTriangle, X, SlidersHorizontal, RotateCcw, Plus, Trash2, ChevronLeft, Activity } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
+import AuditLogTab from './AuditLogTab';
 import Select from '../ui/Select';
 import apiService from '../../services/api';
 
@@ -105,7 +106,7 @@ export default function PolicyTab() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<'settings' | 'rules'>('rules');
+  const [tab, setTab] = useState<'settings' | 'rules' | 'log'>('log');
   const [newRule, setNewRule] = useState<any | null>(null);
   const [testResults, setTestResults] = useState<Record<number, any>>({});
   const [saveErr, setSaveErr] = useState('');
@@ -186,7 +187,7 @@ export default function PolicyTab() {
   const allowAgents = policy.allow_list?.agents || [];
   const allowHashes = policy.allow_list?.content_hashes || [];
 
-  const TabBtn = ({ id, label, icon: Icon }: { id: 'settings' | 'rules'; label: string; icon: any }) => (
+  const TabBtn = ({ id, label, icon: Icon }: { id: 'settings' | 'rules' | 'log'; label: string; icon: any }) => (
     <button
       data-id={`audit-policy-tab-${id}`}
       onClick={() => setTab(id)}
@@ -201,13 +202,16 @@ export default function PolicyTab() {
       {/* sub-tabs — hidden while the rule editor is open so it takes over the panel */}
       {!newRule && (
         <div className="flex items-center gap-1 border-b border-[var(--vsc-border)] pb-1">
+          <TabBtn id="log" label={t('tabAuditLog', '日志')} icon={Activity} />
           <TabBtn id="rules" label={t('policyTabRules', '规则')} icon={ListChecks} />
           <TabBtn id="settings" label={t('policyTabSettings', '设置')} icon={SlidersHorizontal} />
           {saving && <span className="ml-auto inline-flex items-center gap-1 text-[12px] text-[var(--vsc-text-muted)]"><Spinner size="xs" />{t('policySaving', '保存中…')}</span>}
         </div>
       )}
 
-      {tab === 'settings' ? (
+      {tab === 'log' ? (
+        <div data-id="audit-policy-log"><AuditLogTab /></div>
+      ) : tab === 'settings' ? (
         <div className="space-y-2" data-id="audit-policy-settings">
           {/* SMTP / notify email */}
           <SettingRow icon={Mail} label={t('policyNotifyEmail', '通知邮件 (SMTP)')} desc={emailReady === null ? '…' : emailReady ? t('policyEmailReady', '已配置') : t('policyEmailMissing', '未配置,无法发告警邮件')} on={!!emailReady}>

@@ -6,6 +6,7 @@
   "memSectionAgent": "本 Agent",
   "memSectionGlobal": "全局",
   "memSectionProject": "项目",
+  "memSectionTools": "工具配置",
   "memSectionRole": "角色",
   "memAgentFallback": "记忆文件",
   "memNew": "新建模板",

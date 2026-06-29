@@ -1,4 +1,4 @@
-import { Activity, BookOpen, Brain, Check, Copy, Folder, History, LineChart, ListTodo, Pencil, Settings, ShieldCheck, X } from 'lucide-react'
+import { BookOpen, Braces, Brain, Check, Copy, Folder, History, LineChart, ListTodo, Pencil, Settings, ShieldCheck, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -9,6 +9,7 @@ import { AgentInstallOverlay } from './AgentInstallOverlay'
 import { ShellPanel } from '../terminal/ShellPanel'
 import CurrentHistoryView from '../chat/CurrentHistoryView'
 import DispatcherChat from '../chat/DispatcherChat'
+import TipBelow from '../ui/TipBelow'
 import { isCicyLiteAgent } from '../../lib/agentType'
 // AgentCanvasItem outlived its namesake: the draggable-canvas component was
 // dead code (never rendered, tree-shaken) and was deleted 2026-06-05; the
@@ -171,7 +172,7 @@ function AgentStackCard({
   onToggleHistory: () => void;
   historyActive: boolean;
 }) {
-  const { t } = useTranslation('layout')
+  const { t } = useTranslation(['layout', 'workspace'])
   const { globalVar } = useApp()  // helper_mode → hide the card header-right controls
   // History opens as a single shared popover owned by AgentStack (so switching
   // the active agent switches the history too). This card only toggles it and
@@ -324,17 +325,17 @@ function AgentStackCard({
     onOpenPaneTodo?.(item.paneId)
   }, [item.paneId, onOpenPaneTodo])
 
+  const handleOpenRequest = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onOpenPaneContent?.(item.paneId, 'tools')
+  }, [item.paneId, onOpenPaneContent])
   const handleOpenKnowledge = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     onOpenPaneContent?.(item.paneId, 'knowledge')
   }, [item.paneId, onOpenPaneContent])
-  const handleOpenAuditLog = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleOpenAudit = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
-    onOpenPaneContent?.(item.paneId, 'log')
-  }, [item.paneId, onOpenPaneContent])
-  const handleOpenAuditPolicy = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation()
-    onOpenPaneContent?.(item.paneId, 'policy')
+    onOpenPaneContent?.(item.paneId, 'audit')
   }, [item.paneId, onOpenPaneContent])
   const handleOpenMemory = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
@@ -473,13 +474,13 @@ function AgentStackCard({
           {showHeaderButtons ? (
           <div data-id="agent-stack-card-header-buttons" className="flex items-center gap-1">
             {onOpenPaneTodo && (
+              <TipBelow label={t('tabTodo', { ns: 'workspace' })}>
               <button
                 data-id="agent-stack-card-todo"
                 type="button"
                 onClick={handleOpenTodo}
                 className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                title="Todo"
-                aria-label="Todo"
+                aria-label={t('tabTodo', { ns: 'workspace' })}
               >
                 <ListTodo className="h-4 w-4" />
                 {todoCount > 0 && (
@@ -491,94 +492,102 @@ function AgentStackCard({
                   </span>
                 )}
               </button>
+              </TipBelow>
             )}
+            <TipBelow label={t('tabFiles', { ns: 'workspace' })}>
             <button
               data-id="agent-stack-card-files"
               type="button"
               onClick={handleOpenFiles}
               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-              title="Files"
-              aria-label="Files"
+              aria-label={t('tabFiles', { ns: 'workspace' })}
             >
               <Folder className="h-4 w-4" />
             </button>
+            </TipBelow>
+            <TipBelow label={t('tabSession', { ns: 'workspace' })}>
             <button
               data-id="agent-stack-card-session"
               type="button"
               onClick={handleOpenSession}
               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-              title="分析"
-              aria-label="分析"
+              aria-label={t('tabSession', { ns: 'workspace' })}
             >
               <LineChart className="h-4 w-4" />
             </button>
+            </TipBelow>
             {onOpenPaneContent && (
+              <TipBelow label={t('tabRequest', { ns: 'workspace' })}>
+              <button
+                data-id="agent-stack-card-request"
+                type="button"
+                onClick={handleOpenRequest}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+                aria-label={t('tabRequest', { ns: 'workspace' })}
+              >
+                <Braces className="h-4 w-4" />
+              </button>
+              </TipBelow>
+            )}
+            {onOpenPaneContent && (
+              <TipBelow label={t('tabKnowledge', { ns: 'workspace' })}>
               <button
                 data-id="agent-stack-card-knowledge"
                 type="button"
                 onClick={handleOpenKnowledge}
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                title={t('tabKnowledge', { defaultValue: '知识库' })}
-                aria-label={t('tabKnowledge', { defaultValue: '知识库' })}
+                aria-label={t('tabKnowledge', { ns: 'workspace' })}
               >
                 <BookOpen className="h-4 w-4" />
               </button>
+              </TipBelow>
             )}
             {onOpenPaneMemory && (
+              <TipBelow label={t('tabMemory', { ns: 'workspace' })}>
               <button
                 data-id="agent-stack-card-memory"
                 type="button"
                 onClick={handleOpenMemory}
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                title="Memory"
-                aria-label="Memory"
+                aria-label={t('tabMemory', { ns: 'workspace' })}
               >
                 <Brain className="h-4 w-4" />
               </button>
+              </TipBelow>
             )}
             {onOpenPaneContent && (
-              <>
-                <button
-                  data-id="agent-stack-card-audit-log"
-                  type="button"
-                  onClick={handleOpenAuditLog}
-                  className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                  title={t('tabAuditLog', { ns: 'audit', defaultValue: '审计日志' })}
-                  aria-label={t('tabAuditLog', { ns: 'audit', defaultValue: '审计日志' })}
-                >
-                  <Activity className="h-4 w-4" />
-                  {auditAlertCount > 0 && (
-                    <span
-                      data-id="agent-stack-card-audit-log-badge"
-                      className="absolute -right-0.5 -top-0.5 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
-                    >
-                      {auditAlertCount > 99 ? '99+' : auditAlertCount}
-                    </span>
-                  )}
-                </button>
-                <button
-                  data-id="agent-stack-card-audit-policy"
-                  type="button"
-                  onClick={handleOpenAuditPolicy}
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                  title={t('tabAuditPolicy', { ns: 'audit', defaultValue: '审计策略' })}
-                  aria-label={t('tabAuditPolicy', { ns: 'audit', defaultValue: '审计策略' })}
-                >
-                  <ShieldCheck className="h-4 w-4" />
-                </button>
-              </>
+              <TipBelow label={t('tabAudit', { ns: 'audit', defaultValue: '审计' })}>
+              <button
+                data-id="agent-stack-card-audit"
+                type="button"
+                onClick={handleOpenAudit}
+                className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+                aria-label={t('tabAudit', { ns: 'audit', defaultValue: '审计' })}
+              >
+                <ShieldCheck className="h-4 w-4" />
+                {auditAlertCount > 0 && (
+                  <span
+                    data-id="agent-stack-card-audit-badge"
+                    className="absolute -right-0.5 -top-0.5 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
+                  >
+                    {auditAlertCount > 99 ? '99+' : auditAlertCount}
+                  </span>
+                )}
+              </button>
+              </TipBelow>
             )}
+            <TipBelow label={t('tabSettings', { ns: 'workspace' })}>
             <button
               data-id="agent-stack-card-settings"
               type="button"
               onClick={handleOpenSettings}
               aria-pressed={settingsShortcutActive}
               className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${settingsShortcutActive ? 'bg-white/[0.08] text-zinc-100 ring-1 ring-white/[0.12]' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100'}`}
-              title="Settings"
-              aria-label="Settings"
+              aria-label={t('tabSettings', { ns: 'workspace' })}
             >
               <Settings className="h-4 w-4" />
             </button>
+            </TipBelow>
           </div>
           ) : null}
         </div>

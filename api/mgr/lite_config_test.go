@@ -45,15 +45,14 @@ func TestLiteDefaultsReproduceBuiltins(t *testing.T) {
 	resetLiteConfigCache()
 	defer func() { cicyRootDir = prev; resetLiteConfigCache() }()
 
-	// ONE universal base: no frontmatter → assistant with the coordinate default.
+	// No role + no frontmatter → NO tools (employees.yaml + profile-default both
+	// retired; tools come only from role meta.yaml / custom AGENT.md / frontmatter).
 	cfg := resolveLiteConfig("w-1", writeAgentsMD(t, ""))
 	if cfg.profile != "assistant" {
 		t.Fatalf("profile=%q want assistant", cfg.profile)
 	}
-	for _, n := range []string{"todo_add", "agent_msg", "agent_capture"} {
-		if !cfg.enabledTools[n] {
-			t.Errorf("default agent missing coordinate tool %q", n)
-		}
+	if len(cfg.enabledTools) != 0 {
+		t.Errorf("agent with no role/frontmatter should have NO tools, got %v", cfg.enabledTools)
 	}
 	if cfg.external {
 		t.Error("no agent is external anymore")
@@ -84,7 +83,7 @@ func TestLiteToolsetIndependentOfSession(t *testing.T) {
 	cicyRootDir = t.TempDir()
 	resetLiteConfigCache()
 	defer func() { cicyRootDir = prev; resetLiteConfigCache() }()
-	ws := writeAgentsMD(t, "")
+	ws := writeAgentsMD(t, "---\ntools: [coordinate]\n---\n")
 	a := resolveLiteConfig("w-1", ws)
 	b := resolveLiteConfig("w-1", ws)
 	if len(a.enabledTools) == 0 || len(a.enabledTools) != len(b.enabledTools) {

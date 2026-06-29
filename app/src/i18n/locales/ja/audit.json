@@ -298,6 +298,7 @@
   "actBlockHelp": "完全にブロック—要求/応答を通さない",
   "dirOutboundHelp": "エージェントがモデルへ送る内容(プロンプト/文脈)",
   "dirInboundHelp": "モデルからエージェントへの応答",
+  "tabAudit": "監査",
   "tabAuditLog": "監査ログ",
   "tabAuditPolicy": "監査ポリシー",
   "matcherRegex": "正規表現",

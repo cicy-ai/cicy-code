@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -40,7 +39,8 @@ import (
 // liteConfig is the resolved per-instance configuration.
 type liteConfig struct {
 	profile      string
-	systemPrompt string          // base + body + identity line, cache-stable
+	systemPrompt string          // the shared system.md base (the `system` field)
+	roleContext  string          // the agent's AGENTS.md body — its role, carried as message context (NOT in system)
 	enabledTools map[string]bool // empty ⇒ pure chat
 	external     bool            // profile is outward-facing (liaison): exec/custom tools refused
 	workspace    string          // for custom-tool cwd
@@ -152,29 +152,25 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	grantGroups = append(grantGroups, cfg.Grants.ByAgent[shortID]...)
 	grantable := expandGroups(grantGroups, cfg.ToolGroups)
 
-	// selected groups, in priority order:
-	//   employees.yaml template `tools:` (this employee's role) >
+	// selected groups, in priority order (employees.yaml + profile-default both
+	// RETIRED — no fallback):
 	//   workspace AGENTS.md frontmatter `tools:` >
-	//   role template (~/cicy-ai/memory/agents/<slug>.md) frontmatter `tools:` >
-	//   profile default.
-	// The role-template source means the composed AGENTS.md no longer has to carry
-	// the frontmatter at the very top — it can be pure global → project → role —
-	// while tools still resolve. Still narrowed by `grantable` below (security
-	// model effective = selected ∩ grantable, L3 narrow-only, unchanged).
-	roleSlug := employeeRoleSlug(shortID) // this employee's role-template slug
-	selectGroups := prof.DefaultGroups
+	//   the role's own definition: role/meta.yaml `tools:` (library roles) or a
+	//     custom agent's AGENT.md `tools:` (user-authored roles).
+	// An agent with neither gets NO tools. Still narrowed by `grantable` below
+	// (security model: effective = selected ∩ grantable, L3 narrow-only).
+	roleSlug := employeeRoleSlug(shortID) // this agent's role-template slug
+	var selectGroups []string
 	if t := loadRoleMeta(roleSlug).Tools; len(t) > 0 {
 		selectGroups = t
+	} else if ca, ok := customAgentFor(roleSlug); ok && len(ca.Tools) > 0 {
+		selectGroups = ca.Tools
 	}
 	if fm.hasTools {
 		selectGroups = fm.tools
 	}
-	if tools := employeeTemplateTools(roleSlug); len(tools) > 0 {
-		selectGroups = tools
-	}
 	selected := expandGroups(selectGroups, cfg.ToolGroups)
 
-	// effective = selected ∩ grantable (narrow-only).
 	enabled := map[string]bool{}
 	for name := range selected {
 		if grantable[name] {
@@ -191,23 +187,18 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 		}
 	}
 
-	// System prompt = profile base + AGENTS.md body + identity line. Stays
-	// byte-stable across turns (cache prefix) — no timestamps.
-	prompt := resolveSystemBase(prof.SystemBase)
-	// persona: employees.yaml template `prompt:` (if set) overrides the AGENTS.md
-	// body; otherwise the role .md body is used as before.
-	body := strings.TrimSpace(fm.body)
-	if p := strings.TrimSpace(employeeTemplatePrompt(roleSlug)); p != "" {
-		body = p
-	}
-	if body != "" {
-		prompt += "\n\n# 角色说明\n" + body
-	}
-	prompt += fmt.Sprintf("\n\n你自己的 AGENT_ID 是 %s。", shortID)
+	// Two separate things, like a CLI agent (system prompt vs CLAUDE.md):
+	//   - systemPrompt = the role's own system.md → the `system` field (no fallback).
+	//   - roleContext  = THIS agent's AGENTS.md body (its role) → carried as a
+	//     leading context block in `messages`, NOT concatenated into `system`.
+	// Both stay byte-stable across turns (cache prefix) — no timestamps.
+	systemBase := cicySystemBase(roleSlug)
+	roleContext := strings.TrimSpace(fm.body)
 
 	return liteConfig{
 		profile:      profileKey,
-		systemPrompt: prompt,
+		systemPrompt: systemBase,
+		roleContext:  roleContext,
 		enabledTools: enabled,
 		external:     false,
 		workspace:    workspace,

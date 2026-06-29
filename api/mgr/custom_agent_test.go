@@ -9,13 +9,12 @@ import (
 
 // A custom agent authored under ~/cicy-ai/agents/<slug>/AGENT.md must round-trip
 // (write → scan → parse) and feed the SAME role-lookup chain the built-in roles
-// use: employeeTemplateTools/Prompt resolve from it, and composeAgentMemory
+// use: customAgentFor resolves its tools, and composeAgentMemory
 // seeds its persona body into the new agent's guidance file.
 func TestCustomAgentRoundTripAndLookup(t *testing.T) {
 	prev := cicyRootDir
 	cicyRootDir = t.TempDir()
-	resetEmployeeTemplatesCache()
-	defer func() { cicyRootDir = prev; resetEmployeeTemplatesCache() }()
+	defer func() { cicyRootDir = prev }()
 
 	slug, err := writeCustomAgent(customAgent{
 		Slug:  "销售助手",
@@ -41,14 +40,6 @@ func TestCustomAgentRoundTripAndLookup(t *testing.T) {
 	ca, ok := customAgentFor("销售助手")
 	if !ok || len(ca.Tools) != 2 || ca.Tools[1] != "shell" || !strings.Contains(ca.Body, "销售助手") {
 		t.Fatalf("customAgentFor = %+v ok=%v", ca, ok)
-	}
-
-	// feeds the employees lookup chain (tools + persona prompt)
-	if tools := employeeTemplateTools("销售助手"); len(tools) != 2 || tools[0] != "coordinate" {
-		t.Errorf("employeeTemplateTools = %v", tools)
-	}
-	if p := employeeTemplatePrompt("销售助手"); !strings.Contains(p, "回答客户咨询") {
-		t.Errorf("employeeTemplatePrompt = %q", p)
 	}
 
 	// seeded into a new agent's memory (no memory/agents/*.md file exists for it)
