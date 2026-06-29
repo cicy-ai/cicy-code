@@ -773,11 +773,11 @@ function DesktopSnapshotView({ clientId, onSendToAgent }: { clientId: string; on
     }
   }, [clientId]);
 
+  // 不再定时截图:挂载时拉一次「最近一张」,之后只有用户点「立即截图 / 刷新」才会
+  // 触发桌面端真正截图(captureNow → desktopSnapshotNow → 写盘 → 再拉 image)。
   useEffect(() => {
     setError('');
     fetchLatest();
-    const id = setInterval(() => fetchLatest(true), 20000);
-    return () => clearInterval(id);
   }, [fetchLatest]);
 
   const captureNow = async () => {
