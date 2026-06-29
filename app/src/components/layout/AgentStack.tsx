@@ -3,7 +3,6 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
 import { useApp } from '../../contexts/AppContext'
-import apiService from '../../services/api'
 import AgentAvatar from '../AgentAvatar'
 import { WebFrame } from '../WebFrame'
 import { AgentInstallOverlay } from './AgentInstallOverlay'
@@ -65,7 +64,7 @@ function AgentStack({
   auditAlertCount?: number
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { t } = useTranslation('layout')
+  useTranslation('layout')
 
   // History is OWNED here (not per-card) so it follows the active agent:
   // switching agents switches the history shown. `historyPaneId` = the agent

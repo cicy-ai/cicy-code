@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -10,14 +11,111 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
+// agentLangFromConfig extracts the agent's stored UI language from its config
+// JSON (set at create time). Empty ⇒ English default.
+func agentLangFromConfig(config string) string {
+	if strings.TrimSpace(config) == "" {
+		return ""
+	}
+	var c struct {
+		Lang string `json:"lang"`
+	}
+	_ = json.Unmarshal([]byte(config), &c)
+	return c.Lang
+}
+
 // agentRoleTemplatesFS carries the official role templates baked into the binary
-// so a fresh install seeds them to ~/cicy-ai/memory/agents/ on first boot — same
-// shipping model as the global template, just a directory of them.
+// so a fresh install seeds them to ~/cicy-ai/memory/agents/ on first boot. Each
+// role is a DIRECTORY: <slug>/role.md (English, the default persona),
+// <slug>/role.zh.md (Chinese), <slug>/meta.yaml (profile/tools/name/greeting,
+// each with an EN default + _zh variant). The persona file is what lands in the
+// agent's CLAUDE.md/AGENTS.md; the greeting lives only in meta.yaml (shown in the
+// chat view, never injected into the agent's memory).
 //
-//go:embed embed/agent-roles/*.md
+//go:embed embed/agent-roles
 var agentRoleTemplatesFS embed.FS
+
+// roleMeta is the parsed <slug>/meta.yaml.
+type roleMeta struct {
+	Profile    string   `yaml:"profile"`
+	Tools      []string `yaml:"tools"`
+	Name       string   `yaml:"name"`
+	NameZh     string   `yaml:"name_zh"`
+	Greeting   string   `yaml:"greeting"`
+	GreetingZh string   `yaml:"greeting_zh"`
+}
+
+// langIsZh reports whether a UI/agent language code selects Chinese.
+func langIsZh(lang string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(lang)), "zh")
+}
+
+// roleDir is the on-disk directory for a role template.
+func roleDir(slug string) string {
+	clean := sanitizeTemplateSlug(slug)
+	if clean == "" {
+		return ""
+	}
+	return filepath.Join(agentTemplatesDir(), clean)
+}
+
+// rolePersonaFile returns the persona filename for a language ("role.md" for the
+// English default, "role.zh.md" for Chinese).
+func rolePersonaFile(lang string) string {
+	if langIsZh(lang) {
+		return "role.zh.md"
+	}
+	return "role.md"
+}
+
+// readRoleFile reads a file from a role's dir, preferring the user-editable
+// ~/cicy-ai/memory/agents/<slug>/<name> and falling back to the embedded seed.
+func readRoleFile(slug, name string) string {
+	clean := sanitizeTemplateSlug(slug)
+	if clean == "" {
+		return ""
+	}
+	if b, err := os.ReadFile(filepath.Join(agentTemplatesDir(), clean, name)); err == nil && strings.TrimSpace(string(b)) != "" {
+		return string(b)
+	}
+	if b, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + clean + "/" + name); err == nil {
+		return string(b)
+	}
+	return ""
+}
+
+// loadRoleMeta parses a role's meta.yaml (disk-or-embed). Empty struct if absent.
+func loadRoleMeta(slug string) roleMeta {
+	var m roleMeta
+	if raw := readRoleFile(slug, "meta.yaml"); raw != "" {
+		_ = yaml.Unmarshal([]byte(raw), &m)
+	}
+	return m
+}
+
+// roleMetaName / roleMetaGreeting pick the language variant (English default).
+func roleMetaName(slug, lang string) string {
+	m := loadRoleMeta(slug)
+	if langIsZh(lang) && strings.TrimSpace(m.NameZh) != "" {
+		return m.NameZh
+	}
+	if strings.TrimSpace(m.Name) != "" {
+		return m.Name
+	}
+	return sanitizeTemplateSlug(slug)
+}
+
+func roleMetaGreeting(slug, lang string) string {
+	m := loadRoleMeta(slug)
+	if langIsZh(lang) && strings.TrimSpace(m.GreetingZh) != "" {
+		return strings.TrimSpace(m.GreetingZh)
+	}
+	return strings.TrimSpace(m.Greeting)
+}
 
 // Layered, user-editable memory templates. On agent creation the composed
 // content is copied verbatim into the new agent's native guidance file
@@ -75,26 +173,27 @@ func projectTemplatePath(slug string) string {
 	return filepath.Join(projectTemplatesDir(), clean+".md")
 }
 
+// roleTemplatePath returns the editable English persona file for a role
+// (<slug>/role.md) — used by the template-editor API.
 func roleTemplatePath(slug string) string {
-	clean := sanitizeTemplateSlug(slug)
-	if clean == "" {
+	d := roleDir(slug)
+	if d == "" {
 		return ""
 	}
-	return filepath.Join(agentTemplatesDir(), clean+".md")
+	return filepath.Join(d, "role.md")
 }
 
 // reservedTemplateSlugs are system base/default templates that live in
 // ~/cicy-ai/memory/agents/ (so there's ONE template source, editable on disk)
 // but must NOT show up in the role picker — they're the cicy system-prompt base
 // and the no-role default charter, not selectable personas.
-var reservedTemplateSlugs = map[string]bool{
-	"base-assistant":  true,
-	"base-dispatcher": true,
-	"default-charter": true,
-}
+// reservedTemplateSlugs hides system base templates from the create-agent role
+// picker. Empty now: "assistant" is a normal, selectable role (the default), so
+// nothing is hidden.
+var reservedTemplateSlugs = map[string]bool{}
 
 // listTemplateSlugs returns the user-selectable .md slugs in dir (sorted),
-// excluding reserved system templates.
+// excluding reserved system templates. Used for PROJECT templates (flat .md).
 func listTemplateSlugs(dir string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -115,32 +214,154 @@ func listTemplateSlugs(dir string) []string {
 	return out
 }
 
-// roleTemplateRaw returns a role template's RAW markdown (frontmatter intact),
-// preferring the user-editable ~/cicy-ai/memory/agents/<slug>.md and falling
-// back to the embedded seed so a base/default template is never empty before
-// first-boot seeding. This keeps memory/agents/ the single template source.
-func roleTemplateRaw(slug string) string {
+// listRoleSlugs returns the user-selectable role slugs (subdirs of
+// ~/cicy-ai/memory/agents/ that contain a role.md), excluding reserved templates.
+func listRoleSlugs() []string {
+	entries, err := os.ReadDir(agentTemplatesDir())
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() || reservedTemplateSlugs[e.Name()] {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(agentTemplatesDir(), e.Name(), "role.md")); err != nil {
+			continue
+		}
+		out = append(out, e.Name())
+	}
+	sort.Strings(out)
+	return out
+}
+
+// roleFileSortKey orders the files inside a role dir for display: the English
+// persona first, then the Chinese persona, then meta.yaml, then anything else.
+func roleFileSortKey(name string) int {
+	switch name {
+	case "role.md":
+		return 0
+	case "role.zh.md":
+		return 1
+	case "meta.yaml":
+		return 2
+	}
+	return 3
+}
+
+// listRoleFiles returns the files inside a role's dir (union of the on-disk
+// ~/cicy-ai/memory/agents/<slug>/ and the embedded seed), ordered role.md,
+// role.zh.md, meta.yaml, then the rest alphabetically. Sub-dirs are skipped.
+func listRoleFiles(slug string) []string {
 	clean := sanitizeTemplateSlug(slug)
 	if clean == "" {
+		return nil
+	}
+	set := map[string]bool{}
+	if entries, err := os.ReadDir(filepath.Join(agentTemplatesDir(), clean)); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				set[e.Name()] = true
+			}
+		}
+	}
+	if entries, err := agentRoleTemplatesFS.ReadDir("embed/agent-roles/" + clean); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				set[e.Name()] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for n := range set {
+		out = append(out, n)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if ki, kj := roleFileSortKey(out[i]), roleFileSortKey(out[j]); ki != kj {
+			return ki < kj
+		}
+		return out[i] < out[j]
+	})
+	return out
+}
+
+// roleDirInfo is one role folder plus the files under it, for the memory editor.
+type roleDirInfo struct {
+	Slug  string   `json:"slug"`
+	Files []string `json:"files"`
+}
+
+// listAllRoleDirs returns EVERY role folder under ~/cicy-ai/memory/agents/
+// (including the reserved base/default templates, which the editor may edit even
+// though they're hidden from the create-agent picker), merged with embedded
+// seeds, each with its file list. Backs the memory editor's role tree.
+func listAllRoleDirs() []roleDirInfo {
+	names := map[string]bool{}
+	if entries, err := os.ReadDir(agentTemplatesDir()); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				names[e.Name()] = true
+			}
+		}
+	}
+	if entries, err := agentRoleTemplatesFS.ReadDir("embed/agent-roles"); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				names[e.Name()] = true
+			}
+		}
+	}
+	slugs := make([]string, 0, len(names))
+	for n := range names {
+		slugs = append(slugs, n)
+	}
+	sort.Strings(slugs)
+	out := make([]roleDirInfo, 0, len(slugs))
+	for _, s := range slugs {
+		out = append(out, roleDirInfo{Slug: s, Files: listRoleFiles(s)})
+	}
+	return out
+}
+
+// sanitizeRoleFileName validates a filename addressed within a role dir
+// (role.md, role.zh.md, meta.yaml, …): a bare basename with no separators,
+// no traversal, and not hidden. Returns "" when unsafe.
+func sanitizeRoleFileName(name string) string {
+	name = strings.TrimSpace(strings.Trim(name, "/"))
+	if name == "" || strings.ContainsAny(name, `/\`) {
 		return ""
 	}
-	if raw := loadTemplateFile(roleTemplatePath(clean)); strings.TrimSpace(raw) != "" {
+	if name == "." || name == ".." || strings.HasPrefix(name, ".") {
+		return ""
+	}
+	if filepath.Base(name) != name {
+		return ""
+	}
+	return name
+}
+
+// roleTemplateRaw returns a role's persona markdown for a language
+// (<slug>/role.md for English, <slug>/role.zh.md for Chinese), disk-or-embed.
+// The persona carries NO frontmatter (metadata is in meta.yaml) and NO greeting.
+func roleTemplateRaw(slug, lang string) string {
+	if raw := readRoleFile(slug, rolePersonaFile(lang)); raw != "" {
 		return raw
 	}
-	if b, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + clean + ".md"); err == nil {
-		return string(b)
+	// Chinese requested but no zh persona → fall back to the English default.
+	if langIsZh(lang) {
+		return readRoleFile(slug, "role.md")
 	}
 	return ""
 }
 
-// roleTemplateBody returns a role template's body (frontmatter stripped) via the
-// same disk-or-embed source as roleTemplateRaw.
+// roleTemplateBody returns a role's English persona body, trimmed. (Personas
+// carry no frontmatter now, so this is just the trimmed file.)
 func roleTemplateBody(slug string) string {
-	return strings.TrimSpace(parseLiteFrontmatter(roleTemplateRaw(slug)).body)
+	return strings.TrimSpace(roleTemplateRaw(slug, ""))
 }
 
 func listProjectTemplates() []string { return listTemplateSlugs(projectTemplatesDir()) }
-func listRoleTemplates() []string    { return listTemplateSlugs(agentTemplatesDir()) }
+func listRoleTemplates() []string    { return listRoleSlugs() }
 
 // defaultGlobalMemoryTemplate seeds ~/cicy-ai/memory/global.md the first time
 // it is needed.
@@ -154,8 +375,6 @@ You can collaborate with other agents through the ` + "`cicy-agent`" + ` skill:
 Run ` + "`cicy-agent help`" + ` first to see all subcommands (note it is ` + "`help`" + `, not ` + "`--help`" + `).
 
 ## Constraints
-
-<!-- Write the mandatory constraints every agent must follow here. -->
 `
 
 // ensureGlobalMemoryTemplate writes the default template if the file is missing.
@@ -187,25 +406,33 @@ func ensureRoleMemoryTemplates() {
 		return
 	}
 	const root = "embed/agent-roles"
-	entries, err := agentRoleTemplatesFS.ReadDir(root)
+	roleDirs, err := agentRoleTemplatesFS.ReadDir(root)
 	if err != nil {
 		log.Printf("[memory-template] read embedded role templates failed: %v", err)
 		return
 	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+	for _, rd := range roleDirs {
+		if !rd.IsDir() {
 			continue
 		}
-		dst := filepath.Join(dir, e.Name())
-		if _, err := os.Stat(dst); err == nil {
-			continue // never clobber a user-edited template
-		}
-		raw, err := agentRoleTemplatesFS.ReadFile(root + "/" + e.Name())
-		if err != nil {
-			continue
-		}
-		if err := os.WriteFile(dst, raw, 0644); err != nil {
-			log.Printf("[memory-template] seed role %s failed: %v", e.Name(), err)
+		dstDir := filepath.Join(dir, rd.Name())
+		_ = os.MkdirAll(dstDir, 0755)
+		files, _ := agentRoleTemplatesFS.ReadDir(root + "/" + rd.Name())
+		for _, f := range files {
+			if f.IsDir() {
+				continue
+			}
+			dst := filepath.Join(dstDir, f.Name())
+			if _, err := os.Stat(dst); err == nil {
+				continue // never clobber a user-edited file
+			}
+			raw, err := agentRoleTemplatesFS.ReadFile(root + "/" + rd.Name() + "/" + f.Name())
+			if err != nil {
+				continue
+			}
+			if err := os.WriteFile(dst, raw, 0644); err != nil {
+				log.Printf("[memory-template] seed role %s/%s failed: %v", rd.Name(), f.Name(), err)
+			}
 		}
 	}
 }
@@ -234,34 +461,32 @@ func extractOpeningSection(md string) string {
 }
 
 // agentOpeningGreeting returns the opening line shown when an employee's chat
-// history is empty. Resolution: employee-template config (employees.yaml
-// `greeting`) → the role .md `## 开场白` (back-compat) → a generic line from the
-// title. The first two are hot-read, so editing the config takes effect live.
+// history is empty. It comes from the role's meta.yaml (`greeting` / `greeting_zh`),
+// picked by the agent's stored language (default English).
 func agentOpeningGreeting(shortID string) string {
-	var roleTemplate, title, agentType, workspace string
+	var roleTemplate, title, agentType, workspace, config string
 	_ = store.QueryRow(
-		"SELECT COALESCE(role_template,''), COALESCE(title,''), COALESCE(agent_type,''), COALESCE(workspace,'') FROM agent_config WHERE pane_id=?",
+		"SELECT COALESCE(role_template,''), COALESCE(title,''), COALESCE(agent_type,''), COALESCE(workspace,''), COALESCE(config,'') FROM agent_config WHERE pane_id=?",
 		shortID+":main.0",
-	).Scan(&roleTemplate, &title, &agentType, &workspace)
+	).Scan(&roleTemplate, &title, &agentType, &workspace, &config)
 	// Only cicy (lite) agents have an opening greeting; coding agents
 	// (claude/codex/…) get none so the chat view stays blank for them.
 	if normalizeAgentType(agentType) != "cicy" {
 		return ""
 	}
+	lang := agentLangFromConfig(config)
 	if slug := sanitizeTemplateSlug(roleTemplate); slug != "" {
-		// 1) employees.yaml template greeting (the configurable source)
-		if g := strings.TrimSpace(employeeTemplateGreeting(slug)); g != "" {
-			return substituteTemplatePlaceholders(g, shortID, workspace, agentType)
-		}
-		// 2) legacy: the role .md `## 开场白` section
-		if g := extractOpeningSection(loadTemplateFile(roleTemplatePath(slug))); g != "" {
+		if g := roleMetaGreeting(slug, lang); g != "" {
 			return substituteTemplatePlaceholders(g, shortID, workspace, agentType)
 		}
 	}
 	if strings.TrimSpace(title) == "" {
 		title = shortID
 	}
-	return fmt.Sprintf("你好,我是%s。有什么可以帮你的?", title)
+	if langIsZh(lang) {
+		return fmt.Sprintf("你好,我是%s。有什么可以帮你的?", title)
+	}
+	return fmt.Sprintf("Hi, I'm %s. How can I help?", title)
 }
 
 func loadTemplateFile(path string) string {
@@ -317,7 +542,7 @@ func platformSetupGuidance() string {
 // global (always) + project (when projectSlug set) + role (when roleSlug set),
 // placeholder-substituted. Returns the default global template when nothing is
 // on disk so creation never produces an empty file.
-func composeAgentMemory(agentID, workspace, agentType, projectSlug, roleSlug string) string {
+func composeAgentMemory(agentID, workspace, agentType, projectSlug, roleSlug, lang string) string {
 	ensureGlobalMemoryTemplate()
 	ensureDefaultProject()
 
@@ -327,13 +552,11 @@ func composeAgentMemory(agentID, workspace, agentType, projectSlug, roleSlug str
 	}
 	// Every agent carries a project's rules; an unassigned agent falls back to the
 	// "default" project (projectSlugOrDefault), so default.md reaches everyone.
-	// projectRulesBody strips the YAML frontmatter (name) so only the rules body
-	// lands in the agent's CLAUDE.md — never the metadata header.
 	if project := projectRulesBody(projectSlugOrDefault(projectSlug)); project != "" {
 		parts = append(parts, project)
 	}
 	if slug := sanitizeTemplateSlug(roleSlug); slug != "" {
-		if role := strings.TrimSpace(loadTemplateFile(roleTemplatePath(slug))); role != "" {
+		if role := strings.TrimSpace(roleTemplateRaw(slug, lang)); role != "" {
 			parts = append(parts, role)
 		} else if ca, ok := customAgentFor(slug); ok && strings.TrimSpace(ca.Body) != "" {
 			// User-authored custom agent: persona lives in ~/cicy-ai/agents/<slug>/AGENT.md

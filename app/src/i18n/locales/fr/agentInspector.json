@@ -185,5 +185,9 @@
   "proxyManagerNodeDetail": "Voir le détail du nœud",
   "proxyManagerLastDelay": "Dernier délai",
   "proxyManagerExitIP": "IP de sortie",
-  "proxyManagerNodeConfig": "Config YAML source"
+  "proxyManagerNodeConfig": "Config YAML source",
+  "memCopy": "Copier",
+  "memCut": "Couper",
+  "memPaste": "Coller",
+  "memWordWrap": "Retour à la ligne"
 }

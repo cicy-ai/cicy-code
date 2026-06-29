@@ -57,7 +57,6 @@ const CURRENT_HISTORY_TURN_STORE = 'history_turns';
 // entry stores the live `maxId` it was built at; a mismatch (new turns /
 // compaction) invalidates it, so it's safe to read-trust while maxId holds.
 const CURRENT_HISTORY_PROMPTS_STORE = 'prompts_only';
-const CURRENT_HISTORY_PAGE_SIZE = 5;
 // Number of contiguous item ids loaded per page (one ranged fetch). Kept under
 // the backend's max page limit (100). Each turn spans a few ids, so this is
 // ~10-20 turns per page.
@@ -65,10 +64,8 @@ const CURRENT_HISTORY_PAGE_SIZE = 5;
 // lazily via "load earlier" on scroll-up. current.json can be huge — never read
 // it whole. A turn spans a few ids, so ~16 ids ≈ a screenful of turns.
 const CURRENT_HISTORY_WINDOW = 16;
-const CURRENT_HISTORY_MIN_QUESTIONS = 8;
 // Prompts-only: how many user questions to eagerly backfill on open before
 // leaving the rest to scroll-up paging.
-const PROMPTS_ONLY_MIN_QUESTIONS = 5;
 // Max assistant turns rendered in an expanded answer before "展开更早" — a single
 // reply can be 40+ tool rounds; rendering them all at once is what causes the jank.
 const ANSWER_RENDER_CAP = 8;
@@ -184,50 +181,6 @@ async function getCurrentHistoryTurnsByIDsFromIndexedDB(paneId: string, conversa
   }
 }
 
-function buildPromptsCacheKey(paneId: string, conversationId: string) {
-  return `${paneId}:${conversationId}`;
-}
-
-interface PromptsCacheEntry { maxId: number; prompts: HistoryTurn[]; }
-
-async function getPromptsCacheFromIndexedDB(paneId: string, conversationId: string): Promise<PromptsCacheEntry | null> {
-  if (!conversationId) return null;
-  const db = await openCurrentHistoryToolDB();
-  if (!db || !db.objectStoreNames.contains(CURRENT_HISTORY_PROMPTS_STORE)) return null;
-  try {
-    return await new Promise<PromptsCacheEntry | null>((resolve) => {
-      const tx = db.transaction(CURRENT_HISTORY_PROMPTS_STORE, 'readonly');
-      const store = tx.objectStore(CURRENT_HISTORY_PROMPTS_STORE);
-      const request = store.get(buildPromptsCacheKey(paneId, conversationId));
-      request.onsuccess = () => {
-        const r = request.result;
-        if (r && Array.isArray(r.prompts)) resolve({ maxId: Number(r.maxId || 0), prompts: r.prompts as HistoryTurn[] });
-        else resolve(null);
-      };
-      request.onerror = () => resolve(null);
-      tx.onabort = () => resolve(null);
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function setPromptsCacheToIndexedDB(paneId: string, conversationId: string, maxId: number, prompts: HistoryTurn[]) {
-  if (!conversationId || maxId <= 0) return;
-  const db = await openCurrentHistoryToolDB();
-  if (!db || !db.objectStoreNames.contains(CURRENT_HISTORY_PROMPTS_STORE)) return;
-  try {
-    await new Promise<void>((resolve) => {
-      const tx = db.transaction(CURRENT_HISTORY_PROMPTS_STORE, 'readwrite');
-      const store = tx.objectStore(CURRENT_HISTORY_PROMPTS_STORE);
-      store.put({ key: buildPromptsCacheKey(paneId, conversationId), paneId, conversationId, maxId, prompts, updatedAt: Date.now() });
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-      tx.onabort = () => resolve();
-    });
-  } catch {}
-}
-
 // ---- window._cacheHistory:整页历史的内存快照缓存(排在 IndexedDB / 网络之前)----
 // key = paneId,值 = 该 pane 上次渲染的整页状态。打开历史面板时先用快照**同步**渲染
 // 首屏(0 网络等待、不出 loading 骨架),随后照常 fresh 拉服务器、整体覆盖(React 按
@@ -319,84 +272,6 @@ async function loadWindowItems(
   // 3) assemble strictly ascending; ids that genuinely don't exist drop out.
   const items = wantedIds.map((id) => byId.get(id)).filter(Boolean) as RawHistoryItem[];
   return { items, lo };
-}
-
-async function syncCurrentHistoryTurnsToIndexedDB(paneId: string, conversationId: string, turns: RawHistoryItem[]) {
-  if (!conversationId || !turns.length) {
-    return turns;
-  }
-  await setCurrentHistoryTurnsToIndexedDB(paneId, conversationId, turns);
-  const historyIDs = turns
-    .map((turn) => Number(turn?.history_id || turn?.id || 0))
-    .filter((historyID) => historyID > 0);
-  if (!historyIDs.length) {
-    return turns;
-  }
-  const cached = await getCurrentHistoryTurnsByIDsFromIndexedDB(paneId, conversationId, historyIDs);
-  const byID = new Map<number, RawHistoryItem>();
-  for (const turn of turns) {
-    const historyID = Number(turn?.history_id || turn?.id || 0);
-    if (historyID > 0) byID.set(historyID, turn);
-  }
-  for (const turn of cached) {
-    const historyID = Number(turn?.history_id || turn?.id || 0);
-    if (historyID > 0) byID.set(historyID, turn);
-  }
-  return historyIDs.map((historyID) => byID.get(historyID)).filter(Boolean) as RawHistoryItem[];
-}
-
-function toolArgText(input: any) {
-  if (typeof input === 'string') return input.trim();
-  try {
-    return JSON.stringify(input);
-  } catch {
-    return String(input || '').trim();
-  }
-}
-
-function flattenPartText(part: any): string {
-  if (!part) return '';
-  if (typeof part === 'string') return part.trim();
-  if (typeof part !== 'object') return '';
-  if (typeof part.text === 'string' && part.text.trim()) return part.text.trim();
-  if (typeof part.thinking === 'string' && part.thinking.trim()) return part.thinking.trim();
-  if (typeof part.content === 'string' && part.content.trim()) return part.content.trim();
-  if (Array.isArray(part.content)) {
-    return part.content.map((item: any) => flattenPartText(item)).filter(Boolean).join('\n').trim();
-  }
-  return '';
-}
-
-function countQuestionBoundaries(rawItems: RawHistoryItem[]) {
-  let count = 0;
-  for (const item of rawItems) {
-    if (isQuestionBoundary(item)) count += 1;
-  }
-  return count;
-}
-
-function isQuestionBoundary(item: RawHistoryItem | undefined | null) {
-  const role = String(item?.role || '').trim();
-  if (role !== 'user') return false;
-  const content = Array.isArray(item?.content) ? item.content : [];
-  const nonToolText = content
-    .filter((part: any) => String(part?.type || '').trim() !== 'tool_result')
-    .map((part: any) => flattenPartText(part))
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-  return !!nonToolText;
-}
-
-function trimToRecentQuestionWindow(rawItems: RawHistoryItem[], minQuestions = CURRENT_HISTORY_MIN_QUESTIONS) {
-  if (!rawItems.length) return rawItems;
-  const questionIndexes: number[] = [];
-  for (let i = 0; i < rawItems.length; i += 1) {
-    if (isQuestionBoundary(rawItems[i])) questionIndexes.push(i);
-  }
-  if (questionIndexes.length <= minQuestions) return rawItems;
-  const startIndex = questionIndexes[questionIndexes.length - minQuestions];
-  return rawItems.slice(startIndex);
 }
 
 function buildTurnsFromRawItems(rawItems: RawHistoryItem[]): HistoryTurn[] {
@@ -1022,120 +897,7 @@ async function getHistoryIDs(paneId: string, params: { conversation_id?: string 
   return data;
 }
 
-async function ensureRawHistoryItemsByIDs(
-  paneId: string,
-  conversationId: string,
-  historyIDs: number[],
-): Promise<RawHistoryItem[]> {
-  if (!historyIDs.length || !conversationId) return [];
-  const cached = await getCurrentHistoryTurnsByIDsFromIndexedDB(paneId, conversationId, historyIDs);
-  const byID = new Map<number, RawHistoryItem>();
-  for (const item of cached) {
-    const id = Number(item?.history_id || item?.id || 0);
-    if (id > 0) byID.set(id, item);
-  }
-  const missingIDs = historyIDs.filter((id) => !byID.has(id));
-  if (missingIDs.length) {
-    const before = Math.max(...missingIDs) + 1;
-    const lower = Math.min(...missingIDs);
-    const limit = before - lower;
-    const data = await getCurrentHistory(paneId, {
-      limit,
-      before,
-      conversation_id: conversationId,
-    });
-    const rawItems = Array.isArray(data?.items) ? data.items : [];
-    const syncedItems = await syncCurrentHistoryTurnsToIndexedDB(paneId, conversationId, rawItems);
-    for (const item of syncedItems) {
-      const id = Number(item?.history_id || item?.id || 0);
-      if (id > 0) byID.set(id, item);
-    }
-  }
-  return historyIDs.map((id) => byID.get(id)).filter(Boolean) as RawHistoryItem[];
-}
-
-function ensureLatestStreamingTurn(prev: HistoryTurn[], payload: { historyId: number; conversationId: string; status?: string; model?: string; question?: string }) {
-  const next = prev.slice();
-  const existingIndex = next.findIndex((item) => Number(item?.history_id || 0) === payload.historyId);
-  if (existingIndex >= 0) {
-    const current = next[existingIndex];
-    next[existingIndex] = {
-      ...current,
-      conversation_id: payload.conversationId || current.conversation_id,
-      q: payload.question || current.q,
-      text: payload.question || current.text,
-      status: payload.status || current.status || 'thinking',
-      model: payload.model || current.model,
-      role: current.role || 'pair',
-    };
-    return next;
-  }
-  next.push({
-    history_id: payload.historyId,
-    conversation_id: payload.conversationId,
-    role: 'pair',
-    q: payload.question || '',
-    text: payload.question || '',
-    a: '',
-    steps: [],
-    status: payload.status || 'thinking',
-    model: payload.model,
-  });
-  return normalizeHistoryTurns(next);
-}
-
-function updateLatestStreamingTurn(prev: HistoryTurn[], payload: { historyId: number; conversationId: string; status?: string; delta?: string; thinking?: string; answer?: string }) {
-  const next = prev.slice();
-  const index = next.findIndex((item) => Number(item?.history_id || 0) === payload.historyId);
-  if (index < 0) return prev;
-  const current = { ...next[index] } as HistoryTurn;
-  const steps = Array.isArray(current.steps) ? [...current.steps] : [];
-  const status = String(payload.status || current.status || 'thinking').trim() || 'thinking';
-  if (payload.delta) {
-    const text = String(payload.delta).trim();
-    if (text) {
-      const textIdx = steps.findIndex((step: any) => step?.type === 'text');
-      if (textIdx >= 0) {
-        const prevText = String((steps[textIdx] as any)?.text || '');
-        steps[textIdx] = { type: 'text', text: `${prevText}${payload.delta}` };
-      } else {
-        steps.push({ type: 'text', text: payload.delta });
-      }
-    }
-  }
-  if (payload.answer != null) {
-    const answer = String(payload.answer || '');
-    const textIdx = steps.findIndex((step: any) => step?.type === 'text');
-    if (textIdx >= 0) {
-      steps[textIdx] = { type: 'text', text: answer };
-    } else if (answer.trim()) {
-      steps.push({ type: 'text', text: answer });
-    }
-    current.a = answer;
-  } else {
-    current.a = steps.filter((step: any) => step?.type === 'text').map((step: any) => String(step?.text || '')).join('\n\n').trim();
-  }
-  current.steps = steps;
-  current.status = status;
-  current.conversation_id = payload.conversationId || current.conversation_id;
-  next[index] = current;
-  return normalizeHistoryTurns(next);
-}
-
-function mergeHistoryTurnList(prev: HistoryTurn[], incoming: HistoryTurn, limit = CURRENT_HISTORY_PAGE_SIZE) {
-  const incomingID = Number(incoming?.history_id || 0);
-  const next = prev.slice();
-  const existingIndex = incomingID > 0 ? next.findIndex((item) => Number(item?.history_id || 0) === incomingID) : -1;
-  if (existingIndex >= 0) {
-    next[existingIndex] = mergeHistoryTurnVersions(next[existingIndex], incoming);
-  } else {
-    next.push(incoming);
-  }
-  const normalized = normalizeHistoryTurns(next);
-  return limit > 0 && normalized.length > limit ? normalized.slice(normalized.length - limit) : normalized;
-}
-
-function getVisibleHistorySteps(turn: HistoryTurn, isLatestTurn: boolean) {
+function getVisibleHistorySteps(turn: HistoryTurn, _isLatestTurn: boolean) {
   const steps = Array.isArray(turn?.steps) ? turn.steps : [];
   if (!steps.length) return [] as HistoryTurn['steps'];
   return steps.filter((step: any) => {
@@ -1729,16 +1491,6 @@ const ToolCard = memo(function ToolCard({ tool, toolId }: { tool: any; toolId: s
   );
 });
 
-function HistoryTurnIdBadge({ historyId }: { historyId?: number }) {
-  const value = Number(historyId || 0);
-  if (value <= 0) return null;
-  return (
-    <div data-id="current-history-view-turn-id-badge" className="mb-1 px-0.5 font-mono text-[11px] text-zinc-600">
-      #{value}
-    </div>
-  );
-}
-
 function ThinkingBlock({ text, live = false }: { text: string; live?: boolean }) {
   // 两态,不再做 3 行折叠:
   // - live(正在流式输出这一轮):强制全展开、无折叠 —— 实时看它思考。
@@ -2271,22 +2023,6 @@ function formatPromptTimeAgo(iso: string): string {
   return new Date(t).toLocaleDateString();
 }
 
-// promptTextIsScaffold: a role=user turn that's actually harness/system noise,
-// not a human question. Uses the SAME splitLeadingHarnessBlocks peeling that
-// CollapsibleQ(bare) renders with — so the filter and the render agree exactly:
-// if peeling every leading harness block (system-reminder / env-context /
-// compaction-continuation / recap / command echoes) leaves nothing, the turn
-// would render as an EMPTY q bubble → drop it instead.
-function promptTextIsScaffold(raw: string | undefined): boolean {
-  let remaining = String(raw || '');
-  for (let i = 0; i < 50; i += 1) {
-    const { blocks, remaining: rest } = splitLeadingHarnessBlocks(remaining);
-    if (!blocks.length) break;
-    remaining = rest;
-  }
-  return remaining.trim() === '';
-}
-
 function isActiveAssistantStatus(status: string) {
   const value = String(status || '').trim().toLowerCase();
   return value === 'thinking' || value === 'working' || value === 'tool_use' || value === 'tool_call' || value === 'streaming';
@@ -2355,12 +2091,6 @@ export default function CurrentHistoryView({
   const [nextBefore, setNextBefore] = useState<number | null>(null);
   const [conversationId, setConversationId] = useState('');
   const [model, setModel] = useState('');
-  // Prompts-only: question turns hydrated from IndexedDB for instant paint.
-  // cachedPromptMaxIdRef holds the maxId the cache was built at — when it still
-  // matches the live maxId, the cache is authoritative and the eager backfill
-  // is skipped (no re-paging the history just to show the questions again).
-  const [cachedPromptTurns, setCachedPromptTurns] = useState<HistoryTurn[]>([]);
-  const cachedPromptMaxIdRef = useRef(0);
   // Prompts-only q list, served clean & aligned from the backend (current.json's
   // `prompts`: real human questions only, de-noised + de-duplicated at write
   // time, ids matching the snapshot's positional history ids). This is the SOLE

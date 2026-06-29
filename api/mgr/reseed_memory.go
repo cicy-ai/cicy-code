@@ -170,7 +170,7 @@ func reseedOne(t reseedTarget, dryRun bool, outDir string) error {
 	}
 	path := filepath.Join(t.workspace, rel)
 
-	content := composeGuidanceContent(t.workspace, t.agentType, t.paneID, t.projectTemplate, t.roleTemplate)
+	content := composeGuidanceContent(t.workspace, t.agentType, t.paneID, t.projectTemplate, t.roleTemplate, "")
 
 	old, readErr := os.ReadFile(path)
 	if readErr == nil {

@@ -1,6 +1,13 @@
 import axios, { AxiosError } from 'axios';
 import config from '../../config';
 import { TokenManager } from '../../services/tokenManager';
+import i18n from '../../i18n';
+
+// fe(code, fallback) — i18n helper for fs-error messages (workspace ns,
+// fileExplorer.fsErr.*). Chinese stays the defaultValue so untranslated
+// locales still read sensibly.
+const fe = (code: string, fallback: string): string =>
+  i18n.t(`fileExplorer.fsErr.${code}`, { ns: 'workspace', defaultValue: fallback }) as string;
 
 // Lightweight HTTP client for /api/fs/*. Mirrors the auth / baseURL
 // conventions of services/api.ts but keeps the file module self-contained.
@@ -127,35 +134,36 @@ export class FsError extends Error {
   }
 }
 
-/** Map a backend detail code to user-facing Chinese text. Falls through to
- *  the raw message for unknown codes so unexpected errors still surface. */
+/** Map a backend detail code to user-facing text (i18n'd; Chinese is the
+ *  fallback). Falls through to the raw message for unknown codes so unexpected
+ *  errors still surface. */
 export function friendlyFsError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err || '');
   const detail = err instanceof FsError ? err.detail : msg;
   switch (detail) {
-    case 'not_found':                  return '文件不存在';
-    case 'permission_denied':          return '没有权限';
-    case 'path_outside_workspace':     return '路径不在工作区内';
-    case 'path_absolute_forbidden':    return '不允许使用绝对路径';
-    case 'path_symlink_escape':        return '链接指向工作区外,已拒绝';
-    case 'path_write_forbidden':       return '该路径不可写入(受保护)';
-    case 'file_too_large':             return '文件超过大小上限';
-    case 'file_not_regular':           return '只能操作普通文件';
-    case 'not_a_directory':            return '不是目录';
-    case 'directory_not_empty':        return '目录不为空,无法删除';
-    case 'destination_exists':         return '目标已存在';
-    case 'cannot_delete_root':         return '不能删除工作区根目录';
-    case 'cannot_rename_root':         return '不能重命名工作区根目录';
-    case 'page_client_not_connected':  return '当前页面未连接,无法发送';
-    case 'agent_workspace_unavailable':return 'agent 工作区不可用';
-    case 'missing_agent_id':           return '缺少 agent_id';
-    case 'ripgrep_not_installed':      return '主机未安装 ripgrep,无法做全文搜索';
-    case 'exists':                     return '已存在';
-    case 'internal_error':             return '服务器错误';
-    case 'invalid_body':               return '请求格式错误';
-    case 'method_not_allowed':         return '请求方法不允许';
+    case 'not_found':                  return fe('not_found', '文件不存在');
+    case 'permission_denied':          return fe('permission_denied', '没有权限');
+    case 'path_outside_workspace':     return fe('path_outside_workspace', '路径不在工作区内');
+    case 'path_absolute_forbidden':    return fe('path_absolute_forbidden', '不允许使用绝对路径');
+    case 'path_symlink_escape':        return fe('path_symlink_escape', '链接指向工作区外,已拒绝');
+    case 'path_write_forbidden':       return fe('path_write_forbidden', '该路径不可写入(受保护)');
+    case 'file_too_large':             return fe('file_too_large', '文件超过大小上限');
+    case 'file_not_regular':           return fe('file_not_regular', '只能操作普通文件');
+    case 'not_a_directory':            return fe('not_a_directory', '不是目录');
+    case 'directory_not_empty':        return fe('directory_not_empty', '目录不为空,无法删除');
+    case 'destination_exists':         return fe('destination_exists', '目标已存在');
+    case 'cannot_delete_root':         return fe('cannot_delete_root', '不能删除工作区根目录');
+    case 'cannot_rename_root':         return fe('cannot_rename_root', '不能重命名工作区根目录');
+    case 'page_client_not_connected':  return fe('page_client_not_connected', '当前页面未连接,无法发送');
+    case 'agent_workspace_unavailable':return fe('agent_workspace_unavailable', 'agent 工作区不可用');
+    case 'missing_agent_id':           return fe('missing_agent_id', '缺少 agent_id');
+    case 'ripgrep_not_installed':      return fe('ripgrep_not_installed', '主机未安装 ripgrep,无法做全文搜索');
+    case 'exists':                     return fe('exists', '已存在');
+    case 'internal_error':             return fe('internal_error', '服务器错误');
+    case 'invalid_body':               return fe('invalid_body', '请求格式错误');
+    case 'method_not_allowed':         return fe('method_not_allowed', '请求方法不允许');
   }
-  if (detail?.startsWith('mtime_mismatch:')) return '磁盘上的版本已被外部修改';
+  if (detail?.startsWith('mtime_mismatch:')) return fe('mtime_mismatch', '磁盘上的版本已被外部修改');
   return msg || 'fs_error';
 }
 

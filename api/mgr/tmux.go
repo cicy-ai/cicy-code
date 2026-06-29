@@ -89,6 +89,7 @@ type paneCreateOpts struct {
 	inheritGuidance  bool
 	projectTemplate  string
 	roleTemplate     string
+	lang             string // UI language at creation (selects EN/ZH role persona + greeting)
 	// skipPrimaryBind suppresses the default "bind under w-1001" when no master is
 	// named — used by official-roster members that are created standalone (in the
 	// DB, but not on the master's team until the user/HR adds them).
@@ -552,6 +553,7 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 		InheritGuidance  *bool   `json:"inherit_guidance"`
 		ProjectTemplate  string  `json:"project_template"`
 		RoleTemplate     string  `json:"role_template"`
+		Lang             string  `json:"lang"`
 	}
 	req.AllowAllActions = true
 	req.ReplyInChinese = true
@@ -586,7 +588,7 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	if req.InheritGuidance != nil {
 		inheritGuidance = *req.InheritGuidance
 	}
-	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, useCustomGateway, useProxy, proxySettings, req.WinName, strings.TrimSpace(req.MasterPaneID), strings.TrimSpace(req.MasterAgentType), inheritGuidance, strings.TrimSpace(req.ProjectTemplate), strings.TrimSpace(req.RoleTemplate), token, nil)
+	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, useCustomGateway, useProxy, proxySettings, req.WinName, strings.TrimSpace(req.MasterPaneID), strings.TrimSpace(req.MasterAgentType), inheritGuidance, strings.TrimSpace(req.ProjectTemplate), strings.TrimSpace(req.RoleTemplate), strings.TrimSpace(req.Lang), token, nil)
 	if err != nil {
 		J(w, M{"success": false, "error": err.Error()})
 		return
@@ -609,7 +611,7 @@ func resolveCustomAgentSelection(agentType, roleTemplate string) (string, string
 	return agentType, roleTemplate
 }
 
-func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, projectTemplate string, roleTemplate string, token string, runtimeAI *runtimeAIOverride) (M, error) {
+func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, projectTemplate string, roleTemplate string, lang string, token string, runtimeAI *runtimeAIOverride) (M, error) {
 	agentType, roleTemplate = resolveCustomAgentSelection(agentType, roleTemplate)
 	agentType = normalizeAgentType(agentType)
 	if agentType == "" {
@@ -678,6 +680,7 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 		inheritGuidance:  inheritGuidance,
 		projectTemplate:  projectTemplate,
 		roleTemplate:     roleTemplate,
+		lang:             lang,
 		runtimeAI:        runtimeAI,
 	})
 }
@@ -718,7 +721,7 @@ func guidanceFilenameForAgentType(agentType string) string {
 // (~/cicy-ai/memory/{global.md, projects/<slug>.md}). The content is COPIED in
 // — self-contained, no inheritance, no gateway injection. Existing files are
 // not overwritten so user customisations survive recreate.
-func writeAgentGuidanceFile(workspace, agentType, paneID, projectTemplate, roleTemplate string) {
+func writeAgentGuidanceFile(workspace, agentType, paneID, projectTemplate, roleTemplate, lang string) {
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {
 		return
@@ -736,7 +739,7 @@ func writeAgentGuidanceFile(workspace, agentType, paneID, projectTemplate, roleT
 		log.Printf("[init] failed to mkdir for %s (%s): %v", rel, shortID, err)
 		return
 	}
-	content := composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleTemplate)
+	content := composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleTemplate, lang)
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		log.Printf("[init] failed to write %s for %s: %v", rel, shortID, err)
 	}
@@ -754,14 +757,14 @@ func writeAgentGuidanceFile(workspace, agentType, paneID, projectTemplate, roleT
 // resolveLiteConfig) MUST stay at the very top of the file, so project + global
 // are APPENDED after the persona body rather than prepended (the reverse of
 // composeAgentMemory's order, which is fine because they're plain context).
-func composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleTemplate string) string {
+func composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleTemplate, lang string) string {
 	if normalizeAgentType(agentType) == "cicy" {
 		ensureRoleMemoryTemplates()
-		// No-role default persona: the "default-charter" template (one source,
-		// memory/agents/, no hardcoded Go text).
-		seed := roleTemplateRaw("default-charter")
+		// No-role default persona: the "assistant" template (one source,
+		// memory/agents/, no hardcoded Go text). It doubles as the system base.
+		seed := roleTemplateRaw("assistant", lang)
 		if slug := sanitizeTemplateSlug(roleTemplate); slug != "" {
-			if rt := strings.TrimSpace(roleTemplateRaw(slug)); rt != "" {
+			if rt := strings.TrimSpace(roleTemplateRaw(slug, lang)); rt != "" {
 				seed = rt
 			} else if ca, ok := customAgentFor(slug); ok && strings.TrimSpace(ca.Body) != "" {
 				// User-authored custom agent: persona is its AGENT.md body.
@@ -770,13 +773,9 @@ func composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleT
 		}
 		ensureGlobalMemoryTemplate()
 		ensureDefaultProject()
-		// Pure global → project → role, in that order — NO frontmatter at the top.
-		// The role template's `tools:` frontmatter is NOT written into AGENTS.md;
-		// resolveLiteConfig sources tools straight from the role template
-		// (memory/agents/<slug>.md) by the agent's role_template, so the composed
-		// file can follow the requested order without breaking tool resolution.
-		// Unassigned agents fall back to the "default" project (projectSlugOrDefault).
-		_, body := splitFrontmatter(seed)
+		// Pure global → project → role, in that order. The persona (role.md) carries
+		// no frontmatter and no greeting (those live in meta.yaml); tools resolve
+		// from meta.yaml in resolveLiteConfig.
 		parts := []string{}
 		if global := strings.TrimSpace(loadTemplateFile(globalMemoryTemplatePath())); global != "" {
 			parts = append(parts, global)
@@ -784,12 +783,28 @@ func composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleT
 		if project := projectRulesBody(projectSlugOrDefault(projectTemplate)); project != "" {
 			parts = append(parts, project)
 		}
-		if rb := strings.TrimSpace(body); rb != "" {
+		if rb := strings.TrimSpace(seed); rb != "" {
 			parts = append(parts, rb)
 		}
 		return substituteTemplatePlaceholders(strings.Join(parts, "\n\n"), paneID, workspace, agentType)
 	}
-	return composeAgentMemory(paneID, workspace, agentType, projectTemplate, roleTemplate)
+	return composeAgentMemory(paneID, workspace, agentType, projectTemplate, roleTemplate, lang)
+}
+
+// mergeLangIntoConfigJSON sets {"lang": <lang>} on a pane's config JSON blob.
+func mergeLangIntoConfigJSON(configJSON, lang string) string {
+	m := map[string]interface{}{}
+	if strings.TrimSpace(configJSON) != "" {
+		_ = json.Unmarshal([]byte(configJSON), &m)
+	}
+	if m == nil {
+		m = map[string]interface{}{}
+	}
+	m["lang"] = lang
+	if b, err := json.Marshal(m); err == nil {
+		return string(b)
+	}
+	return configJSON
 }
 
 func createManagedPane(opts paneCreateOpts) (M, error) {
@@ -799,7 +814,7 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 	}
 
 	paneID := opts.session + ":main.0"
-	writeAgentGuidanceFile(workspace, opts.agentType, paneID, opts.projectTemplate, opts.roleTemplate)
+	writeAgentGuidanceFile(workspace, opts.agentType, paneID, opts.projectTemplate, opts.roleTemplate, opts.lang)
 	if !opts.configOnly {
 		ensureTmuxServer()
 		runTmux("new-session", "-d", "-s", opts.session, "-n", "main", "-c", toPosixPath(workspace))
@@ -807,6 +822,11 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 	proxyConfigJSON, err := mergeProxySettingsIntoConfigJSON("{}", &proxySettings{Password: opts.proxyPassword, Rule: opts.proxyRule})
 	if err != nil {
 		return M{"success": false}, err
+	}
+	// Persist the creation language in the config JSON so the greeting
+	// (agentOpeningGreeting) can pick the matching meta.yaml variant later.
+	if l := strings.TrimSpace(opts.lang); l != "" {
+		proxyConfigJSON = mergeLangIntoConfigJSON(proxyConfigJSON, l)
 	}
 	// Seed the per-pane runtime_ai override (fork carries the source's so a
 	// gateway fork routes through the SAME provider — otherwise it falls back to
@@ -5811,6 +5831,7 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		false,                     // inherit_guidance
 		srcProjectTemplate.String, // inherit the source agent's project template (composed in if the file still exists)
 		srcRoleTemplate.String,    // inherit the source agent's role template
+		agentLangFromConfig(srcConfig.String), // inherit the source agent's creation language
 		token,
 		forkRuntimeAI, // gateway fork: same runtime_ai provider as source
 	)

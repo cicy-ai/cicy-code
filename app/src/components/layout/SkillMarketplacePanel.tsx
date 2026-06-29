@@ -7,7 +7,7 @@ import i18n from '../../i18n';
 import {
   Search, Loader2, CheckCircle2, AlertTriangle, RefreshCw, X, Send,
   Globe, Activity, Server, Plug, Mail, FileText, Code, Terminal, Key, Shield, Package, Cloud,
-  Copy, Check, XCircle, Languages,
+  Copy, Check, XCircle,
   ExternalLink, Tag, User, Calendar, HardDrive, Hash, FileCode, BookOpen, ShieldCheck, Lock,
   Compass, Users, RotateCw,
 } from 'lucide-react';
@@ -145,7 +145,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   const [loadError, setLoadError] = useState<string>('');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
-  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [, setBusy] = useState<Record<string, boolean>>({});
   const [selectedName, setSelectedName] = useState<string | null>(null);
   // Three-pillar hub: Discover (browse+install across all sources) / Publish
   // (my always-on self-hosted registry) / Subscribe (registries others shared).
@@ -890,7 +890,6 @@ function InlineStatus({ skill }: { skill: MarketSkill }) {
   );
 }
 
-type Tab = 'help' | 'tools'; // legacy, no longer used in UI but kept for type compat
 
 function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpdate, onEject, onOpenProxyManager, onOpenProxySshManager, onOpenFrpServerManager, onOpenWebClients }: {
   name: string;
@@ -908,12 +907,11 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
   const { t } = useTranslation('workspace');
   const [data, setData] = useState<SkillDetailPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>('help');
   const [busyAction, setBusyAction] = useState<'install' | 'update' | 'uninstall' | 'eject' | null>(null);
   const busy = busyAction !== null;
   const [installLog, setInstallLog] = useState('');
   const [installError, setInstallError] = useState('');
-  const [sendText, setSendText] = useState('');
+  const [, setSendText] = useState('');
   const [copied, setCopied] = useState<string>('');
   const [googleStatus, setGoogleStatus] = useState<{ connected: boolean; authorized_email?: string; has_shared_client?: boolean } | null>(null);
   const [googleBusy, setGoogleBusy] = useState(false);
@@ -947,68 +945,6 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
   }, [name]);
 
   useEffect(() => { refreshGoogleStatus(); }, [refreshGoogleStatus]);
-
-  const handleGoogleConnect = async () => {
-    setGoogleBusy(true);
-    setGoogleError('');
-    setGoogleDevice(null);
-    try {
-      const res = await apiService.deviceConnectGoogleSkillConfig();
-      const d = res?.data;
-      if (!d?.state || !d?.user_code) {
-        setGoogleError(d?.error || 'no device code returned');
-        setGoogleBusy(false);
-        return;
-      }
-      const device = {
-        state: d.state as string,
-        user_code: d.user_code as string,
-        verification_url: (d.verification_url as string) || 'https://www.google.com/device',
-        verification_url_complete: (d.verification_url_complete as string) || '',
-      };
-      setGoogleDevice(device);
-      if (device.verification_url_complete) {
-        window.open(device.verification_url_complete, '_blank', 'noopener');
-      }
-      let interval = (d.interval as number) || 5;
-      const start = Date.now();
-      const poll = async () => {
-        if (Date.now() - start > 15 * 60 * 1000) {
-          setGoogleError('timed out waiting for Google authorization');
-          setGoogleBusy(false);
-          setGoogleDevice(null);
-          return;
-        }
-        try {
-          const r = await apiService.devicePollGoogleSkillConfig(device.state);
-          const p = r?.data;
-          if (p?.connected) {
-            setGoogleBusy(false);
-            setGoogleDevice(null);
-            await refreshGoogleStatus();
-            return;
-          }
-          if (p?.error && p?.error !== 'slow_down') {
-            setGoogleError(String(p.error));
-            setGoogleBusy(false);
-            setGoogleDevice(null);
-            return;
-          }
-          if (p?.interval) interval = p.interval as number;
-        } catch (e: any) {
-          setGoogleError(e?.message || 'poll failed');
-          setGoogleBusy(false);
-          setGoogleDevice(null);
-          return;
-        }
-        setTimeout(poll, interval * 1000);
-      };
-      setTimeout(poll, interval * 1000);
-    } catch (e: any) {
-      setGoogleError(e?.response?.data?.detail || e?.response?.data?.error || e?.message || 'connect failed');
-      setGoogleBusy(false);
-    }
-  };
 
   const handleGoogleCancel = () => {
     setGoogleBusy(false);

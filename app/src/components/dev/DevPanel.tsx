@@ -10,7 +10,7 @@ const SIZE_KEY = 'devpanel_size';
 const OPEN_KEY = 'devpanel_open';
 
 export default function DevPanel() {
-  const { t } = useTranslation('devPanel');
+  useTranslation('devPanel');
   const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) === '1');
   const stores = useDevStore();
 

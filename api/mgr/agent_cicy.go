@@ -66,8 +66,8 @@ const cicyGatewayBase = "http://127.0.0.1:8008"
 
 // cicy persona/base text is NOT hardcoded here. It lives in
 // ~/cicy-ai/memory/agents/ (seeded from embed/agent-roles/), the single template
-// source: the no-role default charter is "default-charter", the system-prompt
-// base is "base-dispatcher" / "base-assistant" (resolved via resolveSystemBase).
+// source: one universal template "assistant" is both the system-prompt base
+// (resolved via resolveSystemBase) and the no-role default persona.
 
 // ── conversation state ──────────────────────────────────────────────────────
 

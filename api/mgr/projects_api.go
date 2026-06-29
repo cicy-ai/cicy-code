@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // Project = a first-class, user-created project: name + rules.
@@ -42,10 +40,9 @@ func ensureDefaultProject() {
 	path := projectTemplatePath(defaultProjectSlug)
 	if path != "" {
 		if _, err := os.Stat(path); err != nil {
-			body := "---\nname: " + yamlScalar("default") + "\n---\n" +
-				"# Default Project\n\n<!-- Out-of-the-box default project: every agent not assigned to a real project shares this one memory pool. -->\n"
+			// No frontmatter — the project name IS the file slug.
 			_ = os.MkdirAll(filepath.Dir(path), 0o755)
-			_ = os.WriteFile(path, []byte(body), 0o644)
+			_ = os.WriteFile(path, []byte("## Project\n"), 0o644)
 		}
 	}
 	ensureProjectMemDir(defaultProjectSlug)
@@ -74,11 +71,6 @@ func ensureProjectMemDir(slug string) string {
 	}
 	_ = os.MkdirAll(dir, 0o755)
 	return dir
-}
-
-// projectFrontmatter is the YAML header of a project .md.
-type projectFrontmatter struct {
-	Name string `yaml:"name"`
 }
 
 // splitFrontmatter separates a leading `---\n…\n---\n` YAML block from the body.
@@ -116,25 +108,11 @@ func projectRulesBody(slug string) string {
 	return strings.TrimSpace(body)
 }
 
-// readProjectMeta parses a project's {slug, name} from its .md frontmatter.
-// Missing name falls back to the slug.
+// readProjectMeta returns a project's {slug, name}. The display name IS the file
+// slug — project .md files carry no frontmatter; the filename is the name.
 func readProjectMeta(slug string) projectMeta {
 	clean := sanitizeTemplateSlug(slug)
-	meta := projectMeta{Slug: clean, Name: clean}
-	path := projectTemplatePath(clean)
-	if path == "" {
-		return meta
-	}
-	fm, _ := splitFrontmatter(loadTemplateFile(path))
-	if strings.TrimSpace(fm) != "" {
-		var pf projectFrontmatter
-		if yaml.Unmarshal([]byte(fm), &pf) == nil {
-			if n := strings.TrimSpace(pf.Name); n != "" {
-				meta.Name = n
-			}
-		}
-	}
-	return meta
+	return projectMeta{Slug: clean, Name: clean}
 }
 
 // listProjectsWithMeta returns every registered project with its metadata.
@@ -175,38 +153,27 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, http.StatusBadRequest, "bad_name")
 			return
 		}
+		// No frontmatter — the project name IS the file slug. The .md holds just
+		// the rules body (composed into agents' CLAUDE.md).
 		rules := strings.TrimSpace(req.Rules)
 		if rules == "" {
-			rules = "# " + name + "\n\n<!-- 项目规则:agents 选了本项目会把下面内容并入 CLAUDE.md。 -->\n"
+			rules = "# " + name
 		}
-		var b strings.Builder
-		b.WriteString("---\n")
-		b.WriteString("name: " + yamlScalar(name) + "\n")
-		b.WriteString("---\n")
-		b.WriteString(rules)
 		if !strings.HasSuffix(rules, "\n") {
-			b.WriteString("\n")
+			rules += "\n"
 		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			httpErr(w, http.StatusInternalServerError, "mkdir_failed")
 			return
 		}
-		if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(rules), 0o644); err != nil {
 			httpErr(w, http.StatusInternalServerError, "write_failed")
 			return
 		}
 		ensureProjectMemDir(slug)
-		J(w, projectMeta{Slug: slug, Name: name})
+		J(w, projectMeta{Slug: slug, Name: slug})
 	default:
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
 }
 
-// yamlScalar quotes a scalar for a frontmatter value when needed (paths with
-// special chars, leading ~, etc.). Double-quote + escape is always safe.
-func yamlScalar(s string) string {
-	if s == "" {
-		return `""`
-	}
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
-}

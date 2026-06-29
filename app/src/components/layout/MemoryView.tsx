@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import CodeMirror from '@uiw/react-codemirror';
+import CodeMirror, { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { EditorView, keymap } from '@codemirror/view';
+import { oneDark } from '@codemirror/theme-one-dark';
 import { markdown } from '@codemirror/lang-markdown';
+import { CLIPBOARD_KEYMAP, cmCopySelection, cmCutSelection, cmPasteSelection } from '../files/cmClipboard';
 import {
   Globe,
   FolderGit2,
-  UserCircle,
-  IdCard,
+  Folder,
+  FolderOpen,
+  FileText,
   Plus,
   Trash2,
   Pencil,
@@ -16,6 +19,11 @@ import {
   Send,
   Eye,
   FileCode,
+  Copy,
+  Scissors,
+  ClipboardPaste,
+  WrapText,
+  Check,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
@@ -47,6 +55,14 @@ interface MemoryViewProps {
   className?: string;
 }
 
+/** A role folder under ~/cicy-ai/memory/agents/<slug>/ and the files in it
+ *  (role.md, role.zh.md, meta.yaml, …). A role file's Selection.name is the
+ *  `<slug>/<file>` pair so the API addresses the exact file. */
+interface RoleDir {
+  slug: string;
+  files: string[];
+}
+
 const NEW_PROJECT_SEED = `# Project Memory
 
 <!-- Agents that select this project template inherit the project rules below. -->
@@ -56,9 +72,13 @@ const NEW_ROLE_SEED = `# Role Charter
 <!-- Agents that select this role template inherit the responsibilities below. -->
 `;
 
-// Blend CodeMirror into the zinc-950 chrome (drop the default panel bg).
+// Blend CodeMirror into the zinc-950 chrome (drop the default panel bg). Kept in
+// lock-step with the file editor's cmBlendTheme (components/files/CodeEditor.tsx)
+// so the memory editor and the file editor render identically — same gutter,
+// font, and selection. No height/font-size overrides here: oneDark's defaults
+// (16px) carry through, exactly like the file editor.
 const cmBlendTheme = EditorView.theme({
-  '&': { backgroundColor: 'transparent !important', color: '#e4e4e7', height: '100%' },
+  '&': { backgroundColor: 'transparent !important', color: '#e4e4e7' },
   '.cm-gutters': {
     backgroundColor: 'transparent !important',
     borderRight: '1px solid rgba(255,255,255,0.04)',
@@ -71,16 +91,17 @@ const cmBlendTheme = EditorView.theme({
   '.cm-activeLineGutter, .cm-activeLine': { backgroundColor: 'rgba(255,255,255,0.03)' },
   '.cm-selectionBackground, ::selection': { backgroundColor: 'rgba(59,130,246,0.25) !important' },
   '.cm-cursor': { borderLeftColor: '#e4e4e7' },
-  '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '13px' },
-  '.cm-content': { caretColor: '#e4e4e7' },
+  '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
 });
 
+// Matches the file editor's BASIC_SETUP_EDIT so the two editors share gutter,
+// fold, and bracket behavior.
 const BASIC_SETUP = {
   lineNumbers: true,
   highlightActiveLine: true,
-  foldGutter: false,
-  bracketMatching: false,
-  closeBrackets: false,
+  foldGutter: true,
+  bracketMatching: true,
+  closeBrackets: true,
   autocompletion: false,
 } as const;
 
@@ -92,10 +113,10 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
   const { t } = useTranslation('agentInspector');
   const [projects, setProjects] = useState<string[]>([]);
   const [roles, setRoles] = useState<string[]>([]);
-  const [agentFilename, setAgentFilename] = useState<string>('');
+  const [roleDirs, setRoleDirs] = useState<RoleDir[]>([]);
   const [listLoading, setListLoading] = useState(true);
 
-  const [selected, setSelected] = useState<Selection>({ scope: 'agent', name: agentId });
+  const [selected, setSelected] = useState<Selection>({ scope: 'global', name: 'global' });
   const [content, setContent] = useState('');
   const [savedContent, setSavedContent] = useState('');
   const [docLoading, setDocLoading] = useState(false);
@@ -103,7 +124,14 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
   const [error, setError] = useState('');
   // Memory docs are markdown — default to rendered preview, same as the file
   // editor; toggle to the CodeMirror source via the header button.
-  const [previewMd, setPreviewMd] = useState(true);
+  const [previewMd, setPreviewMd] = useState(false);
+  // Soft-wrap toggle (default off — long lines scroll), matching the file editor.
+  const [wrap, setWrap] = useState(false);
+  // Live CodeMirror handle for the editor-content context menu's clipboard ops.
+  const cmRef = useRef<ReactCodeMirrorRef>(null);
+  // Right-click menu over the editor CONTENT (copy/cut/paste/wrap), distinct from
+  // ctxMenu which is the file-list send-to-agent menu.
+  const [editorMenu, setEditorMenu] = useState<{ x: number; y: number } | null>(null);
 
   // Inline slug editor — creating a new template, or renaming an existing one.
   const [editing, setEditing] = useState<
@@ -140,6 +168,28 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
     };
   }, [ctxMenu]);
 
+  // Dismiss the editor-content menu on any click/scroll/blur/Escape.
+  useEffect(() => {
+    if (!editorMenu) return;
+    const close = () => setEditorMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('blur', close);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('blur', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [editorMenu]);
+
+  // Clipboard ops for the editor-content menu, sharing the file editor's helpers.
+  const editorCopy = () => { const v = cmRef.current?.view; if (v) cmCopySelection(v); };
+  const editorCut = () => { const v = cmRef.current?.view; if (v) cmCutSelection(v); };
+  const editorPaste = () => { const v = cmRef.current?.view; if (v) cmPasteSelection(v); };
+
   const sendToAgent = useCallback(async (sel: Selection) => {
     try {
       const name = sel.scope === 'global' ? undefined : sel.name;
@@ -175,6 +225,13 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
       const { data } = await apiService.listMemoryTemplates();
       setProjects(Array.isArray(data?.projects) ? data.projects : []);
       setRoles(Array.isArray(data?.roles) ? data.roles : []);
+      setRoleDirs(
+        Array.isArray(data?.roleDirs)
+          ? data.roleDirs
+              .filter((d: any) => d && typeof d.slug === 'string')
+              .map((d: any) => ({ slug: d.slug, files: Array.isArray(d.files) ? d.files : [] }))
+          : [],
+      );
     } catch {
       /* keep stale list on transient failure */
     } finally {
@@ -182,27 +239,13 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
     }
   }, []);
 
-  // Load the agent's own filename (CLAUDE.md / AGENTS.md) for the label.
-  useEffect(() => {
-    let live = true;
-    apiService
-      .getMemoryTemplate('agent', agentId)
-      .then(({ data }) => {
-        if (live) setAgentFilename(data?.filename || '');
-      })
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [agentId]);
-
   useEffect(() => {
     refreshList();
   }, [refreshList]);
 
-  // Reset selection to the agent's own file whenever the agent changes.
+  // Reset selection to the global file whenever the agent changes.
   useEffect(() => {
-    setSelected({ scope: 'agent', name: agentId });
+    setSelected({ scope: 'global', name: 'global' });
   }, [agentId]);
 
   // Load the selected document.
@@ -363,7 +406,7 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
         await apiService.deleteMemoryTemplate(scope, name);
         await refreshList();
         if (selected.scope === scope && selected.name === name) {
-          setSelected({ scope: 'agent', name: agentId });
+          setSelected({ scope: 'global', name: 'global' });
         }
       } catch (e: any) {
         setError(e?.message || 'delete failed');
@@ -376,11 +419,11 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
     sel: Selection,
     label: string,
     icon: React.ReactNode,
-    actions?: { onDelete: () => void; onRename: () => void; placeholder: string },
+    actions?: { onDelete: () => void; onRename?: () => void; placeholder: string },
   ) => {
     // While this exact row is being renamed, swap it for the inline input.
     if (
-      actions &&
+      actions?.onRename &&
       editing?.mode === 'rename' &&
       editing.scope === sel.scope &&
       editing.oldName === sel.name
@@ -407,7 +450,7 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
           active ? 'bg-blue-500/15 text-blue-200' : 'text-zinc-300 hover:bg-zinc-800/60'
         }`}
         onClick={() => handleSelect(sel)}
-        onDoubleClick={() => actions?.onRename()}
+        onDoubleClick={() => actions?.onRename?.()}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -418,17 +461,19 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
         <span data-id={`memory-view-item-label-${selKey(sel)}`} className="flex-1 truncate">{label}</span>
         {actions && (
           <>
-            <button
-              data-id={`memory-view-item-rename-${selKey(sel)}`}
-              className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-zinc-200 transition"
-              title={t('memRename')}
-              onClick={(e) => {
-                e.stopPropagation();
-                actions.onRename();
-              }}
-            >
-              <Pencil size={12} />
-            </button>
+            {actions.onRename && (
+              <button
+                data-id={`memory-view-item-rename-${selKey(sel)}`}
+                className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-zinc-200 transition"
+                title={t('memRename')}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  actions.onRename?.();
+                }}
+              >
+                <Pencil size={12} />
+              </button>
+            )}
             <button
               data-id={`memory-view-item-delete-${selKey(sel)}`}
               className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 transition"
@@ -487,29 +532,56 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
     );
   };
 
+  // A role is a FOLDER (~/cicy-ai/memory/agents/<slug>/) holding role.md /
+  // role.zh.md / meta.yaml. Render it as a collapsible folder whose children are
+  // its files; each file's Selection.name is `<slug>/<file>` so the API edits the
+  // exact file. Deleting role.md removes the role's English persona, so per-file
+  // delete is offered on every file.
+  const renderRoleFolder = (rd: RoleDir) => {
+    const fkey = `rolefolder:${rd.slug}`;
+    const folderCollapsed = !!collapsed[fkey];
+    return (
+      <div data-id={`memory-view-role-folder-${rd.slug}`} key={rd.slug}>
+        <button
+          data-id={`memory-view-role-folder-toggle-${rd.slug}`}
+          onClick={() => toggleSection(fkey)}
+          className="w-full flex items-center gap-1 px-2 py-0.5 text-[13px] text-zinc-300 hover:bg-zinc-800/60 select-none"
+        >
+          {folderCollapsed ? <ChevronRight className="w-3 h-3 shrink-0 text-zinc-500" /> : <ChevronDown className="w-3 h-3 shrink-0 text-zinc-500" />}
+          {folderCollapsed ? <Folder size={14} className="shrink-0 text-amber-400" /> : <FolderOpen size={14} className="shrink-0 text-amber-400" />}
+          <span className="flex-1 truncate text-left">{rd.slug}</span>
+        </button>
+        {!folderCollapsed && (
+          <div data-id={`memory-view-role-folder-files-${rd.slug}`} className="pl-4">
+            {rd.files.map((file) =>
+              renderItem(
+                { scope: 'role', name: `${rd.slug}/${file}` },
+                file,
+                <FileText size={14} />,
+                {
+                  onDelete: () => remove('role', `${rd.slug}/${file}`),
+                  onRename: () => {},
+                  placeholder: '',
+                },
+              ),
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div data-id="memory-view" className={`flex h-full w-full overflow-hidden ${className || ''}`}>
       {/* Left: sectioned list (file-explorer style) */}
       <div data-id="memory-view-list" className="w-56 shrink-0 border-r border-zinc-800 overflow-y-auto py-1 bg-zinc-900/30">
-        {renderSection(
-          'agent',
-          t('memSectionAgent'),
-          undefined,
-          undefined,
-          renderItem(
-            { scope: 'agent', name: agentId },
-            agentFilename || t('memAgentFallback'),
-            <UserCircle size={14} />,
-          ),
-          true,
-        )}
-
         {renderSection(
           'global',
           t('memSectionGlobal'),
           undefined,
           undefined,
           renderItem({ scope: 'global', name: 'global' }, 'global.md', <Globe size={14} />),
+          true,
         )}
 
         {renderSection(
@@ -542,16 +614,10 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
         {renderSection(
           'role',
           t('memSectionRole'),
-          roles.length,
+          roleDirs.length,
           () => beginAdd('role'),
           <>
-            {roles.map((slug) =>
-              renderItem({ scope: 'role', name: slug }, `${slug}.md`, <IdCard size={14} />, {
-                onDelete: () => remove('role', slug),
-                onRename: () => beginRename('role', slug),
-                placeholder: t('memNewRolePlaceholder'),
-              }),
-            )}
+            {roleDirs.map((rd) => renderRoleFolder(rd))}
             {editing?.mode === 'new' && editing.scope === 'role' && (
               <SlugInput
                 dataId="memory-view-new-role-input"
@@ -615,15 +681,26 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
               <MarkdownPreview source={content} />
             </div>
           ) : (
-            <CodeMirror
-              value={content}
-              height="100%"
-              theme={cmBlendTheme}
-              basicSetup={BASIC_SETUP}
-              extensions={[markdown(), saveKeymap, EditorView.lineWrapping]}
-              onChange={setContent}
-              className="h-full text-[13px]"
-            />
+            <div
+              className="h-full"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setEditorMenu({ x: e.clientX, y: e.clientY });
+              }}
+            >
+              <CodeMirror
+                ref={cmRef}
+                value={content}
+                height="100%"
+                theme={oneDark}
+                basicSetup={BASIC_SETUP}
+                extensions={[markdown(), CLIPBOARD_KEYMAP, saveKeymap, cmBlendTheme, ...(wrap ? [EditorView.lineWrapping] : [])]}
+                onChange={setContent}
+                className="h-full"
+                style={{ height: '100%' }}
+              />
+            </div>
           )}
         </div>
       </div>
@@ -648,6 +725,57 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
           >
             <Send className="h-3.5 w-3.5 text-zinc-400" />
             {t('memSendToAgent', { defaultValue: '发送给当前 agent' })}
+          </button>
+        </div>
+      )}
+
+      {editorMenu && (
+        <div
+          data-id="memory-view-editor-context-menu"
+          className="fixed z-[200] min-w-[160px] rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-lg text-[13px] text-zinc-200"
+          style={{ top: editorMenu.y, left: editorMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button
+            data-id="memory-view-editor-context-copy"
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-800"
+            onClick={() => { editorCopy(); setEditorMenu(null); }}
+          >
+            <Copy className="h-3.5 w-3.5 text-zinc-400" />
+            <span className="flex-1">{t('memCopy', { defaultValue: '复制' })}</span>
+            <span className="text-[10px] text-zinc-500">Cmd+C</span>
+          </button>
+          <button
+            data-id="memory-view-editor-context-cut"
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-800"
+            onClick={() => { editorCut(); setEditorMenu(null); }}
+          >
+            <Scissors className="h-3.5 w-3.5 text-zinc-400" />
+            <span className="flex-1">{t('memCut', { defaultValue: '剪切' })}</span>
+            <span className="text-[10px] text-zinc-500">Cmd+X</span>
+          </button>
+          <button
+            data-id="memory-view-editor-context-paste"
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-800"
+            onClick={() => { editorPaste(); setEditorMenu(null); }}
+          >
+            <ClipboardPaste className="h-3.5 w-3.5 text-zinc-400" />
+            <span className="flex-1">{t('memPaste', { defaultValue: '粘贴' })}</span>
+            <span className="text-[10px] text-zinc-500">Cmd+V</span>
+          </button>
+          <div className="my-1 border-t border-zinc-700/70" />
+          <button
+            data-id="memory-view-editor-context-wrap"
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-800"
+            onClick={() => { setWrap((v) => !v); setEditorMenu(null); }}
+          >
+            {wrap ? <Check className="h-3.5 w-3.5 text-zinc-400" /> : <WrapText className="h-3.5 w-3.5 text-zinc-400" />}
+            <span className="flex-1">{t('memWordWrap', { defaultValue: '自动换行' })}</span>
           </button>
         </div>
       )}

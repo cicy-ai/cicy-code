@@ -110,7 +110,6 @@ const STORAGE_KEY = 'cicy.lang';
  * requires a matching `locales/<code>/<ns>.json` for every namespace.
  */
 export const TRANSLATED_LNGS = ['en', 'zh-CN', 'fr', 'ja'] as const;
-type TranslatedLng = (typeof TRANSLATED_LNGS)[number];
 
 /**
  * Languages offered in the in-app picker. The picker uses Intl.DisplayNames
@@ -143,7 +142,6 @@ const SUPPORTED_LNGS = [
   // Africa
   'sw', 'am', 'ha', 'yo', 'ig', 'zu', 'xh', 'af', 'so', 'rw', 'om', 'sn',
 ] as const;
-type SupportedLng = (typeof SUPPORTED_LNGS)[number];
 
 const resources = {
   en: {

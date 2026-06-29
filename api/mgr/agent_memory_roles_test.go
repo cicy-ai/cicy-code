@@ -5,47 +5,41 @@ import (
 	"testing"
 )
 
-// The official role roster's templates must be baked into the binary so a fresh
-// install can seed them (ensureRoleMemoryTemplates) before creating the role
-// agents. If any is missing/empty, the agent's AGENTS.md would lose its charter.
+// The preinstalled roles must be baked into the binary as <slug>/role.md (the
+// English default persona) so a fresh install can seed them before creating the
+// role agents.
 func TestRoleRosterTemplatesEmbedded(t *testing.T) {
-	want := []string{"项目经理", "产品经理", "测试工程师", "法务", "人力资源", "Token优化师"}
+	want := []string{"knowledge-specialist", "audit-policy-specialist"}
 	for _, slug := range want {
-		raw, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + slug + ".md")
+		raw, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + slug + "/role.md")
 		if err != nil {
-			t.Errorf("role template %q not embedded: %v", slug, err)
+			t.Errorf("role persona %q not embedded: %v", slug, err)
 			continue
 		}
 		if len(strings.TrimSpace(string(raw))) == 0 {
-			t.Errorf("role template %q embedded but empty", slug)
+			t.Errorf("role persona %q embedded but empty", slug)
 		}
 	}
 }
 
-// Each role template must carry an extractable `## 开场白` so the empty-chat
-// greeting (agentOpeningGreeting) has real text to show for that role.
-func TestRoleGreetingsExtractable(t *testing.T) {
-	for _, slug := range []string{"项目经理", "产品经理", "测试工程师", "法务", "人力资源", "Token优化师", "运维工程师", "团队助手"} {
-		raw, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + slug + ".md")
-		if err != nil {
-			t.Errorf("role template %q missing: %v", slug, err)
-			continue
-		}
-		if g := extractOpeningSection(string(raw)); strings.TrimSpace(g) == "" {
-			t.Errorf("role %q has no extractable 开场白", slug)
+// Each role's meta.yaml must carry a greeting (the empty-chat opening line lives
+// in meta.yaml now, never in the persona/memory).
+func TestRoleGreetingsInMeta(t *testing.T) {
+	for _, slug := range []string{"knowledge-specialist", "audit-policy-specialist"} {
+		if g := strings.TrimSpace(loadRoleMeta(slug).Greeting); g == "" {
+			t.Errorf("role %q has no greeting in meta.yaml", slug)
 		}
 	}
 }
 
-// Every slug the roster references must resolve to an embedded template — guards
-// against a roster entry whose RoleTemplate has no matching file.
+// Every slug the roster references must resolve to an embedded role.md.
 func TestOfficialRosterRoleTemplatesExist(t *testing.T) {
 	for _, w := range officialRoleRoster() {
 		if w.RoleTemplate == "" {
 			continue
 		}
-		if _, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + w.RoleTemplate + ".md"); err != nil {
-			t.Errorf("roster %s (w-%d) role template %q not embedded: %v", w.Title, w.Port, w.RoleTemplate, err)
+		if _, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + w.RoleTemplate + "/role.md"); err != nil {
+			t.Errorf("roster %s (w-%d) role %q not embedded: %v", w.Title, w.Port, w.RoleTemplate, err)
 		}
 	}
 }

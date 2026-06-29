@@ -471,11 +471,12 @@ const helperWorkerPaneID = "w-1001:main.0"
 
 func helperModeBuiltinWorker() builtinWorker {
 	return builtinWorker{
-		Port:         helperWorkerPort,
-		AgentType:    "cicy",
-		Title:        "团队助手",
-		RoleTemplate: "团队助手",
-		Master:       true,
+		Port:      helperWorkerPort,
+		AgentType: "cicy",
+		Title:     "团队助手",
+		// No role template anymore (the 团队助手 template was removed) — uses the
+		// default cicy charter.
+		Master: true,
 	}
 }
 
@@ -502,26 +503,18 @@ type builtinWorker struct {
 //   - CLI coding agents: claude/codex/opencode, gateway-routed
 //     (use_custom_gateway via createBuiltinWorker); no role template.
 func officialRoleRoster() []builtinWorker {
+	// Minimal cicy roster: only two cicy specialists are preinstalled —
+	//   - 知识专员 doubles as the master (team knowledge base + per-project
+	//     curation of claude's shared memory pool, project-mem/<slug>/),
+	//   - 审计策略专员 = the user's audit advisor.
+	// The coding agents (claude/codex/opencode) are kept and bind under the
+	// master. All other cicy roles (项目经理/HR/产品经理/…) are NOT preinstalled.
 	roster := []builtinWorker{
-		{Port: 1001, AgentType: "cicy", Title: "项目经理", RoleTemplate: "项目经理", Master: true},
-		// 取消预装:产品经理。
-		// {Port: 101, AgentType: "cicy", Title: "产品经理", RoleTemplate: "产品经理", BindToPrimary: true},
-		// 取消预装:法务。
-		// {Port: 103, AgentType: "cicy", Title: "法务", RoleTemplate: "法务", BindToPrimary: true},
-		{Port: 104, AgentType: "cicy", Title: "HR", RoleTemplate: "人力资源", BindToPrimary: true},
-		{Port: 106, AgentType: "claude", Title: "架构师", BindToPrimary: true},
-		{Port: 107, AgentType: "codex", Title: "全栈开发工程师", BindToPrimary: true},
-		{Port: 108, AgentType: "opencode", Title: "软件工程师", BindToPrimary: true},
-		// 取消预装:运维工程师 / SRE。
-		// {Port: 109, AgentType: "cicy", Title: "运维工程师", RoleTemplate: "运维工程师", BindToPrimary: true},
-		// 单一审计角色:审计策略专员 = 用户的审计顾问(配规则 + 解读日志 + 研判命中)。
-		// 旧的 审计专员已并入本席位。
-		{Port: 110, AgentType: "cicy", Title: "审计策略专员", RoleTemplate: "审计策略专员", BindToPrimary: true},
-		// 知识专员:团队知识库 + 按项目策展 claude 共享记忆池(project-mem/<slug>/)。
-		// 开箱即上岗,否则没人给"越用越聪明"的共享记忆把关。
-		{Port: 111, AgentType: "cicy", Title: "知识专员", RoleTemplate: "知识专员", BindToPrimary: true},
-		// 取消预装:评测专员。
-		// {Port: 112, AgentType: "cicy", Title: "评测专员", RoleTemplate: "评测专员", BindToPrimary: true},
+		{Port: 1001, AgentType: "cicy", Title: "Knowledge Specialist", RoleTemplate: "knowledge-specialist", Master: true},
+		{Port: 106, AgentType: "claude", Title: "Architect", BindToPrimary: true},
+		{Port: 107, AgentType: "codex", Title: "Full-stack Engineer", BindToPrimary: true},
+		{Port: 108, AgentType: "opencode", Title: "Software Engineer"},
+		{Port: 110, AgentType: "cicy", Title: "Audit Policy Specialist", RoleTemplate: "audit-policy-specialist"},
 	}
 	return roster
 }
@@ -890,7 +883,7 @@ func reseedBuiltinGuidance(selected []string) {
 		if strings.TrimSpace(ws) == "" {
 			continue
 		}
-		content := composeGuidanceContent(ws, w.AgentType, paneID, "", w.RoleTemplate)
+		content := composeGuidanceContent(ws, w.AgentType, paneID, "", w.RoleTemplate, "")
 		if strings.TrimSpace(content) == "" {
 			continue
 		}

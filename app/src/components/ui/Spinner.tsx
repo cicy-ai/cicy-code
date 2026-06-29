@@ -1,5 +1,3 @@
-import React from 'react';
-
 export type SpinnerSize = 'xs' | 'sm' | 'md' | 'lg';
 
 const SIZE_MAP: Record<SpinnerSize, string> = {

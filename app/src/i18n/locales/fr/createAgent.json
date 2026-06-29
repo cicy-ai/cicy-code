@@ -47,5 +47,6 @@
     "shell": "Commandes shell",
     "handoff": "Messages d'équipe",
     "a2a": "Tâches externes"
-  }
+  },
+  "languageLabel": "Langue"
 }

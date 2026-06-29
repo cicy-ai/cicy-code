@@ -63,22 +63,22 @@ func TestEnsureEmployeeTemplatesSeeds(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("employees.yaml not seeded: %v", err)
 	}
-	// 人力资源 selects [coordinate, onboard] in its frontmatter → must surface.
-	if tools := employeeTemplateTools("人力资源"); len(tools) == 0 {
-		t.Error("seeded 人力资源 should carry its frontmatter tools")
+	// audit-policy-specialist selects [coordinate, audit, shell] in meta.yaml → must surface.
+	if tools := employeeTemplateTools("audit-policy-specialist"); len(tools) == 0 {
+		t.Error("seeded audit-policy-specialist should carry its meta.yaml tools")
 	}
-	// 项目经理 has a `## 开场白` → greeting must be non-empty after seeding.
-	if strings.TrimSpace(employeeTemplateGreeting("项目经理")) == "" {
-		t.Error("seeded 项目经理 should carry its 开场白 greeting")
+	// knowledge-specialist has a greeting in meta.yaml → must be non-empty after seeding.
+	if strings.TrimSpace(employeeTemplateGreeting("knowledge-specialist")) == "" {
+		t.Error("seeded knowledge-specialist should carry its meta.yaml greeting")
 	}
 
 	// Idempotent: a second call must NOT overwrite operator edits.
-	if err := os.WriteFile(path, []byte("templates:\n  项目经理:\n    greeting: \"EDITED\"\n"), 0644); err != nil {
+	if err := os.WriteFile(path, []byte("templates:\n  knowledge-specialist:\n    greeting: \"EDITED\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	resetEmployeeTemplatesCache()
 	ensureEmployeeTemplates() // should be a no-op now
-	if g := strings.TrimSpace(employeeTemplateGreeting("项目经理")); g != "EDITED" {
+	if g := strings.TrimSpace(employeeTemplateGreeting("knowledge-specialist")); g != "EDITED" {
 		t.Errorf("ensureEmployeeTemplates clobbered an existing file; greeting=%q", g)
 	}
 }

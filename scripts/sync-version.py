@@ -92,7 +92,6 @@ def get_versions():
     return {
         "npm_package": get_npm_version(),
         "app_package": get_app_version(),
-        "app_config": extract_one(r"^const APP_VERSION = '([^']+)';$", read_text(APP_CONFIG_PATH), APP_CONFIG_PATH),
         "mgr_main_go": extract_one(r'^const version = "([^"]+)"$', read_text(MAIN_GO_PATH), MAIN_GO_PATH),
         "cicy_tmux_conf": extract_one(r'^export CICY_VERSION="([^"]+)"$', read_text(TMUX_CONF_PATH), TMUX_CONF_PATH),
     }
@@ -103,9 +102,8 @@ def sync_targets(version):
     set_app_version(version)
     set_app_lock_version(version)
 
-    app_config = read_text(APP_CONFIG_PATH)
-    app_config = replace_one(r"^const APP_VERSION = '([^']+)';$", f"const APP_VERSION = '{version}';", app_config, APP_CONFIG_PATH)
-    write_text(APP_CONFIG_PATH, app_config)
+    # app/src/config.ts no longer carries a hardcoded version — APP_VERSION now
+    # reads from package.json (import pkg), so there is nothing to sync here.
 
     main_go = read_text(MAIN_GO_PATH)
     main_go = replace_one(r'^const version = "([^"]+)"$', f'const version = "{version}"', main_go, MAIN_GO_PATH)

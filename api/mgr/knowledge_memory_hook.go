@@ -21,7 +21,7 @@ import (
 // touches none of audit's policy / scanner / forward machinery. The only thing it
 // shares with audit is the gateway hook interface it plugs into.
 
-const knowledgeSpecialistRoleTemplate = "知识专员"
+const knowledgeSpecialistRoleTemplate = "knowledge-specialist"
 
 // knowledgeMemoryDedupWindow collapses repeated writes to the same
 // (source_pane, file_path) into a single dispatch; within the window the entry's

@@ -3,6 +3,10 @@ import { Globe, Loader2, RefreshCw, Zap, SlidersHorizontal } from 'lucide-react'
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
 import Select from '../ui/Select';
+import i18n from '../../i18n';
+
+// gp(key) — i18n helper for this component's strings (workspace ns, globalProxy.*).
+const gp = (k: string, fallback?: string) => i18n.t(`globalProxy.${k}`, { ns: 'workspace', defaultValue: fallback }) as string;
 
 // 🌍 Global-proxy / exit-IP indicator. Lives on the right side of the Workspace
 // top toolbar. Opening it (or hitting 测速) hits GET /api/proxy/exit-info to
@@ -43,9 +47,9 @@ type ProxyList = {
 };
 
 function viaLabel(via?: string) {
-  if (via === 'proxy') return '代理出口';
-  if (via === 'direct') return '直连出口';
-  return '出口 IP';
+  if (via === 'proxy') return gp('proxyExit', 'Proxy exit');
+  if (via === 'direct') return gp('directExit', 'Direct exit');
+  return gp('exitIP', 'Exit IP');
 }
 
 // Show each proxy-group member by its RAW mihomo name (cicy-gw-us, default_proxy,
@@ -75,7 +79,7 @@ function ExitRow({ group, highlight }: { group: ExitGroup; highlight?: boolean }
         </div>
         {failed ? (
           <div className="mt-0.5 truncate text-[12px] font-medium text-red-300">
-            {group.error || '探测失败'}
+            {group.error || gp('probeFailed', 'Probe failed')}
           </div>
         ) : (
           <div className="mt-0.5 flex items-center gap-1.5">
@@ -106,13 +110,13 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
     try {
       const { data } = await apiService.getProxyExitInfo();
       if (data?.success === false) {
-        setExitError('探测失败');
+        setExitError(gp('probeFailed', 'Probe failed'));
         setExitInfo(null);
       } else {
         setExitInfo(data as ExitInfo);
       }
     } catch {
-      setExitError('探测失败');
+      setExitError(gp('probeFailed', 'Probe failed'));
       setExitInfo(null);
     } finally {
       setExitLoading(false);
@@ -199,8 +203,8 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
         className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
           open ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100'
         }`}
-        title="全局代理 / 出口 IP"
-        aria-label="全局代理 / 出口 IP"
+        title={gp('title', 'Global proxy / Exit IP')}
+        aria-label={gp('title', 'Global proxy / Exit IP')}
       >
         <Globe className="h-4 w-4" />
       </button>
@@ -228,7 +232,7 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
           <div data-id="global-proxy-header" className="flex items-center justify-between gap-2 px-2 py-1.5">
             <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-400">
               <Globe className="h-3.5 w-3.5" />
-              出口 IP
+              {gp('exitIP', 'Exit IP')}
             </span>
             <button
               type="button"
@@ -238,7 +242,7 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-50"
             >
               {exitLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-              测速
+              {gp('speedTest', 'Speed test')}
             </button>
           </div>
 
@@ -246,12 +250,12 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
             {exitLoading && groups.length === 0 ? (
               <div className="flex items-center justify-center gap-2 rounded-lg bg-white/[0.03] px-2.5 py-4 text-[12px] text-zinc-500">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                正在探测…
+                {gp('probing', 'Probing…')}
               </div>
             ) : exitError ? (
               <div className="rounded-lg bg-red-500/10 px-2.5 py-3 text-[12px] text-red-300">{exitError}</div>
             ) : groups.length === 0 ? (
-              <div className="rounded-lg bg-white/[0.03] px-2.5 py-3 text-[12px] text-zinc-500">暂无数据</div>
+              <div className="rounded-lg bg-white/[0.03] px-2.5 py-3 text-[12px] text-zinc-500">{gp('noData', 'No data')}</div>
             ) : isMatch ? (
               <ExitRow group={groups[0]} />
             ) : (
@@ -262,9 +266,9 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
           </div>
 
           <div data-id="global-proxy-nodes" className="mt-1 border-t border-white/[0.06] px-1 pt-1.5">
-            <div className="px-1 pb-1 text-[10px] uppercase tracking-[0.12em] text-zinc-500">节点切换</div>
+            <div className="px-1 pb-1 text-[10px] uppercase tracking-[0.12em] text-zinc-500">{gp('nodeSwitch', 'Node switch')}</div>
             {members.length === 0 ? (
-              <div className="px-1 py-1.5 text-[12px] text-zinc-500">暂无可选节点</div>
+              <div className="px-1 py-1.5 text-[12px] text-zinc-500">{gp('noNodes', 'No nodes available')}</div>
             ) : (
               <div className="flex items-center gap-2 px-1 pb-1">
                 <Select
@@ -286,10 +290,10 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
                 data-id="global-proxy-manage"
                 onClick={() => { onManageNodes(); setOpen(false); }}
                 className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 text-[11px] text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                title="打开节点管理面板"
+                title={gp('manageNodesTitle', 'Open node management')}
               >
                 <SlidersHorizontal className="h-3 w-3" />
-                管理节点
+                {gp('manageNodes', 'Manage nodes')}
               </button>
             ) : null}
           </div>

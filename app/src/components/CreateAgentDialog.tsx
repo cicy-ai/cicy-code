@@ -20,6 +20,9 @@ export interface CreateAgentValues {
   project_template: string;
   /** Role-library template slug (架构 §5). Empty = none. */
   role_template: string;
+  /** UI language for the agent's role persona + greeting (e.g. "en", "zh-CN").
+   *  Defaults to the current browser/UI language. */
+  lang: string;
 }
 
 interface Props {
@@ -46,7 +49,8 @@ const DEFAULT_VALUES: CreateAgentValues = {
   use_proxy: false,
   inherit_guidance: false,
   project_template: 'default', // 开箱即用:新 agent 默认归属 default 项目(共享记忆)
-  role_template: '',
+  role_template: 'assistant', // role library 默认 = assistant(通用基座/默认人设)
+  lang: '', // set to the current UI language when the dialog opens
 };
 
 export default function CreateAgentDialog({
@@ -60,7 +64,7 @@ export default function CreateAgentDialog({
   dialogClassName = '',
   agentTypeGridClassName = 'grid grid-cols-1 gap-2 sm:grid-cols-2',
 }: Props) {
-  const { t } = useTranslation('createAgent');
+  const { t, i18n } = useTranslation('createAgent');
   const { t: ts } = useTranslation('settings');
   const { t: tc } = useTranslation('common');
   const { agentTypeOptions } = useApp();
@@ -90,6 +94,7 @@ export default function CreateAgentDialog({
     setValues({
       ...DEFAULT_VALUES,
       agent_type: agentTypeOptions[0]?.value || 'claude',
+      lang: (i18n.language || '').toLowerCase().startsWith('zh') ? 'zh-CN' : 'en', // default to the current browser/UI language
     });
     void loadProjects();
     apiService.listMemoryTemplates()
@@ -218,8 +223,20 @@ export default function CreateAgentDialog({
                 className="w-full"
                 value={values.role_template}
                 onChange={(v) => set({ role_template: v })}
-                placeholder={t('templateNone')}
-                options={[{ value: '', label: t('templateNone') }, ...roleTemplates.map((slug) => ({ value: slug, label: slug }))]}
+                options={roleTemplates.map((slug) => ({ value: slug, label: slug }))}
+              />
+            </div>
+            <div data-id="create-agent-dialog-lang-field">
+              <label className="mb-1.5 block text-[13px] font-medium text-zinc-300">{t('languageLabel', 'Language')}</label>
+              <Select
+                dataId="create-agent-dialog-lang-select"
+                className="w-full"
+                value={values.lang}
+                onChange={(v) => set({ lang: v })}
+                options={[
+                  { value: 'en', label: 'English' },
+                  { value: 'zh-CN', label: '中文' },
+                ]}
               />
             </div>
             <p className="col-span-2 text-[11px] text-zinc-600">{t('templateHint')}</p>

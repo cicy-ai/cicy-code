@@ -7,7 +7,6 @@
   "copilot": "Tilted toward GitHub workflow and completion",
   "cicy-wechat": "Good for WeChat channel and messaging",
   "cicy-feishu": "Good for Feishu channel and office collaboration",
-  "openclaw": "Good for long-lived channels and external integrations",
   "hermes": "Default master worker, good for orchestration",
   "cicy-claude": "Claude-compatible wrapper for unified entry"
 }

@@ -7,7 +7,6 @@
   "copilot": "Centré sur GitHub et complétion",
   "cicy-wechat": "Adapté au canal WeChat",
   "cicy-feishu": "Adapté au canal Feishu",
-  "openclaw": "Adapté aux canaux longue durée",
   "hermes": "Master par défaut, idéal pour la coordination",
   "cicy-claude": "Wrapper compatible Claude"
 }

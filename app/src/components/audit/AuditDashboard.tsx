@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
-import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, Sparkles, MessageSquare, Minimize2, X, ShieldCheck } from 'lucide-react';
+import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, Sparkles, MessageSquare, ShieldCheck } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import DecisionsTab from './DecisionsTab';
 import AssistantTab from './AssistantTab';

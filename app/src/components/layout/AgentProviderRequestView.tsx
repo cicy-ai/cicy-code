@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Brain, Languages, Search, Wrench } from 'lucide-react';
+import { Brain, Languages, Wrench } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import apiService from '../../services/api';
@@ -184,15 +184,6 @@ function renderToolProperty(item: any, requiredNames: string[], translatedDescri
       {typeof item?.additional_properties !== 'undefined' ? <div data-id={`agent-provider-request-tool-property-additional-${safeName}`} className="text-zinc-500">additionalProperties: {String(item.additional_properties)}</div> : null}
     </div>
   );
-}
-
-function renderToolSummaryBlocks(tool: any, translationState: TranslationEntry | undefined, onTranslate: (tool: any) => void) {
-  const safeName = String(tool?.name || 'tool').replace(/[^a-zA-Z0-9_-]/g, '-');
-  const description = String(tool?.description || '').trim();
-  if (!description) {
-    return null;
-  }
-  return renderTranslatedParagraphs(`agent-provider-request-tool-summary-${safeName}`, description, translationState, () => onTranslate(tool));
 }
 
 function renderToolDetail(tool: any, summaryTranslationState: TranslationState[string] | undefined, parameterTranslationState: TranslationState[string] | undefined, onTranslateSummary: (tool: any) => void, onTranslateParameters: (tool: any) => void) {

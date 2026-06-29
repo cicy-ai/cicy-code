@@ -1198,7 +1198,7 @@ export function BrowserWindowsColumn({
   const [newUrl, setNewUrl] = useState('');
   const [adding, setAdding] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
-  const [selKey, setSelKey] = useState<string | null>(null);
+  const [, setSelKey] = useState<string | null>(null);
 
   const load = useCallback(async (silent = false) => {
     // silent=true skips the loading skeleton so an action-triggered refresh
@@ -1234,18 +1234,12 @@ export function BrowserWindowsColumn({
       setSelKey(null);
     }
   }, [windows]);
-  const selWin = (windows || []).find((w) => w.key === selKey) || null;
   // Both backends open a start-page TAB ("新加标签"). For Chrome, that also
   // launches the profile if it isn't running yet.
   const addLabel = t('bwAddTab');
   const unitLabel = t('bwUnitTab');
   // Add-tab button is always shown (no per-backend/profile gating).
   const canAddTab = true;
-
-  const closeTab = async (w: WinItem) => {
-    await windowAction(clientId, profile, w, 'close');
-    await load(true); // silent — don't re-screenshot every remaining tab
-  };
 
   const onAdd = async () => {
     if (adding) return;
@@ -1287,7 +1281,7 @@ export function BrowserWindowsColumn({
           className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer">
           <Settings className="w-3.5 h-3.5" />
         </button>
-        <button data-id="browser-windows-column-refresh" onClick={load} disabled={loading} title={t('bwRefreshWindows')}
+        <button data-id="browser-windows-column-refresh" onClick={() => load()} disabled={loading} title={t('bwRefreshWindows')}
           className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50">
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
         </button>
@@ -1731,42 +1725,6 @@ function InjectScriptModal({
       </div>
     </div>,
     document.body,
-  );
-}
-
-// Compact Chrome-style tab row: icon + title + close. Click selects (preview).
-function WindowTab({ win, selected, onSelect, onClose }: { win: WinItem; selected: boolean; onSelect: () => void; onClose: () => void }) {
-  const { t } = useTranslation('layout');
-  const [closing, setClosing] = useState(false);
-  const doClose = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (closing || win.status === 'closed') return;
-    setClosing(true);
-    try { await onClose(); } finally { setClosing(false); }
-  };
-  return (
-    <div
-      data-id="BrowserWindowTab"
-      onClick={onSelect}
-      title={win.url || win.title}
-      className={cn(
-        'group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer',
-        selected ? 'bg-white/[0.08]' : 'hover:bg-white/[0.03]',
-      )}
-    >
-      <Globe className={cn('w-3.5 h-3.5 shrink-0', win.status === 'closed' ? 'text-zinc-700' : 'text-zinc-500')} />
-      <span className={cn('text-[12px] truncate flex-1', selected ? 'text-zinc-100' : 'text-zinc-300')}>{win.title}</span>
-      {win.status === 'closed' && <span className="text-[9px] text-zinc-600 shrink-0">{t('bwClosedShort')}</span>}
-      <button
-        data-id="browser-window-tab-close"
-        onClick={doClose}
-        disabled={win.status === 'closed'}
-        title={t('bwClose')}
-        className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-zinc-500 hover:text-red-400 transition-opacity shrink-0 disabled:hidden"
-      >
-        {closing ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
-      </button>
-    </div>
   );
 }
 

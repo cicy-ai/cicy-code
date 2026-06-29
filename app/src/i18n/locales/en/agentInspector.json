@@ -298,5 +298,9 @@
   "proxyManagerNodeDetail": "View node detail",
   "proxyManagerLastDelay": "Last delay",
   "proxyManagerExitIP": "Exit IP",
-  "proxyManagerNodeConfig": "Source YAML config"
+  "proxyManagerNodeConfig": "Source YAML config",
+  "memCopy": "Copy",
+  "memCut": "Cut",
+  "memPaste": "Paste",
+  "memWordWrap": "Word wrap"
 }

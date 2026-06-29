@@ -52,7 +52,7 @@ func TestCustomAgentRoundTripAndLookup(t *testing.T) {
 	}
 
 	// seeded into a new agent's memory (no memory/agents/*.md file exists for it)
-	mem := composeAgentMemory("w-9999", "/tmp/ws", "cicy", "", "销售助手")
+	mem := composeAgentMemory("w-9999", "/tmp/ws", "cicy", "", "销售助手", "")
 	if !strings.Contains(mem, "回答客户咨询") {
 		t.Errorf("composeAgentMemory missing persona body:\n%s", mem)
 	}

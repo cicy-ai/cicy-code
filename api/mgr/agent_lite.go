@@ -29,9 +29,9 @@ import (
 // profile's compiled base prompt, so users can refine any role inline and it
 // takes effect next turn — no restart.
 
-// The assistant/dispatcher system-prompt base is NOT a Go const — it lives in
-// ~/cicy-ai/memory/agents/base-assistant.md / base-dispatcher.md (seeded from
-// embed/agent-roles/) and is loaded via resolveSystemBase. Single source.
+// The system-prompt base is NOT a Go const — it lives in
+// ~/cicy-ai/memory/agents/assistant/ (seeded from embed/agent-roles/) and is
+// loaded via resolveSystemBase. One universal "assistant" template.
 
 // Profiles / tool groups / custom tools / grants are no longer Go consts — they
 // live in ~/cicy-ai/db/lite-config.json (see lite_config.go), with baked
@@ -163,8 +163,8 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	// model effective = selected ∩ grantable, L3 narrow-only, unchanged).
 	roleSlug := employeeRoleSlug(shortID) // this employee's role-template slug
 	selectGroups := prof.DefaultGroups
-	if rtfm := parseLiteFrontmatter(roleTemplateRaw(roleSlug)); rtfm.hasTools {
-		selectGroups = rtfm.tools
+	if t := loadRoleMeta(roleSlug).Tools; len(t) > 0 {
+		selectGroups = t
 	}
 	if fm.hasTools {
 		selectGroups = fm.tools

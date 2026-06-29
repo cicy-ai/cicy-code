@@ -185,5 +185,9 @@
   "proxyManagerNodeDetail": "ノード詳細を表示",
   "proxyManagerLastDelay": "前回の遅延",
   "proxyManagerExitIP": "出口 IP",
-  "proxyManagerNodeConfig": "ソース YAML 設定"
+  "proxyManagerNodeConfig": "ソース YAML 設定",
+  "memCopy": "コピー",
+  "memCut": "切り取り",
+  "memPaste": "貼り付け",
+  "memWordWrap": "折り返し"
 }

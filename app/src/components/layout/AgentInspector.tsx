@@ -2,10 +2,8 @@ import { Children, cloneElement, isValidElement, type ReactNode, useCallback, us
 import { Search, Settings } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Trans, useTranslation } from 'react-i18next';
-import config from '../../config';
+import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
-import { TokenManager } from '../../services/tokenManager';
 import type { EditPaneData } from '../../types';
 import Select, { type SelectOption } from '../ui/Select';
 import { normalizeAgentType } from '../../lib/agentType';
@@ -26,13 +24,6 @@ type RuntimeAIDefaultSummary = {
   model?: string;
 };
 const HISTORY_PAGE_SIZE = 30;
-
-const tabs: Array<{ id: InspectorTab; labelKey: string }> = [
-  { id: 'overview', labelKey: 'tabOverview' },
-  { id: 'history', labelKey: 'tabHistory' },
-  { id: 'memory', labelKey: 'tabMemory' },
-  { id: 'settings', labelKey: 'tabSettings' },
-];
 
 const settingsSections = [
   { id: 'general', labelKey: 'sectionGeneral', icon: Settings },
@@ -99,11 +90,6 @@ function formatCostEstimate(value?: number) {
   return `$${formatCredit(value)}`;
 }
 
-function formatPercent(value?: number) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
-  return `${value}%`;
-}
-
 function formatStatusLabel(value: string | undefined, idleLabel: string) {
   const text = String(value || '').trim();
   if (!text) return idleLabel;
@@ -127,10 +113,6 @@ function pickUsageValue(current?: number, cumulative?: number) {
   if (typeof current === 'number' && Number.isFinite(current) && current === 0) return current;
   if (typeof cumulative === 'number' && Number.isFinite(cumulative) && cumulative === 0) return cumulative;
   return undefined;
-}
-
-function normalizeHistoryText(value?: string) {
-  return String(value || '').trim().replace(/\r\n/g, '\n');
 }
 
 function escapeRegExp(value: string) {
@@ -202,15 +184,6 @@ function createInspectorMarkdownComponents(query: string) {
   };
 }
 
-function shouldShowHistorySnippet(item: any) {
-  const snippet = normalizeHistoryText(item?.snippet);
-  if (!snippet) return false;
-  const q = normalizeHistoryText(item?.q);
-  const a = normalizeHistoryText(item?.a);
-  if (snippet === q || snippet === a) return false;
-  return item?.match_field && item.match_field !== 'q';
-}
-
 function InspectorMarkdown({
   text,
   className = '',
@@ -242,12 +215,10 @@ export default function AgentInspector({
   paneId,
   paneTitle,
   open,
-  onClose,
   requestedTab,
   onPanePatch,
   embedded = false,
   liveStatus,
-  inspectorVersion = 0,
 }: {
   paneId: string;
   paneTitle?: string;
@@ -308,8 +279,8 @@ export default function AgentInspector({
   const [notesDraft, setNotesDraft] = useState('');
   const [notesSaving, setNotesSaving] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('general');
-  const [settingsLoading, setSettingsLoading] = useState(false);
-  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [, setSettingsLoading] = useState(false);
+  const [, setSettingsSaving] = useState(false);
   const settingsPaneLoadedRef = useRef<string>('');
   const [generalSettingsBaseline, setGeneralSettingsBaseline] = useState('null');
   const [modelSettingsBaseline, setModelSettingsBaseline] = useState('null');
@@ -1008,15 +979,6 @@ export default function AgentInspector({
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div data-id="agent-inspector-info-row" className="flex items-start justify-between gap-3">
-      <span data-id="agent-inspector-auto-21" className="text-zinc-500">{label}</span>
-      <span data-id="agent-inspector-auto-22" className="max-w-[180px] text-right text-zinc-200">{value}</span>
-    </div>
-  );
-}
-
 function EmptyState({ text }: { text: string }) {
   return (
     <div data-id="agent-inspector-empty-state" className="rounded-2xl border border-dashed border-white/[0.08] px-4 py-8 text-center text-sm text-zinc-600">
@@ -1072,31 +1034,6 @@ function InspectorInput({
       placeholder={placeholder}
       readOnly={readOnly}
       className={`w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 transition-all placeholder:text-zinc-700 focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/20 ${mono ? 'font-mono' : ''} ${readOnly ? 'cursor-not-allowed opacity-70' : ''}`}
-    />
-  );
-}
-
-function InspectorTextarea({
-  value,
-  onChange,
-  rows,
-  placeholder,
-  mono,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  rows?: number;
-  placeholder?: string;
-  mono?: boolean;
-}) {
-  return (
-    <textarea
-      data-id="agent-inspector-settings-textarea"
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      rows={rows}
-      placeholder={placeholder}
-      className={`w-full resize-none rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 transition-all placeholder:text-zinc-700 focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/20 ${mono ? 'font-mono' : ''}`}
     />
   );
 }

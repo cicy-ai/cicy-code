@@ -5,7 +5,6 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import config from '../../config'
 import { WebFrame } from '../WebFrame'
-import apiService from '../../services/api'
 import { Spinner } from '../ui/Spinner'
 
 type HistoryTurn = {

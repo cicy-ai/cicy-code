@@ -47,5 +47,6 @@
     "shell": "Shell 命令",
     "handoff": "团队消息",
     "a2a": "对外任务"
-  }
+  },
+  "languageLabel": "语言"
 }

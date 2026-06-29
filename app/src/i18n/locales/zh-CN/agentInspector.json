@@ -266,5 +266,9 @@
   "proxyManagerNodeDetail": "查看节点详情",
   "proxyManagerLastDelay": "上次延迟",
   "proxyManagerExitIP": "出口 IP",
-  "proxyManagerNodeConfig": "源 YAML 配置"
+  "proxyManagerNodeConfig": "源 YAML 配置",
+  "memCopy": "复制",
+  "memCut": "剪切",
+  "memPaste": "粘贴",
+  "memWordWrap": "自动换行"
 }

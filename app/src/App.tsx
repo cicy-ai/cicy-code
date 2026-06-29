@@ -92,7 +92,7 @@ function WsGate({ children }: { children: any }) {
 }
 
 function Main() {
-  const { token, authType, isChecking, provisioning } = useAuth();
+  const { token, isChecking, provisioning } = useAuth();
   const [route, setRoute] = useState(parseHash);
 
   useEffect(() => {

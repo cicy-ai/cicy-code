@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import { execShell, execShellBackground, tailLog, isLogDone } from '../lib/speedup/rpc';
+import { execShellBackground, tailLog, isLogDone } from '../lib/speedup/rpc';
 import { ROOTFS_MIRRORS, GH_PROXIES } from '../lib/speedup/mirrors';
 import { probeAll, formatSpeed, type ProbeResult } from '../lib/speedup/probe';
 import { Spinner } from './ui/Spinner';

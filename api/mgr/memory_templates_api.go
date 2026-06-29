@@ -31,6 +31,7 @@ func handleMemoryTemplates(w http.ResponseWriter, r *http.Request) {
 		"global":   M{"name": "global", "path": globalMemoryTemplatePath()},
 		"projects": listProjectTemplates(),
 		"roles":    listRoleTemplates(),
+		"roleDirs": listAllRoleDirs(),
 		"dir":      cicyMemoryDir(),
 	})
 }
@@ -59,9 +60,20 @@ func resolveTemplatePath(suffix string) (scope, name, path string) {
 		if len(parts) < 2 {
 			return "", "", ""
 		}
-		slug := sanitizeTemplateSlug(parts[1])
+		// role/<slug>[/<file>]: a bare slug edits the English persona (role.md);
+		// an explicit file addresses any file in the role dir (role.zh.md,
+		// meta.yaml, …).
+		rest := strings.SplitN(parts[1], "/", 2)
+		slug := sanitizeTemplateSlug(rest[0])
 		if slug == "" {
 			return "", "", ""
+		}
+		if len(rest) == 2 {
+			file := sanitizeRoleFileName(rest[1])
+			if file == "" {
+				return "", "", ""
+			}
+			return "role", slug + "/" + file, filepath.Join(roleDir(slug), file)
 		}
 		return "role", slug, roleTemplatePath(slug)
 	}
@@ -145,6 +157,16 @@ func handleMemoryTemplateByName(w http.ResponseWriter, r *http.Request) {
 			ensureGlobalMemoryTemplate()
 		}
 		content := loadTemplateFile(path)
+		// role files fall back to their embedded seed when no on-disk override
+		// exists, so the editor always shows the effective content (and deleting
+		// a seeded file cleanly reverts to seed rather than showing blank).
+		if scope == "role" && content == "" {
+			rslug, rfile := name, "role.md"
+			if i := strings.IndexByte(name, '/'); i >= 0 {
+				rslug, rfile = name[:i], name[i+1:]
+			}
+			content = readRoleFile(rslug, rfile)
+		}
 		J(w, M{"scope": scope, "name": name, "content": content, "path": path, "exists": fileExistsPlain(path)})
 	case http.MethodPut:
 		var body struct {

@@ -12,7 +12,7 @@ import (
 // whichever live cicy agent was provisioned with this role_template. The former
 // split (审计策略专员 owns policy + 审计专员 triages) was merged into this one
 // advisor: it configures rules, interprets logs, and triages hits.
-const auditSpecialistRoleTemplate = "审计策略专员"
+const auditSpecialistRoleTemplate = "audit-policy-specialist"
 
 // Wire the audit pipeline's "forward finding to advisor" channel to the
 // cross-agent send path. Runs before main() so the forwarder is set by the

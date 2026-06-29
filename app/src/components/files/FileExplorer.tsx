@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronRight, ChevronDown, File as FileIcon, Folder, FolderOpen, RefreshCw, Send, Eye, EyeOff, Info, Star, Trash2, Edit3, FilePlus, FolderPlus, Upload, Download, Link as LinkIcon, PanelLeftClose } from 'lucide-react';
-import { fsApi, FsEntry, FsListResponse, FsFavorite, FsRoot, joinFsPath, fsParent, fsBasename } from './api';
+import { fsApi, FsEntry, FsListResponse, FsFavorite, FsRoot, joinFsPath, fsParent } from './api';
 import { fsCachePeek, fsCacheSet, fsKey } from './fsCache';
 import i18n from '../../i18n';
 

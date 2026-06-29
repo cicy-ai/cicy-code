@@ -47,7 +47,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   const [perms, setPerms] = useState<string[]>([]);
   const [authType, setAuthType] = useState<string | null>(null);
   const [plan, setPlan] = useState<string | null>(null);
-  const [globalHome, setGlobalHome] = useState<string | null>(null);
+  const [, setGlobalHome] = useState<string | null>(null);
   const [provisioning, setProvisioning] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
 

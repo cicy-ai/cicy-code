@@ -1,6 +1,6 @@
 import { assetUrl } from './assets'
 
-type NormalizedAgentType = '' | 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'kiro-cli' | 'copilot' | 'openclaw' | 'hermes' | 'cicy-claude' | 'cicy'
+type NormalizedAgentType = '' | 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'kiro-cli' | 'copilot' | 'hermes' | 'cicy-claude' | 'cicy'
 
 export type AgentTypeOption = {
   value: string
@@ -22,7 +22,6 @@ export const AGENT_TYPE_OPTIONS: AgentTypeOption[] = [
   { value: 'cursor', label: 'Cursor' },
   { value: 'kiro-cli', label: 'Kiro CLI' },
   { value: 'copilot', label: 'Copilot' },
-  { value: 'openclaw', label: 'OpenClaw' },
   { value: 'hermes', label: 'Hermes' },
   { value: 'cicy', label: 'CiCy' },
 ]
@@ -35,7 +34,6 @@ const AGENT_TYPE_ICON_MAP: Record<Exclude<NormalizedAgentType, ''>, AgentTypeIco
   cursor: { label: 'Cursor', src: assetUrl('/assets/logos/cursor.svg') },
   'kiro-cli': { label: 'Kiro', src: assetUrl('/assets/logos/kiro.png') },
   copilot: { label: 'Copilot', src: assetUrl('/assets/logos/copilot.svg') },
-  openclaw: { label: 'OpenClaw', text: '🦞' },
   hermes: { label: 'Hermes', text: 'HE' },
   'cicy-claude': { label: 'CiCy', src: assetUrl('/assets/logos/cicy.svg') },
   cicy: { label: 'CiCy', src: assetUrl('/assets/logos/cicy-logo.svg?v=2') },
@@ -43,9 +41,6 @@ const AGENT_TYPE_ICON_MAP: Record<Exclude<NormalizedAgentType, ''>, AgentTypeIco
 
 export function normalizeAgentType(agentType?: string): NormalizedAgentType {
   switch ((agentType || '').trim().toLowerCase()) {
-    case 'openclaw':
-    case 'opencraw':
-      return 'openclaw'
     case 'codex':
     case 'openai':
       return 'codex'

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Plus, Trash2, Check } from 'lucide-react';
-import { getApiBase, setApiBase } from '../../config';
+import { getApiBase } from '../../config';
 import api from '../../services/api';
 
 const LS_PRESETS = 'cicy_api_presets';
@@ -57,7 +57,8 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
       if (cur) localStorage.setItem(LOCAL_TOKEN_BACKUP, cur);
       if (token) localStorage.setItem(TOKEN_KEY, token);
     }
-    setApiBase(isDefault ? '' : url);
+    // apiBase 切换已下线:前端一律同域名直连(inferApiBase 不再读 localStorage),
+    // 这里仅切换 token,不再改写 apiBase。
     setCurrent(isDefault ? DEFAULT_URL : url);
   }
 

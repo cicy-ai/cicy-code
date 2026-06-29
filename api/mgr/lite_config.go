@@ -329,10 +329,10 @@ func resetLiteConfigCache() {
 // no hardcoded prompt text in Go.
 func resolveSystemBase(ref string) string {
 	switch ref {
-	case "@dispatcher":
-		return roleTemplateBody("base-dispatcher")
-	case "@assistant":
-		return roleTemplateBody("base-assistant")
+	// One universal base. @dispatcher is a legacy alias kept only so any old
+	// config still resolves — every cicy agent now shares "assistant".
+	case "@assistant", "@dispatcher":
+		return roleTemplateBody("assistant")
 	}
 	if slug := strings.TrimPrefix(ref, "@role:"); slug != ref {
 		return roleTemplateBody(slug)

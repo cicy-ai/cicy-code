@@ -1,51 +1,20 @@
 
-const LS_API_BASE = 'cicy_api_base';
+import pkg from '../package.json';
+
 const SS_HOST_HOME = 'cicy_host_home';
 const DEFAULT_CICY_ROOT = '~/cicy-ai';
 const DEFAULT_HOST_HOME = import.meta.env.VITE_HOST_HOME || DEFAULT_CICY_ROOT;
-const APP_VERSION = '2.3.54';
+const APP_VERSION = pkg.version;
 
+// 前端一律同域名直连:apiBase 为空 → 走当前 origin(本地实例 / 自托管)。dev 可用
+// VITE_API_BASE 覆盖。旧的 cicy-ai.com SaaS 域名路由(app/api/audit/workspace/tunnel)已下线。
 function inferApiBase(): string {
-  const envBase = import.meta.env.VITE_API_BASE || '';
-  if (typeof window === 'undefined') return envBase;
-
-  const { hostname, host, origin } = window.location;
-  const isTunnelHost = /^g-\d+\.cicy-ai\.com$/.test(hostname);
-  const managedBase = envBase || 'https://api.cicy-ai.com';
-
-  const saved = localStorage.getItem(LS_API_BASE);
-  if (saved) {
-    if (!isTunnelHost) return saved;
-    try {
-      const savedHost = new URL(saved).hostname;
-      if (!/^g-\d+\.cicy-ai\.com$/.test(savedHost)) return saved;
-    } catch {
-      return saved;
-    }
-  }
-
-  if (hostname === 'app.cicy-ai.com' || hostname === 'api.cicy-ai.com' || /^audit\./.test(hostname)) return origin;
-  if (isTunnelHost) return managedBase;
-
-  const proMatch = hostname.match(/^(u-.+)-app\.cicy-ai\.com$/);
-  if (proMatch) return `https://${proMatch[1]}-api.cicy-ai.com`;
-
-  const freeMatch = hostname.match(/^(u-.+)-free-app\.cicy-ai\.com$/);
-  if (freeMatch) return `https://${freeMatch[1]}-free-api.cicy-ai.com`;
-
-  if (host.startsWith('localhost:') || host.startsWith('127.0.0.1:')) return envBase || '';
-
-  return envBase || origin;
+  return import.meta.env.VITE_API_BASE || '';
 }
 
 
 export function getApiBase(): string {
   return inferApiBase();
-}
-
-export function setApiBase(base: string) {
-  if (base) localStorage.setItem(LS_API_BASE, base);
-  else localStorage.removeItem(LS_API_BASE);
 }
 
 export function getHostHome(): string {
@@ -85,10 +54,6 @@ export function syncHostHomeFromPath(path: string | null | undefined): string | 
   return inferred;
 }
 
-function toRuntimeAbsolutePath(path: string): string {
-  return path.replace(/^~(?=\/|$)/, getHostHome());
-}
-
 export function toTildePath(path: string): string {
   const home = getHostHome();
   if (path === home) return '~';
@@ -99,11 +64,9 @@ export function defaultWorkerWorkspace(paneId: string): string {
   return `${DEFAULT_CICY_ROOT}/workers/${paneId}`;
 }
 
-// Workspace: Pro → u-xxx-api, Trial → u-xxx-free-api
-const host = typeof window !== 'undefined' ? window.location.hostname : '';
-const isWorkspace = /^(u-.+)-(app|free-app)\.cicy-ai\.com$/.test(host);
-
-const isAudit = typeof window !== 'undefined' && /^audit\./.test(window.location.hostname);
+// cicy-ai.com SaaS 域名(workspace / audit)已下线 → 恒为 false。
+const isWorkspace = false;
+const isAudit = false;
 
 // prod uses same-origin or inferred workspace api domain; localhost/dev can still use VITE_API_BASE
 const base = getApiBase();
@@ -112,10 +75,7 @@ const config = {
   apiBase:        base,
   mgrBase:        base,
   ttydBase:       base,
-  ideBase:        base,
-  openClawBase:   base ? base + '/openclaw' : '/openclaw',
   hostHome:       DEFAULT_HOST_HOME,
-  desktopBase:    base,
   sttBase:        base,
   pollInterval:   1000,
   version:        APP_VERSION,
@@ -134,10 +94,6 @@ export const urls = {
     const base = `${config.ttydBase}/ttyd/${paneId}/?token=${token}`;
     return lang ? `${base}&lang=${encodeURIComponent(lang)}` : base;
   },
-  openClaw:   (token?: string)                           => `${config.openClawBase}${token ? `?token=${encodeURIComponent(token)}` : ''}`,
-  desktop:    (token: string)                            => `${config.desktopBase}/?token=${token}`,
-  idePane:    (paneId: string, token: string)            => `${config.ideBase}/ttyd/${paneId}/?token=${token}`,
-  stt:        ()                                         => `${config.sttBase}/stt`,
 };
 
 export default config;

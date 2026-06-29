@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useTranslation, Trans } from 'react-i18next';
+import { Trans } from 'react-i18next';
 import i18n from '../../i18n';
 import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, UserPlus, GitBranch, ChevronRight, ChevronDown } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
-import { normalizeAgentType, guidanceFilenameForAgentType } from '../../lib/agentType';
+import { normalizeAgentType } from '../../lib/agentType';
 import { metricsFromCurrentReply, type AgentLiveMetrics } from '../../lib/agentMetrics';
 import { useApp } from '../../contexts/AppContext';
 import { ModelTag } from '../../lib/modelTag';
@@ -157,7 +157,7 @@ function CtxRing({ pct }: { pct: number }) {
 
 export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll, onOpenAgentFile, hideMaster = false }: Props) {
   const [creating, setCreating] = useState(false);
-  const [forkingId, setForkingId] = useState<string | null>(null);
+  const [forkingId] = useState<string | null>(null);
   // Source pane id whose fork-confirm preview modal is open (null = closed).
   const [forkPreviewSrc, setForkPreviewSrc] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -269,6 +269,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         inherit_guidance: values.inherit_guidance,
         project_template: values.project_template,
         role_template: values.role_template,
+        lang: values.lang,
       });
       if (data?.pane_id || data?.session) {
         setCreateDialogOpen(false);
@@ -286,13 +287,6 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 
   // reply.json turn status: "completed" | "failed" | anything else = in flight
   // ("thinking"). Green when done, red when failed, pulsing yellow otherwise.
-  const statusDot = (s: StatusInfo) => {
-    if (!s.status) return 'bg-zinc-700';
-    if (s.status === 'completed') return 'bg-emerald-700';
-    if (s.status === 'failed') return 'bg-red-700';
-    return 'bg-yellow-600 animate-pulse';
-  };
-
   // (textual status label retired — the live-metrics dot carries status now)
 
   const getName = (binding: Binding) => {
@@ -563,17 +557,14 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     title,
     agentType,
     gateway,
-    status,
     subtitle,
     active = false,
-    opened = false,
     onClick,
     onRemove,
     onDelete,
     onRestart,
     onFork,
     forking = false,
-    onOpenSettings,
     canRestart = true,
     groupKey,
     draggable = false,

@@ -126,6 +126,40 @@ Each agent owns a self-contained native guidance file (`CLAUDE.md` / `AGENTS.md`
 
 The gateway no longer rewrites outgoing request system prompts to inject memory/rules — agents read their own guidance files natively, keeping gateway and non-gateway paths consistent (`agentInspectorRewriteRequestBody` in `api/mgr/agent_inspector.go` only does model override + Anthropic system normalization).
 
+## Opening the fresh test instance in a desktop tab
+
+The `cicy-fresh` skill rebuilds + recreates a clean instance on **port 8208** (running
+as the throwaway `cicyfresh` user, with the real api_token injected). To eyeball its UI
+inside the running cicy-desktop, open it as a **tab** in the CiCy Browser via the
+`agent-electron` skill — do NOT spawn a bare window.
+
+1. List connected desktops and pick the **local macOS** one (UA contains `CiCyDesktop`,
+   `"platform":"darwin"`, `remote_addr` = 127.0.0.1) to get its `client_id`:
+
+   ```bash
+   TOKEN=$(node -p "require(require('os').homedir()+'/cicy-ai/global.json').api_token")
+   curl -s http://127.0.0.1:8008/api/chat/clients -H "Authorization: Bearer $TOKEN"
+   # → grab the darwin client's "client_id" (e.g. web-w-1001-xxxx)
+   ```
+
+   `$TOKEN` is the real api_token from `~/cicy-ai/global.json` — the SAME token
+   `cicy-fresh` injects into the 8208 instance, so it authes both.
+
+2. Check existing tabs (avoid a double-open), then open 8208 as a tab on profile 0:
+
+   ```bash
+   agent-electron --client <client_id> tabs 0
+   agent-electron --client <client_id> tab-open 0 "http://127.0.0.1:8208/?token=$TOKEN"
+   ```
+
+Notes:
+- accountIdx/`--idx` 0 is the desktop's default profile.
+- Prefer `tab-open` over `open`: `open` spawns a separate BrowserWindow; the user wants
+  it living in the tab-browser.
+- The 8208 instance self-reports the same version as the source tree (e.g. 2.3.54) — an
+  unreleased local build does not bump the version constant, so don't treat a matching
+  `/api/ping` version as "the old instance".
+
 ## Extension note
 
 There are two extension folders in the repo:

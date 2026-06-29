@@ -12,8 +12,8 @@ import { isCicyLiteAgent } from '../lib/agentType';
 import { electronRPC } from '../lib/speedup/rpc';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
-  Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
+  Terminal, Folder, X, Settings, Brain, Search,
+  LayoutList, Users, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
   Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -24,12 +24,9 @@ import { useDevRegister, devStore } from '../lib/devStore';
 import { useAuth } from '../contexts/AuthContext';
 import { SendingProvider } from '../contexts/SendingContext';
 // import ChatView from './chat/ChatView';
-import ChatHistoryView from './chat/ChatHistoryView';
 import TodoPanel from './TodoPanel';
 import FilesView from './files/FilesView';
 import KnowledgePanel from './knowledge/KnowledgePanel';
-import { WebFrame } from './WebFrame';
-import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
 import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
@@ -51,7 +48,7 @@ import AgentStack from './layout/AgentStack';
 import WeChatBindModal from './im/WeChatBindModal';
 import SettingsModal, { type SettingsSection } from './settings/SettingsModal';
 import { useDialogs } from './ui/Modal';
-import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
+import config, { defaultWorkerWorkspace, syncHostHomeFromPath, urls } from '../config';
 import apiService from '../services/api';
 import { loadHandled, serverAckedIds, resolveStatus } from './audit/auditHandled';
 import { sendCommandToTmux } from '../services/mockApi';
@@ -67,7 +64,6 @@ const cache = {
   set: (k: string, v: any) => localStorage.setItem(k, JSON.stringify(v)),
 };
 
-const LEFT_PANEL_WIDTH = 320;
 const CLI_DRAWER_WIDTH_KEY = 'ws_cliDrawerWidth';
 const CLI_CONTENT_MODE_KEY = 'ws_cliContentMode';
 const cliContentTabKey = (paneId: string) => `TeamPanel:${paneId}.paneId:cliContentTab`;
@@ -86,7 +82,6 @@ const CLI_DRAWER_MAX_WIDTH = 960;
 const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
 const GITHUB_ISSUES_URL = 'https://github.com/cicy-ai/cicy-code/issues';
 const UPGRADE_URL = 'https://cicy-ai.com/team/upgrade';
-const RENEW_URL = 'https://cicy-ai.com/team/pay';
 
 type MembershipCardState = {
   userId: string;
@@ -96,10 +91,6 @@ type MembershipCardState = {
   renewUrl: string | null;
   upgradeUrl: string | null;
 };
-
-function formatDateTime(ms: number) {
-  return new Date(ms).toLocaleString(undefined, { hour12: false });
-}
 
 function languageDisplayName(code: string): string {
   try {
@@ -137,13 +128,6 @@ function flagEmoji(code: string): string {
   return country.toUpperCase().replace(/./g, (ch) =>
     String.fromCodePoint(0x1F1A5 + ch.charCodeAt(0)),
   );
-}
-
-function formatClockTime(value: string | null) {
-  if (!value) return '';
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) return value;
-  return new Date(parsed).toLocaleTimeString(undefined, { hour12: false });
 }
 
 function focusTmuxPaneFrame(paneId: string) {
@@ -266,21 +250,6 @@ function membershipTone(level: string | null) {
   }
 }
 
-function membershipTagTone(level: string | null) {
-  switch ((level || '').trim().toLowerCase()) {
-    case 'trial':
-      return 'border-amber-300/40 bg-amber-300/15 text-amber-100';
-    case 'shared':
-      return 'border-sky-300/40 bg-sky-300/15 text-sky-100';
-    case 'pro_vm':
-      return 'border-emerald-300/40 bg-emerald-300/15 text-emerald-100';
-    case 'private_deploy':
-      return 'border-violet-300/40 bg-violet-300/15 text-violet-100';
-    default:
-      return 'border-white/15 bg-white/[0.06] text-zinc-200';
-  }
-}
-
 const DEFAULT_MEMBERSHIP_CARD: MembershipCardState = {
   userId: 'open-source',
   level: 'open_source',
@@ -290,13 +259,6 @@ const DEFAULT_MEMBERSHIP_CARD: MembershipCardState = {
   upgradeUrl: UPGRADE_URL,
 };
 
-const MEMBERSHIP_TAG_FALLBACK_KEY: Record<MembershipCardState['level'], string> = {
-  open_source: 'tagOpenSource',
-  trial: 'tagTrial',
-  shared: 'tagShared',
-  pro_vm: '',
-  private_deploy: 'tagPrivateDeploy',
-};
 
 function normalizeMembershipLevel(value: unknown): MembershipCardState['level'] {
   const raw = String(value || '').trim().toLowerCase();
@@ -356,11 +318,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     isShellOpen,
     toggleShellOpen,
   } = useApp();
-  const { token, hasPermission } = useAuth();
-  const { confirm, node: dialogsNode } = useDialogs();
+  const { token } = useAuth();
+  const { node: dialogsNode } = useDialogs();
   const paneId = agentId || 'w-1001';
   const fullPaneId = `${paneId}:main.0`;
-  const initialPaneIdRef = useRef(paneId);
 
   const mainTab = 'cli' as 'cli' | 'chat';
   const [leftPanelView, setLeftPanelView] = useState<LeftPanelView>(() => {
@@ -370,8 +331,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const ok: LeftPanelView[] = ['team', 'skills', 'customAgents', 'agents', 'todo', 'windows'];
     return ok.includes(v) ? v : null;
   });
-  const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [inspectorRequestedTab, setInspectorRequestedTab] = useState<InspectorTab>('overview');
+  const [, setInspectorOpen] = useState(false);
+  const [, setInspectorRequestedTab] = useState<InspectorTab>('overview');
   const [cliContentOpen, setCliContentOpen] = useState(() => cache.get(cliContentOpenKey(paneId), false) === true);
   const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>(() => normalizeCliContentTab(cache.get(cliContentTabKey(paneId), 'files')));
   const [lastSessionSubTab, setLastSessionSubTab] = useState<RequestViewTab>(() => {
@@ -428,8 +389,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
 
   const [status, setStatus] = useState('idle');
   const [contextUsage, setContextUsage] = useState<number | null>(null);
-  const [mouseMode, setMouseMode] = useState<'on' | 'off'>('off');
-  const [isRestarting, setIsRestarting] = useState(false);
+  const [mouseMode] = useState<'on' | 'off'>('off');
+  const [isRestarting] = useState(false);
   const [agents, setAgents] = useState<any[]>([]);
   const [boundAgents, setBoundAgents] = useState<any[]>([]);
   const [pollStatuses, setPollStatuses] = useState<Record<string, any>>({});
@@ -439,8 +400,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const paneDetailsRef = useRef<Record<string, any>>({});
   useEffect(() => { paneDetailsRef.current = paneDetails; }, [paneDetails]);
   const [activeTeamPaneId, setActiveTeamPaneId] = useState<Record<string, string>>(() => cache.get(TEAM_TERMINAL_ACTIVE_KEY, {}));
-  const [inspectorPaneId, setInspectorPaneId] = useState(paneId);
-  const [canvasLocateRequest, setCanvasLocateRequest] = useState<{ paneId: string; nonce: number; zoomToActual?: boolean } | null>(null);
+  const [, setInspectorPaneId] = useState(paneId);
+  const [, setCanvasLocateRequest] = useState<{ paneId: string; nonce: number; zoomToActual?: boolean } | null>(null);
   const agentWorkspaceRef = useRef(defaultWorkerWorkspace(paneId));
   const prevCanvasPaneIdsRef = useRef<string[] | null>(null);
   const initialCanvasRestoreScopeRef = useRef<string | null>(null);
@@ -467,10 +428,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setSystemResources(next);
   }, [setSystemResources]);
 
-  const handleOpenClawOpen = () => {
-    if (!token) return;
-    window.open(urls.openClaw(token), '_blank');
-  };
   const [agentDetail, setAgentDetail] = useState<any>(null);
   // Mirror the primary pane's detail into AppContext so any other component (footer
   // ModelPicker, secondary panels, etc.) can subscribe via useApp().activeAgentDetail
@@ -554,13 +511,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     return () => { cancelled = true; };
   }, []);
   const [chatWsLiveStatus, setChatWsLiveStatus] = useState('idle');
-  const [chatWsLiveText, setChatWsLiveText] = useState('');
+  const [, setChatWsLiveText] = useState('');
   const [chatWsHistoryVersion, setChatWsHistoryVersion] = useState(0);
   const [chatWsInspectorVersion, setChatWsInspectorVersion] = useState(0);
-  const [chatSuggestionText, setChatSuggestionText] = useState('');
-  const [chatSuggestionPending, setChatSuggestionPending] = useState(false);
-  const [chatSuggestionSending, setChatSuggestionSending] = useState(false);
-  const [filesTargetPaneId, setFilesTargetPaneId] = useState<string | null>(null);
+  const [, setChatSuggestionText] = useState('');
+  const [, setChatSuggestionPending] = useState(false);
   // Refs kept in sync so the chat-ws message handler (a stable useCallback)
   // can read the latest paneId / pageClientId / openCodeFile without taking
   // them as deps (which would invalidate the callback on every change and
@@ -576,15 +531,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [membershipPopoverPos, setMembershipPopoverPos] = useState<{ x: number; y: number } | null>(null);
   const membershipMenuRef = useRef<HTMLDivElement>(null);
   const membershipTriggerRef = useRef<HTMLButtonElement>(null);
-  const isApiOnlyRuntime = !!(agentDetail && agentDetail.capabilities?.supports_tmux === false);
 
-  const [showVoiceControl, setShowVoiceControl] = useState(false);
+  const [showVoiceControl] = useState(false);
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [voiceBtnPos, setVoiceBtnPos] = useState(() => cache.get('ws_voiceBtnPos', { x: 20, y: Math.max(60, window.innerHeight - 400) }));
 
-  const [panelPos, setPanelPos] = useState(() => cache.get('agent_panelPos', { x: 20, y: Math.max(60, window.innerHeight - 280) }));
-  const [panelSize, setPanelSize] = useState(() => cache.get('agent_panelSize', { width: 360, height: 220 }));
-  const [activeWinIdx, setActiveWinIdx] = useState('0');
+  const [panelPos] = useState(() => cache.get('agent_panelPos', { x: 20, y: Math.max(60, window.innerHeight - 280) }));
+  const [panelSize] = useState(() => cache.get('agent_panelSize', { width: 360, height: 220 }));
+  const [activeWinIdx] = useState('0');
   const activityBarRef = useRef<HTMLDivElement>(null);
 
   const addApp = (window as any).__desktopAddApp || (() => {});
@@ -799,21 +753,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     return () => window.removeEventListener('agent-status-change', handler as EventListener);
   }, []);
 
-  const handleRestart = async () => {
-    if (isApiOnlyRuntime) return;
-    if (!(await confirm({ body: `Restart ${paneId}?` }))) return;
-    setIsRestarting(true);
-    try { await apiService.restartPane(paneId); for (let i = 0; i < 30; i++) { await new Promise(r => setTimeout(r, 1000)); try { const { data } = await apiService.getTtydStatus(paneId); if (data.status === 'running') break; } catch {} } } catch { alert(t('alertRestartFailed')); } finally { setIsRestarting(false); }
-  };
-  const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
-  const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
-
   const toggleLeft = (p: 'team' | 'skills' | 'customAgents' | 'todo' | 'windows') => {
     setLeftPanelView(prev => prev === p ? null : p);
-  };
-
-  const toggleAgents = () => {
-    setLeftPanelView(prev => prev === 'agents' ? null : 'agents');
   };
 
   const canvasPaneIds = useMemo(() => {
@@ -985,13 +926,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setInspectorRequestedTab(nextTab);
     setInspectorOpen(true);
   }, []);
-  const toggleInspectorSettings = useCallback((targetPaneId: string) => {
-    const cleanPaneId = targetPaneId.replace(/:.*$/, '');
-    const shouldClose = inspectorOpen && inspectorPaneId === cleanPaneId && inspectorRequestedTab === 'settings';
-    setInspectorPaneId(cleanPaneId);
-    setInspectorRequestedTab('settings');
-    setInspectorOpen(!shouldClose);
-  }, [inspectorOpen, inspectorPaneId, inspectorRequestedTab]);
   useEffect(() => {
     initialCanvasRestoreScopeRef.current = null;
     initialStackSelectionScopeRef.current = null;
@@ -1337,11 +1271,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const topBarTitle = topBarDetail?.title
     || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === topBarPaneId)?.title
     || (topBarPaneId === paneId ? title : topBarPaneId);
-  const topBarWorkspace = topBarDetail?.workspace || defaultWorkerWorkspace(topBarPaneId);
-  const topBarIsApiOnlyRuntime = !!(
-    topBarDetail
-    && topBarDetail.capabilities?.supports_tmux === false
-  );
   const nativeFilesAgentId = (activeCliPaneId || paneId).split(':')[0];
   // Workspace folder follows the active agent, not the master. Each agent is
   // bound to its own workspace in agent_config; the backend /api/fs/* lookup
@@ -2400,6 +2329,7 @@ function AgentDrawer({ agents, paneId, statuses = {}, onSelectAgent, onAgentsCha
         use_proxy: values.use_proxy,
         project_template: values.project_template,
         role_template: values.role_template,
+        lang: values.lang,
       });
       const id = data?.pane_id || data?.id;
       if (id) {

@@ -95,12 +95,6 @@ function fmtGap(sec?: number): string {
   if (sec < 3600) return `${Math.round(sec / 60)}m`;
   return `${(sec / 3600).toFixed(1)}h`;
 }
-function diagChangedLabel(c: string, t: (k: string, d?: string) => string): string {
-  if (c === 'system') return t('anDiagSystem', 'system 变');
-  if (c === 'tools') return t('anDiagTools', 'tools 变');
-  if (c === 'first_msg') return t('anDiagFirstMsg', '历史头变');
-  return c;
-}
 // Plain-language status for one cache-diag row. Judged by ACTUAL hit rate, not
 // raw hash equality — a prefix can shift every request yet still hit ~99%.
 function diagReasonText(reason: string | undefined, t: (k: string, d?: string) => string): string {
@@ -167,12 +161,6 @@ const NODE_STYLE: Record<string, { dot: string; chip: string; labelKey: string; 
 const NODE_ABSENT: Record<string, { key: string; default: string }> = {
   skills: { key: 'anNodeAbsentSkills', default: '未检测到 skills 目录（本次请求未注入）' },
   mcp: { key: 'anNodeAbsentMcp', default: '未挂载 MCP server' },
-};
-
-const LEVEL_STYLE: Record<string, { border: string; dot: string; title: string }> = {
-  critical: { border: 'border-l-red-400/70', dot: 'bg-red-400', title: 'text-red-200' },
-  warn: { border: 'border-l-amber-400/70', dot: 'bg-amber-400', title: 'text-amber-200' },
-  info: { border: 'border-l-sky-400/60', dot: 'bg-sky-400', title: 'text-sky-200' },
 };
 
 // Minimal SVG sparkline (no chart lib). Scales values to the viewbox.

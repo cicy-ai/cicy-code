@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ShieldCheck, ShieldX, EyeOff, Bell, FileText, Zap, Mail, ListChecks, AlertTriangle, X, SlidersHorizontal, RotateCcw, Plus, Trash2, ChevronLeft } from 'lucide-react';
+import { Mail, ListChecks, AlertTriangle, X, SlidersHorizontal, RotateCcw, Plus, Trash2, ChevronLeft } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import Select from '../ui/Select';
 import apiService from '../../services/api';
@@ -34,25 +34,6 @@ const sevColor: Record<string, string> = {
   medium: 'text-amber-300 border-amber-500/30 bg-amber-500/10',
   low: 'text-zinc-400 border-zinc-500/20 bg-zinc-500/10',
 };
-const SEVERITIES = ['low', 'medium', 'high', 'critical'];
-
-function ActionBadge({ action }: { action?: string }) {
-  const { t } = useTranslation('audit');
-  const map: Record<string, { cls: string; icon: any; label: string }> = {
-    block: { cls: 'text-red-400 bg-red-500/10 border-red-500/30', icon: ShieldX, label: t('guardBlocked') },
-    redact: { cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30', icon: EyeOff, label: t('guardRedacted') },
-    notify: { cls: 'text-blue-400 bg-blue-500/10 border-blue-500/30', icon: Bell, label: t('logActionNotify') },
-    log: { cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20', icon: FileText, label: t('logActionLog') },
-  };
-  const m = map[action || 'log'] || map.log;
-  const Icon = m.icon;
-  return (
-    <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[12px] font-medium ${m.cls}`}>
-      <Icon size={10} />{m.label}
-    </span>
-  );
-}
-
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   return (
     <button
@@ -125,8 +106,6 @@ export default function PolicyTab() {
   const [err, setErr] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<'settings' | 'rules'>('rules');
-  const [patEdit, setPatEdit] = useState<Record<string, string>>({});
-  const [patType, setPatType] = useState<Record<string, string>>({});
   const [newRule, setNewRule] = useState<any | null>(null);
   const [testResults, setTestResults] = useState<Record<number, any>>({});
   const [saveErr, setSaveErr] = useState('');

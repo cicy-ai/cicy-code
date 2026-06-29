@@ -34,10 +34,11 @@ const cmBlendTheme = EditorView.theme({
   '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
 });
 import { Save, Send, RefreshCw, AlertTriangle, GitCompare, Download as DownloadIcon } from 'lucide-react';
-import { Download, Eye, FileCode } from 'lucide-react';
+import { Download, Eye, FileCode, Copy, Scissors, ClipboardPaste, WrapText, Check } from 'lucide-react';
 import { fsApi, fsBasename, FsError, FsReadResult, FsStatResponse, friendlyFsError } from './api';
 import { languageForPath } from './language';
 import { cicySearch } from './cmSearchPanel';
+import { CLIPBOARD_KEYMAP, cmCopySelection, cmCutSelection, cmPasteSelection } from './cmClipboard';
 import MarkdownPreview from './MarkdownPreview';
 import i18n from '../../i18n';
 
@@ -226,10 +227,6 @@ function bufferFromStat(stat: FsStatResponse, mode: EditorMode): BufferState {
   };
 }
 
-function isImageMime(mime: string): boolean {
-  return /^image\//.test(mime);
-}
-
 function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return `${n}B`;
   if (n < 1024) return `${n} B`;
@@ -262,13 +259,17 @@ export default function CodeEditor({
   const rootDataId = active ? 'code-editor' : 'code-editor-inactive';
 
   const isMarkdown = isMarkdownPath(path);
-  // Default to preview when opening a markdown file; user toggles via right-click.
-  const [previewMd, setPreviewMd] = useState<boolean>(isMarkdown);
+  // Default to source when opening a markdown file; user toggles to preview via right-click.
+  const [previewMd, setPreviewMd] = useState<boolean>(false);
   useEffect(() => {
-    setPreviewMd(isMarkdownPath(path));
+    setPreviewMd(false);
   }, [path]);
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // Soft-wrap toggle. Default OFF (long lines scroll horizontally); the editor
+  // context menu flips it. CodeMirror wraps only when EditorView.lineWrapping is
+  // in the extension set, so `false` here means no wrapping.
+  const [wrap, setWrap] = useState(false);
   const openMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setMenu({ x: e.clientX, y: e.clientY });
@@ -618,8 +619,8 @@ export default function CodeEditor({
   );
 
   const extensions = useMemo(
-    () => [...language, ...SEARCH_EXT, saveKeymap, cursorExt, cmBlendTheme],
-    [language, saveKeymap, cursorExt],
+    () => [...language, ...SEARCH_EXT, CLIPBOARD_KEYMAP, saveKeymap, cursorExt, cmBlendTheme, ...(wrap ? [EditorView.lineWrapping] : [])],
+    [language, saveKeymap, cursorExt, wrap],
   );
   // Read-only variant (large `text_large` files + non-workspace roots): no
   // language parser, not editable. MUST be memoized — building this array
@@ -629,8 +630,8 @@ export default function CodeEditor({
   // halt. Dropping `language` here is also what makes the "syntax highlight
   // off" banner actually true.
   const readonlyExtensions = useMemo(
-    () => [...SEARCH_EXT, saveKeymap, cursorExt, EditorView.editable.of(false), cmBlendTheme],
-    [saveKeymap, cursorExt],
+    () => [...SEARCH_EXT, saveKeymap, cursorExt, EditorView.editable.of(false), cmBlendTheme, ...(wrap ? [EditorView.lineWrapping] : [])],
+    [saveKeymap, cursorExt, wrap],
   );
 
   if (!path) {
@@ -803,6 +804,14 @@ export default function CodeEditor({
   // resolves writes per-root. Only oversized files stay read-only (the editor
   // can't safely hold them).
   const readOnly = heavy;
+
+  // Clipboard ops driven from the context menu, sharing the keymap helpers.
+  // CodeMirror keeps its selection even when the editor loses focus (the menu
+  // button steals focus), so the helpers read it off the live view.
+  const handleCopy = () => { const v = cmRef.current?.view; if (v) cmCopySelection(v); };
+  const handleCut = () => { const v = cmRef.current?.view; if (v) cmCutSelection(v); };
+  const handlePaste = () => { const v = cmRef.current?.view; if (v) cmPasteSelection(v); };
+
   return (
     <div
       data-id={rootDataId}
@@ -910,6 +919,12 @@ export default function CodeEditor({
           canDiff={!!onShowDiff}
           canPreviewMd={isMarkdown}
           previewing={previewMd}
+          canEdit={!readOnly}
+          wrapping={wrap}
+          onCopy={handleCopy}
+          onCut={handleCut}
+          onPaste={handlePaste}
+          onToggleWrap={() => setWrap((v) => !v)}
           onSave={handleSave}
           onSendToAgent={handleSendToAgent}
           onDownload={handleDownload}
@@ -930,6 +945,12 @@ interface EditorContextMenuProps {
   canDiff?: boolean;
   canPreviewMd?: boolean;
   previewing?: boolean;
+  canEdit?: boolean;
+  wrapping?: boolean;
+  onCopy?: () => void;
+  onCut?: () => void;
+  onPaste?: () => void;
+  onToggleWrap?: () => void;
   onSave?: () => void;
   onSendToAgent: () => void;
   onDownload: () => void;
@@ -940,7 +961,8 @@ interface EditorContextMenuProps {
 }
 
 function EditorContextMenu({
-  x, y, canSave, canDiff, canPreviewMd, previewing,
+  x, y, canSave, canDiff, canPreviewMd, previewing, canEdit, wrapping,
+  onCopy, onCut, onPaste, onToggleWrap,
   onSave, onSendToAgent, onDownload, onShowDiff, onReload, onTogglePreview,
   onClose,
 }: EditorContextMenuProps) {
@@ -966,6 +988,42 @@ function EditorContextMenu({
       style={{ left: pos.left, top: pos.top }}
       onPointerDown={(e) => e.stopPropagation()}
     >
+      {onCopy && (
+        <Item
+          icon={<Copy className="w-3.5 h-3.5" />}
+          onClick={() => { onCopy(); onClose(); }}
+          shortcut="Cmd+C"
+        >
+          {t('editorCopy', { defaultValue: '复制' })}
+        </Item>
+      )}
+      {canEdit && onCut && (
+        <Item
+          icon={<Scissors className="w-3.5 h-3.5" />}
+          onClick={() => { onCut(); onClose(); }}
+          shortcut="Cmd+X"
+        >
+          {t('editorCut', { defaultValue: '剪切' })}
+        </Item>
+      )}
+      {canEdit && onPaste && (
+        <Item
+          icon={<ClipboardPaste className="w-3.5 h-3.5" />}
+          onClick={() => { onPaste(); onClose(); }}
+          shortcut="Cmd+V"
+        >
+          {t('editorPaste', { defaultValue: '粘贴' })}
+        </Item>
+      )}
+      {onToggleWrap && (
+        <Item
+          icon={wrapping ? <Check className="w-3.5 h-3.5" /> : <WrapText className="w-3.5 h-3.5" />}
+          onClick={() => { onToggleWrap(); onClose(); }}
+        >
+          {t('editorWordWrap', { defaultValue: '自动换行' })}
+        </Item>
+      )}
+      {(onCopy || onToggleWrap) && <div className="my-1 border-t border-zinc-700/70" />}
       {canSave && onSave && (
         <Item
           icon={<Save className="w-3.5 h-3.5" />}

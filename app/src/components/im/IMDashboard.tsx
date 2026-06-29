@@ -806,7 +806,6 @@ export default function IMDashboard({ leftMount, rightMount }: {
   );
 
   /* ───────── RIGHT PANEL ───────── */
-  const platformDef = platforms.find((p) => p.kind === selected?.platform) || null;
   const isTelegram = selected?.platform === 'telegram';
   const isWeChat = selected?.platform === 'wechat';
   const testOk = !!(testRes && (testRes.ok || testRes.success));

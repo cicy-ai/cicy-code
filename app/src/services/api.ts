@@ -241,7 +241,6 @@ const api = {
   saveEmailConfig: (cfg: any) => http.post('/api/settings/email', cfg),
   getApiToken: () => http.get('/api/settings/token'),
   refreshApiToken: (body?: { to?: string }) => http.post('/api/settings/token/refresh', body || {}),
-  getOpenClawGateway: () => http.get('/api/openclaw/gateway'),
 
   getProviders: () => http.get('/api/providers'),
   createProvider: (data: any) => http.post('/api/providers', data),

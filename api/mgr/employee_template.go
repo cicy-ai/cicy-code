@@ -18,6 +18,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -103,25 +104,24 @@ func ensureEmployeeTemplates() {
 			}
 		}
 	}
-	entries, err := agentRoleTemplatesFS.ReadDir("embed/agent-roles")
+	roleDirs, err := agentRoleTemplatesFS.ReadDir("embed/agent-roles")
 	if err != nil {
 		return
 	}
 	out := employeeTemplatesFile{Templates: map[string]employeeTemplate{}}
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".md" {
+	for _, rd := range roleDirs {
+		if !rd.IsDir() || reservedTemplateSlugs[rd.Name()] {
 			continue
 		}
-		raw, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + e.Name())
+		metaRaw, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + rd.Name() + "/meta.yaml")
 		if err != nil {
 			continue
 		}
-		slug := sanitizeTemplateSlug(e.Name())
-		t := employeeTemplate{Greeting: extractOpeningSection(string(raw))}
-		if fm := parseLiteFrontmatter(string(raw)); fm.hasTools {
-			t.Tools = fm.tools
+		var m roleMeta
+		if yaml.Unmarshal(metaRaw, &m) != nil {
+			continue
 		}
-		out.Templates[slug] = t
+		out.Templates[rd.Name()] = employeeTemplate{Greeting: strings.TrimSpace(m.Greeting), Tools: m.Tools}
 	}
 	if len(out.Templates) == 0 {
 		return
