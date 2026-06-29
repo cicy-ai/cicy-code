@@ -194,6 +194,11 @@ func validateLiteParam(pname string, spec liteToolParam, input map[string]interf
 // liteToolSafeEnv returns a minimal environment for custom-tool subprocesses:
 // PATH/HOME/locale only. NO api tokens, NO proxy vars, NO X_AGENT_* identity —
 // a custom tool must not inherit the server's credentials or the MITM proxy.
+//
+// CICY_API_PORT IS passed through: skill-backed custom tools (cicy-todo /
+// cicy-agent / …) must target THIS instance's API, not the hardcoded 8008
+// default. It's a port number, not a credential — the token itself stays washed
+// (skills read it from ~/cicy-ai/global.json, which HOME still resolves).
 func liteToolSafeEnv() []string {
 	keep := []string{"PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR",
 		"SystemRoot", "USERPROFILE", "TEMP", "TMP"} // last four for Windows
@@ -203,5 +208,6 @@ func liteToolSafeEnv() []string {
 			env = append(env, k+"="+v)
 		}
 	}
+	env = append(env, "CICY_API_PORT="+runtimeAPIBasePort())
 	return env
 }

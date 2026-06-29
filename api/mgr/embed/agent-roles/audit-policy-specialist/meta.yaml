@@ -1,5 +1,5 @@
 profile: dispatcher
-tools: [coordinate, audit, shell]
+tools: [core, audit]
 name: Audit Policy Specialist
 name_zh: 审计策略专员
 greeting: |

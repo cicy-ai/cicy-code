@@ -1,5 +1,5 @@
 profile: dispatcher
-tools: [coordinate, shell]
+tools: [core]
 name: Knowledge Specialist
 name_zh: 知识专员
 greeting: |

@@ -144,39 +144,19 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	// dispatcher/liaison profiles and no `profile:` frontmatter — identity comes
 	// purely from the system prompt + selected tools.
 	profileKey := "assistant"
-	prof := cfg.Profiles[profileKey]
 
-	// grantable: the ceiling of what this instance may use.
-	grantGroups := append([]string{}, prof.GrantableGroups...)
-	grantGroups = append(grantGroups, cfg.Grants.ByProfile[profileKey]...)
-	grantGroups = append(grantGroups, cfg.Grants.ByAgent[shortID]...)
-	grantable := expandGroups(grantGroups, cfg.ToolGroups)
-
-	// selected groups, in priority order (employees.yaml + profile-default both
-	// RETIRED — no fallback):
-	//   workspace AGENTS.md frontmatter `tools:` >
-	//   the role's own definition: role/meta.yaml `tools:` (library roles) or a
-	//     custom agent's AGENT.md `tools:` (user-authored roles).
-	// An agent with neither gets NO tools. Still narrowed by `grantable` below
-	// (security model: effective = selected ∩ grantable, L3 narrow-only).
+	// Tools come ONLY from the role's own definition — role/meta.yaml `tools:`
+	// (library roles) or a custom agent's AGENT.md `tools:` (user-authored). No
+	// profiles, no grants, no grantable ceiling, no AGENTS.md-frontmatter override:
+	// 以 role 为主. enabled = expand(the role's selected groups).
 	roleSlug := employeeRoleSlug(shortID) // this agent's role-template slug
-	var selectGroups []string
-	if t := loadRoleMeta(roleSlug).Tools; len(t) > 0 {
-		selectGroups = t
-	} else if ca, ok := customAgentFor(roleSlug); ok && len(ca.Tools) > 0 {
-		selectGroups = ca.Tools
-	}
-	if fm.hasTools {
-		selectGroups = fm.tools
-	}
-	selected := expandGroups(selectGroups, cfg.ToolGroups)
-
-	enabled := map[string]bool{}
-	for name := range selected {
-		if grantable[name] {
-			enabled[name] = true
+	selectGroups := loadRoleMeta(roleSlug).Tools
+	if len(selectGroups) == 0 {
+		if ca, ok := customAgentFor(roleSlug); ok {
+			selectGroups = ca.Tools
 		}
 	}
+	enabled := expandGroups(selectGroups, cfg.ToolGroups)
 
 	// Custom tools available to this instance (subset of enabled that are
 	// declared custom).

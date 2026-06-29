@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1094,84 +1095,20 @@ func cicyToolDefs(cfg liteConfig) []M {
 	return append(out, liteCustomToolDefs(cfg)...)
 }
 
+// cicyAllToolDefs holds the IN-PROCESS built-in tool defs. There are only two:
+// `skill` (discover + read any installed skill's SKILL.md — the cicy-todo /
+// cicy-agent / … ecosystem) and `shell` (run a skill's CLI, or anything else).
+// No per-skill hardcoded tools: 装个 skill 即可用, 改 skill 即更新.
 func cicyAllToolDefs() []M {
 	return append([]M{}, []M{
 		{
-			"name":        "todo_add",
-			"description": "Record a new task in the shared todo list. Optionally assign it to an agent by short pane id (e.g. w-10003).",
+			"name":        "skill",
+			"description": "发现并读取已安装的 skill(cicy-todo 记 todo、cicy-agent 给别的 agent 派活/抓进度、等等)。不带 name = 列出所有 skill 及一句话简介;带 name = 返回该 skill 的 SKILL.md 用法。读到用法后,用 `shell` 跑它的 CLI(如 `cicy-todo add \"...\"`、`cicy-agent msg w-xxx \"...\"`)。",
 			"input_schema": M{
 				"type": "object",
 				"properties": M{
-					"title":   M{"type": "string", "description": "Short imperative task title"},
-					"pane_id": M{"type": "string", "description": "Optional owner agent short id"},
+					"name": M{"type": "string", "description": "skill 名(如 cicy-todo);留空则列出全部已装 skill"},
 				},
-				"required": []string{"title"},
-			},
-		},
-		{
-			"name":        "todo_list",
-			"description": "List todos. Optional status filter: todo|test|done|dropped.",
-			"input_schema": M{
-				"type": "object",
-				"properties": M{
-					"status": M{"type": "string"},
-				},
-			},
-		},
-		{
-			"name":        "todo_update",
-			"description": "Update a todo's status (todo|test|done|dropped) and/or reassign its owner.",
-			"input_schema": M{
-				"type": "object",
-				"properties": M{
-					"id":      M{"type": "string", "description": "Todo id or unique prefix"},
-					"status":  M{"type": "string"},
-					"pane_id": M{"type": "string", "description": "New owner agent short id"},
-				},
-				"required": []string{"id"},
-			},
-		},
-		{
-			"name":        "agent_list",
-			"description": "List all agents in the workspace: short id, title, agent type, active flag.",
-			"input_schema": M{
-				"type":       "object",
-				"properties": M{},
-			},
-		},
-		{
-			"name":        "agent_msg",
-			"description": "Send a task or question to another agent's terminal. The agent will act on it asynchronously.",
-			"input_schema": M{
-				"type": "object",
-				"properties": M{
-					"pane_id": M{"type": "string", "description": "Target agent short id, e.g. w-10003"},
-					"text":    M{"type": "string", "description": "The message / task brief to send"},
-				},
-				"required": []string{"pane_id", "text"},
-			},
-		},
-		{
-			"name":        "agent_capture",
-			"description": "Capture the last lines of another agent's terminal to check its progress.",
-			"input_schema": M{
-				"type": "object",
-				"properties": M{
-					"pane_id": M{"type": "string", "description": "Target agent short id"},
-					"lines":   M{"type": "integer", "description": "How many trailing lines (default 40, max 200)"},
-				},
-				"required": []string{"pane_id"},
-			},
-		},
-		{
-			"name":        "agent_online",
-			"description": "把一个离线/未上线的 agent 拉进团队并上线(组队官能力)。绑定到主控 w-1001;cicy 角色直接热身上线可对话,CLI 角色(claude/codex 等)需运行时已安装才能拉起终端——未安装会返回提示,让你先找运维安装。用 agent_list 看「就绪=否」的 agent 后用本工具拉上线。",
-			"input_schema": M{
-				"type": "object",
-				"properties": M{
-					"pane_id": M{"type": "string", "description": "要拉上线的 agent 短 id,如 w-992"},
-				},
-				"required": []string{"pane_id"},
 			},
 		},
 		{
@@ -1188,6 +1125,82 @@ func cicyAllToolDefs() []M {
 			},
 		},
 	}...)
+}
+
+// cicySkillTool implements the in-process `skill` tool. With no name it lists
+// every installed skill (name + one-line description scanned from each SKILL.md
+// frontmatter); with a name it returns that skill's SKILL.md (+ references/help.md)
+// so the agent learns its CLI and then runs it via `shell`. Reads SKILL.md the
+// same way claude's Skill tool does — zero per-skill hardcoding.
+func cicySkillTool(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		entries, err := os.ReadDir(cicySkillsDir)
+		if err != nil {
+			return "(没有已安装的 skill)"
+		}
+		var lines []string
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			md, err := os.ReadFile(filepath.Join(cicySkillsDir, e.Name(), "SKILL.md"))
+			if err != nil {
+				continue
+			}
+			n, desc := cicySkillMeta(string(md))
+			if n == "" {
+				n = e.Name()
+			}
+			lines = append(lines, "- "+n+": "+desc)
+		}
+		if len(lines) == 0 {
+			return "(没有已安装的 skill)"
+		}
+		sort.Strings(lines)
+		return "已安装的 skill —— 用 skill(name) 看用法,再用 shell 跑它的 CLI:\n" + strings.Join(lines, "\n")
+	}
+	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		return "error: bad skill name"
+	}
+	md, err := os.ReadFile(filepath.Join(cicySkillsDir, name, "SKILL.md"))
+	if err != nil {
+		return "error: skill 未找到: " + name + "(用不带参数的 skill 列出已装的)"
+	}
+	out := string(md)
+	if help, herr := os.ReadFile(filepath.Join(cicySkillsDir, name, "references", "help.md")); herr == nil && len(help) > 0 {
+		out += "\n\n===== references/help.md =====\n" + string(help)
+	}
+	return out
+}
+
+// cicySystemBlocks builds the `system` field: the role's system.md base, plus a
+// block listing the installed skills (name + one-line description) so the agent
+// knows what's available without calling the skill tool first — like claude lists
+// available skills in context. Byte-stable unless skills change, so it caches.
+func cicySystemBlocks(systemPrompt string) []M {
+	blocks := []M{{"type": "text", "text": systemPrompt}}
+	if list := cicySkillTool(""); strings.TrimSpace(list) != "" && !strings.HasPrefix(list, "(") {
+		blocks = append(blocks, M{"type": "text", "text": list})
+	}
+	blocks[len(blocks)-1]["cache_control"] = M{"type": "ephemeral"}
+	return blocks
+}
+
+// cicySkillMeta pulls name + description from a SKILL.md YAML frontmatter.
+func cicySkillMeta(md string) (name, desc string) {
+	for _, ln := range strings.Split(md, "\n") {
+		t := strings.TrimSpace(ln)
+		switch {
+		case strings.HasPrefix(t, "name:"):
+			name = strings.TrimSpace(strings.TrimPrefix(t, "name:"))
+		case strings.HasPrefix(t, "description:"):
+			desc = strings.TrimSpace(strings.TrimPrefix(t, "description:"))
+		case t == "---" && (name != "" || desc != ""):
+			return
+		}
+	}
+	return
 }
 
 // platformShellArgv builds the argv to run a single command string through the
@@ -1214,235 +1227,8 @@ func cicyRunTool(selfShortID, name string, input map[string]interface{}, cfg lit
 		return strings.TrimSpace(v)
 	}
 	switch name {
-	case "todo_add":
-		title := str("title")
-		if title == "" {
-			return "error: title required"
-		}
-		ws := masterWorkspaceForTodo()
-		if ws == "" {
-			return "error: master workspace unavailable"
-		}
-		todoMu.Lock()
-		defer todoMu.Unlock()
-		todos, err := loadTodos(ws)
-		if err != nil {
-			return "error: " + err.Error()
-		}
-		// Default the owner to the dispatcher's own pane: an empty PaneID is
-		// invisible in every pane-filtered view (UI lists by pane), so an
-		// "unassigned" todo would silently disappear until reassigned.
-		owner := shortPaneID(normPaneID(str("pane_id")))
-		if owner == "" {
-			owner = selfShortID
-		}
-		now := time.Now().UTC().Truncate(time.Second)
-		item := Todo{
-			ID:        nextTodoID(todos),
-			Title:     title,
-			Status:    "todo",
-			PaneID:    owner,
-			CreatorID: selfShortID,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-		todos = append(todos, item)
-		if err := saveTodos(ws, todos); err != nil {
-			return "error: " + err.Error()
-		}
-		return fmt.Sprintf("created todo #%s: %s (owner=%s)", item.ID, item.Title, orDash(item.PaneID))
-	case "todo_list":
-		ws := masterWorkspaceForTodo()
-		if ws == "" {
-			return "error: master workspace unavailable"
-		}
-		todoMu.Lock()
-		todos, err := loadTodos(ws)
-		todoMu.Unlock()
-		if err != nil {
-			return "error: " + err.Error()
-		}
-		filter := str("status")
-		sortTodos(todos)
-		var b strings.Builder
-		count := 0
-		for _, t := range todos {
-			if filter != "" && t.Status != filter {
-				continue
-			}
-			fmt.Fprintf(&b, "#%s [%s] %s (owner=%s)\n", t.ID, t.Status, t.Title, orDash(t.PaneID))
-			count++
-		}
-		if count == 0 {
-			return "no todos" + map[bool]string{true: " with status " + filter, false: ""}[filter != ""]
-		}
-		return strings.TrimRight(b.String(), "\n")
-	case "todo_update":
-		ws := masterWorkspaceForTodo()
-		if ws == "" {
-			return "error: master workspace unavailable"
-		}
-		todoMu.Lock()
-		defer todoMu.Unlock()
-		todos, err := loadTodos(ws)
-		if err != nil {
-			return "error: " + err.Error()
-		}
-		idx, err := resolveTodoID(todos, str("id"))
-		if err != nil {
-			return "error: " + err.Error()
-		}
-		changed := false
-		if status := str("status"); status != "" {
-			if !todoValidStatus[status] {
-				return "error: invalid status " + status
-			}
-			todos[idx].Status = status
-			changed = true
-		}
-		if pane := str("pane_id"); pane != "" {
-			todos[idx].PaneID = shortPaneID(normPaneID(pane))
-			changed = true
-		}
-		if !changed {
-			return "error: nothing to update (pass status and/or pane_id)"
-		}
-		todos[idx].UpdatedAt = time.Now()
-		if err := saveTodos(ws, todos); err != nil {
-			return "error: " + err.Error()
-		}
-		return fmt.Sprintf("updated todo #%s: [%s] %s (owner=%s)", todos[idx].ID, todos[idx].Status, todos[idx].Title, orDash(todos[idx].PaneID))
-	case "agent_list":
-		// Roster for HR/PM scheduling. Each row carries the metadata HR needs to
-		// decide who to bring on and what setup is required:
-		//   id | 名称 | type | 类型 | 就绪 | 安装 | 网关 | 模型
-		// - 类型: lite = cicy headless (in-process, no CLI); CLI = needs a runtime.
-		// - 就绪: cicy → server-side session warmed; CLI → tmux pane alive.
-		// - 安装: cicy → —; CLI → 已装 / 需装(HR asks 运维 to install 需装 ones).
-		rows, err := store.Query("SELECT pane_id, title, agent_type, COALESCE(use_custom_gateway,0), COALESCE(default_model,'') FROM agent_config ORDER BY ttyd_port DESC, pane_id")
-		if err != nil {
-			return "error: " + err.Error()
-		}
-		defer rows.Close()
-		live := liveSessionSet()
-		var b strings.Builder
-		b.WriteString("id | 名称 | type | 类型 | 就绪 | 安装 | 网关 | 模型\n")
-		for rows.Next() {
-			var paneID, title, agentType, model string
-			var useGateway int
-			if rows.Scan(&paneID, &title, &agentType, &useGateway, &model) != nil {
-				continue
-			}
-			short := shortPaneID(paneID)
-			kind, ready, install := "CLI", "否", "需装"
-			if normalizeAgentType(agentType) == "cicy" {
-				kind, install = "lite", "—"
-				if cicySessionRegistered(short) {
-					ready = "就绪"
-				}
-			} else {
-				if cmd := cliCommandForAgentType(agentType); cmd == "" {
-					install = "—"
-				} else if _, err := exec.LookPath(cmd); err == nil {
-					install = "已装"
-				}
-				if live[short] {
-					ready = "就绪"
-				}
-			}
-			gw := "否"
-			if useGateway != 0 {
-				gw = "是"
-			}
-			if strings.TrimSpace(model) == "" {
-				model = "默认"
-			}
-			fmt.Fprintf(&b, "%s | %s | %s | %s | %s | %s | %s | %s\n", short, title, agentType, kind, ready, install, gw, model)
-		}
-		out := strings.TrimRight(b.String(), "\n")
-		if out == "" || !strings.Contains(out, "\n") {
-			return "no agents"
-		}
-		return out
-	case "agent_msg":
-		pane := shortPaneID(normPaneID(str("pane_id")))
-		text := str("text")
-		if pane == "" || text == "" {
-			return "error: pane_id and text required"
-		}
-		if pane == selfShortID {
-			return "error: refusing to message myself"
-		}
-		if err := sendTextToPane(pane+":main.0", text, true); err != nil {
-			return "error: " + err.Error()
-		}
-		return "dispatched to " + pane
-	case "agent_capture":
-		pane := shortPaneID(normPaneID(str("pane_id")))
-		if pane == "" {
-			return "error: pane_id required"
-		}
-		lines := 40
-		if v, ok := input["lines"].(float64); ok && int(v) > 0 {
-			lines = int(v)
-		}
-		if lines > 200 {
-			lines = 200
-		}
-		out, err := runTmux("capture-pane", "-t", pane+":main.0", "-p", "-S", fmt.Sprintf("-%d", lines))
-		if err != nil {
-			return "error: " + err.Error()
-		}
-		out = strings.TrimRight(out, "\n ")
-		if out == "" {
-			return "(terminal empty)"
-		}
-		return out
-	case "agent_online":
-		pane := shortPaneID(normPaneID(str("pane_id")))
-		if pane == "" {
-			return "error: pane_id required"
-		}
-		if pane == selfShortID {
-			return "error: 这是我自己,无需拉"
-		}
-		var agentType, workspace string
-		if err := store.QueryRow(
-			"SELECT COALESCE(agent_type,''), COALESCE(workspace,'') FROM agent_config WHERE pane_id=?",
-			pane+":main.0",
-		).Scan(&agentType, &workspace); err != nil {
-			return "error: 找不到 agent " + pane + "(先用 agent_list 确认 id)"
-		}
-		isCicy := normalizeAgentType(agentType) == "cicy"
-		// CLI gate: the runtime must be installed before a pane can launch. If it
-		// isn't, stop here and tell HR to have 运维 install it — don't half-bind.
-		if !isCicy {
-			if cmd := cliCommandForAgentType(agentType); cmd != "" {
-				if _, err := exec.LookPath(cmd); err != nil {
-					return fmt.Sprintf("%s 是 %s 型 CLI,运行时 %s 还没装,无法上线。先用 agent_msg 让运维安装 %s,装好我再拉。", pane, agentType, cmd, cmd)
-				}
-			}
-		}
-		// Pull onto the team: activate + bind under master (w-1001).
-		store.Exec(fmt.Sprintf("UPDATE agent_config SET active=1, updated_at=%s WHERE pane_id=? AND COALESCE(active,0)=0", store.Now()), pane+":main.0")
-		ensureWorkerBoundToPrimary(pane)
-		if isCicy {
-			if workspace == "" {
-				workspace = paneWorkspace(pane)
-			}
-			if workspace == "" {
-				return "error: " + pane + " 无 workspace,已绑定主控但无法热身,请联系运维排查"
-			}
-			getCicySession(pane, workspace) // warm → register → online
-			if cicySessionRegistered(pane) {
-				return pane + " 已拉进团队并上线(cicy 已热身,现在可直接对话)"
-			}
-			return pane + " 已绑定主控,但热身未注册,请稍后重试或联系运维"
-		}
-		if err := ensureAgentRunningByPaneID(pane + ":main.0"); err != nil {
-			return "error: 已绑定主控,但拉起终端失败:" + err.Error()
-		}
-		return pane + " 已拉进团队并上线(已绑定主控 + 拉起终端,现在能打开了)"
+	case "skill":
+		return cicySkillTool(str("name"))
 	case "shell":
 		command := str("command")
 		if command == "" {
@@ -2826,10 +2612,7 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 			// system+tools), so Anthropic-protocol providers hit explicit
 			// caching and DeepSeek hits its implicit prefix cache; the gateway's
 			// DeepSeek adapter flattens/drops cache_control harmlessly.
-			"system": []M{{
-				"type": "text", "text": cfg.systemPrompt,
-				"cache_control": M{"type": "ephemeral"},
-			}},
+			"system":   cicySystemBlocks(cfg.systemPrompt),
 			"messages": cicyInjectRoleContext(cicyRequestMessages(session.messages), cfg.roleContext),
 		}
 		// Pure-chat roles (assistant/support/sales) enable no tools — omit the

@@ -76,34 +76,20 @@ type liteConfigFile struct {
 // unchanged when the JSON file is absent or only partially overrides. ─────────
 
 func defaultLiteConfig() liteConfigFile {
+	// lite-config.json defines ONLY tools now: tool GROUPS (group → tool names)
+	// + the tool DEFINITIONS (customTools). No profiles/grants/grantable — a
+	// role's meta.yaml `tools:` is the single source of what it gets.
+	//
+	// cicy's tools are deliberately tiny: `skill` (discover + read any installed
+	// skill's SKILL.md — the cicy-todo / cicy-agent / … ecosystem) and `shell`
+	// (run the skill's CLI, or anything else). No per-skill hardcoded tools —
+	// 装个 skill 即可用, 改 skill 即更新.
 	return liteConfigFile{
-		Profiles: map[string]liteProfileCfg{
-			// ONE universal base. Every cicy agent is an "assistant"; its identity
-			// and behavior come entirely from its system prompt + selected tools —
-			// no dispatcher/liaison profiles, no a2a/external concept anymore.
-			"assistant": {Name: "CiCy", SystemBase: "@assistant",
-				DefaultGroups:   []string{"coordinate"},
-				GrantableGroups: []string{"coordinate", "onboard", "shell", "handoff"}},
-		},
 		ToolGroups: map[string][]string{
-			"coordinate": {"todo_add", "todo_list", "todo_update", "agent_list", "agent_msg", "agent_capture"},
-			"handoff":    {"agent_list", "agent_msg", "agent_capture"},
-			// HR-only: pull an offline/standalone agent onto the team and bring it
-			// online (bind under master; cicy → warm session, CLI → launch pane).
-			"onboard": {"agent_online"},
-			// A real shell (PowerShell on Windows, bash on unix) — e.g. the team
-			// helper installing Docker + cicy-code hands-on.
-			"shell": {"shell"},
-			// audit: the 审计策略专员 (audit advisor) calls the /api/audit/* API as
-			// native tools. Declared here (image default), grantable to every
-			// assistant, selected only by the 审计策略专员 charter's `tools:` line.
+			"core":  {"skill", "shell"},
 			"audit": auditGroupToolNames(),
 		},
 		CustomTools: auditCustomTools(),
-		// Grant the audit group to every assistant (the ceiling). Only the
-		// 审计策略专员 charter actually selects it, so no other agent gets the
-		// audit tools unless its charter opts in.
-		Grants: liteGrants{ByAgent: map[string][]string{}, ByProfile: map[string][]string{"assistant": {"audit"}}},
 	}
 }
 

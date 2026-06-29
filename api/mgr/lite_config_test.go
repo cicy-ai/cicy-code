@@ -7,12 +7,10 @@ import (
 	"testing"
 )
 
-// writeLiteConfig points the loader at a temp config file and resets the cache.
-// Returns a cleanup that restores the default path resolution.
+// withLiteConfig points the loader at a temp config file and resets the cache.
 func withLiteConfig(t *testing.T, cfg liteConfigFile) {
 	t.Helper()
 	dir := t.TempDir()
-	// cicyRootDir/db/lite-config.json is the path; override cicyRootDir.
 	prev := cicyRootDir
 	cicyRootDir = dir
 	if err := os.MkdirAll(filepath.Join(dir, "db"), 0o755); err != nil {
@@ -37,130 +35,25 @@ func writeAgentsMD(t *testing.T, frontmatter string) string {
 	return ws
 }
 
-// ── default behaviour unchanged (migration safety) ───────────────────────────
+// ── tools come ONLY from the role (meta.yaml / custom AGENT.md) ───────────────
+// No profiles, no grants, no grantable, no AGENTS.md-frontmatter, no
+// profile-default — an agent with no role gets NO tools.
 
-func TestLiteDefaultsReproduceBuiltins(t *testing.T) {
+func TestLiteNoRoleNoTools(t *testing.T) {
 	prev := cicyRootDir
 	cicyRootDir = t.TempDir() // no config file → pure defaults
 	resetLiteConfigCache()
 	defer func() { cicyRootDir = prev; resetLiteConfigCache() }()
 
-	// No role + no frontmatter → NO tools (employees.yaml + profile-default both
-	// retired; tools come only from role meta.yaml / custom AGENT.md / frontmatter).
 	cfg := resolveLiteConfig("w-1", writeAgentsMD(t, ""))
 	if cfg.profile != "assistant" {
 		t.Fatalf("profile=%q want assistant", cfg.profile)
 	}
 	if len(cfg.enabledTools) != 0 {
-		t.Errorf("agent with no role/frontmatter should have NO tools, got %v", cfg.enabledTools)
+		t.Errorf("agent with no role should have NO tools, got %v", cfg.enabledTools)
 	}
 	if cfg.external {
 		t.Error("no agent is external anymore")
-	}
-
-	// frontmatter `profile:` is ignored now — every agent is an assistant.
-	l := resolveLiteConfig("w-4", writeAgentsMD(t, "---\nprofile: liaison\n---\n"))
-	if l.profile != "assistant" {
-		t.Errorf("frontmatter profile must be ignored, got %q", l.profile)
-	}
-	if l.external {
-		t.Error("liaison/external is gone")
-	}
-
-	// tools: drives the selection.
-	a := resolveLiteConfig("w-3", writeAgentsMD(t, "---\ntools: [coordinate]\n---\n"))
-	if !a.enabledTools["todo_add"] {
-		t.Error("tools:[coordinate] should enable coordinate")
-	}
-}
-
-// ── L4: session/injection cannot grant tools (tools computed pre-turn) ────────
-// (Structural: resolveLiteConfig takes only shortID+workspace, never message
-//  text. This test documents that the enabled set is independent of any chat
-//  content by resolving twice and asserting determinism.)
-func TestLiteToolsetIndependentOfSession(t *testing.T) {
-	prev := cicyRootDir
-	cicyRootDir = t.TempDir()
-	resetLiteConfigCache()
-	defer func() { cicyRootDir = prev; resetLiteConfigCache() }()
-	ws := writeAgentsMD(t, "---\ntools: [coordinate]\n---\n")
-	a := resolveLiteConfig("w-1", ws)
-	b := resolveLiteConfig("w-1", ws)
-	if len(a.enabledTools) == 0 || len(a.enabledTools) != len(b.enabledTools) {
-		t.Fatalf("toolset must be deterministic across repeated resolution: %v vs %v", a.enabledTools, b.enabledTools)
-	}
-	for k := range a.enabledTools {
-		if !b.enabledTools[k] {
-			t.Fatalf("nondeterministic toolset: missing %q on second resolve", k)
-		}
-	}
-}
-
-// ── L3: frontmatter can only NARROW, never escalate ──────────────────────────
-
-func TestLiteFrontmatterCannotEscalate(t *testing.T) {
-	withLiteConfig(t, liteConfigFile{
-		Profiles: map[string]liteProfileCfg{
-			"assistant": {Name: "a", SystemBase: "@assistant",
-				DefaultGroups: nil, GrantableGroups: []string{"coordinate"}},
-		},
-		ToolGroups: map[string][]string{
-			"coordinate": {"todo_add", "agent_msg"},
-			"danger":     {"shell_exec"},
-		},
-		CustomTools: map[string]liteCustomTool{
-			"shell_exec": {Description: "x", Argv: []string{"echo"}},
-		},
-		Grants: liteGrants{},
-	})
-	// assistant tries to grab a non-grantable group via frontmatter.
-	ws := writeAgentsMD(t, "---\nprofile: assistant\ntools: [coordinate, danger, shell_exec]\n---\n")
-	cfg := resolveLiteConfig("w-1", ws)
-	if cfg.enabledTools["shell_exec"] {
-		t.Error("frontmatter escalated to a non-grantable custom tool — SECURITY HOLE")
-	}
-	if !cfg.enabledTools["todo_add"] {
-		t.Error("grantable coordinate should still be enabled")
-	}
-	if len(cfg.customTools) != 0 {
-		t.Errorf("no custom tool should be active, got %v", cfg.customTools)
-	}
-}
-
-// ── grants escalate only within config (L1), scoped per agent ─────────────────
-
-func TestLiteGrantsScopedByAgent(t *testing.T) {
-	withLiteConfig(t, liteConfigFile{
-		Profiles: map[string]liteProfileCfg{
-			"assistant": {Name: "a", SystemBase: "@assistant",
-				DefaultGroups: []string{"coordinate"}, GrantableGroups: []string{"coordinate"}},
-		},
-		ToolGroups: map[string][]string{
-			"coordinate": {"todo_add"},
-			"qa-ui":      {"chrome_eval"},
-		},
-		CustomTools: map[string]liteCustomTool{
-			"chrome_eval": {Description: "x", Argv: []string{"agent-chrome", "eval", "{expr}"},
-				Params: map[string]liteToolParam{"expr": {Type: "string", Required: true}}},
-		},
-		Grants: liteGrants{
-			ByAgent: map[string][]string{"w-qa": {"qa-ui"}}, // only this agent may select qa-ui
-		},
-	})
-
-	// granted agent gets the custom tool, but only when frontmatter selects it.
-	wsSel := writeAgentsMD(t, "---\ntools: [coordinate, qa-ui]\n---\n")
-	qa := resolveLiteConfig("w-qa", wsSel)
-	if !qa.enabledTools["chrome_eval"] {
-		t.Error("granted agent selecting qa-ui should enable chrome_eval")
-	}
-	if _, ok := qa.customTools["chrome_eval"]; !ok {
-		t.Error("chrome_eval should be in resolved customTools")
-	}
-	// a DIFFERENT agent (no grant) selecting qa-ui gets nothing.
-	other := resolveLiteConfig("w-other", wsSel)
-	if other.enabledTools["chrome_eval"] {
-		t.Error("ungranted agent escalated via frontmatter — SECURITY HOLE")
 	}
 }
 
@@ -224,71 +117,17 @@ func TestLiteCustomToolNotEnabledRefused(t *testing.T) {
 	}
 }
 
-// ── config hot-merge: file adds without redeclaring built-ins ─────────────────
+// ── config hot-merge: a file adds tool groups without losing the built-ins ─────
 
 func TestLiteConfigMergeKeepsBuiltins(t *testing.T) {
 	withLiteConfig(t, liteConfigFile{
-		// only declare a NEW profile; built-ins must survive the merge.
-		Profiles: map[string]liteProfileCfg{
-			"analyst": {Name: "分析", SystemBase: "literal base", GrantableGroups: []string{"coordinate"}},
-		},
+		ToolGroups: map[string][]string{"extra": {"shell"}},
 	})
 	cfg := loadLiteConfig()
-	if _, ok := cfg.Profiles["assistant"]; !ok {
-		t.Error("built-in assistant profile lost after merge")
+	if _, ok := cfg.ToolGroups["core"]; !ok {
+		t.Error("built-in core group lost after merge")
 	}
-	if _, ok := cfg.Profiles["analyst"]; !ok {
-		t.Error("file-declared analyst profile missing")
-	}
-	if _, ok := cfg.ToolGroups["coordinate"]; !ok {
-		t.Error("built-in coordinate group lost after merge")
-	}
-}
-
-// agent_online (the onboard group) is HR-only: a dispatcher agent that selects
-// `tools: [coordinate, onboard]` in its AGENTS.md gets it, but a default
-// dispatcher (coordinate only) must NOT — onboarding/pulling agents online is a
-// privileged 组队官 action, not a power every lite agent has.
-func TestOnboardToolHRGated(t *testing.T) {
-	prev := cicyRootDir
-	cicyRootDir = t.TempDir() // no config file → pure defaults
-	resetLiteConfigCache()
-	defer func() { cicyRootDir = prev; resetLiteConfigCache() }()
-
-	// HR: profile dispatcher + tools:[coordinate, onboard] → agent_online enabled,
-	// and the coordinate tools still present (onboard is additive, not replacing).
-	hr := resolveLiteConfig("w-997", writeAgentsMD(t, "---\nprofile: dispatcher\ntools: [coordinate, onboard]\nname: HR\n---\n"))
-	if !hr.enabledTools["agent_online"] {
-		t.Error("HR (tools:[coordinate,onboard]) should enable agent_online")
-	}
-	if !hr.enabledTools["agent_list"] || !hr.enabledTools["agent_msg"] {
-		t.Error("HR should keep its coordinate tools alongside onboard")
-	}
-
-	// Default dispatcher (no tools frontmatter → coordinate only) must NOT get it.
-	pm := resolveLiteConfig("w-1001", writeAgentsMD(t, ""))
-	if pm.enabledTools["agent_online"] {
-		t.Error("default dispatcher escalated to agent_online — onboard must stay HR-gated")
-	}
-	if pm.enabledTools["shell"] {
-		t.Error("default dispatcher must NOT have the shell tool")
-	}
-}
-
-// The shell tool (raw PowerShell/bash) is Team-Helper-only: the 团队助手 template
-// selects `tools: [coordinate, shell]` and gets it; no default dispatcher does.
-func TestShellToolHelperGated(t *testing.T) {
-	prev := cicyRootDir
-	cicyRootDir = t.TempDir() // no config file → pure defaults
-	resetLiteConfigCache()
-	defer func() { cicyRootDir = prev; resetLiteConfigCache() }()
-
-	helper := resolveLiteConfig("w-1001", writeAgentsMD(t, "---\nprofile: dispatcher\ntools: [coordinate, shell]\nname: 团队助手\n---\n"))
-	if !helper.enabledTools["shell"] {
-		t.Error("团队助手 (tools:[coordinate,shell]) should enable shell")
-	}
-	plain := resolveLiteConfig("w-1000", writeAgentsMD(t, ""))
-	if plain.enabledTools["shell"] {
-		t.Error("default dispatcher got shell — must stay helper-gated")
+	if _, ok := cfg.ToolGroups["extra"]; !ok {
+		t.Error("file-declared extra group missing")
 	}
 }

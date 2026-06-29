@@ -3,6 +3,7 @@ import CodeMirror, { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { EditorView, keymap } from '@codemirror/view';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { markdown } from '@codemirror/lang-markdown';
+import { json } from '@codemirror/lang-json';
 import { CLIPBOARD_KEYMAP, cmCopySelection, cmCutSelection, cmPasteSelection } from '../files/cmClipboard';
 import {
   Globe,
@@ -667,8 +668,9 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
 
         {error && <div data-id="memory-view-error" className="px-3 py-1.5 text-xs text-red-400 bg-red-500/5">{error}</div>}
 
-        {/* Markdown preview / source toggle — same affordance as the file editor. */}
-        {!docLoading && (
+        {/* Markdown preview / source toggle — same affordance as the file editor.
+            Hidden for the lite-config.json (config scope): it's JSON, not markdown. */}
+        {!docLoading && selected.scope !== 'config' && (
           <button
             data-id="memory-view-preview-toggle"
             type="button"
@@ -686,7 +688,7 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
             <div data-id="memory-view-doc-loading" className="h-full flex items-center justify-center text-zinc-600 text-[13px] gap-2">
               <Loader2 size={14} className="animate-spin" /> {t('memLoading')}
             </div>
-          ) : previewMd ? (
+          ) : previewMd && selected.scope !== 'config' ? (
             <div data-id="memory-view-preview" className="h-full overflow-y-auto">
               <MarkdownPreview source={content} />
             </div>
@@ -705,7 +707,7 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
                 height="100%"
                 theme={oneDark}
                 basicSetup={BASIC_SETUP}
-                extensions={[markdown(), CLIPBOARD_KEYMAP, saveKeymap, cmBlendTheme, ...(wrap ? [EditorView.lineWrapping] : [])]}
+                extensions={[selected.scope === 'config' ? json() : markdown(), CLIPBOARD_KEYMAP, saveKeymap, cmBlendTheme, ...(wrap ? [EditorView.lineWrapping] : [])]}
                 onChange={setContent}
                 className="h-full"
                 style={{ height: '100%' }}
