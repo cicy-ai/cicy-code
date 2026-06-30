@@ -256,7 +256,7 @@ function renderToolsWorkspace(items: any[], query: string, selectedName: string 
                 onClick={() => onSelect(String(item?.name || ''))}
                 className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${active ? 'border-white/[0.14] bg-white/[0.08] text-zinc-100' : 'border-white/[0.06] bg-[#101114] text-zinc-300 hover:bg-white/[0.04]'}`}
               >
-                <div data-id={`agent-provider-request-tool-item-name-${safeName}`} className="text-[12px] font-medium">{compactText(item?.name, 'tool')}</div>
+                <div data-id={`agent-provider-request-tool-item-name-${safeName}`} className="break-all text-[12px] font-medium">{compactText(item?.name, 'tool')}</div>
                 <div data-id={`agent-provider-request-tool-item-meta-${safeName}`} className="mt-1 text-[11px] text-zinc-500">{typeof item?.property_count === 'number' ? item.property_count : 0} props · {Array.isArray(item?.required) ? item.required.length : 0} required</div>
               </button>
             );

@@ -58,6 +58,107 @@ interface TestResult {
 /* ───────────── helpers ───────────── */
 
 function cn(...p: Array<string | false | null | undefined>) { return p.filter(Boolean).join(' '); }
+
+// Numeric id of a pane (`w-104` → 104) for ascending sort; non-numeric → last.
+function paneIdNum(id: string) { const m = String(id).match(/(\d+)/); return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER; }
+
+// BindPicker — the reusable "choose an agent to bind" modal. Used in THREE
+// places (detail edit, add-WeChat, add-TG); always a full-screen overlay layered
+// above whatever opened it (the add modals sit at z-10000, so pass a higher z).
+// Lists EVERY agent (any type), `panes` arrives already id-ascending; searches
+// id + title + type. `busyPanes` (bound by other same-platform accounts) are
+// shown disabled. Escape / backdrop / the X close it.
+function BindPicker({ panes, busyPanes, value, onPick, onClose, z = 10010 }: {
+  panes: PaneOpt[];
+  busyPanes?: Set<string>;
+  value: string;
+  onPick: (paneId: string) => void;
+  onClose: () => void;
+  z?: number;
+}) {
+  const { t } = useTranslation('im');
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+  const list = useMemo(() => {
+    const ql = q.trim().toLowerCase();
+    let l = panes.filter((p) => !busyPanes?.has(p.pane_id) || p.pane_id === value);
+    if (ql) l = l.filter((p) => `${p.pane_id} ${p.title} ${p.agent_type}`.toLowerCase().includes(ql));
+    return l;
+  }, [panes, busyPanes, q, value]);
+  return createPortal((
+    <div
+      data-id="im-bind-picker"
+      className="fixed inset-0 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      style={{ zIndex: z }}
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[72vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#161618] shadow-2xl shadow-black/70"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
+          <h3 className="text-[14px] font-semibold text-white">{t('bindModalTitle', '选择绑定 agent')}</h3>
+          <button type="button" data-id="im-bind-picker-close" onClick={onClose} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="border-b border-white/[0.06] p-2.5">
+          <div className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5">
+            <Search size={14} className="shrink-0 text-zinc-500" />
+            <input
+              data-id="im-bind-picker-search"
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={t('bindSearchPlaceholder', '按 id 或 title 搜索…')}
+              className="h-9 w-full bg-transparent text-[13px] text-zinc-100 placeholder:text-zinc-600 focus:outline-none"
+            />
+          </div>
+        </div>
+        <div data-id="im-bind-picker-list" className="flex-1 overflow-auto p-1.5">
+          <button
+            type="button"
+            onClick={() => onPick('')}
+            className={cn('flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors hover:bg-white/[0.06]', !value && 'bg-white/[0.07]')}
+          >
+            <span className="grid w-4 place-items-center">{!value && <Check size={13} className="text-blue-400" />}</span>
+            <span className="text-zinc-500">{t('unboundOption', '不绑定')}</span>
+          </button>
+          {list.length > 0 && <div className="my-1 h-px bg-white/[0.06]" />}
+          {list.map((p) => {
+            const isSel = p.pane_id === value;
+            return (
+              <button
+                key={p.pane_id}
+                type="button"
+                data-id={`im-bind-picker-option-${p.pane_id}`}
+                onClick={() => onPick(p.pane_id)}
+                className={cn('flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors hover:bg-white/[0.06]', isSel && 'bg-white/[0.07]')}
+              >
+                <span className="grid w-4 shrink-0 place-items-center">{isSel && <Check size={13} className="text-blue-400" />}</span>
+                <AgentAvatar agentType={p.agent_type} title={p.title || p.pane_id} variant="option" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate font-mono text-zinc-100">{p.pane_id}</span>
+                    {p.agent_type && <span className="rounded bg-white/[0.06] px-1 py-px text-[10px] font-medium text-zinc-400">{p.agent_type}</span>}
+                  </span>
+                  {p.title && <span className="block truncate text-[11px] text-zinc-500">{p.title}</span>}
+                </span>
+              </button>
+            );
+          })}
+          {list.length === 0 && (
+            <div className="px-3 py-6 text-center text-[12px] text-zinc-600">{t('bindNoMatch', '没有匹配的 agent')}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  ), document.body);
+}
 function toast(m: string) { window.dispatchEvent(new CustomEvent('show-toast', { detail: m })); }
 function errText(e: any) { return String(e?.response?.data?.detail || e?.message || e || i18n.t('errorUnknown', { ns: 'im' })); }
 
@@ -155,6 +256,10 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const [bindOpen, setBindOpen] = useState(false);
   const bindRef = useRef<HTMLDivElement>(null);
+  // Add-flow agent binding (WeChat / TG): defaults to the master w-1001, changed
+  // via the same BindPicker, layered above the add modals.
+  const [addBind, setAddBind] = useState('w-1001');
+  const [addBindOpen, setAddBindOpen] = useState(false);
   const [draft, setDraft] = useState<{ name: string; secret: string; boundPaneId: string }>({ name: '', secret: '', boundPaneId: '' });
   const [baseline, setBaseline] = useState('');
   const [panes, setPanes] = useState<PaneOpt[]>([]);
@@ -225,11 +330,11 @@ export default function IMDashboard({ leftMount, rightMount }: {
     setShowSecret(true);
   }, [showSecret, draft.secret, selected]);
 
-  /* ---- panes for bind picker — any agent, gateway or not ---- */
+  /* ---- panes for bind picker — EVERY agent, any type, any gateway ---- */
   // Reply push works on BOTH paths now: the local gateway (ai_gateway_audit.go)
   // and the non-gateway MITM audit, so binding no longer depends on
-  // use_custom_gateway. Show every claude / opencode / codex agent regardless of
-  // gateway mode. (Non-gateway help text still flags the push caveat.)
+  // use_custom_gateway OR agent_type. List every agent (cicy / claude / codex /
+  // opencode / …), sorted by id ascending; the picker searches id + title.
   useEffect(() => {
     apiService.getPanes().then((r: any) => {
       const raw = Array.isArray(r.data?.panes) ? r.data.panes : (Array.isArray(r.data) ? r.data : []);
@@ -238,7 +343,8 @@ export default function IMDashboard({ leftMount, rightMount }: {
         title: String(p.title || p.name || ''),
         agent_type: String(p.agent_type || p.agentType || ''),
         use_custom_gateway: !!(p.use_custom_gateway ?? p.useCustomGateway),
-      })).filter((p: PaneOpt) => p.pane_id && ['claude', 'opencode', 'codex'].includes(p.agent_type));
+      })).filter((p: PaneOpt) => !!p.pane_id)
+        .sort((a: PaneOpt, b: PaneOpt) => paneIdNum(a.pane_id) - paneIdNum(b.pane_id) || a.pane_id.localeCompare(b.pane_id));
       setPanes(list);
     }).catch(() => {});
   }, []);
@@ -256,16 +362,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
     return busy;
   }, [accounts, selected]);
 
-  /* ---- ALL wechat-bound panes (used by add flow to decide whether to spawn a new worker) ---- */
-  const wechatBoundPanes = useMemo(() => {
-    const s = new Set<string>();
-    for (const a of accounts) {
-      if (a.platform !== 'wechat') continue;
-      const id = (a.bound_pane_id || '').replace(/:main\.0$/, '');
-      if (id) s.add(id);
-    }
-    return s;
-  }, [accounts]);
+
 
   const snapshot = JSON.stringify(draft);
   const dirty = snapshot !== baseline;
@@ -354,21 +451,6 @@ export default function IMDashboard({ leftMount, rightMount }: {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [filterMenuOpen]);
 
-  /* ---- bind picker click-outside ---- */
-  useEffect(() => {
-    if (!bindOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (bindRef.current && !bindRef.current.contains(e.target as Node)) setBindOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setBindOpen(false); };
-    document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey, true);
-    return () => {
-      document.removeEventListener('mousedown', onDoc);
-      document.removeEventListener('keydown', onKey, true);
-    };
-  }, [bindOpen]);
-
   const addAccount = (platform: string) => {
     setAddMenuOpen(false);
     if (platform === 'telegram') return void addTelegram();
@@ -384,6 +466,8 @@ export default function IMDashboard({ leftMount, rightMount }: {
     setTgTokenInput('');
     setTgStep('token');
     setTgPendingAccount(null);
+    setAddBind('w-1001');
+    setAddBindOpen(false);
     setTgModalOpen(true);
   };
 
@@ -400,6 +484,8 @@ export default function IMDashboard({ leftMount, rightMount }: {
       const res = await apiService.createIMAccount({ platform: 'telegram', secret: token });
       const a = res?.data?.account as IMAccount | undefined;
       if (!a?.id) throw new Error('create account: missing id');
+      // Bind to the chosen agent (default w-1001) right away.
+      if (addBind) { try { await apiService.bindIMAccount(a.id, addBind); } catch (e) { console.warn('tg bind failed', e); } }
       setTgPendingAccount(a);
       setTgStep('wait_message');
       // 主列表也刷一下让新账号马上显示
@@ -448,45 +534,12 @@ export default function IMDashboard({ leftMount, rightMount }: {
     setWxLogin(null);
     setWxStarting(true);
 
-    // Step 1: each wechat account gets its OWN dedicated "Wechat Worker" pane.
-    // We never reuse generic local-gateway agents like w-1001 (which the user
-    // has for other purposes). Look for an existing unbound Wechat Worker, and
-    // if none, spin up a fresh one (claude agent on deepseek with custom gateway).
-    let bindTarget = panes.find((p) => p.title === 'Wechat Worker' && !wechatBoundPanes.has(p.pane_id))?.pane_id || '';
-    let bindCreated = false;
-    if (!bindTarget) {
-      try {
-        const r = await apiService.createPane({
-          title: 'Wechat Worker',
-          agent_type: 'claude',
-          default_model: 'deepseek-v4-pro',
-          use_custom_gateway: true,
-        });
-        const d = r?.data as any;
-        if (!d?.success) throw new Error(d?.error || 'create pane failed');
-        bindTarget = String(d.pane_id || '').replace(/:main\.0$/, '');
-        bindCreated = true;
-        // refresh panes so the new pane shows up in the picker right away
-        try {
-          const pr = await apiService.getPanes();
-          const raw = Array.isArray(pr.data?.panes) ? pr.data.panes : (Array.isArray(pr.data) ? pr.data : []);
-          const list: PaneOpt[] = raw.map((p: any) => ({
-            pane_id: String(p.pane_id || p.paneId || '').replace(/:main\.0$/, ''),
-            title: String(p.title || p.name || ''),
-            agent_type: String(p.agent_type || p.agentType || ''),
-            use_custom_gateway: !!(p.use_custom_gateway ?? p.useCustomGateway),
-          })).filter((p: PaneOpt) => p.pane_id && ['claude', 'opencode', 'codex'].includes(p.agent_type));
-          setPanes(list);
-        } catch {}
-      } catch (e) {
-        setWxError(errText(e));
-        toast(t('wechatScanFailed', { err: 'auto-create worker failed: ' + errText(e) }));
-        setWxStarting(false);
-        return;
-      }
-    }
-    setPendingBindPane(bindTarget);
-    setPendingBindCreated(bindCreated);
+    // Bind target defaults to the master (w-1001); the user can change it to ANY
+    // agent via the picker in the modal — onPick updates pendingBindPane too.
+    // (No more dedicated auto-created "Wechat Worker".)
+    setAddBind('w-1001');
+    setPendingBindPane('w-1001');
+    setPendingBindCreated(false);
 
     // Step 2: ask backend for a QR session
     try {
@@ -911,7 +964,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
                       <button
                         data-id="im-detail-bind-trigger"
                         type="button"
-                        onClick={() => setBindOpen((o) => !o)}
+                        onClick={() => setBindOpen(true)}
                         className={cn(
                           'group flex h-11 w-full items-center gap-2.5 rounded-lg border bg-white/[0.025] pl-2 pr-2 text-left text-[13px] transition-colors',
                           bindOpen ? 'border-blue-500/55 ring-1 ring-blue-500/15' : 'border-white/[0.09] hover:border-white/[0.16]',
@@ -935,56 +988,14 @@ export default function IMDashboard({ leftMount, rightMount }: {
                       </button>
 
                       {bindOpen && (
-                        <div data-id="im-detail-bind-dropdown" className="absolute left-0 right-0 z-50 mt-1.5 max-h-72 overflow-auto rounded-xl border border-white/[0.09] bg-[#141416] p-1 shadow-2xl shadow-black/60">
-                          <button
-                            type="button"
-                            onClick={() => { setDraft((d) => ({ ...d, boundPaneId: '' })); setBindOpen(false); }}
-                            className={cn('flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors hover:bg-white/[0.06]', !cur && 'bg-white/[0.07]')}
-                          >
-                            <span className="grid w-4 place-items-center">{!cur && <Check size={13} className="text-blue-400" />}</span>
-                            <span className="text-zinc-500">{t('unboundOption')}</span>
-                          </button>
-                          {panes.length > 0 && <div className="my-1 h-px bg-white/[0.06]" />}
-                          {panes.filter(p => !busyPanes.has(p.pane_id) || p.pane_id === cur).map((p) => {
-                            const isSel = p.pane_id === cur;
-                            return (
-                              <button
-                                key={p.pane_id}
-                                type="button"
-                                onClick={() => { setDraft((d) => ({ ...d, boundPaneId: p.pane_id })); setBindOpen(false); }}
-                                className={cn(
-                                  'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors hover:bg-white/[0.06]',
-                                  isSel && 'bg-white/[0.07]',
-                                )}
-                              >
-                                <span className="grid w-4 shrink-0 place-items-center">{isSel && <Check size={13} className="text-blue-400" />}</span>
-                                <AgentAvatar agentType={p.agent_type} title={p.title || p.pane_id} variant="option" />
-                                <span className="min-w-0 flex-1">
-                                  <span className="flex items-center gap-1.5">
-                                    <span className="truncate font-mono text-zinc-100">{p.pane_id}</span>
-                                    {p.agent_type && <span className="rounded bg-white/[0.06] px-1 py-px text-[10px] font-medium text-zinc-400">{p.agent_type}</span>}
-                                  </span>
-                                  {p.title && <span className="block truncate text-[11px] text-zinc-500">{p.title}</span>}
-                                </span>
-                              </button>
-                            );
-                          })}
-                          {/* Fallback: keep old bound pane visible even if it's no longer in panes list */}
-                          {cur && !panes.some((p) => p.pane_id === cur) && (
-                            <>
-                              <div className="my-1 h-px bg-white/[0.06]" />
-                              <button
-                                type="button"
-                                onClick={() => setBindOpen(false)}
-                                className="flex w-full items-center gap-2.5 rounded-lg bg-amber-500/[0.06] px-2.5 py-2 text-left text-[13px]"
-                              >
-                                <span className="grid w-4 shrink-0 place-items-center"><Check size={13} className="text-amber-400" /></span>
-                                <span className="font-mono text-amber-200">{cur}</span>
-                                <span className="ml-auto text-[10px] text-amber-400">offline?</span>
-                              </button>
-                            </>
-                          )}
-                        </div>
+                        <BindPicker
+                          panes={panes}
+                          busyPanes={busyPanes}
+                          value={cur}
+                          z={9999}
+                          onPick={(id) => { setDraft((d) => ({ ...d, boundPaneId: id })); setBindOpen(false); }}
+                          onClose={() => setBindOpen(false)}
+                        />
                       )}
                     </div>
                   );
@@ -1020,6 +1031,37 @@ export default function IMDashboard({ leftMount, rightMount }: {
           </div>
         </div>
       </main>
+    </div>
+  );
+
+  /* ───────── add-flow "bind agent" field (shared by WeChat + TG modals) ─────────
+     Shows the chosen agent (default w-1001); clicking opens BindPicker on top. */
+  const addBindPane = panes.find((p) => p.pane_id === addBind);
+  const addBindField = (
+    <div data-id="im-add-bind-field">
+      <div className="mb-1.5 text-[12px] font-medium text-zinc-400">{t('fieldBindAgent')}</div>
+      <button
+        type="button"
+        data-id="im-add-bind-trigger"
+        onClick={() => setAddBindOpen(true)}
+        className="group flex h-11 w-full items-center gap-2.5 rounded-lg border border-white/[0.09] bg-white/[0.025] px-2 text-left text-[13px] transition-colors hover:border-white/[0.16]"
+      >
+        {addBind ? (
+          <>
+            <AgentAvatar agentType={addBindPane?.agent_type} title={addBindPane?.title || addBind} variant="select" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate font-mono text-zinc-100">{addBind}</span>
+                {addBindPane?.agent_type && <span className="rounded bg-white/[0.06] px-1 py-px text-[10px] font-medium text-zinc-400">{addBindPane.agent_type}</span>}
+              </div>
+              <span className="block truncate text-[11px] text-zinc-500">{addBindPane?.title || (addBind === 'w-1001' ? '我01' : '')}</span>
+            </div>
+          </>
+        ) : (
+          <span className="flex-1 text-zinc-500">{t('unboundOption')}</span>
+        )}
+        <ChevronDown size={14} className="shrink-0 text-zinc-500 group-hover:text-zinc-300" />
+      </button>
     </div>
   );
 
@@ -1064,6 +1106,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
             </div>
             {wxLogin?.detail && !loading && <div className="mt-1 text-[11px] text-zinc-500">{wxLogin.detail}</div>}
             <div className="mt-3 text-[11px] leading-relaxed text-zinc-600 max-w-[320px]">{t('scanSuccessNote')}</div>
+            <div className="mt-4 w-full text-left">{addBindField}</div>
             {!loading && (expired || failed) && (
               <Btn variant="secondary" size="md" icon={<RefreshCw size={13} />} className="mt-4" onClick={() => void addWeChat()}>
                 {t('regenerateAnotherQr')}
@@ -1125,6 +1168,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
                 </div>
                 <div className="text-zinc-500">{t('botFatherSteps')}</div>
               </div>
+              {addBindField}
               <div className="flex justify-end gap-2 pt-1">
                 <Btn data-id="im-tg-modal-cancel" variant="ghost" size="md" onClick={closeTgModal} disabled={tgSubmitting}>{t('cancel')}</Btn>
                 <Btn data-id="im-tg-modal-submit" variant="primary" size="md" onClick={() => void submitTgToken()} disabled={tgSubmitting || !tgTokenInput.trim()}>
@@ -1169,6 +1213,15 @@ export default function IMDashboard({ leftMount, rightMount }: {
       {rightMount && detailOpen && createPortal(detailUI, rightMount)}
       {wxModal && createPortal(wxModal, document.body)}
       {tgModal && createPortal(tgModal, document.body)}
+      {addBindOpen && (
+        <BindPicker
+          panes={panes}
+          value={addBind}
+          z={10010}
+          onPick={(id) => { setAddBind(id); setPendingBindPane(id); setAddBindOpen(false); }}
+          onClose={() => setAddBindOpen(false)}
+        />
+      )}
       {createPortal(dialogsNode, document.body)}
     </>
   );

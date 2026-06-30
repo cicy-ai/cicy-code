@@ -511,10 +511,10 @@ func officialRoleRoster() []builtinWorker {
 	// master. All other cicy roles (项目经理/HR/产品经理/…) are NOT preinstalled.
 	roster := []builtinWorker{
 		{Port: 1001, AgentType: "cicy", Title: "Knowledge Specialist", RoleTemplate: "knowledge-specialist", Master: true},
-		{Port: 106, AgentType: "claude", Title: "Architect", BindToPrimary: true},
-		{Port: 107, AgentType: "codex", Title: "Full-stack Engineer", BindToPrimary: true},
-		{Port: 108, AgentType: "opencode", Title: "Software Engineer"},
-		{Port: 110, AgentType: "cicy", Title: "Audit Policy Specialist", RoleTemplate: "audit-policy-specialist"},
+		{Port: 101, AgentType: "claude", Title: "Architect", BindToPrimary: true},
+		{Port: 102, AgentType: "codex", Title: "Full-stack Engineer", BindToPrimary: true},
+		{Port: 103, AgentType: "opencode", Title: "Software Engineer"},
+		{Port: 104, AgentType: "cicy", Title: "Audit Policy Specialist", RoleTemplate: "audit-policy-specialist"},
 	}
 	return roster
 }
@@ -1107,6 +1107,9 @@ var preinstalledSkills = []string{
 	// Team knowledge Layer 2 store CLI (add/list/recall/promote/...) — fresh
 	// installs get it so agents can record/recall team knowledge out of the box.
 	"cicy-knowledge",
+	// Audit policy + log CLI — the 审计策略专员 works through this skill (shell +
+	// skill, no built-in audit_* tools), so it must be present on fresh installs.
+	"cicy-audit-policy",
 	// Skill ecosystem conventions (private dev / team install / public PR) —
 	// every agent should know these by default.
 	"cicy-skill-spec",
