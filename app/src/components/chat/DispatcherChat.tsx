@@ -177,7 +177,14 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
       const detail = (e as CustomEvent)?.detail || {};
       const id = String(detail.paneId || '').trim();
       if (id && id !== paneId) return;
-      setBusy(!!detail.busy);
+      // The history poll's busy signal may only ENTER the in-flight state, never
+      // leave it: replyInFlight flickers to false on transient gaps (tool-round
+      // boundary / current.json reseed, session rotation, slow turn registration),
+      // and honoring that false mid-generation would flip the stop button back to
+      // "send" and make Esc a no-op — so a click sends a new message instead of
+      // stopping. Clearing busy is owned solely by the hysteresis poll below
+      // (positive terminal read only), so the two pollers can't race it off.
+      if (detail.busy) setBusy(true);
     };
     window.addEventListener('cicy:dispatcher-busy', onBusy as EventListener);
     return () => window.removeEventListener('cicy:dispatcher-busy', onBusy as EventListener);
@@ -210,16 +217,21 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
   // 卸载时回收所有图片 objectURL。
   useEffect(() => () => { attachmentsRef.current.forEach((a) => a.previewURL && URL.revokeObjectURL(a.previewURL)); }, []);
 
-  // 安全兜底:busy 期间直接轮询后端 reply 状态,只要「不在途」(complete / fail /
-  // 根本没在生成)就解锁——不依赖 CurrentHistoryView 的 poll。后者在 /clear 建空会话、
-  // 会话轮换等场景下不会 emit busy=false(实测整段零事件),导致 composer 永久锁死在
-  // 「回复生成中」、发不出下一条。给 3s 起步宽限,避免刚发出去、turn 还没登记就误解锁;
-  // busy 本就是软指示(发送从不硬门禁,服务端会 merge),宁可早解锁也不要锁死。
+  // busy 的**唯一解锁权**在这里(单一清除源 + 滞回),不让 CurrentHistoryView 的 poll
+  // 和这里互相抢着清 busy。规则:
+  //   - 只在「确证终态」(complete / failed)时解锁——agent 这一轮确实结束了。
+  //   - 绝不因「暂时看不到在跑的回合」(answerId===0,出现在工具轮边界 reseed、会话轮换、
+  //     turn 还没登记的瞬间)而解锁:那种闪断会把停止键变回发送键、让 Esc 失效,正是这次
+  //     要修的 bug。claude 把「打断」绑在一个权威的生成状态上,这里是等价物——没确证结束前
+  //     一直保持「可打断」。
+  //   - /clear 建空会话这种死锁:busy 是乐观置上的、但根本没有 turn 登记。只有在「从没见过
+  //     在途回合」时,给更长宽限后才兜底解锁。
   useEffect(() => {
     if (!busy) return;
     let cancelled = false;
     let timer: number | null = null;
     const since = Date.now();
+    let sawInFlight = false; // 是否曾确证看到这一轮在生成
     const tick = async () => {
       if (cancelled) return;
       try {
@@ -229,12 +241,15 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
         const complete = !!(data as any)?.complete;
         const status = String((data as any)?.status || '').trim().toLowerCase();
         const failed = status === 'failed' || status === 'fail' || status === 'error';
-        const inFlight = answerId > 0 && !complete && !failed;
-        if (!inFlight && Date.now() - since > 3000) { setBusy(false); return; }
+        if (answerId > 0 && !complete && !failed) sawInFlight = true;
+        // 确证终态 → 解锁(给 800ms 起步宽限,避免刚发出去、上一轮残留的 complete 误判)。
+        if (answerId > 0 && (complete || failed) && Date.now() - since > 800) { setBusy(false); return; }
+        // 死锁兜底:从没见过在途回合 + 一直没有 turn,长宽限后解锁(/clear 空会话)。
+        if (!sawInFlight && answerId === 0 && Date.now() - since > 5000) { setBusy(false); return; }
       } catch {}
-      timer = window.setTimeout(tick, 1200);
+      timer = window.setTimeout(tick, 1000);
     };
-    timer = window.setTimeout(tick, 1200);
+    timer = window.setTimeout(tick, 1000);
     return () => { cancelled = true; if (timer != null) window.clearTimeout(timer); };
   }, [busy, paneId]);
 
@@ -326,6 +341,8 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     try {
       if (agentType === 'cicy') await apiService.cancelCicyReply(paneId);
       else await apiService.sendKeys(paneId, 'Escape');
+      setBusy(false); // reflect the stop at once; if the turn is still tearing down
+                      // the history poll re-sets busy=true until it truly ends.
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('composerCanceled') }));
     } catch {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('composerCancelFailed') }));

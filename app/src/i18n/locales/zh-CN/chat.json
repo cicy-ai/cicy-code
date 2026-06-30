@@ -27,5 +27,10 @@
   "composerUploadFailedNamed": "「{{name}}」上传失败",
   "composerSendFailed": "发送失败",
   "composerCanceled": "已取消",
-  "composerCancelFailed": "取消失败"
+  "composerCancelFailed": "取消失败",
+  "outcomeCancelled": "已停止生成",
+  "outcomeBlocked": "已拦截",
+  "outcomeError": "生成失败",
+  "retry": "重试",
+  "retrying": "重试中…"
 }

@@ -1,4 +1,4 @@
-import { Children, cloneElement, isValidElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Children, cloneElement, isValidElement, lazy, Suspense, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Settings } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -8,7 +8,9 @@ import type { EditPaneData } from '../../types';
 import Select, { type SelectOption } from '../ui/Select';
 import { normalizeAgentType } from '../../lib/agentType';
 import { useApp } from '../../contexts/AppContext';
-import MemoryView from './MemoryView';
+// Lazy: MemoryView pulls in the CodeMirror editor stack (lite-config / templates
+// editing). Defer it so codemirror isn't on the inspector's first-paint path.
+const MemoryView = lazy(() => import('./MemoryView'));
 
 export type InspectorTab = 'overview' | 'memory' | 'settings' | 'history';
 type InspectorRequestedTab = InspectorTab | 'notes' | 'history';
@@ -776,7 +778,7 @@ export default function AgentInspector({
 
           {tab === 'memory' && (
             <div data-id="agent-inspector-memory-tab" className="h-full">
-              <MemoryView agentId={paneId} className="h-full w-full" />
+              <Suspense fallback={null}><MemoryView agentId={paneId} className="h-full w-full" /></Suspense>
             </div>
           )}
 

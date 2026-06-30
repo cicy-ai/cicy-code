@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation, Trans } from 'react-i18next';
 import { TRANSLATED_LNGS } from '../i18n';
@@ -25,8 +25,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { SendingProvider } from '../contexts/SendingContext';
 // import ChatView from './chat/ChatView';
 import TodoPanel from './TodoPanel';
-import FilesView from './files/FilesView';
-import KnowledgePanel from './knowledge/KnowledgePanel';
+// Lazy: these pull in the heavy CodeMirror editor stack. Behind tab gates, so
+// dynamic-importing them keeps codemirror off the first-paint critical path.
+const FilesView = lazy(() => import('./files/FilesView'));
+const KnowledgePanel = lazy(() => import('./knowledge/KnowledgePanel'));
+// Lazy: the team roster opens on demand (icon next to create-worker).
+const TeamRosterPanel = lazy(() => import('./layout/TeamRosterPanel'));
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
 import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
@@ -50,7 +54,7 @@ import { useDialogs } from './ui/Modal';
 import TipBelow from './ui/TipBelow';
 import config, { defaultWorkerWorkspace, syncHostHomeFromPath, urls } from '../config';
 import apiService from '../services/api';
-import { loadHandled, serverAckedIds, resolveStatus } from './audit/auditHandled';
+import { loadHandled } from './audit/auditHandled';
 import { sendCommandToTmux } from '../services/mockApi';
 import { sendToAgent } from '../services/agentSend';
 import { chatWs } from '../services/chatWs';
@@ -335,11 +339,24 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [, setInspectorRequestedTab] = useState<InspectorTab>('overview');
   const [cliContentOpen, setCliContentOpen] = useState(() => cache.get(cliContentOpenKey(paneId), false) === true);
   const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>(() => normalizeCliContentTab(cache.get(cliContentTabKey(paneId), 'files')));
+  // Team roster (花名册) — a top-level overlay inside the cli-tab content area.
+  const [rosterOpen, setRosterOpen] = useState(false);
   const [lastSessionSubTab, setLastSessionSubTab] = useState<RequestViewTab>(() => {
     const v = cache.get(cliContentTabKey(paneId), 'files');
     return v === 'meta' || v === 'usage' || v === 'analysis' ? v : 'analysis';
   });
   const [lastRequestSubTab, setLastRequestSubTab] = useState<RequestViewTab>('tools');
+  // Lazy-mount latch for heavy cli-content tabs. The file explorers (FilesView /
+  // KnowledgePanel) restore persisted open files, open fs watchers, and stat/read
+  // on mount — so while mounted-but-hidden they fire fs/stat + fs/read for tabs
+  // the user never opened, on every page load. Mount a tab's content only once it
+  // has actually been opened; keep it mounted afterwards (tree expansion + open
+  // files persist across tab switches). Closed component ⇒ no requests.
+  const [seenCliTabs, setSeenCliTabs] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!cliContentOpen) return;
+    setSeenCliTabs((prev) => (prev.has(cliContentTab) ? prev : new Set(prev).add(cliContentTab)));
+  }, [cliContentOpen, cliContentTab]);
   useEffect(() => {
     if (cliContentTab === 'meta' || cliContentTab === 'usage' || cliContentTab === 'analysis') {
       setLastSessionSubTab(cliContentTab);
@@ -608,10 +625,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     let cancelled = false;
     const fetchInstalled = async () => {
       try {
-        const res: any = await apiService.listMarketSkills();
+        // Local installed-skills scan (fast) — NOT the ~2s remote market catalog.
+        const res: any = await apiService.getInstalledSkills();
         const skills = Array.isArray(res?.data?.skills) ? res.data.skills : [];
-        const todo = skills.find((s: any) => s?.name === 'cicy-todo');
-        if (!cancelled) setTodoSkillInstalled(!!todo?.status?.installed);
+        const installed = skills.some((s: any) => s?.name === 'cicy-todo');
+        if (!cancelled) setTodoSkillInstalled(installed);
       } catch {
         if (!cancelled) setTodoSkillInstalled(false);
       }
@@ -819,6 +837,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     if (!todoSkillInstalled) { setTodoCount(0); return; }
     let cancelled = false;
     const refresh = async () => {
+      if (typeof document !== 'undefined' && document.hidden) return; // 后台 webview 不轮询
       try {
         const res: any = await apiService.getTodoCounts(activeCliPaneId);
         const c = res?.data || {};
@@ -827,6 +846,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     };
     refresh();
     const id = window.setInterval(refresh, 10000);
+    const onVis = () => { if (!document.hidden) void refresh(); }; // 回前台立即补一次
+    document.addEventListener('visibilitychange', onVis);
     // TodoPanel carries fresh counts in the event detail; use them directly
     // when they're for the active pane, otherwise refetch.
     const onChange = (e: Event) => {
@@ -838,45 +859,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       }
     };
     window.addEventListener('cicy:todos-changed', onChange);
-    return () => { cancelled = true; window.clearInterval(id); window.removeEventListener('cicy:todos-changed', onChange); };
+    return () => { cancelled = true; window.clearInterval(id); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('cicy:todos-changed', onChange); };
   }, [todoSkillInstalled, activeCliPaneId]);
-  // Keep the 知识库 tab's _inbox (pending review) badge fresh. The store is a
-  // shared team resource (not per-pane), so this polls every 30s.
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const res: any = await apiService.listKnowledge({ status: 'pending' });
-        const rows = res?.data?.knowledge || res?.knowledge || [];
-        if (!cancelled) setKnowledgePendingCount(Array.isArray(rows) ? rows.length : 0);
-      } catch { /* keep previous count on transient error */ }
-    };
-    refresh();
-    const id = window.setInterval(refresh, 30000);
-    return () => { cancelled = true; window.clearInterval(id); };
-  }, []);
-
-  // Open (unhandled) audit-alert count, for the 审计日志 tab + agent-stack card badges.
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const res: any = await apiService.getAuditEvents({ limit: 80, severity: 'low,medium,high,critical' });
-        const events: any[] = Array.isArray(res?.data?.events) ? res.data.events : [];
-        const handled = loadHandled();
-        const acked = serverAckedIds(events);
-        const open = events.filter((e: any) =>
-          e.decision?.applied &&
-          ['block', 'redact', 'notify'].includes(e.decision?.action || '') &&
-          resolveStatus(e.id, handled, acked) === 'open'
-        ).length;
-        if (!cancelled) setAuditAlertCount(open);
-      } catch { /* keep previous count on transient error */ }
-    };
-    refresh();
-    const id = window.setInterval(refresh, 15000);
-    return () => { cancelled = true; window.clearInterval(id); };
-  }, []);
+  // 知识库待评审角标(knowledgePendingCount)与审计告警角标(auditAlertCount)不再各自
+  // HTTP 轮询 —— 两个计数都随 5s 的 WS poll_data 推送下来(见上面 poll_data 消费处:
+  // knowledge_pending 直接取;audit_open_ids 由服务端算好、本地再减去 localStorage 的
+  // 已处理集)。这样面板没开也不会有独立请求,后台 webview 更是零请求。
   useEffect(() => {
     setInspectorPaneId(activeCliPaneId || paneId);
   }, [activeCliPaneId, paneId]);
@@ -1140,6 +1128,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           return isDeepEqual(base.membership, data.membership) ? prev : { ...base, membership: data.membership };
         });
       }
+      // Two global badge counts now ride poll_data (no separate HTTP polling):
+      //   - knowledge_pending: count straight through.
+      //   - audit_open_ids: server already excluded server-acked alerts; subtract
+      //     the operator's local-dismiss set (localStorage) for the final count.
+      if (typeof data.knowledge_pending === 'number') {
+        setKnowledgePendingCount((prev) => prev === data.knowledge_pending ? prev : data.knowledge_pending);
+      }
+      if (Array.isArray(data.audit_open_ids)) {
+        const handled = loadHandled();
+        const open = (data.audit_open_ids as string[]).filter((id) => !handled[id]).length;
+        setAuditAlertCount((prev) => prev === open ? prev : open);
+      }
       const st = data.statuses?.[fullPaneId] || data.statuses?.[masterPaneId];
       if (st?.status) setStatus((prev) => prev === st.status ? prev : st.status);
       if (st?.title) setAgentDetail((prev: any) => {
@@ -1319,6 +1319,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       window.dispatchEvent(new CustomEvent('cicy:open-file', { detail: { path: relPath } }));
     }, 80);
   }, [openPaneFiles]);
+  // Open a pane's role + tools (the request/tools inspector view). Used by the
+  // roster's per-row tools button; closes the roster so the view is visible.
+  const openRoleTools = useCallback((targetPaneId: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentMode('fixed');
+    setCliContentTab('tools');
+    setCliContentOpen(true);
+    // Keep the roster open — role+tools shows in the right drawer alongside it.
+  }, [paneId]);
   // markdown history 里点击文件链接 → 揭示文件视图(FilesView 自己监听同一事件打开 tab)。
   useEffect(() => {
     const reveal = () => {
@@ -1614,12 +1625,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             : { position: 'absolute', width: '100%', height: '100%', visibility: 'hidden', pointerEvents: 'none', zIndex: -1 }
           }
         >
-          <FilesView
-            agentId={nativeFilesAgentId}
-            workspaceFolder={nativeFilesWorkspace}
-            pageClientId={pageClientId}
-            className="h-full w-full"
-          />
+          {seenCliTabs.has('files') && (
+            <Suspense fallback={null}>
+              <FilesView
+                agentId={nativeFilesAgentId}
+                workspaceFolder={nativeFilesWorkspace}
+                pageClientId={pageClientId}
+                className="h-full w-full"
+              />
+            </Suspense>
+          )}
         </div>
         <div
           data-id="cli-content-request-view-host"
@@ -1671,11 +1686,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             : { position: 'absolute', width: '100%', height: '100%', visibility: 'hidden', pointerEvents: 'none', zIndex: -1 }
           }
         >
-          <KnowledgePanel
-            agentId={nativeFilesAgentId}
-            workspaceFolder={nativeFilesWorkspace}
-            pageClientId={pageClientId}
-          />
+          {seenCliTabs.has('knowledge') && (
+            <Suspense fallback={null}>
+              <KnowledgePanel
+                agentId={nativeFilesAgentId}
+                workspaceFolder={nativeFilesWorkspace}
+                pageClientId={pageClientId}
+              />
+            </Suspense>
+          )}
         </div>
         <div
           data-id="cli-content-memory-host"
@@ -1815,6 +1834,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             todoCount={todoCount}
             auditAlertCount={auditAlertCount}
           />
+          {rosterOpen && (
+            <Suspense fallback={null}>
+              <TeamRosterPanel
+                panes={agents}
+                bindings={boundAgents}
+                masterPaneId={paneId.split(':')[0]}
+                onClose={() => setRosterOpen(false)}
+                onRefresh={refreshPanes}
+                onOpenAgentFile={openAgentFile}
+                onOpenRoleTools={openRoleTools}
+                onRenameTitle={handleRenamePaneTitle}
+                ModelPicker={ModelPicker}
+              />
+            </Suspense>
+          )}
         </div>
       </div>
     </div>
@@ -1823,6 +1857,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   return (
     <SendingProvider>
     <div data-id="workspace-root" className="flex h-screen overflow-hidden bg-[#0A0A0A] text-zinc-400 relative">
+      {/* Roster mode: mask the left region (activity bar + left panel) so it can't
+          be clicked, and clicking it closes the roster. Width = activity bar (56px)
+          + left panel (360px when open). The roster + right-panel drawer sit to the
+          right of this and stay interactive. */}
+      {rosterOpen ? (
+        <div
+          data-id="team-roster-left-mask"
+          className="absolute left-0 top-0 bottom-0 z-[140] bg-black/40"
+          style={{ width: 56 + (leftActive && !globalVar?.helper_mode ? 360 : 0) }}
+          onClick={() => setRosterOpen(false)}
+        />
+      ) : null}
       {/* Activity Bar */}
       <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
@@ -1925,6 +1971,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                             openInspectorForPane(targetPaneId, 'settings');
                           }}
                           onOpenAgentFile={openAgentFile}
+                          onOpenRoster={() => setRosterOpen(true)}
                         />
                       </div>
                     ) : leftActive === 'skills' ? (

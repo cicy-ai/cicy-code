@@ -711,13 +711,18 @@ func buildPollData(paneID string) M {
 		agents = []M{}
 	}
 	snapshot := loadRuntimeMembershipSnapshot()
+	// Two global dashboard badge counts ride poll_data so the web doesn't poll
+	// /api/knowledge + /api/audit/events on their own timers (TTL-cached).
+	knowledgePending, auditOpenIDs := dashboardCounts.get()
 	resp := M{
-		"success":          true,
-		"pane_id":          shortPaneID(normPaneID(paneID)),
-		"agents":           agents,
-		"statuses":         pollAgentStatuses(paneID, agents),
-		"system_resources": systemResources.getLatest(),
-		"server_time":      time.Now().UTC().Format(time.RFC3339),
+		"success":           true,
+		"pane_id":           shortPaneID(normPaneID(paneID)),
+		"agents":            agents,
+		"statuses":          pollAgentStatuses(paneID, agents),
+		"system_resources":  systemResources.getLatest(),
+		"server_time":       time.Now().UTC().Format(time.RFC3339),
+		"knowledge_pending": knowledgePending,
+		"audit_open_ids":    auditOpenIDs,
 	}
 	if snapshot.TrialExpiresAt != "" {
 		resp["trial_expires_at"] = snapshot.TrialExpiresAt

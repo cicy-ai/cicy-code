@@ -27,5 +27,10 @@
   "composerUploadFailedNamed": "Failed to upload \"{{name}}\"",
   "composerSendFailed": "Send failed",
   "composerCanceled": "Canceled",
-  "composerCancelFailed": "Cancel failed"
+  "composerCancelFailed": "Cancel failed",
+  "outcomeCancelled": "Stopped",
+  "outcomeBlocked": "Blocked",
+  "outcomeError": "Generation failed",
+  "retry": "Retry",
+  "retrying": "Retrying…"
 }

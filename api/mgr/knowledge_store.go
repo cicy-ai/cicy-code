@@ -491,6 +491,27 @@ func handleKnowledge(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleKnowledgeSpecialist gets/sets which pane governs the knowledge store.
+// GET → {pane, default}. POST {pane} pins it (empty pane clears → default).
+// Config-file backed (global.json), so it's NOT tied to a DB role query.
+func handleKnowledgeSpecialist(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		J(w, M{"pane": knowledgeSpecialistPaneID(), "default": knowledgeSpecialistDefaultPane})
+	case http.MethodPost:
+		var req M
+		readBody(r, &req)
+		pane, _ := req["pane"].(string)
+		if err := setKnowledgeSpecialistPane(pane); err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		J(w, M{"pane": knowledgeSpecialistPaneID(), "default": knowledgeSpecialistDefaultPane})
+	default:
+		httpErr(w, http.StatusMethodNotAllowed, "GET or POST")
+	}
+}
+
 func handleKnowledgeByID(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.URL.Path[len("/api/knowledge/"):])
 	if id == "" {

@@ -27,5 +27,10 @@
   "composerUploadFailedNamed": "「{{name}}」のアップロードに失敗しました",
   "composerSendFailed": "送信に失敗しました",
   "composerCanceled": "キャンセルしました",
-  "composerCancelFailed": "キャンセルに失敗しました"
+  "composerCancelFailed": "キャンセルに失敗しました",
+  "outcomeCancelled": "生成を停止しました",
+  "outcomeBlocked": "ブロックされました",
+  "outcomeError": "生成に失敗しました",
+  "retry": "再試行",
+  "retrying": "再試行中…"
 }

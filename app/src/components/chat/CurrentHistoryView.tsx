@@ -1641,9 +1641,17 @@ function OutcomeNoticeCard({
   // a normal assistant output saying the turn failed / was stopped, with 重试 on the
   // latest turn. Subtle red for failures, grey for cancellations.
   // blocked(出站审计拦截)与 error 一样用红色,但图标用 Ban 表示"被拦下",且不给重试。
+  const { t } = useTranslation('chat');
   const isBlocked = outcome === 'blocked';
   const isError = outcome === 'error';
   const isRed = isError || isBlocked;
+  // The outcome label is i18n'd by KIND in the UI — the backend marker text
+  // (干净中文 e.g. 「已停止生成」) is only the detection signal / wire text; `text`
+  // stays the fallback so any unknown kind still shows something readable.
+  const label = isBlocked ? t('outcomeBlocked', { defaultValue: '已拦截' })
+    : isError ? t('outcomeError', { defaultValue: '生成失败' })
+    : outcome === 'cancelled' ? t('outcomeCancelled', { defaultValue: '已停止生成' })
+    : text;
   return (
     <div data-id="current-history-outcome-notice" data-outcome={outcome} className="flex flex-col items-start gap-1.5">
       <div
@@ -1651,7 +1659,7 @@ function OutcomeNoticeCard({
         className={`flex items-start gap-1.5 text-sm leading-[1.7] ${isRed ? 'text-rose-300/85' : 'text-zinc-400'}`}
       >
         {isBlocked ? <Ban className="mt-[3px] h-3.5 w-3.5 shrink-0" /> : isError ? <AlertTriangle className="mt-[3px] h-3.5 w-3.5 shrink-0" /> : <Square className="mt-[3px] h-3.5 w-3.5 shrink-0" />}
-        <span data-id="current-history-outcome-notice-label" className="break-all">{text}</span>
+        <span data-id="current-history-outcome-notice-label" className="break-all">{label}</span>
       </div>
       {detail && detail !== text ? (
         // 具体原因(blocked:命中规则/事件ID;像余额不足卡那样把原因显出来)。缩进对齐到 label 下。
@@ -1673,7 +1681,7 @@ function OutcomeNoticeCard({
           } disabled:opacity-60`}
         >
           <RotateCcw className={`h-3 w-3 ${retrying ? 'animate-spin' : ''}`} />
-          {retrying ? '重试中…' : '重试'}
+          {retrying ? t('retrying', { defaultValue: '重试中…' }) : t('retry', { defaultValue: '重试' })}
         </button>
       ) : null}
     </div>

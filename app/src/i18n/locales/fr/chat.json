@@ -27,5 +27,10 @@
   "composerUploadFailedNamed": "Échec du téléversement de « {{name}} »",
   "composerSendFailed": "Échec de l'envoi",
   "composerCanceled": "Annulé",
-  "composerCancelFailed": "Échec de l'annulation"
+  "composerCancelFailed": "Échec de l'annulation",
+  "outcomeCancelled": "Génération arrêtée",
+  "outcomeBlocked": "Bloqué",
+  "outcomeError": "Échec de la génération",
+  "retry": "Réessayer",
+  "retrying": "Nouvelle tentative…"
 }

@@ -41,7 +41,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.74"
+const version = "2.3.92"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -304,6 +304,7 @@ Options:
 	http.HandleFunc("/api/tmux/chat_history", authM(handleAgentChatHistory))
 	http.HandleFunc("/api/agent/messages", authM(handleAgentMessages)) // cross-agent message link view (JOIN history_turns)
 	http.HandleFunc("/api/knowledge", authM(handleKnowledge))          // team knowledge Layer 2 store: GET list/recall, POST add
+	http.HandleFunc("/api/knowledge/specialist", authM(handleKnowledgeSpecialist)) // GET/POST which pane governs (config-file backed)
 	http.HandleFunc("/api/knowledge/", authM(handleKnowledgeByID))     // GET one / PATCH promote|reject|supersede
 	http.HandleFunc("/api/tmux/client-trace", authM(handleTmuxClientTrace))
 	// http.HandleFunc("/api/tmux/send_wait", authM(handleSendWait)) // TODO: implement handleSendWait
@@ -448,6 +449,7 @@ Options:
 	http.HandleFunc("/api/collab/workflows", wa(handleCollabWorkflows))
 	http.HandleFunc("/api/collab/workflows/", wa(handleCollabWorkflowByID))
 	http.HandleFunc("/api/skills", wa(handleSkills))
+	http.HandleFunc("/api/skills/installed", wa(handleInstalledSkills)) // 本地已装 skill(快,无远程)
 	http.HandleFunc("/api/skills/run", wa(handleSkillRun))
 	http.HandleFunc("/api/skill-market", wa(handleSkillMarketList))
 	http.HandleFunc("/api/skill-market/", wa(handleSkillMarketAction))

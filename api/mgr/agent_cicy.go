@@ -1103,23 +1103,23 @@ func cicyAllToolDefs() []M {
 	return append([]M{}, []M{
 		{
 			"name":        "skill",
-			"description": "发现并读取已安装的 skill(cicy-todo 记 todo、cicy-agent 给别的 agent 派活/抓进度、等等)。不带 name = 列出所有 skill 及一句话简介;带 name = 返回该 skill 的 SKILL.md 用法。读到用法后,用 `shell` 跑它的 CLI(如 `cicy-todo add \"...\"`、`cicy-agent msg w-xxx \"...\"`)。",
+			"description": "Discover and read installed skills. Call with no name to list every installed skill with a one-line summary; call with a name to get that skill's SKILL.md (its CLI usage). Once you've read the usage, run the skill's CLI via the `shell` tool (e.g. `cicy-todo add \"...\"` to track a todo, `cicy-agent msg w-xxx \"...\"` to hand work to another agent).",
 			"input_schema": M{
 				"type": "object",
 				"properties": M{
-					"name": M{"type": "string", "description": "skill 名(如 cicy-todo);留空则列出全部已装 skill"},
+					"name": M{"type": "string", "description": "Skill name (e.g. cicy-todo). Leave empty to list all installed skills."},
 				},
 			},
 		},
 		{
 			"name":        "shell",
-			"description": "在本机执行一条 shell 命令(Windows 走 PowerShell,macOS/Linux 走 bash),拿到 stdout/stderr 和退出码。用于真正动手:下载并安装 Docker Desktop、启动 Docker、安装并启动 cicy-code 等。每次只跑一条、跑完看结果再决定下一步;高破坏命令先跟用户确认。",
+			"description": "Run a single shell command on this host (PowerShell on Windows, bash on macOS/Linux) and get back its stdout/stderr and exit code. This is how you actually do things — run a skill's CLI, inspect or change the system, install and start software. Run one command at a time and read the result before deciding the next; confirm with the user before any destructive command.",
 			"input_schema": M{
 				"type": "object",
 				"properties": M{
-					"command": M{"type": "string", "description": "要执行的命令(Windows=PowerShell 语法,Unix=bash 语法)"},
-					"cwd":     M{"type": "string", "description": "可选工作目录"},
-					"timeout": M{"type": "integer", "description": "可选超时秒数(默认 120,最大 1800)"},
+					"command": M{"type": "string", "description": "The command to run (PowerShell syntax on Windows, bash syntax on Unix)."},
+					"cwd":     M{"type": "string", "description": "Optional working directory."},
+					"timeout": M{"type": "integer", "description": "Optional timeout in seconds (default 120, max 1800)."},
 				},
 				"required": []string{"command"},
 			},
@@ -2601,6 +2601,9 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 			emit(M{"type": "error", "error": "已取消"})
 			session.persistLocked(workspace)
 			cicyAttachOutcomeToSnapshot(shortID, "cancelled", "已取消")
+			// reply.json 收尾成终态——否则起手的 working 占位 + 半截答案会被前端当 live tail
+			// 永久盖在上面,current.json 的「已停止」marker 显示不出来(与 blocked 路径同理)。
+			cicyWriteTerminalReply(shortID, session.convID)
 			return false
 		}
 		payload := M{
@@ -2639,6 +2642,9 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 			emit(M{"type": "error", "error": detail})
 			session.persistLocked(workspace)
 			cicyAttachOutcomeToSnapshot(shortID, kind, detail)
+			// reply.json 收尾成终态,同上:让 UI 解锁并改渲染 current.json 的 outcome marker
+			// (取消→已停止 / 错误→生成失败),而不是把半截答案当 live tail 永久挂着。
+			cicyWriteTerminalReply(shortID, session.convID)
 			return false
 		}
 

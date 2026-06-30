@@ -62,6 +62,24 @@ func handleSkills(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"skills": builtinSkills()})
 }
 
+// handleInstalledSkills lists the LOCALLY installed cicy-skills (name + version),
+// read from the local installed manifest — NO remote registry fetch. The web uses
+// this for cheap install checks (e.g. "is cicy-todo installed?") instead of the
+// ~2s /api/skill-market remote catalog, which it was calling on every page load
+// just to read one skill's install flag.
+func handleInstalledSkills(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		httpErr(w, 405, "method not allowed")
+		return
+	}
+	installed := loadInstalledFull()
+	out := make([]M, 0, len(installed))
+	for name, s := range installed {
+		out = append(out, M{"name": name, "version": s.Version})
+	}
+	J(w, M{"skills": out})
+}
+
 func handleSkillRun(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		httpErr(w, 405, "method not allowed")

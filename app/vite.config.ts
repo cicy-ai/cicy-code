@@ -33,6 +33,33 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, 'src'),
       },
     },
+    build: {
+      // Split out CodeMirror as ONE self-contained chunk. The earlier crash
+      // ("Cannot access 'Mt' before initialization") came from grouping
+      // @codemirror/@lezer while their transitive deps (style-mod, crelt,
+      // w3c-keyname) landed in a different chunk → cross-chunk circular init. The
+      // fix is to capture codemirror's WHOLE dependency closure here so the chunk
+      // is self-contained (it only imports leaves like react, which load first
+      // from the entry). Everything else is left to Vite's default chunking — no
+      // react/vendor hand-splitting, which is where the cycles came from.
+      //
+      // codemirror's only importers (FilesView / MemoryView / DiffView) are all
+      // behind React.lazy, so this chunk stays OFF the first-paint path — it loads
+      // only when a file or memory editor opens.
+      chunkSizeWarningLimit: 1200,
+      rollupOptions: {
+        output: {
+          manualChunks(id: string) {
+            if (!id.includes('node_modules')) return;
+            if (
+              id.includes('@codemirror') || id.includes('@uiw/react-codemirror') ||
+              id.includes('@uiw/codemirror') || id.includes('@lezer') || id.includes('@marijn') ||
+              id.includes('style-mod') || id.includes('w3c-keyname') || id.includes('crelt')
+            ) return 'codemirror';
+          },
+        },
+      },
+    },
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
       allowedHosts: true,

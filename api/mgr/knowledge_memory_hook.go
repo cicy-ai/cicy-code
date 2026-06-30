@@ -50,18 +50,37 @@ func knowledgeHookEnabled() bool {
 	return b
 }
 
-// knowledgeSpecialistPaneID resolves the live 知识专员 agent's pane (an ordinary
-// cicy agent carrying role_template=知识专员), or "" when none is on duty.
+// knowledgeSpecialistDefaultPane is the fallback governing pane — the master
+// (w-1001), which is always on duty, so memory-hook briefs always have a home.
+const knowledgeSpecialistDefaultPane = "w-1001:main.0"
+
+// knowledgeSpecialistConfigKey pins the governing pane in global.json (a FILE, not
+// the DB) — set via `cicy-knowledge specialist <pane>` / POST /api/knowledge/specialist.
+const knowledgeSpecialistConfigKey = "knowledge_specialist_pane"
+
+// knowledgeSpecialistPaneID resolves which pane governs the knowledge store. It is
+// CONFIG-driven — read from global.json, NOT a DB role query (which used to pick
+// "most recently updated agent carrying the role", an implicit/flaky heuristic).
+// The operator pins it explicitly; unset → defaults to the master pane (w-1001).
 func knowledgeSpecialistPaneID() string {
-	if store == nil {
-		return ""
+	if v, ok := readGlobalJSONConfig()[knowledgeSpecialistConfigKey].(string); ok {
+		if p := strings.TrimSpace(v); p != "" {
+			return normPaneID(p)
+		}
 	}
-	var pane string
-	_ = store.QueryRow(
-		"SELECT pane_id FROM agent_config WHERE role_template=? AND COALESCE(active,1)=1 ORDER BY updated_at DESC LIMIT 1",
-		knowledgeSpecialistRoleTemplate,
-	).Scan(&pane)
-	return strings.TrimSpace(pane)
+	return knowledgeSpecialistDefaultPane
+}
+
+// setKnowledgeSpecialistPane pins (or, with "", clears → back to default) the
+// governing pane in global.json.
+func setKnowledgeSpecialistPane(pane string) error {
+	cfg := readGlobalJSONConfig()
+	if p := normPaneID(strings.TrimSpace(pane)); p != "" {
+		cfg[knowledgeSpecialistConfigKey] = p
+	} else {
+		delete(cfg, knowledgeSpecialistConfigKey)
+	}
+	return writeGlobalJSONConfig(cfg)
 }
 
 type memoryWriteHook struct {
@@ -77,7 +96,7 @@ func (h *memoryWriteHook) finalize(reply aiGatewayReplySnapshot) {
 	}
 	// Collect memory-write candidates from THIS request's tool calls (reply.ToolCalls
 	// is per-request, not accumulated) — pure parsing, no DB/IO yet.
-	type cand struct{ path, content string }
+	type cand struct{ path, content, kind string }
 	var cands []cand
 	for _, tc := range reply.ToolCalls {
 		switch strings.TrimSpace(tc.ToolName) {
@@ -86,8 +105,8 @@ func (h *memoryWriteHook) finalize(reply aiGatewayReplySnapshot) {
 			continue
 		}
 		path, content := parseMemoryToolCall(tc.Arguments)
-		if path != "" && isMemoryFilePath(path) {
-			cands = append(cands, cand{path: path, content: content})
+		if k := memoryWriteKind(path); k != "" {
+			cands = append(cands, cand{path: path, content: content, kind: k})
 		}
 	}
 	if len(cands) == 0 {
@@ -98,6 +117,12 @@ func (h *memoryWriteHook) finalize(reply aiGatewayReplySnapshot) {
 		return
 	}
 	for _, c := range cands {
+		if c.kind == "projectmem" {
+			// Shared claude pool: instantly live, NOT a pending-gated canon entry.
+			// Don't insert/brief per write (would flood) — debounced patrol nudge.
+			noteProjectMemWrite(projectMemPoolSlug(c.path))
+			continue
+		}
 		h.dispatch(c.path, knowledgeTitleFromMemory(c.path, c.content), c.content)
 	}
 }
@@ -144,9 +169,9 @@ func (h *memoryWriteHook) dispatch(path, title, body string) {
 	}
 	brief := fmt.Sprintf("📚 [knowledge] %s 写入 memory %s → 已投待评审 _inbox/%s.md。请核实后处置:cicy-knowledge get %s → promote / reject / supersede。",
 		shortPaneID(pane), path, id, id)
-	if err := sendTextToPane(spec, brief, true); err != nil {
-		log.Printf("[knowledge-hook] brief send failed pane=%s id=%s: %v", spec, id, err)
-	}
+	// Deliver the cicy-agent-msg way (the 知识专员 is a headless cicy agent with no
+	// tmux pane; send-keys would silently fail).
+	deliverAgentMessage(spec, brief)
 }
 
 // knowledgeMemorySlug is a deterministic slug for a memory file so repeated

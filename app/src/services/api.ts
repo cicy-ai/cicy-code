@@ -183,6 +183,9 @@ const api = {
   getMachinePanes: (id: number | string) => http.get(`/api/machines/${id}/panes`),
 
   getSkills: () => http.get('/api/skills'),
+  // Locally installed cicy-skills only (name+version) — fast, no remote registry.
+  // Use this for install checks instead of listMarketSkills() (~2s remote).
+  getInstalledSkills: () => http.get('/api/skills/installed'),
   runSkill: (data: any) => http.post('/api/skills/run', data),
 
   listMarketSkills: (params?: { category?: string; installed?: boolean; q?: string }) =>

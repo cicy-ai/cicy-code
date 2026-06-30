@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trans } from 'react-i18next';
 import i18n from '../../i18n';
-import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, UserPlus, GitBranch, ChevronRight, ChevronDown } from 'lucide-react';
+import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, UserPlus, GitBranch, ChevronRight, ChevronDown, ClipboardList } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
@@ -12,6 +12,7 @@ import { metricsFromCurrentReply, type AgentLiveMetrics } from '../../lib/agentM
 import { useApp } from '../../contexts/AppContext';
 import { ModelTag } from '../../lib/modelTag';
 import AgentAvatar from '../AgentAvatar';
+import TipBelow from '../ui/TipBelow';
 import Select from '../ui/Select';
 import CreateAgentDialog, { CreateAgentValues } from '../CreateAgentDialog';
 import ForkConfirmModal from './ForkConfirmModal';
@@ -59,6 +60,8 @@ interface Props {
   // Open a file (workspace-relative path) in the given agent's file editor.
   // Used by the fork-confirm modal to reveal the source's history files.
   onOpenAgentFile?: (paneId: string, relPath: string) => void;
+  // Open the team roster (花名册) — the full bound/unbound agent table.
+  onOpenRoster?: () => void;
   // When true, skip the fixed "current agent (master)" header card so the list
   // shows ONLY the bound members. Used by the audit view to render just the two
   // security agents without the w-1001 master card.
@@ -155,7 +158,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll, onOpenAgentFile, hideMaster = false }: Props) {
+export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll, onOpenAgentFile, onOpenRoster, hideMaster = false }: Props) {
   const [creating, setCreating] = useState(false);
   const [forkingId] = useState<string | null>(null);
   // Source pane id whose fork-confirm preview modal is open (null = closed).
@@ -979,15 +982,27 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           dropdownMatchSelector='[data-id="left-panel-team-view"]'
         />
         </div>
-        <button
-          data-id="team-panel-create-worker"
-          onClick={() => setCreateDialogOpen(true)}
-          disabled={creating}
-          className="flex h-[30px] w-[30px] items-center justify-center rounded-md border border-[var(--vsc-border)] bg-white/[0.02] text-zinc-400 transition-colors duration-150 hover:bg-white/[0.05] hover:border-white/[0.10] hover:text-zinc-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25"
-          title={i18n.t('createBindShortLabel', { ns: 'teamPanel' })}
-        >
-          {creating ? <Spinner size="xs" /> : <Plus className="w-3.5 h-3.5" />}
-        </button>
+        {onOpenRoster ? (
+          <TipBelow label={i18n.t('rosterTitle', { ns: 'workspace', defaultValue: '团队花名册' })}>
+            <button
+              data-id="team-panel-open-roster"
+              onClick={() => onOpenRoster()}
+              className="flex h-[30px] w-[30px] items-center justify-center rounded-md border border-[var(--vsc-border)] bg-white/[0.02] text-zinc-400 transition-colors duration-150 hover:bg-white/[0.05] hover:border-white/[0.10] hover:text-zinc-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25"
+            >
+              <ClipboardList className="w-3.5 h-3.5" />
+            </button>
+          </TipBelow>
+        ) : null}
+        <TipBelow label={i18n.t('createBindShortLabel', { ns: 'teamPanel' })}>
+          <button
+            data-id="team-panel-create-worker"
+            onClick={() => setCreateDialogOpen(true)}
+            disabled={creating}
+            className="flex h-[30px] w-[30px] items-center justify-center rounded-md border border-[var(--vsc-border)] bg-white/[0.02] text-zinc-400 transition-colors duration-150 hover:bg-white/[0.05] hover:border-white/[0.10] hover:text-zinc-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25"
+          >
+            {creating ? <Spinner size="xs" /> : <Plus className="w-3.5 h-3.5" />}
+          </button>
+        </TipBelow>
       </div>}
 
       <CreateAgentDialog
