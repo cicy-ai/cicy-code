@@ -231,33 +231,6 @@ restore_ui_placeholder() {
 EOF
 }
 
-SKILLS_DIR="$ROOT_DIR/skills"
-
-prepare_skills_embed() {
-  # Build cicy-skills binaries + pack the source tree into a single tarball
-  # that setup.go //go:embed picks up. A tar avoids the "different module"
-  # error you get when embedding a directory that itself has go.mod.
-  local out="$API_DIR/mgr/cicy_skills_assets.tar.gz"
-  if [ "${SKIP_SKILLS_EMBED:-0}" = "1" ]; then
-    [ -f "$out" ] || (echo '' | gzip > "$out") # tiny placeholder so go:embed has a file
-    return
-  fi
-  echo "[build] preparing cicy-skills embed tarball..."
-  GOWORK=off make -C "$SKILLS_DIR" build-local-binaries >/dev/null
-  rm -f "$out"
-  tar -czf "$out" -C "$SKILLS_DIR" \
-    --exclude='./node_modules' \
-    --exclude='./.git' \
-    --exclude='./.github' \
-    --exclude='./cf' \
-    --exclude='./docker' \
-    --exclude='./migrations' \
-    --exclude='./providers/google-node/node_modules' \
-    --exclude='./.build-embed.lock' \
-    .
-  echo "[build]   wrote $out ($(du -h "$out" | cut -f1))"
-}
-
 prepare_embed() {
   acquire_build_embed_lock
   rm -rf $API_DIR/mgr/resources $API_DIR/mgr/ui $API_DIR/mgr/tmux.conf $API_DIR/mgr/monitor
@@ -280,12 +253,10 @@ prepare_embed() {
     cd "$API_DIR" && make asset >/dev/null && cd "$ROOT_DIR"
   fi
   cp -r $APP_DIR/dist $API_DIR/mgr/ui
-  prepare_skills_embed
 }
 
 cleanup_embed() {
   rm -rf $API_DIR/mgr/resources $API_DIR/mgr/ui $API_DIR/mgr/tmux.conf $API_DIR/mgr/monitor
-  rm -f $API_DIR/mgr/cicy_skills_assets.tar.gz
   restore_ui_placeholder
   release_build_embed_lock
 }
