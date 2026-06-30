@@ -17,7 +17,7 @@ import {
   Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen, Braces
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { ModelTag } from '../lib/modelTag';
+import { ModelTag, isChatModel } from '../lib/modelTag';
 import AgentAvatar from './AgentAvatar';
 import MobileQRPopover from './MobileQRPopover';
 import { useDevRegister, devStore } from '../lib/devStore';
@@ -2849,7 +2849,7 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
   const modelOrder: string[] = [];
   const modelToProviders = new Map<string, any[]>();
   for (const p of styleProviders) {
-    const models: string[] = Array.isArray(p?.models) ? p.models.map((m: any) => String(m)) : [];
+    const models: string[] = Array.isArray(p?.models) ? p.models.map((m: any) => String(m)).filter(isChatModel) : [];
     for (const m of models) {
       if (!modelToProviders.has(m)) { modelToProviders.set(m, []); modelOrder.push(m); }
       modelToProviders.get(m)!.push(p);

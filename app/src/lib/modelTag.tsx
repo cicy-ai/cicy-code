@@ -27,6 +27,20 @@ function normalize(raw: string): string {
     .replace(/[-@:](\d{6,8}|latest|preview|exp|beta)$/, '');
 }
 
+// isChatModel reports whether a model id can drive a chat completion — i.e.
+// whether it belongs in a chat model picker. Speech-to-text (whisper) and
+// text-to-speech (orpheus / *-tts) models can't chat, so they're excluded.
+// Used to filter provider model lists in the chat model pickers (NOT in the
+// provider dashboard or stt routing, which must still see every model).
+export function isChatModel(raw?: string): boolean {
+  const m = String(raw || '').toLowerCase();
+  if (!m) return false;
+  if (m.includes('whisper')) return false;            // STT (Groq whisper-large-v3*, openai whisper-1)
+  if (m.includes('orpheus')) return false;            // TTS (canopylabs/orpheus-*)
+  if (/(^|[/_-])tts([/_-]|$)/.test(m)) return false;  // generic text-to-speech ids
+  return true;
+}
+
 export function modelFamily(raw?: string): ModelFamily {
   if (!raw || !raw.trim()) return 'other';
   const m = normalize(raw);

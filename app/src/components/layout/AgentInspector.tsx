@@ -7,6 +7,7 @@ import apiService from '../../services/api';
 import type { EditPaneData } from '../../types';
 import Select, { type SelectOption } from '../ui/Select';
 import { normalizeAgentType } from '../../lib/agentType';
+import { isChatModel } from '../../lib/modelTag';
 import { useApp } from '../../contexts/AppContext';
 // Lazy: MemoryView pulls in the CodeMirror editor stack (lite-config / templates
 // editing). Defer it so codemirror isn't on the inspector's first-paint path.
@@ -920,7 +921,7 @@ export default function AgentInspector({
                             const nextRuntimeAi = { ...(settingsData?.runtime_ai || {}), provider_name: value };
                             // Switching provider: if the current model isn't in the new provider's list, reset to its first model
                             const newProvider = runtimeAIProviderOptions.find((p) => p.key === value);
-                            const newProviderModels = newProvider?.models || [];
+                            const newProviderModels = (newProvider?.models || []).filter(isChatModel);
                             const currentModel = String(settingsData?.default_model || '').trim();
                             const keepModel = currentModel && newProviderModels.includes(currentModel) ? currentModel : (newProviderModels[0] || currentModel);
                             patchSettingsData({ runtime_ai: nextRuntimeAi, default_model: keepModel });
@@ -936,7 +937,7 @@ export default function AgentInspector({
                         {(() => {
                           const activeProviderKey = String(settingsData?.runtime_ai?.provider_name || '').trim() || runtimeAIDefault?.provider_name || '';
                           const activeProvider = runtimeAIProviderOptions.find((p) => p.key === activeProviderKey);
-                          const baseModels = activeProvider?.models || [];
+                          const baseModels = (activeProvider?.models || []).filter(isChatModel);
                           const currentValue = settingsData?.default_model || runtimeAIDefault?.model || '';
                           const optionValues = currentValue && !baseModels.includes(currentValue)
                             ? [currentValue, ...baseModels]

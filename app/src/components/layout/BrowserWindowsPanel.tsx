@@ -72,6 +72,7 @@ export interface Profile {
   proxy: { url: string; enabled: boolean };
   running?: boolean;
   meta?: string;
+  gmail?: string;
   logins: LoginRec[];
   ipInfo?: IpInfo;
 }
@@ -201,6 +202,7 @@ async function loadProfiles(clientId: string, backend: Backend): Promise<Profile
         name: `Profile${p.accountIdx}`,
         proxy: p.proxy || { url: '', enabled: false },
         meta: p.partition || `persist:sandbox-${p.accountIdx}`,
+        gmail: p.gmail || p.accounts?.gmail?.account || p.accounts?.google?.account || '',
         logins: Array.isArray(p.logins) ? p.logins : [],
         ipInfo: p.ipInfo,
       });
@@ -232,7 +234,11 @@ async function loadProfiles(clientId: string, backend: Backend): Promise<Profile
     // chrome_list_profiles returns proxy as a STRING; electron as {url,enabled}.
     proxy: typeof p.proxy === 'string' ? { url: p.proxy, enabled: !!p.proxy } : (p.proxy || { url: '', enabled: false }),
     running: !!(p.liveStatus && p.liveStatus.isRunning),
-    meta: p.note || '',   // 显示备注，不显示 gmail
+    meta: p.note || '',
+    // Google identity for the row's secondary line. chrome_list_profiles resolves
+    // `gmail` from the accounts map (desktop ≥ 2.1.214); resolve again client-side
+    // from p.accounts as a fallback so it shows even on older fields.
+    gmail: p.gmail || p.accounts?.gmail?.account || p.accounts?.google?.account || '',
     logins: Array.isArray(p.logins) ? p.logins : [],
     ipInfo: p.ipInfo,
   }));
@@ -335,6 +341,28 @@ async function probeProfileIp(clientId: string, p: Profile): Promise<IpInfo | nu
 }
 
 interface ProfileDetail { name: string; note: string; proxyUrl: string; logins: LoginRec[]; ipInfo?: IpInfo }
+
+// The `account <idx> <service> <id>` CLI records identities in the per-profile
+// `accounts` map (gmail / google / groq / github → {account, password, totp}),
+// a DIFFERENT ledger from the rich `logins` records (`login set`). The detail
+// card only showed `logins`, so accounts looked "empty". Surface them: turn each
+// account into a login row so the recorded gmail/groq/… show up too.
+function accountsToLogins(accounts: any): LoginRec[] {
+  if (!accounts || typeof accounts !== 'object') return [];
+  return Object.entries(accounts).map(([svc, v]: [string, any]) => ({
+    name: svc,
+    username: (v && typeof v === 'object' ? v.account : v) || '',
+    email: svc === 'gmail' || svc === 'google' ? ((v && v.account) || '') : '',
+    twofa: v && v.totp ? '✓' : '',
+  }));
+}
+// Merge manual logins with account-derived rows; a manual record of the same
+// name wins (the user curated it), account rows fill the rest.
+function mergeLoginsWithAccounts(logins: LoginRec[], accounts: any): LoginRec[] {
+  const have = new Set((logins || []).map((l) => String(l.name).toLowerCase()));
+  const extra = accountsToLogins(accounts).filter((r) => !have.has(String(r.name).toLowerCase()));
+  return [...(logins || []), ...extra];
+}
 async function loadProfileDetail(clientId: string, p: Profile): Promise<ProfileDetail> {
   if (p.backend === 'electron') {
     const v = await deviceCall(clientId, 'electron_get_profile', { accountIdx: p.accountIdx });
@@ -343,7 +371,7 @@ async function loadProfileDetail(clientId: string, p: Profile): Promise<ProfileD
       name: v?.name || p.name,
       note: typeof v?.note === 'string' ? v.note : '',
       proxyUrl: v?.proxy?.url || '',
-      logins: Array.isArray(v?.logins) ? v.logins : [],
+      logins: mergeLoginsWithAccounts(Array.isArray(v?.logins) ? v.logins : [], v?.accounts),
       ipInfo: v?.ipInfo,
     };
   }
@@ -354,7 +382,7 @@ async function loadProfileDetail(clientId: string, p: Profile): Promise<ProfileD
     name: r?.profileKey || p.name,
     note: typeof pc.note === 'string' ? pc.note : '',
     proxyUrl: typeof pc.proxy === 'string' ? pc.proxy : (pc.proxy?.url || ''),
-    logins: Array.isArray(pc.logins) ? pc.logins : [],
+    logins: mergeLoginsWithAccounts(Array.isArray(pc.logins) ? pc.logins : [], pc.accounts),
     ipInfo: pc.ipInfo,
   };
 }
@@ -1136,8 +1164,9 @@ export default function BrowserWindowsPanel({
 
 function ProfileRow({ profile, selected, onClick }: { profile: Profile; selected: boolean; onClick: () => void }) {
   const proxyOn = profile.proxy?.enabled && profile.proxy?.url;
-  // No secondary identifier line — neither gmail nor 备注 (user request).
-  const metaText = '';
+  // The Google identity (gmail), resolved from the accounts map, shown inline on
+  // the Profile-name line.
+  const gmail = profile.gmail || '';
   const ip = profile.ipInfo?.ip;
   const area = profile.ipInfo?.area;
   return (
@@ -1152,21 +1181,21 @@ function ProfileRow({ profile, selected, onClick }: { profile: Profile; selected
       <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', profile.backend === 'electron' || profile.running ? 'bg-emerald-500/80' : 'bg-zinc-600')} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span data-id="browser-profile-name" className={cn('text-[13px] truncate', selected ? 'text-zinc-100' : 'text-zinc-200')}>{profile.name}</span>
-          <span className="text-[10px] text-zinc-600">#{profile.accountIdx}</span>
+          <span data-id="browser-profile-name" className={cn('text-[13px] truncate shrink-0', selected ? 'text-zinc-100' : 'text-zinc-200')}>{profile.name}</span>
+          <span className="text-[10px] text-zinc-600 shrink-0">#{profile.accountIdx}</span>
+          {gmail && <span data-id="browser-profile-gmail" className="text-[11px] text-zinc-500 truncate" title={gmail}>{gmail}</span>}
         </div>
         <div className="flex items-center gap-1.5 mt-0.5">
-          {metaText && <span className="text-[10px] text-zinc-600 truncate">{metaText}</span>}
+          {proxyOn ? (
+            <span className="text-[10px] px-1 rounded bg-violet-500/10 text-violet-300/80 truncate shrink-0" title={profile.proxy.url}>proxy</span>
+          ) : (
+            <span className="text-[10px] px-1 rounded bg-white/[0.04] text-zinc-600 shrink-0">no proxy</span>
+          )}
           {ip && (
             <span className="text-[10px] px-1 rounded bg-sky-500/10 text-sky-300/80 truncate shrink-0"
               title={`${ip}${area ? ' · ' + area : ''}`}>
               {ip}{area ? ` · ${area}` : ''}
             </span>
-          )}
-          {proxyOn ? (
-            <span className="text-[10px] px-1 rounded bg-violet-500/10 text-violet-300/80 truncate shrink-0" title={profile.proxy.url}>proxy</span>
-          ) : (
-            <span className="text-[10px] px-1 rounded bg-white/[0.04] text-zinc-600 shrink-0">no proxy</span>
           )}
         </div>
       </div>
