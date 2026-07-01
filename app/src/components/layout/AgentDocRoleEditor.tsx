@@ -4,6 +4,7 @@ import { EditorView, keymap } from '@codemirror/view';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { markdown } from '@codemirror/lang-markdown';
 import { Loader2, Check, AlertCircle, Users } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 
 // The roster drawer's per-agent editor: THREE tabs across the top —
@@ -122,6 +123,7 @@ function useTemplateFile(scope: string | null, name: string | null) {
 interface TabDef { key: string; label: string; scope: 'agent' | 'role'; name: string; shared: boolean; }
 
 export default function AgentDocRoleEditor({ paneId, className }: Props) {
+  const { t } = useTranslation('workspace');
   const [agentType, setAgentType] = useState('');
   const [roleSlug, setRoleSlug] = useState('');
   const [tab, setTab] = useState('doc');
@@ -176,18 +178,18 @@ export default function AgentDocRoleEditor({ paneId, className }: Props) {
           ))}
         </div>
         {file.saving ? (
-          <span className="flex items-center gap-1 text-[11px] text-zinc-500"><Loader2 className="h-3 w-3 animate-spin" /> 保存中</span>
+          <span className="flex items-center gap-1 text-[11px] text-zinc-500"><Loader2 className="h-3 w-3 animate-spin" /> {t('adrSaving')}</span>
         ) : file.dirty ? (
-          <span className="text-[11px] text-amber-400/80">未保存</span>
+          <span className="text-[11px] text-amber-400/80">{t('adrUnsaved')}</span>
         ) : (
-          <span className="flex items-center gap-1 text-[11px] text-emerald-400/70"><Check className="h-3 w-3" /> 已保存</span>
+          <span className="flex items-center gap-1 text-[11px] text-emerald-400/70"><Check className="h-3 w-3" /> {t('adrSaved')}</span>
         )}
       </div>
 
       {/* shared-template notice for meta.yaml / system.md */}
       {active?.shared ? (
         <div className="flex items-center gap-1.5 border-b border-amber-500/15 bg-amber-500/[0.06] px-3 py-1 text-[11px] text-amber-300/80">
-          <Users className="h-3 w-3 shrink-0" /> 共享模板 {slug} · 改动影响所有选用此角色的 agent
+          <Users className="h-3 w-3 shrink-0" /> {t('adrSharedTemplate', { slug })}
         </div>
       ) : null}
       {file.error ? (
@@ -196,13 +198,13 @@ export default function AgentDocRoleEditor({ paneId, className }: Props) {
         </div>
       ) : file.missing ? (
         <div className="flex items-center gap-1.5 border-b border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[11px] text-amber-300">
-          <AlertCircle className="h-3 w-3 shrink-0" /> 该文件还不存在;保存即创建。
+          <AlertCircle className="h-3 w-3 shrink-0" /> {t('adrMissing')}
         </div>
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-auto">
         {file.loading ? (
-          <div className="flex h-full items-center justify-center text-[12px] text-zinc-600"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> 加载中…</div>
+          <div className="flex h-full items-center justify-center text-[12px] text-zinc-600"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('adrLoading')}</div>
         ) : (
           <CodeMirror
             value={file.content}

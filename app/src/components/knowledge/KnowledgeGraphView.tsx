@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { X, Loader2, RefreshCw, FileText, Search } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import MarkdownPreview from '../files/MarkdownPreview';
 
@@ -16,7 +17,6 @@ interface GNode { id: string; kind: 'entry' | 'tag'; label: string; status?: str
 const STATUS_COLOR: Record<string, string> = {
   canon: '#34d399', pending: '#fbbf24', draft: '#94a3b8', deprecated: '#c084fc', rejected: '#fb7185',
 };
-const STATUS_LABEL: Record<string, string> = { canon: '正典', pending: '待评审', draft: '草案', deprecated: '废弃', rejected: '归档' };
 const TAG_COLOR = '#60a5fa';
 const ALL_STATUS = ['canon', 'pending', 'draft', 'deprecated', 'rejected'];
 
@@ -27,6 +27,8 @@ const normStatus = (s?: string) => (s || 'canon').toLowerCase();
 interface Props { className?: string }
 
 export default function KnowledgeGraphView({ className }: Props) {
+  const { t } = useTranslation('workspace');
+  const stLabel = (s?: string) => { const k = normStatus(s); return t('st' + k.charAt(0).toUpperCase() + k.slice(1)); };
   const [entries, setEntries] = useState<KnEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -105,7 +107,7 @@ export default function KnowledgeGraphView({ className }: Props) {
     const ent = entries.find((e) => e.id === id) || null; setSelected(ent); if (!ent) return;
     setDetail({ body: '', loading: true });
     try { const { data } = await apiService.getKnowledge(id); setDetail({ body: typeof data?.body === 'string' ? data.body : '', loading: false }); }
-    catch (e: any) { setDetail({ body: `加载失败: ${e?.message || ''}`, loading: false }); }
+    catch (e: any) { setDetail({ body: t('knLoadFailed', { msg: e?.message || '' }), loading: false }); }
   }, [entries]);
 
   const onNodeClick = useCallback((node: any) => { if (node?.kind === 'entry') openEntry(String(node.id).replace(/^e:/, '')); }, [openEntry]);
@@ -124,26 +126,26 @@ export default function KnowledgeGraphView({ className }: Props) {
       <div data-id="knowledge-graph-toolbar" className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-[var(--vsc-border)] bg-[#0b0b0d] px-3 py-2">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-600" />
-          <input data-id="knowledge-graph-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索标题 / tag / 域…"
+          <input data-id="knowledge-graph-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('knSearchPlaceholder')}
             className="w-56 rounded-md border border-white/[0.08] bg-black/30 py-1 pl-7 pr-2 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-blue-500/40" />
         </div>
         <div className="flex flex-wrap items-center gap-1">
-          {ALL_STATUS.map((s) => chip(!offStatus.has(s), () => setOffStatus((p) => { const n = new Set(p); n.has(s) ? n.delete(s) : n.add(s); return n; }), s, STATUS_LABEL[s], STATUS_COLOR[s]))}
+          {ALL_STATUS.map((s) => chip(!offStatus.has(s), () => setOffStatus((p) => { const n = new Set(p); n.has(s) ? n.delete(s) : n.add(s); return n; }), s, stLabel(s), STATUS_COLOR[s]))}
         </div>
         <div className="flex flex-wrap items-center gap-1">
           {allDomains.map((d) => chip(!offDomains.has(d), () => setOffDomains((p) => { const n = new Set(p); n.has(d) ? n.delete(d) : n.add(d); return n; }), d, d))}
         </div>
-        <span className="ml-auto text-[10px] text-zinc-600">{shownEntries.length} 条 · {allDomains.length} 域</span>
+        <span className="ml-auto text-[10px] text-zinc-600">{t('knCount', { n: shownEntries.length, m: allDomains.length })}</span>
       </div>
 
       <div className="flex min-h-0 flex-1">
         <div ref={wrapRef} data-id="knowledge-graph-canvas" className="relative min-w-0 flex-1 overflow-hidden bg-[#08080a]">
-          <button data-id="knowledge-graph-refresh" type="button" onClick={load} title="刷新"
+          <button data-id="knowledge-graph-refresh" type="button" onClick={load} title={t('knRefresh')}
             className="absolute right-3 top-3 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/[0.08] bg-black/40 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200">
             <RefreshCw className="h-3.5 w-3.5" />
           </button>
           {loading ? (
-            <div className="flex h-full items-center justify-center text-[12px] text-zinc-600"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> 构建图谱…</div>
+            <div className="flex h-full items-center justify-center text-[12px] text-zinc-600"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('knBuilding')}</div>
           ) : error ? (
             <div className="flex h-full items-center justify-center text-[12px] text-rose-400">{error}</div>
           ) : (
@@ -158,7 +160,7 @@ export default function KnowledgeGraphView({ className }: Props) {
               cooldownTicks={140}
               onNodeHover={(n: any) => setHoverId(n ? n.id : null)}
               onNodeClick={onNodeClick}
-              nodeLabel={(n: any) => (n.kind === 'entry' ? `${n.label}${n.domain ? `  ·  ${n.domain}` : ''}  [${STATUS_LABEL[n.status] || n.status}]` : `${n.label}`)}
+              nodeLabel={(n: any) => (n.kind === 'entry' ? `${n.label}${n.domain ? `  ·  ${n.domain}` : ''}  [${stLabel(n.status)}]` : `${n.label}`)}
               linkColor={(l: any) => {
                 const a = typeof l.source === 'object' ? l.source.id : l.source, b = typeof l.target === 'object' ? l.target.id : l.target;
                 if (hiSet && hiSet.has(a) && hiSet.has(b)) return 'rgba(96,165,250,0.55)';
@@ -214,15 +216,15 @@ export default function KnowledgeGraphView({ className }: Props) {
               <button data-id="knowledge-graph-detail-close" type="button" onClick={() => setSelected(null)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200"><X className="h-4 w-4" /></button>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--vsc-border)] px-3 py-2 text-[10px]">
-              {selected.status ? <span className="rounded px-1.5 py-0.5" style={{ background: `${STATUS_COLOR[normStatus(selected.status)] || '#52525b'}22`, color: STATUS_COLOR[normStatus(selected.status)] || '#a1a1aa' }}>{STATUS_LABEL[normStatus(selected.status)] || selected.status}</span> : null}
+              {selected.status ? <span className="rounded px-1.5 py-0.5" style={{ background: `${STATUS_COLOR[normStatus(selected.status)] || '#52525b'}22`, color: STATUS_COLOR[normStatus(selected.status)] || '#a1a1aa' }}>{stLabel(selected.status)}</span> : null}
               {selected.domain ? <span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-zinc-400">{selected.domain}</span> : null}
               {parseTags(selected.tags).map((tg) => <span key={tg} className="rounded bg-blue-500/10 px-1.5 py-0.5 text-blue-300/80">#{tg}</span>)}
             </div>
             <div className="min-h-0 flex-1 overflow-auto px-3 py-2">
               {detail.loading ? (
-                <div className="flex items-center gap-2 text-[12px] text-zinc-600"><Loader2 className="h-4 w-4 animate-spin" /> 加载正文…</div>
+                <div className="flex items-center gap-2 text-[12px] text-zinc-600"><Loader2 className="h-4 w-4 animate-spin" /> {t('knLoadingBody')}</div>
               ) : (
-                <MarkdownPreview source={detail.body || '（空)'} className="text-[12px]" />
+                <MarkdownPreview source={detail.body || t('knEmpty')} className="text-[12px]" />
               )}
             </div>
           </div>
