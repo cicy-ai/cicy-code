@@ -118,6 +118,11 @@ export default function TeamRosterPanel({
     return { all: all.length, bound, unbound: all.length - bound };
   }, [panes, boundIds, masterPaneId]);
 
+  // Open the drawer by default on the first agent, so the roster lands editor-ready.
+  useEffect(() => {
+    if (!selectedAgent && rows.length > 0) setSelectedAgent(rows[0].pane_id);
+  }, [rows, selectedAgent]);
+
   // Lazily fetch detail for the rows shown: gateway rows need
   // runtime_ai_provider_options (the model picker), and every row's default_model
   // powers the model column + the "filter by model" control. Only the GET pane
