@@ -4532,14 +4532,18 @@ func initPaneEnv(opts paneEnvOpts) {
 		sessionEnv["CICY_OPENCLAW_MODEL"] = strings.TrimSpace(aiCfg.OpenClawModel)
 	case "claude":
 		// claude uses ANTHROPIC_BASE_URL and settings.json directly in boot lines.
-		// Per-project shared memory: point claude's auto-memory at the project's
-		// shared pool so same-project claude agents share learnings (A writes →
-		// B recalls). cwd/workspace/role stay per-worker; only memory is shared.
-		// Unassigned agents fall back to the "default" project → everyone shares
-		// one pool out of the box.
-		if pool := ensureProjectMemDir(projectSlugOrDefault(opts.projectTemplate)); pool != "" {
-			sessionEnv["CLAUDE_COWORK_MEMORY_PATH_OVERRIDE"] = pool
-		}
+		//
+		// We deliberately DO NOT set CLAUDE_COWORK_MEMORY_PATH_OVERRIDE anymore.
+		// That override redirected claude's auto-memory from its native, working
+		// per-agent store (~/.claude/projects/<ws>/memory/) to a shared project
+		// pool — but the cowork/team-memory write path is behind Anthropic Statsig
+		// gates (isTeamMemoryEnabled → tengu_herring_clock; the extractor →
+		// EXTRACT_MEMORIES) that default OFF and aren't enabled for these accounts.
+		// Net effect observed: native writes stopped (redirected away) AND the pool
+		// stayed empty → auto-memory silently died the moment an agent was in a
+		// "team". Dropping the override restores native auto-memory (which works).
+		// A shared pool should be built on top of the native stores (e.g. the
+		// 知识专员 curating them), not by hijacking the auto-memory path.
 	case "opencode":
 	case "codex":
 		// codex uses -c flags directly, no env needed
