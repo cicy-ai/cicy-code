@@ -1691,13 +1691,19 @@ func aiGatewayBuildCurrentPrompts(agentID string, conversationID string, body in
 		if clean == "" {
 			continue
 		}
+		// Drop obvious harness / skill-injection / recap scaffolding FIRST —
+		// unconditionally, even when a transcript exists. These blocks are never
+		// human prompts, but a skill-injection block echoes the ARGUMENTS that
+		// triggered it (a real typed command), so the typedSet containment match
+		// below would otherwise misclassify the whole block as a prompt.
+		if recapScaffoldRe.MatchString(clean) || skillInjectionRe.MatchString(clean) || harnessMarkerRe.MatchString(clean) {
+			continue
+		}
 		if typedSet != nil {
 			// Authoritative: keep ONLY what the human actually typed/queued.
 			if !aiGatewayMatchesTyped(typedSet, clean) {
 				continue
 			}
-		} else if recapScaffoldRe.MatchString(clean) || skillInjectionRe.MatchString(clean) || harnessMarkerRe.MatchString(clean) {
-			continue // no transcript → regex fallback for the obvious harness noise
 		}
 		if clean == lastContent {
 			continue // consecutive duplicate
