@@ -3959,11 +3959,11 @@ func agentInspectorLoadPaneDetail(agentID string) M {
 	var tgEnable sql.NullBool
 	var tgToken, tgChatID sql.NullString
 	var groupID sql.NullInt64
-	var role, defaultModel, trustLevel sql.NullString
+	var role, defaultModel, trustLevel, roleTemplate sql.NullString
 	var machineID sql.NullInt64
 	var machineLabel, machineURL, runtimeKind, capabilitiesJSON sql.NullString
 	err := store.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script,
-		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.agent_duty, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level,
+		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.agent_duty, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level, COALESCE(t.role_template,''),
 		COALESCE(t.allow_all_actions, 0),
 		COALESCE(t.reply_in_chinese, 0),
 		COALESCE(t.machine_id, 0), COALESCE(m.label, ''), COALESCE(m.url, ''), COALESCE(json_extract(m.capabilities_json, '$.runtime_kind'), ''), COALESCE(m.capabilities_json, '{}')
@@ -3972,7 +3972,7 @@ func agentInspectorLoadPaneDetail(agentID string) M {
 		LEFT JOIN machines m ON t.machine_id=m.id
 		WHERE t.pane_id=?`, paneID).Scan(
 		&paneID, &title, &port, &workspace, &initScript,
-		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel, &allowAllActions,
+		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel, &roleTemplate, &allowAllActions,
 		&replyInChinese,
 		&machineID, &machineLabel, &machineURL, &runtimeKind, &capabilitiesJSON)
 	if err != nil {
@@ -3987,6 +3987,7 @@ func agentInspectorLoadPaneDetail(agentID string) M {
 		"allow_all_actions": allowAllActions.Bool,
 		"reply_in_chinese":  replyInChinese.Bool,
 		"role":              role.String, "default_model": defaultModel.String,
+		"role_template": roleTemplate.String,
 		"trust_level":   trustLevel.String,
 		"machine_label": machineLabel.String,
 		"machine_url":   machineURL.String,

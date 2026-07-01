@@ -135,7 +135,46 @@ var (
 // room to act first. (Was 60 with per-turn front-trim, which busted the prompt
 // cache every turn at the cap; see cicyCompactMessages.)
 const cicyMaxHistoryMessages = 160
-const cicyMaxToolRounds = 8
+
+// cicyDefaultMaxToolRounds bounds the model→tool→model rounds in ONE cicy turn,
+// applied only to the cicy IN-PROCESS agent (we drive its loop); claude/codex/
+// opencode run their own CLI loop through the transparent gateway with NO cap by
+// default (Claude Code's `maxTurns` is opt-in; absent ⇒ unbounded). We mirror its
+// big-subagent default of 200 as a pure runaway backstop — high enough that real
+// multi-step work (batch governance) never hits it, low enough to stop a
+// degenerate model looping forever. A role's meta.yaml `max_tool_rounds`
+// overrides it per role. On reaching the cap we WRAP UP gracefully (final round
+// runs tool-free so the model gives an answer) rather than erroring out.
+const cicyDefaultMaxToolRounds = 200
+
+// cicyMaxRoundsFor resolves the round cap: the role's meta.yaml override if set,
+// else the global default.
+func cicyMaxRoundsFor(cfg liteConfig) int {
+	if cfg.maxToolRounds > 0 {
+		return cfg.maxToolRounds
+	}
+	return cicyDefaultMaxToolRounds
+}
+
+// cicyWrapUpInstruction is appended to the system prompt on the final tool round
+// so the model closes out instead of being abruptly cut off.
+const cicyWrapUpInstruction = "[系统提示] 你已用满本回合的工具调用预算。这一轮不要再调用任何工具,请直接根据已经获得的信息给出尽可能完整的最终答复;如果任务确实还没做完,就说明已完成到哪一步、还差什么。"
+
+// cicyMaybeWrapUp appends the wrap-up instruction to the system prompt on the
+// final round, leaving it untouched otherwise.
+func cicyMaybeWrapUp(systemPrompt string, final bool) string {
+	if final {
+		return systemPrompt + "\n\n" + cicyWrapUpInstruction
+	}
+	return systemPrompt
+}
+
+// cicyMaxTurnAutoRetries bounds how many times a turn that ended on a TRANSIENT
+// "error" outcome (a gateway drop that survived the per-request retries, e.g. a
+// mid-stream disconnect) is auto-re-run before giving up — so the agent doesn't
+// sit stuck at the error waiting for a manual 重试. cancelled / blocked are
+// terminal and never auto-retried.
+const cicyMaxTurnAutoRetries = 2
 
 // History compaction (compact) — see cicyCompactMessages. Mirrors Claude Code's
 // auto-compact: summarize the older half into one stable message, keep the recent
@@ -2339,6 +2378,7 @@ func runCicyOwnedTurnsCore(session *cicySession, shortID, workspace, text string
 
 	cur := text
 	first := true
+	autoRetries := 0
 	for {
 		session.mu.Lock()
 		var ok bool
@@ -2356,10 +2396,37 @@ func runCicyOwnedTurnsCore(session *cicySession, shortID, workspace, text string
 		}
 		first = false
 		session.mu.Unlock()
+
+		// Auto-retry a TRANSIENT gateway failure so the agent doesn't get stuck at
+		// the error waiting for a manual 重试. A failed turn ends on an "error"
+		// outcome marker (cancelled/blocked are terminal — never retried). Dropping
+		// the marker re-runs the SAME user turn; because the failed round appended no
+		// assistant message (only the marker), the re-run resumes cleanly — even
+		// mid-turn after a tool_result. Bounded + backed off; cancel breaks out.
+		for !ok && autoRetries < cicyMaxTurnAutoRetries && ctx.Err() == nil {
+			session.mu.Lock()
+			retryable := session.lastOutcomeKindLocked() == "error"
+			session.mu.Unlock()
+			if !retryable {
+				break
+			}
+			autoRetries++
+			emit(M{"type": "flush", "text": fmt.Sprintf("出错,自动重试 %d/%d…", autoRetries, cicyMaxTurnAutoRetries)})
+			if !cicySleepBackoff(ctx, autoRetries-1, "") {
+				break // cancelled during backoff
+			}
+			session.mu.Lock()
+			if session.dropTrailingOutcomeLocked() {
+				ok = cicyRunWindowLocked(ctx, session, shortID, workspace, emit)
+			}
+			session.mu.Unlock()
+		}
+
 		if !ok {
 			emit(M{"type": "done"})
 			return // defer clears busy
 		}
+		autoRetries = 0
 		// Drain inputs queued while this turn ran; merge into one follow-up turn.
 		merged, more := session.drainPending()
 		if !more {
@@ -2512,6 +2579,16 @@ func (s *cicySession) dropTrailingOutcomeLocked() bool {
 	return r == "user"
 }
 
+// lastOutcomeKindLocked returns the outcome kind of the trailing message
+// ("error"/"cancelled"/"blocked") or "" if the last message isn't an outcome
+// marker. Used to decide whether a failed turn is auto-retryable (only "error").
+func (s *cicySession) lastOutcomeKindLocked() string {
+	if len(s.messages) == 0 {
+		return ""
+	}
+	return cicyMessageOutcomeKind(s.messages[len(s.messages)-1])
+}
+
 // dropTrailingFailedTurnLocked overwrites a trailing FAILED turn: when the last
 // message is an "error" outcome marker, it removes that marker AND the user q that
 // produced it (back to and including the last user message). A failed turn yields
@@ -2594,7 +2671,12 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 	cicySeedCurrentSnapshot(shortID, session.convID, session.messages)
 	cicyResetReplyForNewTurn(shortID, session.convID)
 
-	for round := 0; round < cicyMaxToolRounds; round++ {
+	maxRounds := cicyMaxRoundsFor(cfg)
+	for round := 0; round < maxRounds; round++ {
+		// Last allowed round → wrap up gracefully: run TOOL-FREE so the model has to
+		// produce a final answer from what it has, instead of being hard-stopped
+		// mid-task with an error.
+		final := round == maxRounds-1
 		// 用户已取消 → 立刻收尾:持久化已有内容,不再发下一轮网关请求。
 		if ctx.Err() != nil {
 			session.messages = append(session.messages, cicyOutcomeMessage("cancelled", "已取消"))
@@ -2615,13 +2697,16 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 			// system+tools), so Anthropic-protocol providers hit explicit
 			// caching and DeepSeek hits its implicit prefix cache; the gateway's
 			// DeepSeek adapter flattens/drops cache_control harmlessly.
-			"system":   cicySystemBlocks(cfg.systemPrompt),
+			"system":   cicySystemBlocks(cicyMaybeWrapUp(cfg.systemPrompt, final)),
 			"messages": cicyInjectRoleContext(cicyRequestMessages(session.messages), cfg.roleContext),
 		}
 		// Pure-chat roles (assistant/support/sales) enable no tools — omit the
-		// field entirely (an empty tools array is rejected by some upstreams).
-		if tools := cicyCachedToolDefs(cfg); len(tools) > 0 {
-			payload["tools"] = tools
+		// field entirely (an empty tools array is rejected by some upstreams). On
+		// the final round we also omit tools so the model can only answer (wrap-up).
+		if !final {
+			if tools := cicyCachedToolDefs(cfg); len(tools) > 0 {
+				payload["tools"] = tools
+			}
 		}
 		// current.json (display) = the FULL conversation including the new q —
 		// seeded by us, NOT by the audit layer (the wire body below may be a
@@ -2731,7 +2816,10 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 		session.messages = append(session.messages, M{"role": "user", "content": toolResults})
 	}
 
-	emit(M{"type": "error", "error": fmt.Sprintf("tool loop exceeded %d rounds, stopping", cicyMaxToolRounds)})
+	// Unreachable in normal flow: the final round runs tool-free, so it ends on a
+	// text answer (returns true above). This is a defensive fallback only — persist
+	// and return success so the partial work + last answer aren't dropped.
+	emit(M{"type": "flush", "text": fmt.Sprintf("已达 %d 轮工具上限,已收尾。", maxRounds)})
 	session.persistLocked(workspace)
-	return false
+	return true
 }

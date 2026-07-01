@@ -397,8 +397,9 @@ const api = {
     });
   },
   // Team knowledge store (file-backed). list filters by status/tag/q/domain.
-  listKnowledge: (params?: { status?: string; tag?: string; q?: string; domain?: string }) =>
+  listKnowledge: (params?: { status?: string; tag?: string; q?: string; domain?: string; view?: string }) =>
     http.get('/api/knowledge', { params: params || {} }),
+  getKnowledge: (id: string) => http.get(`/api/knowledge/${encodeURIComponent(id)}`),
   addTodo: (paneId: string, title: string, creatorId?: string) => {
     const pid = shortPaneRouteId(paneId);
     if (!pid) return Promise.reject(new Error('paneId required for addTodo'));

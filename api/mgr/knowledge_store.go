@@ -38,7 +38,8 @@ type knowledgeRow struct {
 	SourcePane   string `json:"source_pane"`
 	SourceKind   string `json:"source_kind"`
 	OriginRef    string `json:"origin_ref"`
-	Status       string `json:"status"` // derived from folder: pending|canon|rejected
+	Status       string `json:"status"` // resolved maturity: draft|pending|canon|rejected|deprecated (folder-derived, overridable by frontmatter `status:`)
+	Declared     string `json:"declared,omitempty"` // the frontmatter `status:` value (a maturity flag set in-place); when present it OVERRIDES the folder-derived status
 	Domain       string `json:"domain"` // canon folder (empty for inbox/archive)
 	Path         string `json:"path"`
 	VerifiedBy   string `json:"verified_by"`
@@ -47,23 +48,53 @@ type knowledgeRow struct {
 }
 
 const (
-	knowledgeStatusPending  = "pending"
-	knowledgeStatusCanon    = "canon"
-	knowledgeStatusRejected = "rejected"
-	knowledgeDefaultDomain  = "general"
+	knowledgeStatusDraft      = "draft"      // 未成稿: author's WIP. NOT served by recall (canon-only). Specialist doesn't govern it.
+	knowledgeStatusPending    = "pending"    // 待审: in _inbox, awaiting governance review.
+	knowledgeStatusCanon      = "canon"      // 已确立事实: in a domain folder. recall serves these.
+	knowledgeStatusRejected   = "rejected"   // 已弃: in _archive.
+	knowledgeStatusDeprecated = "deprecated" // 已废弃: once-canon, now superseded; excluded from recall.
+	knowledgeDefaultDomain    = "general"
 )
+
+// knowledgeNormalizeStatus maps a frontmatter `status:` value (incl. a few CN/EN
+// aliases) to a canonical maturity, or "" if unrecognized (→ ignored, folder wins).
+func knowledgeNormalizeStatus(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "draft", "草案", "未成稿", "wip":
+		return knowledgeStatusDraft
+	case "pending", "proposed", "待审", "待评审":
+		return knowledgeStatusPending
+	case "canon", "accepted", "stable", "已落地", "已确立":
+		return knowledgeStatusCanon
+	case "deprecated", "superseded", "已废弃", "过时":
+		return knowledgeStatusDeprecated
+	case "rejected", "已弃":
+		return knowledgeStatusRejected
+	}
+	return ""
+}
+
+// knowledgeInPlaceStatus reports whether a status is a maturity FLAG the author
+// may set in-place via frontmatter (without moving the file through the
+// location-governed pipeline). draft/deprecated are demotions a doc can carry
+// while still living in any folder; pending/canon/rejected are LOCATION states
+// (governed by add/promote/reject), so they aren't settable as a bare flag.
+func knowledgeInPlaceStatus(s string) bool {
+	return s == knowledgeStatusDraft || s == knowledgeStatusDeprecated
+}
 
 // ── paths ───────────────────────────────────────────────────────────────
 
 func knowledgeRootDir() string    { return filepath.Join(cicyRootDir, "knowledge") }
 func knowledgeInboxDir() string   { return filepath.Join(knowledgeRootDir(), "_inbox") }
 func knowledgeArchiveDir() string { return filepath.Join(knowledgeRootDir(), "_archive") }
+func knowledgeDraftsDir() string  { return filepath.Join(knowledgeRootDir(), "_drafts") }
 func knowledgeDocsDir() string    { return filepath.Join(knowledgeRootDir(), "docs") }
 
 // knowledgeEnsureRoot creates the store skeleton so writes succeed and the fs
 // root shows up in the FileExplorer even before the first entry.
 func knowledgeEnsureRoot() error {
-	for _, d := range []string{knowledgeRootDir(), knowledgeInboxDir(), knowledgeArchiveDir(), knowledgeDocsDir()} {
+	for _, d := range []string{knowledgeRootDir(), knowledgeInboxDir(), knowledgeArchiveDir(), knowledgeDraftsDir(), knowledgeDocsDir()} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
 		}
@@ -118,6 +149,9 @@ func knowledgeRenderFile(k knowledgeRow) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString("name: " + knowledgeOneLine(k.Title) + "\n")
+	if d := knowledgeNormalizeStatus(k.Declared); d != "" {
+		b.WriteString("status: " + d + "\n")
+	}
 	if t := knowledgeOneLine(k.Tags); t != "" {
 		b.WriteString("tags: " + t + "\n")
 	}
@@ -170,6 +204,13 @@ func knowledgeParseFile(path string) (knowledgeRow, error) {
 	}
 	rel, _ := filepath.Rel(knowledgeRootDir(), path)
 	k.Status, k.Domain = knowledgeStatusForRel(filepath.ToSlash(rel))
+	// A frontmatter `status:` maturity flag OVERRIDES the folder-derived status, so
+	// a doc can sit in a topic folder yet read as draft/deprecated (and thus drop
+	// out of canon-only recall). Domain (topic) is unaffected — filing ≠ maturity.
+	if d := knowledgeNormalizeStatus(fm["status"]); d != "" {
+		k.Declared = d
+		k.Status = d
+	}
 	return k, nil
 }
 
@@ -215,6 +256,8 @@ func knowledgeStatusForRel(rel string) (status, domain string) {
 		return knowledgeStatusPending, ""
 	case "_archive":
 		return knowledgeStatusRejected, ""
+	case "_drafts":
+		return knowledgeStatusDraft, ""
 	default:
 		return knowledgeStatusCanon, top
 	}
@@ -284,15 +327,25 @@ func knowledgeUniqueSlug(base string) string {
 
 // ── write / governance ──────────────────────────────────────────────────
 
-// insertKnowledge writes a PENDING proposal to _inbox/<slug>.md and returns the
-// slug (id). If k.ID is set it's used as a stable slug (the memory hook passes
-// one so repeated writes to the same memory file overwrite the same proposal);
-// otherwise a unique slug is derived from the title. If an entry with the slug
-// already exists OUTSIDE _inbox (already governed), the write is skipped so a
-// reviewed entry is never clobbered or re-proposed.
+// insertKnowledge writes a new entry and returns the slug (id). By default it
+// lands as a PENDING proposal in _inbox/<slug>.md; if k.Status == "draft" it
+// lands in _drafts/<slug>.md instead (未成稿: the author's WIP, which recall —
+// canon-only — won't serve and the specialist won't govern). If k.ID is set it's
+// used as a stable slug (the memory hook passes one so repeated writes to the
+// same memory file overwrite the same proposal); otherwise a unique slug is
+// derived from the title. If an entry with the slug already exists in a GOVERNED
+// location (anything but the destination), the write is skipped so a reviewed
+// entry is never clobbered or re-proposed.
 func insertKnowledge(k knowledgeRow) (string, error) {
 	if err := knowledgeEnsureRoot(); err != nil {
 		return "", err
+	}
+	asDraft := knowledgeNormalizeStatus(k.Status) == knowledgeStatusDraft
+	destStatus := knowledgeStatusPending
+	destDir := knowledgeInboxDir()
+	if asDraft {
+		destStatus = knowledgeStatusDraft
+		destDir = knowledgeDraftsDir()
 	}
 	slug := strings.TrimSpace(k.ID)
 	if slug == "" {
@@ -300,20 +353,24 @@ func insertKnowledge(k knowledgeRow) (string, error) {
 	} else {
 		slug = knowledgeSlugify(slug)
 	}
-	if existing, ok := knowledgeFindByID(slug); ok && existing.Status != knowledgeStatusPending {
+	if existing, ok := knowledgeFindByID(slug); ok && existing.Status != destStatus {
 		return slug, nil // already governed elsewhere — don't clobber/re-propose
 	}
 	if strings.TrimSpace(k.CreatedAt) == "" {
 		k.CreatedAt = time.Now().Format(time.RFC3339)
 	}
 	k.ID = slug
-	path := filepath.Join(knowledgeInboxDir(), slug+".md")
+	k.Declared = "" // location (folder) carries the status for a fresh entry; no in-place flag
+	path := filepath.Join(destDir, slug+".md")
 	if err := os.WriteFile(path, []byte(knowledgeRenderFile(k)), 0o644); err != nil {
 		return slug, err
 	}
-	if strings.TrimSpace(k.SourceKind) == "memory-hook" {
+	switch {
+	case strings.TrimSpace(k.SourceKind) == "memory-hook":
 		knowledgeGitCommit(fmt.Sprintf("knowledge: inbox %s (memory-hook from %s)", slug, shortPaneID(k.SourcePane)), k.SourcePane)
-	} else {
+	case asDraft:
+		knowledgeGitCommit(fmt.Sprintf("knowledge: draft %s (by %s)", slug, knowledgeGitAuthor(k.SourcePane)), k.SourcePane)
+	default:
 		knowledgeGitCommit(fmt.Sprintf("knowledge: add %s (by %s)", slug, knowledgeGitAuthor(k.SourcePane)), k.SourcePane)
 	}
 	return slug, nil
@@ -348,11 +405,41 @@ func supersedeKnowledge(oldID, newID, verifiedBy string) error {
 	return nil
 }
 
+// setKnowledgeStatus sets (or, with "", clears) an in-place maturity flag on an
+// entry WITHOUT moving it through the location pipeline. Only draft/deprecated are
+// valid flags — they demote an entry out of canon-only recall while it stays
+// filed under its topic; pending/canon/rejected are LOCATION states, changed via
+// add/promote/reject, not this call.
+func setKnowledgeStatus(id, status, verifiedBy string) error {
+	row, ok := knowledgeFindByID(id)
+	if !ok {
+		return os.ErrNotExist
+	}
+	norm := knowledgeNormalizeStatus(status)
+	if strings.TrimSpace(status) != "" && !knowledgeInPlaceStatus(norm) {
+		return fmt.Errorf("status must be draft|deprecated (or empty to clear); pending/canon/rejected are set by add/promote/reject")
+	}
+	row.Declared = norm // "" clears
+	if v := normPaneID(strings.TrimSpace(verifiedBy)); v != "" {
+		row.VerifiedBy = v
+	}
+	if err := os.WriteFile(row.Path, []byte(knowledgeRenderFile(row)), 0o644); err != nil {
+		return err
+	}
+	label := norm
+	if label == "" {
+		label = "active"
+	}
+	knowledgeGitCommit(fmt.Sprintf("knowledge: status %s → %s (by %s)", id, label, knowledgeGitAuthor(verifiedBy)), verifiedBy)
+	return nil
+}
+
 func knowledgeMove(id, destDir string, fmUpdates map[string]string) error {
 	row, ok := knowledgeFindByID(id)
 	if !ok {
 		return os.ErrNotExist
 	}
+	row.Declared = "" // a governance move asserts the destination folder's status; drop any in-place flag
 	if v, ok := fmUpdates["verified_by"]; ok {
 		row.VerifiedBy = normPaneID(strings.TrimSpace(v))
 	}
@@ -472,6 +559,11 @@ func handleKnowledge(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, http.StatusBadRequest, "title and body required")
 			return
 		}
+		// status=draft → land in _drafts/ (未成稿); anything else → _inbox/ (pending).
+		initStatus := knowledgeStatusPending
+		if knowledgeNormalizeStatus(getString(req, "status")) == knowledgeStatusDraft {
+			initStatus = knowledgeStatusDraft
+		}
 		id, err := insertKnowledge(knowledgeRow{
 			Title:      title,
 			Body:       body,
@@ -480,12 +572,13 @@ func handleKnowledge(w http.ResponseWriter, r *http.Request) {
 			SourcePane: getString(req, "source_pane"),
 			SourceKind: getString(req, "source_kind"),
 			OriginRef:  getString(req, "origin_ref"),
+			Status:     initStatus,
 		})
 		if err != nil {
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		J(w, M{"id": id, "status": knowledgeStatusPending})
+		J(w, M{"id": id, "status": initStatus})
 	default:
 		httpErr(w, http.StatusMethodNotAllowed, "GET or POST")
 	}
@@ -559,8 +652,22 @@ func handleKnowledgeByID(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			J(w, M{"id": id, "status": knowledgeStatusRejected, "superseded_by": newID})
+		case "status", "set-status":
+			// In-place maturity flag (draft|deprecated, or "" to clear) — no move.
+			st := getString(req, "status")
+			if err := setKnowledgeStatus(id, st, verifiedBy); err != nil {
+				httpErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			resolved := knowledgeNormalizeStatus(st)
+			if resolved == "" {
+				if k, ok := knowledgeFindByID(id); ok {
+					resolved = k.Status
+				}
+			}
+			J(w, M{"id": id, "status": resolved})
 		default:
-			httpErr(w, http.StatusBadRequest, "action must be promote|reject|supersede")
+			httpErr(w, http.StatusBadRequest, "action must be promote|reject|supersede|status")
 		}
 	default:
 		httpErr(w, http.StatusMethodNotAllowed, "GET or PATCH")

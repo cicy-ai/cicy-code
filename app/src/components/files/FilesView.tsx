@@ -69,14 +69,20 @@ const TAB_PERSIST_KEY_PREFIX = 'cicy.files.tabs.';
 // silently discarded — the user just loses their pre-upgrade open-tab state.
 const TAB_PERSIST_VERSION = 2;
 
-function tabPersistKey(agentId: string): string {
-  return `${TAB_PERSIST_KEY_PREFIX}${agentId}`;
+// Tabs are namespaced by fs root: the Files panel (workspace), Knowledge panel
+// (scopeRoot="knowledge") and any other scoped FilesView are the SAME component,
+// so without this they'd share one key per agent and clobber each other's open
+// tabs (knowledge files leaking into Files and back). "workspace" keeps the bare
+// legacy key so existing Files tab state survives; scoped roots get a suffix.
+function tabPersistKey(agentId: string, fsRoot: string = 'workspace'): string {
+  const scope = fsRoot && fsRoot !== 'workspace' ? `${fsRoot}.` : '';
+  return `${TAB_PERSIST_KEY_PREFIX}${scope}${agentId}`;
 }
 
-function loadPersistedTabs(agentId: string): PersistedTabs {
+function loadPersistedTabs(agentId: string, fsRoot: string = 'workspace'): PersistedTabs {
   if (!agentId) return { tabs: [], activeId: '' };
   try {
-    const raw = localStorage.getItem(tabPersistKey(agentId));
+    const raw = localStorage.getItem(tabPersistKey(agentId, fsRoot));
     if (!raw) return { tabs: [], activeId: '' };
     const parsed = JSON.parse(raw);
     if (parsed?.v !== TAB_PERSIST_VERSION || !Array.isArray(parsed?.tabs)) {
@@ -103,7 +109,7 @@ function loadPersistedTabs(agentId: string): PersistedTabs {
   }
 }
 
-function savePersistedTabs(agentId: string, tabs: Tab[], activeId: string): void {
+function savePersistedTabs(agentId: string, tabs: Tab[], activeId: string, fsRoot: string = 'workspace'): void {
   if (!agentId) return;
   try {
     const payload = JSON.stringify({
@@ -111,7 +117,7 @@ function savePersistedTabs(agentId: string, tabs: Tab[], activeId: string): void
       tabs: tabs.map((t) => ({ kind: t.kind, root: t.root, path: t.path, base: t.base })),
       activeId,
     });
-    localStorage.setItem(tabPersistKey(agentId), payload);
+    localStorage.setItem(tabPersistKey(agentId, fsRoot), payload);
   } catch {}
 }
 
@@ -129,30 +135,54 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
   // Files-tab behavior; a scopeRoot (e.g. "memory") anchors everything there.
   const fsRoot = scopeRoot || 'workspace';
   // Hydrate from localStorage so reload preserves the open tab set + active.
-  // Keyed by agentId so different agents have independent tab sets.
-  const initialPersist = useMemo(() => loadPersistedTabs(agentId), [agentId]);
+  // Keyed by (fsRoot, agentId) so different agents — and the File / Knowledge
+  // panels (different scopeRoot) — each keep independent, non-colliding tab sets.
+  const initialPersist = useMemo(() => loadPersistedTabs(agentId, fsRoot), [agentId, fsRoot]);
   const [tabs, setTabs] = useState<Tab[]>(initialPersist.tabs);
   const [activeId, setActiveId] = useState<string>(initialPersist.activeId);
 
-  // Re-hydrate when agentId changes (e.g. user switches to a different agent).
+  // Re-hydrate when agentId (or fs root) changes.
   useEffect(() => {
-    const restored = loadPersistedTabs(agentId);
+    const restored = loadPersistedTabs(agentId, fsRoot);
     setTabs(restored.tabs);
     setActiveId(restored.activeId);
-    // Don't depend on tabs/activeId — agent-switch is the only trigger.
+    // Don't depend on tabs/activeId — agent/root switch is the only trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId]);
+  }, [agentId, fsRoot]);
 
   // Persist tabs + activeId whenever they change.
   useEffect(() => {
-    savePersistedTabs(agentId, tabs, activeId);
-  }, [agentId, tabs, activeId]);
+    savePersistedTabs(agentId, tabs, activeId, fsRoot);
+  }, [agentId, tabs, activeId, fsRoot]);
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
   const [jumps, setJumps] = useState<Record<string, JumpRequest>>({});
   const [quickOpen, setQuickOpen] = useState(false);
   const [search, setSearch] = useState(false);
   const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [reloadKeys, setReloadKeys] = useState<Record<string, number>>({});
+  // Keep-alive cap: every open tab used to mount a live CodeMirror (hidden via
+  // visibility:hidden, never unmounted), so N open files = N editors all
+  // re-rendering = a pegged CPU core. Only keep the active tab + the few most
+  // recently visited mounted; older tabs unmount their editor and re-create on
+  // re-activation (cheap, and they measure correctly since they're visible then).
+  const KEEP_ALIVE_TABS = 4;
+  const [warmIds, setWarmIds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!activeId) return;
+    setWarmIds((prev) =>
+      prev[0] === activeId
+        ? prev
+        : [activeId, ...prev.filter((id) => id !== activeId)].slice(0, KEEP_ALIVE_TABS),
+    );
+  }, [activeId]);
+  // Tabs whose editor stays mounted: active + recently visited + any with
+  // unsaved edits (never unmount a dirty buffer — it'd drop the user's changes).
+  const mountedTabIds = useMemo(() => {
+    const s = new Set<string>(warmIds);
+    if (activeId) s.add(activeId);
+    for (const id of Object.keys(dirty)) if (dirty[id]) s.add(id);
+    return s;
+  }, [warmIds, activeId, dirty]);
   const [explorerNonce, setExplorerNonce] = useState<Record<string, number>>({});
   // Refreshes the extra-root sections (projects/skills/home), which have no
   // fsnotify watcher: bumped on panel open / agent switch (below) and after any
@@ -799,9 +829,12 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
                 data-tab-active={isActive ? 'true' : 'false'}
                 // CodeMirror inside a display:none parent fails to compute
                 // viewport size on init; when we flip it back to visible the
-                // layout is wrong (squished / blank). Keep all tab hosts
-                // laid out (visibility:hidden) so CM measures correctly, and
-                // hide inactives offscreen + non-interactive instead.
+                // layout is wrong (squished / blank). So the active host stays
+                // laid out and inactives are hidden via visibility:hidden +
+                // offscreen (not display:none). To avoid N live editors pegging
+                // the CPU, only the kept-alive tabs (active + recent + dirty)
+                // actually mount an editor; the rest render an empty host and
+                // re-mount on activation (they're visible then, so CM measures).
                 style={
                   isActive
                     ? { position: 'absolute', inset: 0 }
@@ -814,7 +847,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
                       }
                 }
               >
-                {t.kind === 'file' ? (
+                {!mountedTabIds.has(t.id) ? null : t.kind === 'file' ? (
                   <CodeEditor
                     agentId={agentId}
                     path={t.path}

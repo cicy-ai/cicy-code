@@ -3,7 +3,6 @@ import CodeMirror, { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { EditorView, keymap } from '@codemirror/view';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { markdown } from '@codemirror/lang-markdown';
-import { json } from '@codemirror/lang-json';
 import { CLIPBOARD_KEYMAP, cmCopySelection, cmCutSelection, cmPasteSelection } from '../files/cmClipboard';
 import {
   Globe,
@@ -25,7 +24,6 @@ import {
   ClipboardPaste,
   WrapText,
   Check,
-  Wrench,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
@@ -44,7 +42,7 @@ import MarkdownPreview from '../files/MarkdownPreview';
 // editor (same form as the file editor: edit + Save + dirty indicator), backed
 // by the /api/memory/templates API.
 
-type Scope = 'agent' | 'global' | 'project' | 'role' | 'config';
+type Scope = 'agent' | 'global' | 'project' | 'role';
 
 interface Selection {
   scope: Scope;
@@ -327,6 +325,36 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
     },
     [selected, flushSave],
   );
+
+  // External jump (the team roster's "role" button → cicy:open-role {slug}): open
+  // that role's primary file directly and expand its folder, so the roster can hop
+  // between agents' role templates in this drawer. Defers until roleDirs has loaded
+  // (so the file list is known); a slug arriving early is parked in pendingRoleRef.
+  const pendingRoleRef = useRef<string | null>(null);
+  const openRoleSlug = useCallback((slug: string) => {
+    const rd = roleDirs.find((r) => r.slug === slug);
+    if (!rd || rd.files.length === 0) { pendingRoleRef.current = slug; return; }
+    pendingRoleRef.current = null;
+    const file = rd.files.includes('role.md') ? 'role.md'
+      : rd.files.includes('role.zh.md') ? 'role.zh.md'
+      : rd.files[0];
+    setCollapsed((prev) => ({ ...prev, [`rolefolder:${slug}`]: false }));
+    void handleSelect({ scope: 'role', name: `${slug}/${file}` });
+  }, [roleDirs, handleSelect]);
+
+  useEffect(() => {
+    const onOpenRole = (e: Event) => {
+      const slug = (e as CustomEvent).detail?.slug;
+      if (typeof slug === 'string' && slug.trim()) openRoleSlug(slug.trim());
+    };
+    window.addEventListener('cicy:open-role', onOpenRole as EventListener);
+    return () => window.removeEventListener('cicy:open-role', onOpenRole as EventListener);
+  }, [openRoleSlug]);
+
+  // Resolve a parked jump once roleDirs finishes loading.
+  useEffect(() => {
+    if (pendingRoleRef.current) openRoleSlug(pendingRoleRef.current);
+  }, [roleDirs, openRoleSlug]);
 
   // Cmd/Ctrl+S forces an immediate save.
   const saveKeymap = useMemo(
@@ -634,15 +662,6 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
           </>,
         )}
 
-        {renderSection(
-          'tools',
-          t('memSectionTools', { defaultValue: '工具配置' }),
-          undefined,
-          undefined,
-          renderItem({ scope: 'config', name: 'lite-config.json' }, 'lite-config.json', <Wrench size={14} />),
-          true,
-        )}
-
         {listLoading && (
           <div data-id="memory-view-list-loading" className="px-2 py-2 text-xs text-zinc-600 flex items-center gap-1">
             <Loader2 size={12} className="animate-spin" /> {t('memLoading')}
@@ -668,9 +687,8 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
 
         {error && <div data-id="memory-view-error" className="px-3 py-1.5 text-xs text-red-400 bg-red-500/5">{error}</div>}
 
-        {/* Markdown preview / source toggle — same affordance as the file editor.
-            Hidden for the lite-config.json (config scope): it's JSON, not markdown. */}
-        {!docLoading && selected.scope !== 'config' && (
+        {/* Markdown preview / source toggle — same affordance as the file editor. */}
+        {!docLoading && (
           <button
             data-id="memory-view-preview-toggle"
             type="button"
@@ -688,7 +706,7 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
             <div data-id="memory-view-doc-loading" className="h-full flex items-center justify-center text-zinc-600 text-[13px] gap-2">
               <Loader2 size={14} className="animate-spin" /> {t('memLoading')}
             </div>
-          ) : previewMd && selected.scope !== 'config' ? (
+          ) : previewMd ? (
             <div data-id="memory-view-preview" className="h-full overflow-y-auto">
               <MarkdownPreview source={content} />
             </div>
@@ -707,7 +725,7 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
                 height="100%"
                 theme={oneDark}
                 basicSetup={BASIC_SETUP}
-                extensions={[selected.scope === 'config' ? json() : markdown(), CLIPBOARD_KEYMAP, saveKeymap, cmBlendTheme, ...(wrap ? [EditorView.lineWrapping] : [])]}
+                extensions={[markdown(), CLIPBOARD_KEYMAP, saveKeymap, cmBlendTheme, ...(wrap ? [EditorView.lineWrapping] : [])]}
                 onChange={setContent}
                 className="h-full"
                 style={{ height: '100%' }}

@@ -1319,17 +1319,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       window.dispatchEvent(new CustomEvent('cicy:open-file', { detail: { path: relPath } }));
     }, 80);
   }, [openPaneFiles]);
-  // Open a pane's role + tools (the request/tools inspector view). Used by the
-  // roster's per-row tools button; closes the roster so the view is visible.
-  const openRoleTools = useCallback((targetPaneId: string) => {
-    const clean = targetPaneId.replace(/:.*$/, '');
-    if (!clean) return;
-    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
-    setCliContentMode('fixed');
-    setCliContentTab('tools');
-    setCliContentOpen(true);
-    // Keep the roster open — role+tools shows in the right drawer alongside it.
-  }, [paneId]);
   // markdown history 里点击文件链接 → 揭示文件视图(FilesView 自己监听同一事件打开 tab)。
   useEffect(() => {
     const reveal = () => {
@@ -1842,8 +1831,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 masterPaneId={paneId.split(':')[0]}
                 onClose={() => setRosterOpen(false)}
                 onRefresh={refreshPanes}
-                onOpenAgentFile={openAgentFile}
-                onOpenRoleTools={openRoleTools}
                 onRenameTitle={handleRenamePaneTitle}
                 ModelPicker={ModelPicker}
               />
@@ -1861,14 +1848,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           be clicked, and clicking it closes the roster. Width = activity bar (56px)
           + left panel (360px when open). The roster + right-panel drawer sit to the
           right of this and stay interactive. */}
-      {rosterOpen ? (
-        <div
-          data-id="team-roster-left-mask"
-          className="absolute left-0 top-0 bottom-0 z-[140] bg-black/40"
-          style={{ width: 56 + (leftActive && !globalVar?.helper_mode ? 360 : 0) }}
-          onClick={() => setRosterOpen(false)}
-        />
-      ) : null}
       {/* Activity Bar */}
       <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
@@ -2705,6 +2684,28 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
   // that don't (Gemini). Fetched on open; cached server-side.
   const [balances, setBalances] = useState<Record<string, any>>({});
   const rootRef = useRef<HTMLDivElement>(null);
+  // The popover is portaled to <body> (so an overflow/clip container — like the
+  // roster's scrolling list — never crops it) and flips below/above the trigger
+  // depending on available space. pos holds its fixed-position coords.
+  const popRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number } | null>(null);
+  const computePos = useCallback(() => {
+    const r = rootRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const POP_W = 340, GAP = 8, M = 8;
+    const left = Math.min(Math.max(r.left, M), window.innerWidth - POP_W - M);
+    const spaceBelow = window.innerHeight - r.bottom - GAP - M;
+    const spaceAbove = r.top - GAP - M;
+    // Anchor the popover's edge to the trigger (top-to-bottom below, or bottom-to-
+    // top above) so it never floats away with a gap, and cap its height to the
+    // available space (it scrolls internally) so it never clips off-screen. Open
+    // below unless there's clearly more room above.
+    if (spaceBelow >= 240 || spaceBelow >= spaceAbove) {
+      setPos({ left, top: r.bottom + GAP, maxHeight: Math.max(180, Math.min(440, spaceBelow)) });
+    } else {
+      setPos({ left, bottom: window.innerHeight - r.top + GAP, maxHeight: Math.max(180, Math.min(440, spaceAbove)) });
+    }
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -2712,6 +2713,7 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
       const target = event.target as Node | null;
       if (!target) return;
       if (rootRef.current && rootRef.current.contains(target)) return;
+      if (popRef.current && popRef.current.contains(target)) return; // clicks inside the portaled popover
       setOpen(false);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -2905,7 +2907,7 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
       <button
         type="button"
         data-id="model-picker-trigger"
-        onClick={() => setOpen(prev => { const next = !prev; if (next) onOpen?.(); return next; })}
+        onClick={() => setOpen(prev => { const next = !prev; if (next) { computePos(); onOpen?.(); } return next; })}
         aria-haspopup="dialog"
         aria-expanded={open}
         title={activeProvider?.label || activeProviderKey || 'Provider'}
@@ -2933,23 +2935,20 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
           className={`h-3 w-3 text-zinc-600 transition-all duration-200 ${open ? 'rotate-180 text-zinc-300' : ''}`}
         />
       </button>
-      {open ? (
-        // Full-screen backdrop: ttyd/code-server panes are iframes, so clicks
-        // inside them never reach `document` and the pointerdown listener above
-        // can't see them. This real DOM element sits above the iframes (below the
-        // popover) and closes the picker on any click outside the panel.
+      {open ? createPortal(
+        <>
+        {/* No full-screen backdrop: it would sit above the roster rows and swallow
+            the click meant to switch agents (open picker → click a row → the click
+            hits the backdrop, closing the picker but never reaching the row → "can't
+            switch"). Closing on outside-click is handled by the document pointerdown
+            listener above (fires for normal DOM) + the window-blur listener (covers
+            iframe focus), so the backdrop is unnecessary here. */}
         <div
-          data-id="model-picker-backdrop"
-          aria-hidden="true"
-          className="fixed inset-0 z-[179]"
-          onPointerDown={() => setOpen(false)}
-        />
-      ) : null}
-      {open ? (
-        <div
+          ref={popRef}
           data-id="model-picker-popover"
           role="dialog"
-          className="animate-select-in absolute left-0 bottom-[calc(100%+8px)] z-[180] flex max-h-[440px] w-[340px] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
+          className="animate-select-in fixed z-[300] flex w-[340px] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
+          style={{ left: pos?.left, top: pos?.top, bottom: pos?.bottom, maxHeight: pos?.maxHeight }}
         >
           {/* Style tabs — Claude-style vs OpenAI-style (provider protocol). */}
           {stylesPresent.length > 1 ? (
@@ -3063,7 +3062,7 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
             ))}
           </div>
         </div>
-      ) : null}
+        </>, document.body) : null}
     </div>
   );
 }

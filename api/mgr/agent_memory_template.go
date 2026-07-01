@@ -47,6 +47,10 @@ type roleMeta struct {
 	NameZh     string   `yaml:"name_zh"`
 	Greeting   string   `yaml:"greeting"`
 	GreetingZh string   `yaml:"greeting_zh"`
+	// MaxToolRounds overrides the per-turn model→tool→model round cap for this
+	// role (0 = use the global default cicyDefaultMaxToolRounds). Tool-heavy roles
+	// (知识/审计专员 doing batch governance) can raise it; trivial roles lower it.
+	MaxToolRounds int `yaml:"max_tool_rounds"`
 }
 
 // langIsZh reports whether a UI/agent language code selects Chinese.

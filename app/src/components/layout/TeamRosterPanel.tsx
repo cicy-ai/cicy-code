@@ -1,20 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type ComponentType } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { X, RefreshCw, FileText, Wrench, Cloud, ShieldCheck, Pencil, Search, MoreVertical, Trash2, RotateCcw } from 'lucide-react';
+import { X, ShieldCheck, Pencil, Search, MoreVertical, Trash2, RotateCcw, SquarePen } from 'lucide-react';
 import apiService from '../../services/api';
 import { normalizeAgentType } from '../../lib/agentType';
 import { useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
-import TipBelow from '../ui/TipBelow';
+
+// Lazy: the per-agent 3-tab editor (doc / meta.yaml / system.md) — keeps CodeMirror
+// out of the roster's initial chunk; loads when a row is clicked.
+const AgentDocRoleEditor = lazy(() => import('./AgentDocRoleEditor'));
 
 const shortId = (id: string) => (id || '').replace(/:.*$/, '');
-
-// The doc filename an agent reads its role from: claude → CLAUDE.md, everyone
-// else (codex / cicy / opencode / …) → AGENTS.md.
-function agentDocFile(agentType?: string): string {
-  return normalizeAgentType(agentType) === 'claude' ? 'CLAUDE.md' : 'AGENTS.md';
-}
 
 interface RosterAgent {
   pane_id: string;
@@ -41,26 +38,46 @@ interface Props {
   masterPaneId: string;
   onClose: () => void;
   onRefresh?: () => void;
-  onOpenAgentFile: (paneId: string, relPath: string) => void;
-  onOpenRoleTools: (paneId: string) => void;
   onRenameTitle: (paneId: string, title: string) => void;
   ModelPicker: ModelPickerComponent;
 }
 
 type RosterFilter = 'all' | 'bound' | 'unbound';
 
-// The team roster (花名册): every agent on the host — bound and unbound — in one
-// table. Per row: agent type, gateway-vs-official, inline-editable title, a model
-// picker (gateway only), and shortcuts to the agent's role doc (CLAUDE.md /
-// AGENTS.md) and its role+tools (the request/tools inspector view). Opens as a
-// top-level view inside the cli-tab content area.
+// The team roster (花名册): a FULL-SCREEN modal listing every agent (bound +
+// unbound). Clicking a row slides out a right-hand DRAWER with that agent's 3-tab
+// editor — [CLAUDE.md/AGENTS.md] [meta.yaml] [system.md] — so you can quickly edit
+// an agent's guidance doc and its role template's system prompt + meta without
+// leaving the list. Clicking another row re-points the drawer.
 export default function TeamRosterPanel({
   panes, bindings, masterPaneId, onClose, onRefresh,
-  onOpenAgentFile, onOpenRoleTools, onRenameTitle, ModelPicker,
+  onRenameTitle, ModelPicker,
 }: Props) {
   const { t } = useTranslation('workspace');
   const { confirm, node: dialogsNode } = useDialogs();
+  // The agent whose editor drawer is open (pane_id), or null = list-only.
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [drawerWidth, setDrawerWidth] = useState(680);
   const [filter, setFilter] = useState<RosterFilter>('all');
+
+  // Drag the drawer's left edge to resize it (width = viewport-right − mouseX).
+  const startDrawerDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.min(Math.max(window.innerWidth - ev.clientX, 380), window.innerWidth - 320);
+      setDrawerWidth(w);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
   const [search, setSearch] = useState('');
   const [modelFilter, setModelFilter] = useState('');
   // Per-row "more" menu: which row, and the trigger rect (portal-positioned so
@@ -116,12 +133,6 @@ export default function TeamRosterPanel({
     return String(d?.runtime_ai?.model || d?.default_model || '').trim();
   }, [details]);
 
-  // The AI provider an agent routes through (gateway agents only).
-  const providerOf = useCallback((sid: string) => {
-    const d = details[sid];
-    return String(d?.runtime_ai?.provider_name || d?.runtime_ai_default?.provider_name || '').trim();
-  }, [details]);
-
   // Distinct models present, for the model filter dropdown.
   const models = useMemo(() => {
     const set = new Set<string>();
@@ -155,6 +166,7 @@ export default function TeamRosterPanel({
   const toast = (msg: string) => window.dispatchEvent(new CustomEvent('show-toast', { detail: msg }));
 
   const openMenu = (sid: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // don't let the row click open the editor
     setMenuRect((e.currentTarget as HTMLElement).getBoundingClientRect());
     setMenuFor((prev) => (prev === sid ? null : sid));
   };
@@ -187,10 +199,14 @@ export default function TeamRosterPanel({
     { key: 'unbound', label: t('rosterFilterUnbound', { defaultValue: '未绑定' }), n: counts.unbound },
   ];
 
-  return (
-    <div data-id="team-roster-panel" className="absolute inset-0 z-30 flex flex-col bg-[#0b0b0d]">
-      {/* Fills the mid-panel (left of the cli-content drawer / right-panel), so the
-          cli-content-resize-handle stays exposed and draggable to its right. */}
+  // Portal'd to <body> so the full-screen modal escapes any ancestor stacking
+  // context (cli-agent-stack etc.) — otherwise the app's left panel (z-130) and the
+  // resize mask (z-140) paint OVER it. z-[190] sits above all app chrome but below
+  // this modal's own menu/select portals (z-200) and confirm dialogs (z-9999999).
+  return createPortal(
+    <div data-id="team-roster-panel" className="fixed inset-0 z-[190] flex flex-col bg-[#0b0b0d]">
+      {/* Full-screen modal: agent list on the left, a per-agent editor drawer on the
+          right (opens when a row is clicked). */}
       {/* header */}
       <div data-id="team-roster-header" className="flex h-11 shrink-0 items-center justify-between border-b border-[var(--vsc-border)] px-3">
         <div className="flex items-center gap-2">
@@ -198,12 +214,6 @@ export default function TeamRosterPanel({
           <span data-id="team-roster-total" className="text-[11px] text-zinc-500">{t('rosterCount', { defaultValue: '{{n}} 个', n: counts.all })}</span>
         </div>
         <div className="flex items-center gap-1">
-          {onRefresh ? (
-            <button data-id="team-roster-refresh" type="button" onClick={onRefresh} title={t('rosterRefresh', { defaultValue: '刷新' })}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200">
-              <RefreshCw className="h-4 w-4" />
-            </button>
-          ) : null}
           <button data-id="team-roster-close" type="button" onClick={onClose} title={t('rosterClose', { defaultValue: '关闭' })}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200">
             <X className="h-4 w-4" />
@@ -211,6 +221,9 @@ export default function TeamRosterPanel({
         </div>
       </div>
 
+      {/* body: agent list (left) + editor drawer (right) */}
+      <div data-id="team-roster-body" className="flex min-h-0 flex-1 overflow-hidden">
+      <div data-id="team-roster-left" className="flex min-w-0 flex-1 flex-col">
       {/* filter tabs */}
       <div data-id="team-roster-filters" className="flex shrink-0 items-center gap-1 border-b border-[var(--vsc-border)] px-3 py-1.5">
         {FILTERS.map((f) => (
@@ -271,14 +284,19 @@ export default function TeamRosterPanel({
             <tbody>
               {visibleRows.map((r) => {
                 const type = normalizeAgentType(r.agent_type) || '—';
-                const doc = agentDocFile(r.agent_type);
                 const isEditing = editing === r.sid;
                 return (
-                  <tr key={r.sid} data-id={`team-roster-row-${r.sid}`} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
+                  <tr
+                    key={r.sid}
+                    data-id={`team-roster-row-${r.sid}`}
+                    className={`h-[72px] border-b border-white/[0.04] ${
+                      shortId(selectedAgent || '') === r.sid ? 'bg-blue-500/[0.12]' : 'hover:bg-white/[0.02]'
+                    }`}
+                  >
                     {/* agent: avatar + inline-editable title + id + bound dot */}
-                    <td className="px-3 py-3 align-middle">
+                    <td data-id={`team-roster-cell-agent-${r.sid}`} className="px-3 py-1 align-middle">
                       <div className="flex items-center gap-2.5">
-                        <span title={r.bound ? t('rosterBound', { defaultValue: '已绑定' }) : t('rosterUnbound', { defaultValue: '未绑定' })}
+                        <span data-id={`team-roster-bound-${r.sid}`} title={r.bound ? t('rosterBound', { defaultValue: '已绑定' }) : t('rosterUnbound', { defaultValue: '未绑定' })}
                           className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.bound ? 'bg-emerald-400/80' : 'bg-zinc-600'}`} />
                         <AgentAvatar agentType={r.agent_type} title={r.title || r.sid} variant="stack" />
                         <div className="min-w-0">
@@ -289,6 +307,7 @@ export default function TeamRosterPanel({
                                 ref={editInputRef}
                                 data-id={`team-roster-title-input-${r.sid}`}
                                 value={draftTitle}
+                                onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => setDraftTitle(e.target.value)}
                                 onBlur={() => commitEdit(r.pane_id)}
                                 onKeyDown={(e) => {
@@ -299,39 +318,32 @@ export default function TeamRosterPanel({
                                 className="h-6 w-40 rounded border border-blue-500/40 bg-black/40 px-1.5 text-[12px] text-zinc-100 outline-none"
                               />
                             ) : (
-                              <button
-                                data-id={`team-roster-title-${r.sid}`}
-                                type="button"
-                                onClick={() => startEdit(r.sid, r.title || '')}
-                                title={t('rosterEditTitle', { defaultValue: '点击改名' })}
-                                className="group flex h-6 items-center gap-1 truncate text-left text-[12px] text-zinc-200 hover:text-white"
-                              >
+                              // Plain title (display only). Switching agents is the
+                              // dedicated ✏️ edit button; rename is the hover pencil.
+                              <div data-id={`team-roster-title-${r.sid}`} className="group flex h-6 items-center gap-1 text-[12px] text-zinc-200">
                                 <span className="truncate">{r.title || r.sid}</span>
-                                <Pencil className="h-3 w-3 shrink-0 text-zinc-600 opacity-0 group-hover:opacity-100" />
-                              </button>
+                                <button
+                                  data-id={`team-roster-rename-${r.sid}`}
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); startEdit(r.sid, r.title || ''); }}
+                                  title={t('rosterEditTitle', { defaultValue: '改名' })}
+                                  className="shrink-0 rounded p-0.5 text-zinc-600 opacity-0 hover:bg-white/[0.08] hover:text-zinc-300 group-hover:opacity-100"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </button>
+                              </div>
                             )}
                           </div>
-                          <div className="truncate text-[10px] text-zinc-600">{r.sid}</div>
+                          <div data-id={`team-roster-sid-${r.sid}`} className="truncate text-[10px] text-zinc-600">{r.sid}</div>
                         </div>
                       </div>
                     </td>
-                    {/* type + access (gateway / official) stacked in one cell */}
-                    <td className="px-2 py-3 align-middle">
-                      <div className="flex flex-col items-start gap-1">
-                        <span className="text-[12px] text-zinc-300">{type}</span>
-                        {r.use_custom_gateway ? (
-                          <span data-id={`team-roster-gateway-${r.sid}`} className="inline-flex items-center gap-1 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-300">
-                            <Cloud className="h-3 w-3" /> {t('rosterGateway', { defaultValue: '网关' })}
-                          </span>
-                        ) : (
-                          <span data-id={`team-roster-official-${r.sid}`} className="inline-flex items-center gap-1 rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-zinc-400">
-                            <ShieldCheck className="h-3 w-3" /> {t('rosterOfficial', { defaultValue: '官方' })}
-                          </span>
-                        )}
-                      </div>
+                    {/* agent type (gateway-vs-official now lives in the model column) */}
+                    <td data-id={`team-roster-cell-type-${r.sid}`} className="px-2 py-1 align-middle">
+                      <span data-id={`team-roster-type-${r.sid}`} className="text-[12px] text-zinc-300">{type}</span>
                     </td>
                     {/* model on top, provider below */}
-                    <td className="px-2 py-3 align-middle">
+                    <td data-id={`team-roster-cell-model-${r.sid}`} className="px-2 py-1 align-middle" onClick={(e) => e.stopPropagation()}>
                       <div className="flex flex-col items-start gap-1">
                         {r.use_custom_gateway ? (
                           <ModelPicker
@@ -346,36 +358,32 @@ export default function TeamRosterPanel({
                             }}
                           />
                         ) : (
-                          <span className="text-[12px] text-zinc-300">{modelOf(r.sid) || '—'}</span>
+                          // Official (login) agents run on their login's own model — the
+                          // DB default_model / runtime_ai is the GATEWAY routing config,
+                          // which doesn't apply here. Showing it would be misleading, so
+                          // just mark 官方.
+                          <span data-id={`team-roster-model-${r.sid}`} className="inline-flex items-center gap-1 text-[12px] text-zinc-400">
+                            <ShieldCheck className="h-3 w-3 text-zinc-500" /> {t('rosterOfficial', { defaultValue: '官方' })}
+                          </span>
                         )}
-                        {providerOf(r.sid) ? (
-                          <span data-id={`team-roster-provider-${r.sid}`} className="text-[10px] text-zinc-500">{providerOf(r.sid)}</span>
-                        ) : null}
                       </div>
                     </td>
-                    {/* actions: role doc (icon-only) + role/tools + more */}
-                    <td className="px-3 py-3 align-middle">
+                    {/* actions: edit (opens doc/role drawer) + more menu (restart/delete) */}
+                    <td data-id={`team-roster-cell-actions-${r.sid}`} className="px-3 py-1 align-middle">
                       <div className="flex items-center justify-end gap-1">
-                        <TipBelow label={t('rosterOpenDoc', { defaultValue: '查看 {{doc}}', doc })}>
-                          <button
-                            data-id={`team-roster-doc-${r.sid}`}
-                            type="button"
-                            onClick={() => onOpenAgentFile(r.pane_id, doc)}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/[0.08] text-zinc-300 hover:bg-white/[0.06] hover:text-zinc-100"
-                          >
-                            <FileText className="h-3.5 w-3.5" />
-                          </button>
-                        </TipBelow>
-                        <TipBelow label={t('rosterOpenRoleTools', { defaultValue: '查看 role + tools' })}>
-                          <button
-                            data-id={`team-roster-tools-${r.sid}`}
-                            type="button"
-                            onClick={() => onOpenRoleTools(r.pane_id)}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/[0.08] text-zinc-300 hover:bg-white/[0.06] hover:text-zinc-100"
-                          >
-                            <Wrench className="h-3.5 w-3.5" />
-                          </button>
-                        </TipBelow>
+                        <button
+                          data-id={`team-roster-edit-${r.sid}`}
+                          type="button"
+                          onClick={() => setSelectedAgent(r.pane_id)}
+                          title={t('rosterEditAgent', { defaultValue: '编辑 doc / role' })}
+                          className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${
+                            shortId(selectedAgent || '') === r.sid
+                              ? 'border-blue-500/40 bg-blue-500/15 text-blue-300'
+                              : 'border-white/[0.08] text-zinc-300 hover:bg-white/[0.06] hover:text-zinc-100'
+                          }`}
+                        >
+                          <SquarePen className="h-3.5 w-3.5" />
+                        </button>
                         <button
                           data-id={`team-roster-more-${r.sid}`}
                           type="button"
@@ -394,6 +402,33 @@ export default function TeamRosterPanel({
           </table>
         )}
       </div>
+      </div>{/* /team-roster-left */}
+
+      {/* editor drawer — opens on row click; drag the left edge to resize */}
+      {selectedAgent ? (
+        <>
+          <div
+            data-id="team-roster-drawer-resize"
+            onMouseDown={startDrawerDrag}
+            className="w-1 shrink-0 cursor-col-resize bg-[var(--vsc-border)] transition-colors hover:bg-blue-400/70"
+            title={t('rosterDrawerResize', { defaultValue: '拖动调整宽度' })}
+          />
+          <div data-id="team-roster-drawer" className="flex shrink-0 flex-col" style={{ width: drawerWidth }}>
+            <div data-id="team-roster-drawer-header" className="flex h-9 shrink-0 items-center border-b border-[var(--vsc-border)] px-3">
+              <span className="truncate text-[12px] font-medium text-zinc-200">
+                {(rows.find((r) => r.sid === shortId(selectedAgent))?.title) || shortId(selectedAgent)}
+                <span className="ml-1.5 text-[11px] text-zinc-500">{shortId(selectedAgent)}</span>
+              </span>
+            </div>
+            <div className="min-h-0 flex-1">
+              <Suspense fallback={<div className="flex h-full items-center justify-center text-[12px] text-zinc-600">加载编辑器…</div>}>
+                <AgentDocRoleEditor paneId={selectedAgent} className="h-full w-full" />
+              </Suspense>
+            </div>
+          </div>
+        </>
+      ) : null}
+      </div>{/* /team-roster-body */}
 
       {/* per-row "more" menu — portal'd to escape the table's overflow clipping */}
       {menuFor && menuRect ? createPortal(
@@ -432,6 +467,7 @@ export default function TeamRosterPanel({
           </div>
         </div>, document.body) : null}
       {dialogsNode}
-    </div>
+    </div>,
+    document.body,
   );
 }

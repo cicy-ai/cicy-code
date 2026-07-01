@@ -1,7 +1,7 @@
 {
   "name": "cicy-code-ide-v1",
   "private": true,
-  "version": "2.3.98",
+  "version": "2.3.126",
   "type": "module",
   "scripts": {
     "dev": "vite --port=8022 --host=0.0.0.0",
@@ -42,6 +42,7 @@
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-force-graph-2d": "^1.29.1",
     "react-i18next": "^15.7.4",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",

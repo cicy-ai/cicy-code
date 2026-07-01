@@ -42,9 +42,10 @@ type liteConfig struct {
 	systemPrompt string          // the shared system.md base (the `system` field)
 	roleContext  string          // the agent's AGENTS.md body — its role, carried as message context (NOT in system)
 	enabledTools map[string]bool // empty ⇒ pure chat
-	external     bool            // profile is outward-facing (liaison): exec/custom tools refused
-	workspace    string          // for custom-tool cwd
-	customTools  map[string]liteCustomTool
+	external      bool            // profile is outward-facing (liaison): exec/custom tools refused
+	workspace     string          // for custom-tool cwd
+	customTools   map[string]liteCustomTool
+	maxToolRounds int             // per-role override of the tool-round cap (0 = global default)
 }
 
 // liteFrontmatter is the parsed AGENTS.md header (all optional).
@@ -150,7 +151,8 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	// profiles, no grants, no grantable ceiling, no AGENTS.md-frontmatter override:
 	// 以 role 为主. enabled = expand(the role's selected groups).
 	roleSlug := employeeRoleSlug(shortID) // this agent's role-template slug
-	selectGroups := loadRoleMeta(roleSlug).Tools
+	rm := loadRoleMeta(roleSlug)
+	selectGroups := rm.Tools
 	if len(selectGroups) == 0 {
 		if ca, ok := customAgentFor(roleSlug); ok {
 			selectGroups = ca.Tools
@@ -176,12 +178,13 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	roleContext := strings.TrimSpace(fm.body)
 
 	return liteConfig{
-		profile:      profileKey,
-		systemPrompt: systemBase,
-		roleContext:  roleContext,
-		enabledTools: enabled,
-		external:     false,
-		workspace:    workspace,
-		customTools:  custom,
+		profile:       profileKey,
+		systemPrompt:  systemBase,
+		roleContext:   roleContext,
+		enabledTools:  enabled,
+		external:      false,
+		workspace:     workspace,
+		customTools:   custom,
+		maxToolRounds: rm.MaxToolRounds,
 	}
 }

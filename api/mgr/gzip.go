@@ -3,10 +3,21 @@ package main
 import (
 	"bufio"
 	"compress/gzip"
+	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 )
+
+// gzip.Writer carries ~1.2MB of flate state; allocating one per response made
+// compress/flate.NewWriter a top allocator under the polling SPA. Pool + Reset
+// reuses them across requests instead. Streaming responses (SSE/multipart) never
+// take this path — gzipCompressibleType excludes them — so writers are always
+// short-lived and safe to recycle.
+var gzipWriterPool = sync.Pool{
+	New: func() interface{} { return gzip.NewWriter(io.Discard) },
+}
 
 func gzipCompressibleType(ct string) bool {
 	if i := strings.IndexByte(ct, ';'); i >= 0 {
@@ -50,7 +61,9 @@ func (g *gzipResponseWriter) ensure(code int) {
 		h.Del("Content-Length")
 		h.Set("Content-Encoding", "gzip")
 		h.Add("Vary", "Accept-Encoding")
-		g.gw = gzip.NewWriter(g.ResponseWriter)
+		gw := gzipWriterPool.Get().(*gzip.Writer)
+		gw.Reset(g.ResponseWriter)
+		g.gw = gw
 	}
 	g.ResponseWriter.WriteHeader(code)
 }
@@ -70,6 +83,8 @@ func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 func (g *gzipResponseWriter) Close() {
 	if g.gw != nil {
 		_ = g.gw.Close()
+		gzipWriterPool.Put(g.gw)
+		g.gw = nil // guard against a double Close putting the same writer twice
 	}
 }
 
