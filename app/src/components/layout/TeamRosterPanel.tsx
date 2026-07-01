@@ -57,13 +57,13 @@ export default function TeamRosterPanel({
   const { confirm, node: dialogsNode } = useDialogs();
   // The agent whose editor drawer is open (pane_id), or null = list-only.
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  // Drawer width. On open, default to a 4:3 list:drawer split (drawer = 3/7 of the
+  // Drawer width. On open, default to a 6:4 list:drawer split (drawer = 2/5 of the
   // viewport); the drag handle still lets you fine-tune from there.
-  const [drawerWidth, setDrawerWidth] = useState(() => Math.round(window.innerWidth * 3 / 7));
+  const [drawerWidth, setDrawerWidth] = useState(() => Math.round(window.innerWidth * 2 / 5));
   const drawerWasOpen = useRef(false);
   useEffect(() => {
     const open = !!selectedAgent;
-    if (open && !drawerWasOpen.current) setDrawerWidth(Math.round(window.innerWidth * 3 / 7));
+    if (open && !drawerWasOpen.current) setDrawerWidth(Math.round(window.innerWidth * 2 / 5));
     drawerWasOpen.current = open;
   }, [selectedAgent]);
   const [filter, setFilter] = useState<RosterFilter>('all');
