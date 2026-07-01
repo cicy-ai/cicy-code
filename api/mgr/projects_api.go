@@ -11,10 +11,6 @@ import (
 // Project = a first-class, user-created project: name + rules.
 // Stored as ~/cicy-ai/memory/projects/<slug>.md with a YAML frontmatter
 // (name) and the body as the project rules (composed into agents' CLAUDE.md).
-// Each project also owns a shared claude memory pool at
-// ~/cicy-ai/memory/project-mem/<slug>/ — claude workers whose project_template
-// is <slug> get CLAUDE_COWORK_MEMORY_PATH_OVERRIDE pointed there, so the same
-// project's claude agents share auto-memory (A writes → B recalls).
 
 type projectMeta struct {
 	Slug string `json:"slug"`
@@ -45,32 +41,6 @@ func ensureDefaultProject() {
 			_ = os.WriteFile(path, []byte("## Project\n"), 0o644)
 		}
 	}
-	ensureProjectMemDir(defaultProjectSlug)
-}
-
-// projectMemBaseDir is the parent of all per-project shared memory pools.
-func projectMemBaseDir() string {
-	return filepath.Join(cicyMemoryDir(), "project-mem")
-}
-
-// projectMemDir is the shared claude auto-memory pool for one project.
-func projectMemDir(slug string) string {
-	clean := sanitizeTemplateSlug(slug)
-	if clean == "" {
-		return ""
-	}
-	return filepath.Join(projectMemBaseDir(), clean)
-}
-
-// ensureProjectMemDir creates the pool dir (idempotent). Returns the path, or
-// "" for an empty/invalid slug.
-func ensureProjectMemDir(slug string) string {
-	dir := projectMemDir(slug)
-	if dir == "" {
-		return ""
-	}
-	_ = os.MkdirAll(dir, 0o755)
-	return dir
 }
 
 // splitFrontmatter separates a leading `---\n…\n---\n` YAML block from the body.
@@ -170,7 +140,6 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, http.StatusInternalServerError, "write_failed")
 			return
 		}
-		ensureProjectMemDir(slug)
 		J(w, projectMeta{Slug: slug, Name: slug})
 	default:
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")

@@ -96,7 +96,7 @@ func (h *memoryWriteHook) finalize(reply aiGatewayReplySnapshot) {
 	}
 	// Collect memory-write candidates from THIS request's tool calls (reply.ToolCalls
 	// is per-request, not accumulated) — pure parsing, no DB/IO yet.
-	type cand struct{ path, content, kind string }
+	type cand struct{ path, content string }
 	var cands []cand
 	for _, tc := range reply.ToolCalls {
 		switch strings.TrimSpace(tc.ToolName) {
@@ -105,8 +105,12 @@ func (h *memoryWriteHook) finalize(reply aiGatewayReplySnapshot) {
 			continue
 		}
 		path, content := parseMemoryToolCall(tc.Arguments)
-		if k := memoryWriteKind(path); k != "" {
-			cands = append(cands, cand{path: path, content: content, kind: k})
+		// Only an agent's Layer-1 auto-memory (~/.claude/projects/*/memory/, minus
+		// the MEMORY.md index) feeds the canon _inbox. The old shared project-mem
+		// pool path is gone (the CLAUDE_COWORK_MEMORY_PATH_OVERRIDE that fed it was
+		// removed — auto-memory is native per-agent again).
+		if isMemoryFilePath(path) {
+			cands = append(cands, cand{path: path, content: content})
 		}
 	}
 	if len(cands) == 0 {
@@ -117,12 +121,6 @@ func (h *memoryWriteHook) finalize(reply aiGatewayReplySnapshot) {
 		return
 	}
 	for _, c := range cands {
-		if c.kind == "projectmem" {
-			// Shared claude pool: instantly live, NOT a pending-gated canon entry.
-			// Don't insert/brief per write (would flood) — debounced patrol nudge.
-			noteProjectMemWrite(projectMemPoolSlug(c.path))
-			continue
-		}
 		h.dispatch(c.path, knowledgeTitleFromMemory(c.path, c.content), c.content)
 	}
 }
@@ -258,4 +256,23 @@ func clipTitle(s string) string {
 		return strings.TrimSpace(s[:120])
 	}
 	return s
+}
+
+// deliverAgentMessage sends text to an agent the way `cicy-agent msg` does — the
+// ONLY correct path for a HEADLESS cicy agent (the 知识专员 is one): it has no tmux
+// pane, so sendTextToPane (send-keys) silently fails. Route cicy → in-process
+// deliverCicyMessage; terminal agents (claude/codex/…) → send-keys as before.
+func deliverAgentMessage(paneID, text string) {
+	paneID = normPaneID(paneID)
+	if paneID == "" || strings.TrimSpace(text) == "" {
+		return
+	}
+	if paneAgentType(paneID) == "cicy" {
+		short := shortPaneID(paneID)
+		if ws := paneWorkspace(short); ws != "" {
+			go deliverCicyMessage(short, ws, text)
+		}
+		return
+	}
+	_ = sendTextToPane(paneID, text, true)
 }

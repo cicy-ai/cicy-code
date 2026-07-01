@@ -504,8 +504,8 @@ type builtinWorker struct {
 //     (use_custom_gateway via createBuiltinWorker); no role template.
 func officialRoleRoster() []builtinWorker {
 	// Minimal cicy roster: only two cicy specialists are preinstalled —
-	//   - 知识专员 doubles as the master (team knowledge base + per-project
-	//     curation of claude's shared memory pool, project-mem/<slug>/),
+	//   - 知识专员 doubles as the master (team knowledge base + curation of
+	//     agents' native Layer-1 auto-memory writes into the canon _inbox),
 	//   - 审计策略专员 = the user's audit advisor.
 	// The coding agents (claude/codex/opencode) are kept and bind under the
 	// master. All other cicy roles (项目经理/HR/产品经理/…) are NOT preinstalled.
