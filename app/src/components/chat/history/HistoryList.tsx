@@ -315,11 +315,13 @@ export function HistoryList(props: HistoryListProps) {
                 </div>
                 {/* a 占位:先撑出答案位(thinking),真答案一开始流式就由 renderedLiveTurn
                     接管 —— 占位 → 真 a,无新建、不跳。
-                    ⚠️ 必须 `!liveVisible` 闸:poll 在同一帧 setLiveTurn(新轮)+setItems,而清
-                    optimisticQ 在另一个 useEffect(晚一帧)→ 中间一帧 optimistic-a 占位 与
-                    renderedLiveTurn 的占位(2724)并存 = 两个「Thinking…」脉冲动画。live 既已
-                    接管答案位,乐观占位即冗余,直接撤掉,保证任一帧只有一个占位动画。 */}
-                {!liveVisible ? (
+                    闸门用 `!liveStreaming`(不是 `!liveVisible`):
+                    - 新一轮真在流(thinking/streaming)→ liveStreaming=true → 撤乐观占位,
+                      交给 renderedLiveTurn 自己的占位,任一帧只一个「Thinking…」(原防重复意图)。
+                    - 但上一轮 completed 的答案会赖在 live 尾巴(cicy 懒迁移,liveVisible=true 但
+                      status=completed → liveStreaming=false)。此时发新 Q 必须**立刻**画 thinking,
+                      不能被上一轮的尾巴误杀 —— 否则 thinking 要等 poll 拉回新一轮才出(“a 半天才显示”)。 */}
+                {!liveStreaming ? (
                   <div data-id="current-history-optimistic-a" className="mb-5 flex items-start gap-2.5">
                     <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-optimistic-a-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
                     <div className="min-w-0 flex-1">
