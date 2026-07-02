@@ -25,8 +25,6 @@
   "proxyPasswordPlaceholder": "Empty → prefer api_token; otherwise fall back to user==pass",
   "proxyRuleLabel": "mihomo rule",
   "proxyRulePlaceholder": "IN-USER,w-1001,proxy-a",
-  "agentDutyLabel": "Agent duty",
-  "agentDutyPlaceholder": "Describe the agent's role and responsibilities...",
   "networkConfigLabel": "Config (JSON)",
   "networkExampleTitle": "Example:",
   "saveButton": "Save changes",

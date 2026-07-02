@@ -125,7 +125,7 @@ func (d *DB) Migrate() {
 			updated_at TEXT DEFAULT (datetime('now')),
 			ttyd_pid INTEGER, active INTEGER NOT NULL DEFAULT 1,
 			private_mode INTEGER DEFAULT 0, allowed_users TEXT,
-			proxy_enable INTEGER DEFAULT 0, agent_duty TEXT,
+			proxy_enable INTEGER DEFAULT 0,
 			preview TEXT, config TEXT, ttyd_preview TEXT,
 			agent_type TEXT DEFAULT '', common_prompt TEXT,
 			role TEXT, default_model TEXT, trust_level TEXT,

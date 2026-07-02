@@ -1,7 +1,5 @@
 {
   "title": "Modifier le panneau",
-  "agentDutyLabel": "Mission de l'agent",
-  "agentDutyPlaceholder": "Décrivez la mission de l'agent de ce panneau",
   "initScriptHintShort": "sleep:N attend N secondes ; key:X envoie une touche",
   "telegramToggle": "Notifications Telegram",
   "telegramTokenPlaceholder": "Jeton du bot",

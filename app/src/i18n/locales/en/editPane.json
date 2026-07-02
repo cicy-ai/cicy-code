@@ -1,7 +1,5 @@
 {
   "title": "Edit pane",
-  "agentDutyLabel": "Agent duty",
-  "agentDutyPlaceholder": "Describe the duty of this pane's agent",
   "initScriptHintShort": "sleep:N waits N seconds; key:X sends a key",
   "telegramToggle": "Telegram notifications",
   "telegramTokenPlaceholder": "Bot token",

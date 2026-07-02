@@ -929,7 +929,7 @@ func handlePaneByID(w http.ResponseWriter, r *http.Request) {
 
 func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	paneID := normPaneID(id)
-	var title, workspace, initScript, agentType, agentDuty, config, commonPrompt, ttydPreview sql.NullString
+	var title, workspace, initScript, agentType, config, commonPrompt, ttydPreview sql.NullString
 	var port sql.NullInt64
 	var active sql.NullInt64
 	var allowAllActions sql.NullBool
@@ -944,7 +944,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	var machineID sql.NullInt64
 	var machineLabel, machineURL, runtimeKind, capabilitiesJSON sql.NullString
 	err := store.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script,
-		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.agent_duty, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level, COALESCE(t.role_template,''),
+		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level, COALESCE(t.role_template,''),
 		COALESCE(t.allow_all_actions, 0),
 		COALESCE(t.reply_in_chinese, 0),
 		COALESCE(t.use_custom_gateway, 0),
@@ -956,7 +956,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		LEFT JOIN machines m ON t.machine_id=m.id
 		WHERE t.pane_id=?`, paneID).Scan(
 		&paneID, &title, &port, &workspace, &initScript,
-		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel, &roleTemplate, &allowAllActions,
+		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel, &roleTemplate, &allowAllActions,
 		&replyInChinese, &useCustomGateway, &useMitm, &useProxy,
 		&machineID, &machineLabel, &machineURL, &runtimeKind, &capabilitiesJSON)
 	if err != nil {
@@ -970,7 +970,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		"pane_id": shortPaneID(paneID), "title": title.String, "ttyd_port": port.Int64,
 		"workspace": workspace.String, "init_script": initScript.String,
 		"tg_token": tgToken.String, "tg_chat_id": tgChatID.String, "tg_enable": tgEnable.Bool,
-		"active": active.Int64, "agent_type": agentType.String, "agent_duty": agentDuty.String,
+		"active": active.Int64, "agent_type": agentType.String,
 		"config": config.String, "common_prompt": commonPrompt.String, "ttyd_preview": ttydPreview.String,
 		"allow_all_actions":  allowAllActions.Bool,
 		"reply_in_chinese":   replyInChinese.Bool,
@@ -1027,7 +1027,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 // PATCHed a whole settingsData blob; the frontend was tightened, but the
 // surface area here is the durable defense.
 var paneUpdateCols = map[string]bool{
-	"title": true, "agent_duty": true, "config": true, "common_prompt": true,
+	"title": true, "config": true, "common_prompt": true,
 	"ttyd_preview": true, "default_model": true, "trust_level": true,
 	"tg_token": true, "tg_chat_id": true, "tg_enable": true, "active": true,
 	"allow_all_actions":  true,
@@ -1235,16 +1235,6 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	_ = res
 
-	// Sync agent_duty to workspace/.kiro/steering/duty.md
-	// if duty, ok := filtered["agent_duty"].(string); ok {
-	// 	var ws sql.NullString
-	// 	store.QueryRow("SELECT workspace FROM agent_config WHERE pane_id=?", paneID).Scan(&ws)
-	// 	if ws.String != "" {
-	// 		dir := ws.String + "/.kiro/steering"
-	// 		os.MkdirAll(dir, 0755)
-	// 		os.WriteFile(dir+"/duty.md", []byte("---\ninclusion: always\n---\n\n"+duty), 0644)
-	// 	}
-	// }
 	J(w, M{"success": true, "pane_id": shortPaneID(paneID), "updated": filtered})
 }
 

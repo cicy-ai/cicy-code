@@ -6,7 +6,6 @@ export interface Position {
 export interface EditPaneData {
   target: string;
   title: string;
-  agent_duty?: string;
   agent_type?: string;
   allow_all_actions?: boolean;
   use_custom_gateway?: boolean;
