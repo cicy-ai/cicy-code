@@ -8,8 +8,32 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
+
+// deepseekReasoningModels remembers models the upstream itself has told us require
+// DeepSeek's reasoning_content passback — LEARNED at runtime from the provider's
+// own 400 ("reasoning_content … must be passed back"), never from the model name.
+// This is how a freely-switched cicy model that fronts DeepSeek behind an opaque
+// alias (opencodeZen's "big-pickle", any future alias) gets the passback armed
+// without hardcoding a single name. Keyed by lowercased model id.
+var deepseekReasoningModels sync.Map
+
+func markDeepseekReasoningModel(model string) {
+	if m := strings.TrimSpace(strings.ToLower(model)); m != "" {
+		deepseekReasoningModels.Store(m, true)
+	}
+}
+
+func learnedDeepseekReasoningModel(model string) bool {
+	m := strings.TrimSpace(strings.ToLower(model))
+	if m == "" {
+		return false
+	}
+	_, ok := deepseekReasoningModels.Load(m)
+	return ok
+}
 
 const cicyAdaptResponsesHeader = "X-Cicy-Adapt-Responses-To-ChatCompletions"
 const cicyAdaptMessagesHeader = "X-Cicy-Adapt-Messages-To-ChatCompletions"
@@ -1077,7 +1101,16 @@ func isDeepSeekFlavored(upstreamHost, model string) bool {
 	if strings.Contains(strings.ToLower(upstreamHost), "deepseek") {
 		return true
 	}
-	if strings.Contains(strings.ToLower(model), "deepseek") {
+	m := strings.ToLower(model)
+	if strings.Contains(m, "deepseek") {
+		return true
+	}
+	// Opaque DeepSeek aliases (opencodeZen's "big-pickle", etc.) carry no "deepseek"
+	// in the id, so name-matching can't catch them. Instead we LEARN which models
+	// demand the reasoning_content passback from the upstream's own 400 (see the
+	// retry loop in ai_gateway.go) — no hardcoded alias list, works for any model
+	// the user freely switches to.
+	if learnedDeepseekReasoningModel(model) {
 		return true
 	}
 	return false

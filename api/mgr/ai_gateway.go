@@ -236,6 +236,30 @@ func aiGatewayBodyLooksLikeUpstreamFlake(resp *http.Response) (bool, []byte) {
 	return false, buf
 }
 
+// aiGatewayModelFromRequestBody reads the (already-transformed) outgoing request
+// body and returns its "model" field — used to learn which model the upstream
+// just demanded a reasoning_content passback for. Bounded read; "" on any miss.
+func aiGatewayModelFromRequestBody(req *http.Request) string {
+	if req == nil || req.GetBody == nil {
+		return ""
+	}
+	rc, err := req.GetBody()
+	if err != nil {
+		return ""
+	}
+	defer rc.Close()
+	buf, err := io.ReadAll(io.LimitReader(rc, 1*1024*1024))
+	if err != nil {
+		return ""
+	}
+	var m map[string]interface{}
+	if json.Unmarshal(buf, &m) != nil {
+		return ""
+	}
+	s, _ := m["model"].(string)
+	return strings.TrimSpace(s)
+}
+
 func aiGatewayRetryDelay(resp *http.Response, attempt int) time.Duration {
 	if resp != nil {
 		if value := strings.TrimSpace(resp.Header.Get("Retry-After")); value != "" {
@@ -319,8 +343,24 @@ func (t *aiGatewayRetryTransport) RoundTrip(req *http.Request) (*http.Response, 
 			isFlake, buf := aiGatewayBodyLooksLikeUpstreamFlake(resp)
 			flakeBody = buf
 			if isFlake {
-				shouldRetry = true
-				log.Printf("[ai-gateway] upstream flake detected provider=%s agent=%s status=%d — will retry", t.provider, t.agentID, resp.StatusCode)
+				// "reasoning_content … must be passed back": split by whether we ALREADY
+				// treated this model as DeepSeek (and thus echoed reasoning_content):
+				//  - NOT flavored → we sent NO reasoning_content → systematic (an opaque
+				//    DeepSeek alias). Retrying the same body won't help. Learn the model
+				//    + surface the 400 so the turn re-runs and re-transforms WITH the
+				//    passback armed (isDeepSeekFlavored now true).
+				//  - ALREADY flavored → we DID echo reasoning_content → this is the
+				//    genuine cicyAi thinking-mode race (identical body succeeds on
+				//    replay) → retry as before. (Critically, deepseek-* models match by
+				//    name and are NOT in the learned set — they must still hit retry.)
+				model := aiGatewayModelFromRequestBody(attemptReq)
+				if model != "" && !isDeepSeekFlavored(attemptReq.URL.Host, model) {
+					markDeepseekReasoningModel(model)
+					log.Printf("[ai-gateway] learned reasoning-passback model=%s from upstream 400 provider=%s agent=%s — surfacing 400 so the turn re-runs with reasoning_content", model, t.provider, t.agentID)
+				} else {
+					shouldRetry = true
+					log.Printf("[ai-gateway] upstream flake detected provider=%s agent=%s status=%d — will retry", t.provider, t.agentID, resp.StatusCode)
+				}
 			}
 		}
 		if !shouldRetry || attempt >= aiGatewayMaxAttempts {
