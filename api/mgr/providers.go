@@ -23,7 +23,7 @@ var providersFileMu sync.Mutex
 var providerKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
 // agent types exposed in the provider manager defaults editor.
-var providerDefaultAgentTypes = []string{"claude", "cicy", "codex", "gemini", "opencode"}
+var providerDefaultAgentTypes = []string{"claude", "cicy", "codex", "opencode"}
 
 // Official cicy-shipped providers — protected from deletion via API.
 var protectedProviderKeys = map[string]bool{
@@ -59,12 +59,11 @@ func writeGlobalJSONConfig(cfg map[string]any) error {
 // claude/codex/opencode to the CiCyAi gateway by default.
 const defaultProvidersBlockJSON = `{
   "default": {
-    "claude": "defaultAnthropic",
+    "claude": "deepseek_claude",
     "cicy": "opencodeZen",
     "codex": "opencodeZen",
-    "gemini": "defaultOpenAi",
     "opencode": "opencodeZen",
-    "stt": "defaultOpenAi"
+    "stt": "groqStt"
   },
   "items": [
     {
@@ -84,6 +83,33 @@ const defaultProvidersBlockJSON = `{
       "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
       "protocol": "openai",
       "url": "https://gateway.cicy-ai.com"
+    },
+    {
+      "key": "deepseek_claude",
+      "name": "DeepSeek",
+      "apiKey": "",
+      "defaultModel": "deepseek-v4-pro",
+      "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
+      "protocol": "anthropic",
+      "url": "https://api.deepseek.com/anthropic"
+    },
+    {
+      "key": "deepseek",
+      "name": "DeepSeek",
+      "apiKey": "",
+      "defaultModel": "deepseek-v4-pro",
+      "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
+      "protocol": "openai",
+      "url": "https://api.deepseek.com"
+    },
+    {
+      "key": "groqStt",
+      "name": "Groq Whisper",
+      "apiKey": "",
+      "defaultModel": "whisper-large-v3-turbo",
+      "models": ["whisper-large-v3", "whisper-large-v3-turbo"],
+      "protocol": "openai",
+      "url": "https://api.groq.com/openai/v1"
     }
   ]
 }`

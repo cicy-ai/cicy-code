@@ -50,6 +50,7 @@ import type { AgentCanvasItem } from './layout/AgentStack';
 import AgentStack from './layout/AgentStack';
 import WeChatBindModal from './im/WeChatBindModal';
 import SettingsModal, { type SettingsSection } from './settings/SettingsModal';
+import ProvidersModal from './providers/ProvidersModal';
 import { useDialogs } from './ui/Modal';
 import TipBelow from './ui/TipBelow';
 import config, { defaultWorkerWorkspace, syncHostHomeFromPath, urls } from '../config';
@@ -390,6 +391,28 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // Replaces the old activity-bar left-panels for providers & im.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('language');
+  // Dedicated standalone LLM-provider modal (two columns: list + detail), opened
+  // from the sidebar providers button — separate from the general Settings modal.
+  const [providersModalOpen, setProvidersModalOpen] = useState(false);
+  // Red badge on the sidebar providers button: true when any agent-type's routed
+  // provider has an empty apiKey (e.g. the seeded deepseek/groq defaults ship
+  // keyless). Refetched when the settings modal closes so filling a key clears it.
+  const [providersNeedKey, setProvidersNeedKey] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    apiService.getProviders().then((resp: any) => {
+      const d = resp?.data || {};
+      const defaults = d.defaults || d.default || {};
+      const byKey: Record<string, any> = {};
+      for (const it of (d.items || [])) byKey[it.key] = it;
+      const need = Object.values(defaults).some((rk) => {
+        const it = byKey[rk as string];
+        return !!it && !String(it.apiKey || '').trim();
+      });
+      if (alive) setProvidersNeedKey(need);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [settingsOpen]);
   const openSettings = useCallback((s: SettingsSection) => {
     setSettingsSection(s);
     setSettingsOpen(true);
@@ -1864,9 +1887,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
               {/* Browser windows: Chrome / Electron profiles → live windows + screenshots */}
               <SideBtn dataId="btn-windows" active={leftActive === 'windows'} icon={<AppWindow className="w-5 h-5" />} title="浏览器窗口" onClick={() => toggleLeft('windows')} />
+              {/* LLM providers: opens the Settings modal on the providers tab. Red
+                  badge when a routed provider has no API key (e.g. seeded
+                  deepseek/groq default keys are empty until filled). */}
+              <SideBtn dataId="btn-providers" active={providersModalOpen} icon={<Boxes className="w-5 h-5" />} title={t('settingsNavProviders', { defaultValue: 'LLM 供应商' })} onClick={() => setProvidersModalOpen(true)} badge={providersNeedKey} />
               {/* Audit log/policy live as normal right-panel tabs (日志/策略), gated
                   by the audit master switch — no dedicated left-bar entry. */}
-              {/* Providers & IM moved into the unified Settings modal (bottom-left gear). */}
+              {/* IM moved into the unified Settings modal (bottom-left gear). */}
             </>
           )}
         </div>
@@ -2191,15 +2218,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <span data-id="membership-settings-routing-label">{t('settingsNavRouting', { defaultValue: 'Agent 路由' })}</span>
               <Route className="h-3.5 w-3.5" />
             </button>
-            <button
-              type="button"
-              data-id="membership-settings-providers"
-              onClick={() => openSettings('providers')}
-              className="mt-0.5 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
-            >
-              <span data-id="membership-settings-providers-label">{t('settingsNavProviders', { defaultValue: 'LLM 供应商' })}</span>
-              <Boxes className="h-3.5 w-3.5" />
-            </button>
           </div>
           <div data-id="membership-version" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] text-zinc-500">
             <span data-id="membership-version-label">Version</span>
@@ -2209,6 +2227,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         document.body
       ) : null}
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
+      <ProvidersModal open={providersModalOpen} onClose={() => setProvidersModalOpen(false)} />
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
       <ProxyManagerDialog open={proxyManagerOpen} onClose={() => setProxyManagerOpen(false)} paneId={activeCliPaneId || paneId} />
       {toast && <div data-id="workspace-toast" className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 text-sm rounded-lg shadow-lg ${toast.variant === 'success' ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>{toast.message}</div>}
@@ -2233,11 +2252,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   );
 }
 
-function SideBtn({ dataId, active, icon, title, onClick, disabled = false }: { dataId: string; active: boolean; icon: React.ReactNode; title: string; onClick: () => void; disabled?: boolean }) {
+function SideBtn({ dataId, active, icon, title, onClick, disabled = false, badge = false }: { dataId: string; active: boolean; icon: React.ReactNode; title: string; onClick: () => void; disabled?: boolean; badge?: boolean }) {
   return (
     <button data-id={dataId} onClick={disabled ? undefined : onClick} disabled={disabled} aria-disabled={disabled} className={cn("p-2.5 rounded-xl transition-all relative", disabled ? "text-zinc-700 opacity-50 cursor-not-allowed" : cn("cursor-pointer", active ? "text-zinc-300 bg-white/[0.06]" : "text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.03]"))} title={title}>
       {icon}
       {active && !disabled && <div data-id={`${dataId}-active-indicator`} className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-blue-500/60 rounded-r" />}
+      {badge && <span data-id={`${dataId}-badge`} className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-[#0b0b0c]" title="缺少 API key" />}
     </button>
   );
 }

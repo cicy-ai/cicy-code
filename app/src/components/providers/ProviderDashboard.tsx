@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import {
   Plus, Save, Trash2, Zap, Eye, EyeOff, Check, X,
-  Server, Search, ChevronsUpDown, AlertTriangle, Link2, Cpu,
+  Server, Search, ChevronsUpDown, AlertTriangle, Link2, Cpu, ExternalLink,
 } from 'lucide-react';
 import apiService from '../../services/api';
 import AgentAvatar from '../AgentAvatar';
@@ -48,18 +48,15 @@ type Tab = 'routing' | 'providers';
 /* ───────────────────────── constants ───────────────────────── */
 
 const PROTOCOLS = ['openai', 'anthropic'] as const;
-const KNOWN_SLOTS = ['claude', 'cicy', 'codex', 'gemini', 'opencode'];
+const KNOWN_SLOTS = ['claude', 'cicy', 'codex', 'opencode'];
 const PROTECTED_PROVIDER_KEYS = new Set(['defaultAnthropic', 'defaultOpenAi']);
-const SLOT_LABELS: Record<string, string> = { claude: 'Claude', cicy: 'CiCy', codex: 'Codex', gemini: 'Gemini', opencode: 'OpenCode' };
-const SLOT_DESC: Record<string, string> = { claude: 'Claude Code CLI', cicy: 'CiCy Lite Agent', codex: 'OpenAI Codex CLI', gemini: 'Gemini CLI', opencode: 'OpenCode CLI' };
+const SLOT_LABELS: Record<string, string> = { claude: 'Claude', cicy: 'CiCy', codex: 'Codex', opencode: 'OpenCode' };
+const SLOT_DESC: Record<string, string> = { claude: 'Claude Code CLI', cicy: 'CiCy Lite Agent', codex: 'OpenAI Codex CLI', opencode: 'OpenCode CLI' };
 // cicy has no protocol restriction: it always speaks Anthropic Messages but the
 // gateway bridges an openai-protocol provider down to Chat Completions, so either
 // kind of provider can back the cicy slot (mirrors opencode, which is also open).
-// gemini likewise carries no restriction here — the routing UI only knows the
-// openai/anthropic provider protocols, while gemini rides the gateway's dedicated
-// /gemini passthrough, so leave it unfiltered to avoid a false mismatch warning.
-const SLOT_PROTOCOL: Record<string, string> = { claude: 'anthropic', cicy: '', codex: 'openai', gemini: '', opencode: 'openai' };
-const SLOT_FALLBACK_MODEL: Record<string, string> = { claude: 'claude-opus-4-7', cicy: 'deepseek-v4-pro', codex: 'gpt-5.4', gemini: 'gemini-2.5-pro', opencode: 'deepseek-v4-pro' };
+const SLOT_PROTOCOL: Record<string, string> = { claude: 'anthropic', cicy: '', codex: 'openai', opencode: 'openai' };
+const SLOT_FALLBACK_MODEL: Record<string, string> = { claude: 'claude-opus-4-7', cicy: 'deepseek-v4-pro', codex: 'gpt-5.4', opencode: 'deepseek-v4-pro' };
 
 /* ───────────────────────── helpers ───────────────────────── */
 
@@ -146,8 +143,8 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 
 function Field({ label, help, children, className }: { label: React.ReactNode; help?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
-    <label data-id="provider-dashboard-auto-1" className={cn('block', className)}>
-      <span data-id="provider-dashboard-auto-2" className="mb-1.5 block text-[12px] font-medium text-zinc-400">{label}</span>
+    <label data-id="provider-field" className={cn('block', className)}>
+      <span data-id="provider-field-label" className="mb-1.5 block text-[12px] font-medium text-zinc-400">{label}</span>
       {children}
       {help && <span className="mt-1.5 block text-[11px] leading-snug text-zinc-600">{help}</span>}
     </label>
@@ -155,8 +152,8 @@ function Field({ label, help, children, className }: { label: React.ReactNode; h
 }
 
 type BtnVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
-function Btn({ variant = 'secondary', size = 'md', icon, children, busy, className, ...rest }: {
-  variant?: BtnVariant; size?: 'sm' | 'md'; icon?: React.ReactNode; children?: React.ReactNode; busy?: boolean;
+function Btn({ variant = 'secondary', size = 'md', icon, children, busy, className, dataId, ...rest }: {
+  variant?: BtnVariant; size?: 'sm' | 'md'; icon?: React.ReactNode; children?: React.ReactNode; busy?: boolean; dataId?: string;
 } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   const styles: Record<BtnVariant, string> = {
     primary: 'bg-white text-[#0b0b0c] hover:bg-zinc-200 disabled:bg-white/40 font-medium',
@@ -166,7 +163,7 @@ function Btn({ variant = 'secondary', size = 'md', icon, children, busy, classNa
   };
   const sizes = { sm: 'h-7 px-2.5 text-[12px] gap-1', md: 'h-8 px-3 text-[13px] gap-1.5' };
   return (
-    <button data-id="provider-dashboard-auto-3" {...rest} className={cn('inline-flex items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed', sizes[size], styles[variant], className)}>
+    <button data-id={dataId ?? 'provider-btn'} {...rest} className={cn('inline-flex items-center justify-center whitespace-nowrap rounded-lg transition-colors disabled:cursor-not-allowed', sizes[size], styles[variant], className)}>
       {busy ? <Spinner size={size === 'sm' ? 'xs' : 'sm'} /> : icon}
       {children}
     </button>
@@ -208,8 +205,8 @@ function ProviderPicker({
   const pick = (k: string) => { onChange(k); setOpen(false); };
 
   return (
-    <div data-id="provider-dashboard-auto-4" ref={ref} className="relative">
-      <button data-id="provider-dashboard-auto-5"
+    <div data-id="provider-picker" ref={ref} className="relative">
+      <button data-id="provider-picker-trigger"
         type="button" disabled={disabled} onClick={() => setOpen((o) => !o)}
         className={cn('group flex h-9 w-full items-center gap-2 rounded-lg border bg-white/[0.025] pl-3 pr-2 text-left text-[13px] transition-colors',
           open ? 'border-blue-500/55 ring-1 ring-blue-500/15' : 'border-white/[0.09] hover:border-white/[0.16]',
@@ -217,39 +214,39 @@ function ProviderPicker({
       >
         {selected ? (
           <>
-            <span data-id="provider-dashboard-auto-6" className={cn('truncate', selectedMismatch ? 'text-amber-300' : 'text-zinc-100')}>{selected.name || selected.key}</span>
+            <span data-id="provider-picker-selected-name" className={cn('truncate', selectedMismatch ? 'text-amber-300' : 'text-zinc-100')}>{selected.name || selected.key}</span>
             <ProtocolBadge protocol={selected.protocol} />
             {selectedMismatch && <AlertTriangle size={12} className="shrink-0 text-amber-400" />}
           </>
         ) : (
-          <span data-id="provider-dashboard-auto-7" className="text-zinc-600">{i18n.t('useFallback', { ns: 'provider' })}</span>
+          <span data-id="provider-picker-fallback" className="text-zinc-600">{i18n.t('useFallback', { ns: 'provider' })}</span>
         )}
-        <span data-id="provider-dashboard-auto-8" className="ml-auto flex shrink-0 items-center gap-1.5">
+        <span data-id="provider-picker-indicators" className="ml-auto flex shrink-0 items-center gap-1.5">
           {busy && <Spinner size="xs" />}
           <ChevronsUpDown size={13} className="text-zinc-600 transition-colors group-hover:text-zinc-400" />
         </span>
       </button>
 
       {open && (
-        <div data-id="provider-dashboard-auto-9" className="absolute left-0 right-0 z-50 mt-1.5 max-h-72 overflow-auto rounded-xl border border-white/[0.09] bg-[#141416] p-1 shadow-2xl shadow-black/60">
+        <div data-id="provider-picker-menu" className="absolute left-0 right-0 z-50 mt-1.5 max-h-72 overflow-auto rounded-xl border border-white/[0.09] bg-[#141416] p-1 shadow-2xl shadow-black/60">
           {restrictToProtocol && (
-            <div data-id="provider-dashboard-auto-10" className="px-2.5 pb-1 pt-1.5 text-[10px] uppercase tracking-[0.1em] text-zinc-600">{i18n.t('restrictByProtocol', { ns: 'provider', protocol: restrictToProtocol })}</div>
+            <div data-id="provider-picker-protocol-note" className="px-2.5 pb-1 pt-1.5 text-[10px] uppercase tracking-[0.1em] text-zinc-600">{i18n.t('restrictByProtocol', { ns: 'provider', protocol: restrictToProtocol })}</div>
           )}
-          <button data-id="provider-dashboard-auto-11" type="button" onClick={() => pick('')}
+          <button data-id="provider-picker-option-fallback" type="button" onClick={() => pick('')}
             className={cn('flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] transition-colors hover:bg-white/[0.06]', !value && 'bg-white/[0.07]')}>
-            <span data-id="provider-dashboard-auto-12" className="grid w-4 place-items-center">{!value && <Check size={13} className="text-blue-400" />}</span>
-            <span data-id="provider-dashboard-auto-13" className="text-zinc-500">{i18n.t('useFallback', { ns: 'provider' })}</span>
+            <span data-id="provider-picker-option-fallback-check" className="grid w-4 place-items-center">{!value && <Check size={13} className="text-blue-400" />}</span>
+            <span data-id="provider-picker-option-fallback-label" className="text-zinc-500">{i18n.t('useFallback', { ns: 'provider' })}</span>
           </button>
           {compatible.length > 0 && <div className="my-1 h-px bg-white/[0.06]" />}
           {compatible.map((p) => {
             const isSel = p.key === value;
             return (
-              <button data-id="provider-dashboard-auto-14" key={p.key} type="button" onClick={() => pick(p.key)}
+              <button data-id={`provider-picker-option-${p.key}`} key={p.key} type="button" onClick={() => pick(p.key)}
                 className={cn('flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-white/[0.06]', isSel && 'bg-white/[0.07]')}>
-                <span data-id="provider-dashboard-auto-15" className="grid w-4 shrink-0 place-items-center">{isSel && <Check size={13} className="text-blue-400" />}</span>
-                <span data-id="provider-dashboard-auto-16" className="min-w-0 flex-1">
-                  <span data-id="provider-dashboard-auto-17" className="flex items-center gap-1.5">
-                    <span data-id="provider-dashboard-auto-18" className="truncate text-zinc-100">{p.name || p.key}</span>
+                <span data-id="provider-picker-option-check" className="grid w-4 shrink-0 place-items-center">{isSel && <Check size={13} className="text-blue-400" />}</span>
+                <span data-id="provider-picker-option-body" className="min-w-0 flex-1">
+                  <span data-id="provider-picker-option-name-row" className="flex items-center gap-1.5">
+                    <span data-id="provider-picker-option-name" className="truncate text-zinc-100">{p.name || p.key}</span>
                     <ProtocolBadge protocol={p.protocol} />
                   </span>
                   {p.name && p.name !== p.key && <span className="block truncate font-mono text-[11px] text-zinc-600">{p.key}</span>}
@@ -260,17 +257,17 @@ function ProviderPicker({
           {compatible.length === 0 && <div className="px-2.5 py-3 text-center text-[12px] text-zinc-600">{emptyHint || i18n.t('noProviders', { ns: 'provider' })}</div>}
           {selectedMismatch && selected && (
             <>
-              <div data-id="provider-dashboard-auto-19" className="my-1 h-px bg-white/[0.06]" />
-              <button data-id="provider-dashboard-auto-20" type="button" onClick={() => pick(selected.key)}
+              <div data-id="provider-picker-mismatch-divider" className="my-1 h-px bg-white/[0.06]" />
+              <button data-id="provider-picker-mismatch-option" type="button" onClick={() => pick(selected.key)}
                 className="flex w-full items-center gap-2.5 rounded-lg bg-amber-500/[0.06] px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-amber-500/[0.12]">
-                <span data-id="provider-dashboard-auto-21" className="grid w-4 shrink-0 place-items-center"><Check size={13} className="text-amber-400" /></span>
-                <span data-id="provider-dashboard-auto-22" className="min-w-0 flex-1">
-                  <span data-id="provider-dashboard-auto-23" className="flex items-center gap-1.5">
-                    <span data-id="provider-dashboard-auto-24" className="truncate text-amber-200">{selected.name || selected.key}</span>
+                <span data-id="provider-picker-mismatch-check" className="grid w-4 shrink-0 place-items-center"><Check size={13} className="text-amber-400" /></span>
+                <span data-id="provider-picker-mismatch-body" className="min-w-0 flex-1">
+                  <span data-id="provider-picker-mismatch-name-row" className="flex items-center gap-1.5">
+                    <span data-id="provider-picker-mismatch-name" className="truncate text-amber-200">{selected.name || selected.key}</span>
                     <ProtocolBadge protocol={selected.protocol} />
-                    <span data-id="provider-dashboard-auto-25" className="rounded bg-amber-500/15 px-1 py-px text-[9px] font-medium text-amber-300">{i18n.t('protoMismatchPill', { ns: 'provider' })}</span>
+                    <span data-id="provider-picker-mismatch-pill" className="rounded bg-amber-500/15 px-1 py-px text-[9px] font-medium text-amber-300">{i18n.t('protoMismatchPill', { ns: 'provider' })}</span>
                   </span>
-                  <span data-id="provider-dashboard-auto-26" className="block truncate font-mono text-[11px] text-zinc-600">{selected.key}</span>
+                  <span data-id="provider-picker-mismatch-key" className="block truncate font-mono text-[11px] text-zinc-600">{selected.key}</span>
                 </span>
               </button>
             </>
@@ -311,7 +308,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [testModalOpen, setTestModalOpen] = useState(false);
-  const [testPickedModel, setTestPickedModel] = useState<string>('');
+  const [testingAll, setTestingAll] = useState(false);
   const [modelTestResults, setModelTestResults] = useState<Record<string, TestResult | 'pending'>>({});
   const [savingSlot, setSavingSlot] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -384,7 +381,6 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
   };
   const selectProvider = (key: string) => { void guardDirty(() => { setIsNew(false); setSelectedKey(key); setTab('providers'); }); };
   const startNew = () => { void guardDirty(() => { setIsNew(true); setSelectedKey(null); setTab('providers'); }); };
-  const closeDetail = () => { void guardDirty(() => { setIsNew(false); setSelectedKey(null); }); };
 
   /* ---- mutations ---- */
   const buildPayload = useCallback((): ProviderRecord => ({
@@ -451,6 +447,19 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
       setModelTestResults((prev) => ({ ...prev, [model]: { ok: false, detail: errText(err) } }));
     }
   }, [buildPayload]);
+
+  // Test every declared model — bounded concurrency (3 in-flight) so a long
+  // model list doesn't fire dozens of upstream requests at once.
+  const testAllModels = useCallback(async () => {
+    const models = modelsText.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (models.length === 0) return;
+    setTestingAll(true);
+    try {
+      const queue = [...models];
+      const worker = async () => { for (let m = queue.shift(); m; m = queue.shift()) await testSingleModel(m); };
+      await Promise.all([worker(), worker(), worker()]);
+    } finally { setTestingAll(false); }
+  }, [modelsText, testSingleModel]);
 
   const updateDefault = async (agentType: string, providerKey: string) => {
     if (!data) return;
@@ -605,6 +614,9 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
                           <div className="flex items-center gap-1.5">
                             <span className={cn('truncate text-[13px]', active ? 'text-white' : 'text-zinc-200')}>{p.name || p.key}</span>
                             <ProtocolBadge protocol={p.protocol} />
+                            {!String(p.apiKey || '').trim() && (
+                              <span data-id={`providers-left-item-${p.key}-nokey-badge`} className="shrink-0 rounded-md bg-red-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white shadow-sm shadow-red-500/30" title={t('missingApiKey', { defaultValue: '缺少 API key' })}>{t('noKey', { defaultValue: '无 key' })}</span>
+                            )}
                           </div>
                           <div className="mt-0.5 flex items-center gap-1.5">
                             <span className="truncate font-mono text-[11px] text-zinc-600">{p.key}</span>
@@ -623,7 +635,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
               </ul>
             </div>
             <div className="border-t border-white/[0.06] p-2 shrink-0">
-              <Btn variant={isNew ? 'primary' : 'secondary'} size="md" icon={<Plus size={14} />} className="w-full" onClick={startNew}>{t('addProvider')}</Btn>
+              <Btn dataId="provider-add" variant={isNew ? 'primary' : 'secondary'} size="md" icon={<Plus size={14} />} className="w-full" onClick={startNew}>{t('addProvider')}</Btn>
             </div>
           </div>
         )}
@@ -635,14 +647,10 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
   const detailUI = (
     <div data-id="providers-detail-root" className="absolute inset-0 z-30 flex flex-col bg-[#0A0A0A] text-zinc-300 overflow-hidden">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-white/[0.06] px-4">
-        <button onClick={closeDetail} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200" title={t('back') || 'Close'}>
-          <X size={16} />
-        </button>
         <h1 className="truncate text-[14px] font-semibold text-white">{isNew ? t('newProvider') : (selectedProvider?.name || selectedProvider?.key)}</h1>
         {!isNew && <ProtocolBadge protocol={draft.protocol} />}
         {dirty && <span className="inline-flex items-center gap-1 text-[11px] text-amber-300"><span className="h-1.5 w-1.5 rounded-full bg-amber-400" />{t('unsaved')}</span>}
         <div className="flex-1" />
-        {!isNew && !PROTECTED_PROVIDER_KEYS.has(draft.key) && <Btn variant="danger" size="sm" icon={<Trash2 size={12} />} onClick={() => void remove(draft.key)}>{t('delete')}</Btn>}
       </header>
       <main className="flex-1 overflow-auto">
         <div className="mx-auto max-w-[680px] px-8 py-7">
@@ -652,10 +660,10 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
               <SectionHeader>{t('sectionBasic')}</SectionHeader>
               <div className="grid gap-3.5 sm:grid-cols-2">
                 <Field label={t('fieldName')}>
-                  <input value={draft.name || ''} onChange={(e) => patchDraft({ name: e.target.value })} className={INPUT} placeholder="2000Run Claude" />
+                  <input data-id="provider-detail-name-input" value={draft.name || ''} onChange={(e) => patchDraft({ name: e.target.value })} className={INPUT} placeholder="2000Run Claude" />
                 </Field>
                 <Field label="Key" help={isNew ? t('keyHelpNew') : t('keyHelpExisting')}>
-                  <input value={draft.key} onChange={(e) => patchDraft({ key: e.target.value })} disabled={!isNew} className={cn(INPUT, 'font-mono', !isNew && 'cursor-not-allowed')} placeholder="2000RunClaude" />
+                  <input data-id="provider-detail-key-input" value={draft.key} onChange={(e) => patchDraft({ key: e.target.value })} disabled={!isNew} className={cn(INPUT, 'font-mono', !isNew && 'cursor-not-allowed')} placeholder="2000RunClaude" />
                 </Field>
               </div>
             </section>
@@ -671,7 +679,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
                     <Select
                       searchable
                       placeholder={t('selectModel')}
-                      value={availableModels.includes(currentDefault) ? currentDefault : ''}
+                      dataId="provider-detail-default-model-select" value={availableModels.includes(currentDefault) ? currentDefault : ''}
                       options={availableModels.map((m) => ({ value: m, label: m }))}
                       onChange={(v) => patchDraft({ defaultModel: v })}
                     />
@@ -679,9 +687,9 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
                 );
               })()}
               <Field label={t('fieldAvailableModels')} help={t('fieldAvailableModelsHelp')}>
-                <textarea value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={4} className={cn(INPUT, 'h-auto resize-y py-2 font-mono leading-relaxed')} placeholder={'gpt-5.5\ngpt-5.4'} />
+                <textarea data-id="provider-detail-models-input" value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={3} className={cn(INPUT, 'h-auto resize-y py-2 font-mono leading-relaxed')} placeholder={'gpt-5.5\ngpt-5.4'} />
               </Field>
-              <Field label={t('fieldModelMapping')} help={t('fieldModelMappingHelp')}>
+              <Field label={t('fieldModelMapping')} help={t('fieldModelMappingHelp')} className="hidden">
                 {(() => {
                   const availableModels = modelsText.split('\n').map((l) => l.trim()).filter(Boolean);
                   // Friendly "from" suggestions: catch-all, family prefixes, common
@@ -734,7 +742,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
               <Field label="API Base URL" help={t('fieldApiBaseHelp')}>
                 <div className="relative">
                   <Link2 size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
-                  <input value={draft.url || ''} onChange={(e) => patchDraft({ url: e.target.value })} className={cn(INPUT, 'pl-8 font-mono')} placeholder="https://api.2000.run/v1" />
+                  <input data-id="provider-detail-url-input" value={draft.url || ''} onChange={(e) => patchDraft({ url: e.target.value })} className={cn(INPUT, 'pl-8 font-mono')} placeholder="https://api.2000.run/v1" />
                 </div>
               </Field>
               <div className="grid gap-3.5 sm:grid-cols-[150px_1fr]">
@@ -748,16 +756,23 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
                     options={PROTOCOLS.map((p) => ({ value: p, label: p }))}
                   />
                 </Field>
-                <Field label="API Key">
+                <Field label="API Key" help={(draft.url || '').toLowerCase().includes('deepseek.com') ? (
+                  <button data-id="provider-detail-get-apikey" type="button"
+                    onClick={() => window.open('https://platform.deepseek.com/api_keys', '_blank', 'noopener')}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-400 transition-colors hover:text-blue-300">
+                    {t('getDeepSeekApiKey', { defaultValue: '前往 DeepSeek 开放平台获取 API Key' })}
+                    <ExternalLink size={11} />
+                  </button>
+                ) : undefined}>
                   <div className="relative">
                     {/* type="text" so Chrome's password manager never prompts to save */}
                     <input
-                      type="text" name="cicy-provider-api-key" value={draft.apiKey || ''} onChange={(e) => patchDraft({ apiKey: e.target.value })}
+                      data-id="provider-detail-apikey-input" type="text" name="cicy-provider-api-key" value={draft.apiKey || ''} onChange={(e) => patchDraft({ apiKey: e.target.value })}
                       className={cn(INPUT, 'pr-9 font-mono')} placeholder="sk-…" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
                       data-1p-ignore data-lpignore="true"
                       style={showApiKey ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)}
                     />
-                    <button type="button" onClick={() => setShowApiKey((s) => !s)} className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300" title={showApiKey ? t('hide') : t('show')}>
+                    <button data-id="provider-detail-apikey-toggle" type="button" onClick={() => setShowApiKey((s) => !s)} className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300" title={showApiKey ? t('hide') : t('show')}>
                       {showApiKey ? <EyeOff size={13} /> : <Eye size={13} />}
                     </button>
                   </div>
@@ -769,7 +784,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
             {testResult && (
               <div className={cn('relative rounded-xl border px-3.5 py-3 text-[12px]',
                 testResult.ok ? 'border-emerald-500/25 bg-emerald-500/[0.07] text-emerald-200' : 'border-red-500/25 bg-red-500/[0.07] text-red-200')}>
-                <button onClick={() => setTestResult(null)} className="absolute right-2.5 top-2.5 text-current opacity-50 transition-opacity hover:opacity-100"><X size={12} /></button>
+                <button data-id="provider-detail-test-result-close" onClick={() => setTestResult(null)} className="absolute right-2.5 top-2.5 text-current opacity-50 transition-opacity hover:opacity-100"><X size={12} /></button>
                 <div className="flex items-center gap-1.5 pr-5 font-medium">
                   {testResult.ok ? <Check size={13} /> : <X size={13} />}
                   {testResult.ok ? t('testConnSuccess') : t('testConnFailed')}
@@ -784,15 +799,16 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
           </div>
 
           {/* footer */}
-          <div className="mt-7 flex items-center gap-2 border-t border-white/[0.06] pt-5">
-            <Btn variant="primary" size="md" icon={<Save size={14} />} busy={saving} disabled={saving || !canSave} onClick={() => void save()}>{isNew ? t('create') : t('save')}</Btn>
-            {!isNew && <Btn variant="secondary" size="md" icon={<Zap size={14} />} disabled={modelsText.split('\n').map((l) => l.trim()).filter(Boolean).length === 0} onClick={() => { setModelTestResults({}); setTestPickedModel(draft.defaultModel || ''); setTestModalOpen(true); }}>{t('testConnection')}</Btn>}
-            {isNew && <Btn variant="ghost" size="md" onClick={() => { void guardDirty(() => { setIsNew(false); setSelectedKey(items[0]?.key || null); }); }}>{t('cancel')}</Btn>}
-            {!isNew && dirty && <Btn variant="ghost" size="md" onClick={() => loadEditor(selectedProvider)}>{t('discardChanges')}</Btn>}
-            <div className="flex-1" />
-            <span className="hidden text-[11px] text-zinc-600 sm:flex sm:items-center sm:gap-1.5">
-              <Cpu size={11} /> {t('footnoteSave')}
-            </span>
+          <div className="mt-7 border-t border-white/[0.06] pt-5">
+            <div className="flex flex-wrap items-center gap-2">
+            <Btn dataId="provider-detail-save" variant="primary" size="md" icon={<Save size={14} />} busy={saving} disabled={saving || !canSave} onClick={() => void save()}>{isNew ? t('create') : t('save')}</Btn>
+            {!isNew && <Btn dataId="provider-detail-test-connection" variant="secondary" size="md" icon={<Zap size={14} />} disabled={modelsText.split('\n').map((l) => l.trim()).filter(Boolean).length === 0} onClick={() => { setModelTestResults({}); setTestModalOpen(true); }}>{t('test')}</Btn>}
+            {isNew && <Btn dataId="provider-detail-cancel" variant="ghost" size="md" onClick={() => { void guardDirty(() => { setIsNew(false); setSelectedKey(items[0]?.key || null); }); }}>{t('cancel')}</Btn>}
+            {!isNew && dirty && <Btn dataId="provider-detail-discard" variant="ghost" size="md" onClick={() => loadEditor(selectedProvider)}>{t('discardChanges')}</Btn>}
+            </div>
+            <div className="mt-2.5 flex items-center gap-1.5 text-[11px] leading-snug text-zinc-600">
+              <Cpu size={11} className="shrink-0" /> {t('footnoteSave')}
+            </div>
           </div>
         </div>
       </main>
@@ -803,74 +819,96 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
   let testModal: React.ReactNode = null;
   if (testModalOpen) {
     const availableModels = modelsText.split('\n').map((l) => l.trim()).filter(Boolean);
-    const r = testPickedModel ? modelTestResults[testPickedModel] : null;
-    const pending = r === 'pending';
-    const result = pending ? null : (r as TestResult | undefined);
-    const tone = !result ? 'idle' : result.ok ? 'ok' : 'fail';
+    const isDone = (r: TestResult | 'pending' | undefined): r is TestResult => !!r && r !== 'pending';
+    const tested = availableModels.filter((m) => isDone(modelTestResults[m])).length;
+    const passed = availableModels.filter((m) => { const r = modelTestResults[m]; return isDone(r) && r.ok; }).length;
     testModal = (
       <div data-id="provider-test-modal" className="fixed inset-0 z-[10000] cursor-pointer" onClick={() => setTestModalOpen(false)}>
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-        <div className="absolute right-0 top-0 h-full w-[480px] max-w-[92vw] cursor-default flex flex-col overflow-hidden border-l border-white/[0.08] bg-[#161618] shadow-[0_0_50px_rgba(0,0,0,0.5)] animate-drawer-in"
+        <div className="absolute right-0 top-0 h-full w-[680px] max-w-[94vw] cursor-default flex flex-col overflow-hidden border-l border-white/[0.08] bg-[#161618] shadow-[0_0_50px_rgba(0,0,0,0.5)] animate-drawer-in"
           onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
             <div className="flex items-center gap-2">
               <Zap className="w-4 h-4 text-zinc-400" />
               <h2 className="text-[15px] font-semibold text-white">{t('testModalTitle')}</h2>
             </div>
-            <button onClick={() => setTestModalOpen(false)} className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors cursor-pointer">
+            <button data-id="provider-test-modal-close" onClick={() => setTestModalOpen(false)} className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors cursor-pointer">
               <X className="w-4 h-4" />
             </button>
           </div>
           <div className="px-5 py-3 border-b border-white/[0.06] text-[11px] text-zinc-500 font-mono truncate">
             {draft.url} · {proto(draft) || 'openai'}
           </div>
-          <div className="px-5 py-4 space-y-3">
-            {availableModels.length === 0 ? (
-              <div className="text-center text-[12px] text-zinc-600 py-6">{t('noModelsForTest')}</div>
-            ) : (
-              <>
-                <div>
-                  <div className="mb-1.5 text-[11px] font-medium text-zinc-500">{t('testModalPickModel')}</div>
-                  <Select
-                    searchable
-                    placeholder={t('selectModel')}
-                    value={testPickedModel}
-                    options={availableModels.map((m) => ({ value: m, label: m }))}
-                    onChange={(v) => setTestPickedModel(v)}
-                  />
-                </div>
-                <button
-                  type="button"
-                  disabled={!testPickedModel || pending}
-                  onClick={() => testPickedModel && void testSingleModel(testPickedModel)}
-                  className={cn(
-                    'inline-flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-[13px] font-medium transition-colors',
+          {availableModels.length === 0 ? (
+            <div className="px-5 py-10 text-center text-[12px] text-zinc-600">{t('noModelsForTest')}</div>
+          ) : (
+            <>
+              {/* toolbar: test-all + summary */}
+              <div className="flex items-center gap-3 px-5 py-3 border-b border-white/[0.06]">
+                <button data-id="provider-test-all" type="button" disabled={testingAll} onClick={() => void testAllModels()}
+                  className={cn('inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-medium transition-colors',
                     'border-white/[0.1] bg-white/[0.04] text-zinc-200 hover:bg-white/[0.08] hover:border-white/[0.16]',
-                    'disabled:cursor-not-allowed disabled:opacity-50',
-                  )}
-                >
-                  {pending ? <Spinner size="xs" /> : <Zap size={13} />}
-                  {pending ? t('testing') : (result ? t('testRetry') : t('test'))}
+                    'disabled:cursor-not-allowed disabled:opacity-50')}>
+                  {testingAll ? <Spinner size="xs" /> : <Zap size={13} />}
+                  {testingAll ? t('testing') : t('testAll', { defaultValue: 'Test all' })}
                 </button>
-                {result && (
-                  <div className={cn('rounded-lg border px-3 py-2.5 text-[12px]',
-                    tone === 'ok'
-                      ? 'border-emerald-500/25 bg-emerald-500/[0.07] text-emerald-200'
-                      : 'border-red-500/25 bg-red-500/[0.07] text-red-200')}>
-                    <div className="flex items-center gap-1.5 font-medium">
-                      {tone === 'ok' ? <Check size={13} /> : <X size={13} />}
-                      {tone === 'ok' ? t('testOk') : t('testFail')}
-                      {typeof result.status === 'number' && <span className="font-normal opacity-70">· HTTP {result.status}</span>}
-                      {typeof result.duration_ms === 'number' && <span className="font-normal opacity-70">· {result.duration_ms} ms</span>}
-                    </div>
-                    {!result.ok && result.detail && (
-                      <div className="mt-1 text-[11px] opacity-80 break-all font-mono">{result.detail}</div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+                <span data-id="provider-test-summary" className="text-[11px] text-zinc-500">
+                  {tested > 0
+                    ? `${passed}/${availableModels.length} ${t('testPassed', { defaultValue: 'passed' })}`
+                    : `${availableModels.length} ${t('testModels', { defaultValue: 'models' })}`}
+                </span>
+              </div>
+              {/* per-model result table */}
+              <div className="flex-1 overflow-auto">
+                <table data-id="provider-test-table" className="w-full text-[12px]">
+                  <thead className="sticky top-0 bg-[#161618]">
+                    <tr className="border-b border-white/[0.06] text-[10px] uppercase tracking-wider text-zinc-600">
+                      <th className="px-5 py-2 text-left font-medium">{t('testColModel', { defaultValue: 'Model' })}</th>
+                      <th className="px-3 py-2 text-left font-medium">{t('testColStatus', { defaultValue: 'Status' })}</th>
+                      <th className="px-5 py-2 text-right font-medium" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {availableModels.map((m) => {
+                      const r = modelTestResults[m];
+                      const pending = r === 'pending';
+                      const res = isDone(r) ? r : undefined;
+                      return (
+                        <tr key={m} data-id={`provider-test-row-${m}`} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
+                          <td className="px-5 py-2.5 font-mono text-zinc-200 max-w-[220px] truncate" title={m}>{m}</td>
+                          <td className="px-3 py-2.5">
+                            {pending ? (
+                              <span className="inline-flex items-center gap-1.5 text-zinc-500"><Spinner size="xs" />{t('testing')}</span>
+                            ) : !res ? (
+                              <span className="text-zinc-600">—</span>
+                            ) : res.ok ? (
+                              <span className="inline-flex items-center gap-1.5 text-emerald-300">
+                                <Check size={13} />
+                                {typeof res.status === 'number' && <span className="opacity-70">HTTP {res.status}</span>}
+                                {typeof res.duration_ms === 'number' && <span className="opacity-60">· {res.duration_ms}ms</span>}
+                              </span>
+                            ) : (
+                              <span className="inline-flex max-w-[240px] items-center gap-1.5 text-red-300" title={res.detail || ''}>
+                                <X size={13} className="shrink-0" />
+                                <span className="truncate">{res.detail || t('testFail')}</span>
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-5 py-2.5 text-right">
+                            <button data-id={`provider-test-run-${m}`} type="button" disabled={pending}
+                              onClick={() => void testSingleModel(m)} title={t('test')}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.08] hover:text-zinc-200 disabled:opacity-40">
+                              {pending ? <Spinner size="xs" /> : <Zap size={12} />}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       </div>
     );

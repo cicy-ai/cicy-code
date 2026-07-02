@@ -105,5 +105,11 @@
   "testFail": "失败",
   "test": "测试",
   "testing": "测试中…",
-  "testRetry": "再测一次"
+  "testRetry": "再测一次",
+  "testAll": "测试全部",
+  "testPassed": "通过",
+  "testModels": "个模型",
+  "testColModel": "模型",
+  "testColStatus": "状态",
+  "getDeepSeekApiKey": "前往 DeepSeek 开放平台获取 API Key"
 }

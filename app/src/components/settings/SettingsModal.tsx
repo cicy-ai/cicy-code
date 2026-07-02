@@ -493,10 +493,10 @@ export default function SettingsModal({
             <div data-id="settings-section-providers" className={`flex h-full ${isProviderSection ? '' : 'hidden'}`}>
               <div ref={setProvLeft} data-id="settings-prov-left" className="h-full w-[360px] shrink-0 border-r border-white/[0.06]" />
               <div data-id="settings-prov-right" className="relative h-full min-w-0 flex-1">
-                <div ref={setProvRight} className="absolute inset-0" />
+                <div ref={setProvRight} data-id="settings-prov-right-mount" className="absolute inset-0" />
                 {section === 'routing' ? (
                   <div data-id="settings-routing-hint" className="pointer-events-none absolute inset-0 flex items-center justify-center p-8 text-center">
-                    <div className="max-w-xs text-[12px] leading-5 text-zinc-600">
+                    <div data-id="settings-routing-hint-text" className="max-w-xs text-[12px] leading-5 text-zinc-600">
                       {t('settingsRoutingHint', { defaultValue: '在左侧为每个 Agent 类型指定默认供应商与模型。供应商在「LLM 供应商」里维护。' })}
                     </div>
                   </div>

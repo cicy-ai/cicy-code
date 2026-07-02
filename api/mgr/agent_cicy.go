@@ -1486,7 +1486,7 @@ func cicyModel(shortID string) string {
 		}
 	}
 	// default_model 空 → 用 CICY agent-type 的默认 provider 的 model(providers.default["cicy"],
-	// 如 opencodeZen→big-pickle)。否则 resolveClaudeStartupModel 的兜底写死按 "claude" 取默认
+	// 默认 defaultAnthropic→deepseek-v4-pro,与 claude 同链路)。否则 resolveClaudeStartupModel 的兜底写死按 "claude" 取默认
 	// provider,cicy agent 会拿到 claude 链路(defaultAnthropic)的 model、跟自己实际的 provider
 	// (cicy 链路)对不上 → 网关 model↔provider 不一致 → 401。这样所有 cicy agent 即便没显式
 	// 选过 model,也自动用对的默认 model,不必逐个重选。

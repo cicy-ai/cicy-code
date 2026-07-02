@@ -105,5 +105,11 @@
   "testFail": "Failed",
   "test": "Test",
   "testing": "Testing…",
-  "testRetry": "Re-test"
+  "testRetry": "Re-test",
+  "testAll": "Test all",
+  "testPassed": "passed",
+  "testModels": "models",
+  "testColModel": "Model",
+  "testColStatus": "Status",
+  "getDeepSeekApiKey": "Get an API key on the DeepSeek platform"
 }
