@@ -32,5 +32,8 @@
   "outcomeBlocked": "已拦截",
   "outcomeError": "生成失败",
   "retry": "重试",
-  "retrying": "重试中…"
+  "retrying": "重试中…",
+  "compacting": "压缩中…",
+  "compactionMarker": "已压缩 · 上文已归纳（点开看摘要）",
+  "compactionMarkerOpen": "已压缩 · 收起摘要"
 }

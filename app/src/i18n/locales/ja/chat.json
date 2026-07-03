@@ -32,5 +32,8 @@
   "outcomeBlocked": "ブロックされました",
   "outcomeError": "生成に失敗しました",
   "retry": "再試行",
-  "retrying": "再試行中…"
+  "retrying": "再試行中…",
+  "compacting": "圧縮中…",
+  "compactionMarker": "圧縮済み · これまでの文脈を要約（クリックで表示）",
+  "compactionMarkerOpen": "圧縮済み · 要約を閉じる"
 }

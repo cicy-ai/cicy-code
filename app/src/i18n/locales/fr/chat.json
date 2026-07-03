@@ -32,5 +32,8 @@
   "outcomeBlocked": "Bloqué",
   "outcomeError": "Échec de la génération",
   "retry": "Réessayer",
-  "retrying": "Nouvelle tentative…"
+  "retrying": "Nouvelle tentative…",
+  "compacting": "Compression…",
+  "compactionMarker": "Compacté · contexte précédent résumé (cliquer pour voir)",
+  "compactionMarkerOpen": "Compacté · masquer le résumé"
 }

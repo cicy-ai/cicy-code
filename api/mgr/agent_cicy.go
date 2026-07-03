@@ -2194,16 +2194,18 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 	session.mu.Lock()
 	convID := session.convID
 	session.mu.Unlock()
-	// Claude-style visible progress: the UI polls reply.json, so a working-status
-	// reply shows the busy state for the whole summarize round.
-	cicyWriteSlashAckStatus(shortID, convID, "Compacting conversation…", "working")
-	emit(M{"type": "system", "text": "Compacting conversation…"})
+	// PURELY ADDITIVE: /compact must never write an answer-slot reply — a working
+	// or ✅ ack in reply.json overwrites the user's previous answer (which may
+	// still ride the live tail). Progress ("压缩中…") is a FRONTEND marker; the
+	// backend summarizes silently, then appends the summary (the UI renders it as
+	// the ✨已压缩 marker). reply.json is only finalized to a terminal empty state.
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	summary, err := cicyCompactSummarize(cctx, shortID, session.convID, cicyModel(shortID), cicyRenderHistoryForCompaction(msgs))
 	if err != nil || strings.TrimSpace(summary) == "" {
-		cicyWriteSlashAck(shortID, convID, "Compaction failed (empty summary) — conversation left unchanged.")
-		emit(M{"type": "system", "text": "Compaction failed (empty summary) — conversation left unchanged."})
+		// Failure: leave the conversation EXACTLY as it was — no overwriting ack.
+		// The frontend live marker clears via its timeout / terminal reply.
+		cicyWriteTerminalReply(shortID, convID)
 		emit(M{"type": "done"})
 		return
 	}
@@ -2216,10 +2218,7 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 	session.persistLocked(workspace)
 	cicySeedCurrentSnapshot(shortID, session.convID, session.messages)
 	session.mu.Unlock()
-	ack := "✅ Compacted (context continues from the summary)"
-	cicyWriteSlashAck(shortID, convID, ack)
-
-	emit(M{"type": "system", "text": ack})
+	cicyWriteTerminalReply(shortID, convID)
 	emit(M{"type": "done"})
 }
 

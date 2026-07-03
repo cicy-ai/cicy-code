@@ -39,6 +39,16 @@ export const RECAP_PREFIX_RE = /^\s*The user (?:stepped away and is coming back|
 // of the block; in current.json it sits in a self-contained content block right
 // after the system-reminder, so this won't swallow a real question.
 export const CONTINUATION_PREFIX_RE = /^\s*This session is being continued from a previous conversation[\s\S]*$/;
+// cicy /compact appends its summary as a user message opening with this fixed
+// banner (see cicyCompactSummaryPrefix, backend). The UI renders such a turn as
+// the ✨已压缩 compaction MARKER (a foldable divider), never as a user bubble.
+export const CICY_COMPACT_SUMMARY_RE = /^\s*\[以下是更早对话的压缩摘要[^\]]*\]\s*/;
+export function cicyCompactSummaryOf(text: string | undefined | null): string | null {
+  const s = String(text || '');
+  const m = s.match(CICY_COMPACT_SUMMARY_RE);
+  if (!m) return null;
+  return s.slice(m[0].length).trim();
+}
 
 export function splitLeadingHarnessBlocks(text: string): { blocks: string[]; remaining: string } {
   let remaining = String(text || '');

@@ -11,7 +11,8 @@ import { MarkdownBlock, LinkConfirmModal } from './shared/Markdown';
 import { CollapsibleQ, UserTurnAvatar } from './shared/CollapsibleQ';
 import { ToolCard } from './shared/ToolCard';
 import { LiveStreamStep } from './shared/LiveStreamStep';
-import { SystemNoticeCard, OutcomeNoticeCard, PendingThinkingPlaceholder } from './shared/notices';
+import { SystemNoticeCard, OutcomeNoticeCard, PendingThinkingPlaceholder, CompactionMarker } from './shared/notices';
+import { cicyCompactSummaryOf } from './lib/normalizeItem';
 import { AssistantTurnView } from './shared/AssistantTurnView';
 import { PromptRow } from './shared/PromptRow';
 import type { useCurrentHistory } from './useCurrentHistory';
@@ -31,6 +32,7 @@ export function HistoryList(props: HistoryListProps) {
     items,
     liveTurn,
     optimisticQ,
+    compacting,
     displayItems,
     committedMaxId,
     loading,
@@ -101,6 +103,16 @@ export function HistoryList(props: HistoryListProps) {
       );
     }
     if (turn?.role === 'user') {
+      // /compact's appended summary renders as the ✨已压缩 timeline marker (a
+      // foldable divider) — never as a user bubble / prompt row.
+      const compactSummary = cicyCompactSummaryOf(turn.text || turn.q || '');
+      if (compactSummary !== null) {
+        return (
+          <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey}>
+            <CompactionMarker summary={compactSummary} />
+          </div>
+        );
+      }
       // Prompts-only: each real q (scaffold already filtered out in displayItems)
       // renders as a self-managed PromptRow — local expand + lazy answer load on
       // caret click, so expanding one q never re-renders the whole list.
@@ -221,7 +233,7 @@ export function HistoryList(props: HistoryListProps) {
     <OpenUrlContext.Provider value={setPendingUrl}>
     <div data-id="current-history-view" className="flex h-full flex-col bg-[#0b0b0d]">
       {pendingUrl ? <LinkConfirmModal url={pendingUrl} onClose={() => setPendingUrl(null)} /> : null}
-      {!loading && displayItems.length === 0 && !liveVisible && !optimisticQ ? (
+      {!loading && displayItems.length === 0 && !liveVisible && !optimisticQ && !compacting ? (
         greeting ? (
           // 开场白渲染成一条正常的 assistant reply:左上角、带 agent 头像 + markdown
           // 内容列,与真实答案同布局(不再居中占位)。
@@ -292,6 +304,9 @@ export function HistoryList(props: HistoryListProps) {
             ) : null}
             {renderedTurns}
             {renderedLiveTurn}
+            {/* /compact live marker: painted the instant it's sent (onNudge) so the
+                user SEES the backend is working; cleared when the summary lands. */}
+            {compacting ? <CompactionMarker live /> : null}
             {/* 占位 q + a 必须排在 renderedLiveTurn 之后 —— 新问题 q2 是最新的一轮,而上一轮
                 的答案 a1 在被 reconcileTail 迁进 committed 之前仍以 renderedLiveTurn(live 尾巴)
                 渲染。若把 q2 排在它前面,顺序会变成 q1 → q2 → a1(q2 把 q1 的答案挤开、硬钉到顶

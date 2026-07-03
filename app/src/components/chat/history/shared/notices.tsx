@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, AlertTriangle, Square, RotateCcw, Ban } from 'lucide-react';
+import { ChevronDown, ChevronRight, AlertTriangle, Square, RotateCcw, Ban, Sparkles, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { EnvironmentContextData } from '../types';
 
@@ -49,6 +49,49 @@ export function SystemNoticeCard({ text }: { text: string }) {
       {open ? (
         <div data-id="current-history-system-notice-body" className="mt-1 w-full whitespace-pre-wrap rounded-md border border-white/[0.05] bg-white/[0.02] px-2.5 py-1.5 text-[11px] leading-relaxed text-zinc-500">
           {text}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// CompactionMarker renders /compact as a STATE TRANSITION in the timeline, not a
+// Q&A: `live` is the in-progress divider ("压缩中…", painted the instant /compact
+// is sent); the default is the landed ✨已压缩 divider whose summary folds open.
+export function CompactionMarker({ summary, live }: { summary?: string; live?: boolean }) {
+  const { t } = useTranslation('chat');
+  const [open, setOpen] = useState(false);
+  if (live) {
+    return (
+      <div data-id="current-history-compaction-marker" data-compacting="1" className="my-3 flex items-center gap-2 text-[11px] text-amber-200/70">
+        <span className="h-px flex-1 bg-white/[0.07]" />
+        <span data-id="current-history-compaction-marker-label" className="inline-flex items-center gap-1.5 whitespace-nowrap">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          {t('compacting', { defaultValue: '压缩中…' })}
+        </span>
+        <span className="h-px flex-1 bg-white/[0.07]" />
+      </div>
+    );
+  }
+  return (
+    <div data-id="current-history-compaction-marker" className="my-3 flex flex-col items-center">
+      <button
+        type="button"
+        data-id="current-history-compaction-marker-toggle"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 text-[11px] text-zinc-500 transition-colors hover:text-zinc-300"
+      >
+        <span className="h-px flex-1 bg-white/[0.07]" />
+        <span data-id="current-history-compaction-marker-label" className="inline-flex items-center gap-1.5 whitespace-nowrap">
+          <Sparkles className="h-3 w-3" />
+          {open ? t('compactionMarkerOpen', { defaultValue: '已压缩 · 收起摘要' }) : t('compactionMarker', { defaultValue: '已压缩 · 上文已归纳（点开看摘要）' })}
+          {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        </span>
+        <span className="h-px flex-1 bg-white/[0.07]" />
+      </button>
+      {open && summary ? (
+        <div data-id="current-history-compaction-marker-body" className="mt-2 w-full whitespace-pre-wrap rounded-md border border-white/[0.05] bg-white/[0.02] px-3 py-2 text-xs leading-relaxed text-zinc-400">
+          {summary}
         </div>
       ) : null}
     </div>

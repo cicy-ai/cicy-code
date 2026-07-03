@@ -11,7 +11,7 @@ import {
 import { historyMemCache } from './lib/cache';
 import { getHistoryIDs, loadWindowItems } from './lib/dataAccess';
 import { buildTurnsFromRawItems, normalizeHistoryTurns } from './lib/turns';
-import { splitLeadingHarnessBlocks } from './lib/normalizeItem';
+import { splitLeadingHarnessBlocks, cicyCompactSummaryOf } from './lib/normalizeItem';
 import { liveStepsContentSize, scheduleScrollToBottom } from './lib/misc';
 
 export function useCurrentHistory(opts: {
@@ -72,6 +72,26 @@ export function useCurrentHistory(opts: {
   // turn 的 id 超过 baseline)就把锚点交接给真 q 并撤掉占位 —— 同一位置,不闪不跳。
   const [optimisticQ, setOptimisticQ] = useState<{ text: string; ts: number } | null>(null);
   const optimisticBaselineUserIdRef = useRef(0);
+  // /compact in-flight:发出瞬间置 true(onNudge)→ HistoryList 画「压缩中…」分隔线;
+  // 追加的摘要落地(最后一项命中 cicyCompactSummaryOf)或超时(100s,后端 90s 上限)清除。
+  const [compacting, setCompacting] = useState(false);
+  const compactingTsRef = useRef(0);
+  const compactingRef = useRef(false);
+  useEffect(() => { compactingRef.current = compacting; }, [compacting]);
+  // /clear 发出即清:onNudge 里立刻把视图重置为空(不等后端轮转),并记住被清的
+  // 会话 id —— 该会话的任何轮询数据(旧 tail / 旧 reply)一律不收,防止后端 rotate
+  // 完成前老内容闪回。轮询观测到不同的 cid(新会话)时解除。
+  const clearedConvIdRef = useRef('');
+  const conversationIdRef = useRef('');
+  useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
+  useEffect(() => {
+    if (!compacting) return;
+    const last = items[items.length - 1] as any;
+    if (last && cicyCompactSummaryOf(last.text || last.q) !== null) { setCompacting(false); return; }
+    const remaining = Math.max(1000, 100000 - (Date.now() - compactingTsRef.current));
+    const t = window.setTimeout(() => setCompacting(false), remaining);
+    return () => window.clearTimeout(t);
+  }, [compacting, items]);
   // 给输入框广播"是否还在等回复"。busy = 有占位 q(刚发出) 或 轮询发现 in-flight 回复
   // (未 complete 且非 fail/error)。只在变化时 emit。供 DispatcherChat 锁发送、显示 waiting。
   const optimisticActiveRef = useRef(false);
@@ -127,6 +147,8 @@ export function useCurrentHistory(opts: {
       const cid = String(ids?.conversation_id || '').trim();
       const newMax = Number(ids?.id || 0);
       if (!cid || newMax <= maxLoadedIdRef.current) return null;
+      // /clear 发出即清后,被清会话的 tail 不收(防老内容闪回)。
+      if (clearedConvIdRef.current && cid === clearedConvIdRef.current) return null;
       const size = Math.min(newMax - maxLoadedIdRef.current, 100);
       // fresh: the just-completed tail's slots may collide with stale cache
       // from an earlier conversation at the same positional history_id.
@@ -155,6 +177,8 @@ export function useCurrentHistory(opts: {
       if (seq !== requestSeqRef.current) return;
       const cid = String(ids?.conversation_id || '').trim() || nextCid;
       const newMax = Number(ids?.id || 0);
+      // /clear 发出即清后,被清会话不重载(等 rotate 到新会话再 rebind)。
+      if (clearedConvIdRef.current && cid === clearedConvIdRef.current) return;
       // 新会话是空的(/clear 后):必须把视图完整重置成空,而不是只换 id。
       // 否则旧 turn 留在屏上,且 maxLoadedIdRef 仍停在旧会话的 max —— 新会话里
       // 任何小 id 的答案/报错都会被判在边界下方而永不 attach(错误也出不来)。
@@ -199,6 +223,8 @@ export function useCurrentHistory(opts: {
     setOptimisticQ(null);
     optimisticBaselineUserIdRef.current = 0;
     replyInFlightRef.current = false;
+    setCompacting(false);
+    clearedConvIdRef.current = '';
   }, [paneId, open]);
 
   useEffect(() => {
@@ -420,6 +446,16 @@ export function useCurrentHistory(opts: {
         replyInFlightRef.current = replyInFlight;
         emitBusy(optimisticActiveRef.current || replyInFlight);
 
+        // /clear 发出即清后:被清会话的任何数据一律不收(否则 rotate 完成前老内容
+        // 闪回)。快速轮询等 rotate;观测到新会话 cid 时解除封锁、走正常 rebind。
+        if (clearedConvIdRef.current) {
+          if (cid && cid === clearedConvIdRef.current) {
+            schedule(CURRENT_HISTORY_POLL_ACTIVE_MS);
+            return;
+          }
+          clearedConvIdRef.current = '';
+        }
+
         // The agent rotated to a DIFFERENT conversation than committed is
         // showing → rebind onto the new conversation. (docs §11)
         if (conversationId && cid && cid !== conversationId) {
@@ -467,6 +503,13 @@ export function useCurrentHistory(opts: {
         const answer = String(data?.answer || '');
         const thinking = String(data?.thinking || '');
         const hasContent = !!(answer || thinking);
+        // /compact 失败:后端把 reply finalize 成「终态空」(complete、无内容)而不追加
+        // 摘要 → 撤掉压缩中 marker(成功路径由摘要落地清除)。1.5s 宽限:防止发出瞬间
+        // 上一条残留的终态空 reply(如 /clear 后)在后端开始压缩前就误杀 marker。
+        if (compactingRef.current && complete && !hasContent
+          && Date.now() - compactingTsRef.current > 1500) {
+          setCompacting(false);
+        }
         // Guard: never attach a tail whose answer belongs to a different
         // conversation (transient during rotation, before rebind reloads).
         const sameConversation = !replyCid || !conversationId || replyCid === conversationId;
@@ -659,6 +702,22 @@ export function useCurrentHistory(opts: {
       // the placeholder; the command's ack arrives via the reply.json poll.
       const qText = String(detail.text || '').trim();
       const isSlashCommand = /^\/\w+(\s|$)/.test(qText);
+      // /compact → paint the "压缩中…" timeline marker THIS frame (before the POST
+      // round-trips), so the user sees the backend is working. Cleared when the
+      // appended summary lands (or by timeout / send-failure teardown).
+      if (/^\/compact(\s|$)/.test(qText)) { compactingTsRef.current = Date.now(); setCompacting(true); }
+      // /clear → 发出即清:立刻重置成空视图,不等后端 rotate + 轮询往返。被清会话
+      // 记进 clearedConvIdRef,它的旧数据在 poll / fetchTail / softRebind 里一律不收。
+      if (/^\/clear(\s|$)/.test(qText)) {
+        clearedConvIdRef.current = conversationIdRef.current;
+        requestSeqRef.current += 1; // 丢弃在途的窗口加载
+        maxLoadedIdRef.current = 0;
+        clearLiveTurn();
+        setOptimisticQ(null);
+        setItems([]);
+        setHasMore(false);
+        setNextBefore(null);
+      }
       if (qText && !isSlashCommand) {
         // 上一轮若是「生成失败」→ 新 q 就地覆盖它(后端 dropTrailingFailedTurnLocked 会丢掉
         // 失败的 q 并让新 q 复用同一个 id)。前端必须配合:删掉失败的 q + 它的 a,并把
@@ -688,11 +747,13 @@ export function useCurrentHistory(opts: {
       if (timer != null) { window.clearTimeout(timer); timer = null; }
       void poll();
     };
-    // Send failed → retract the optimistic q/a slots painted on click.
+    // Send failed → retract the optimistic q/a slots painted on click, and the
+    // "压缩中…" marker (a /compact whose POST never landed must not leave it hanging).
     const onCancelOptimistic = (e: Event) => {
       const id = String((e as CustomEvent)?.detail?.paneId || '').trim();
       if (id && id !== paneId) return;
       setOptimisticQ(null);
+      setCompacting(false);
     };
     window.addEventListener('cicy:current-history-refresh', onNudge as EventListener);
     window.addEventListener('cicy:current-history-cancel-optimistic', onCancelOptimistic as EventListener);
@@ -1023,6 +1084,7 @@ export function useCurrentHistory(opts: {
     items,
     liveTurn,
     optimisticQ,
+    compacting,
     displayItems,
     committedMaxId,
     promptList,

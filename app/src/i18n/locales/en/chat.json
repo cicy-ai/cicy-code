@@ -32,5 +32,8 @@
   "outcomeBlocked": "Blocked",
   "outcomeError": "Generation failed",
   "retry": "Retry",
-  "retrying": "Retrying…"
+  "retrying": "Retrying…",
+  "compacting": "Compacting…",
+  "compactionMarker": "Compacted · earlier context summarized (click to view)",
+  "compactionMarkerOpen": "Compacted · hide summary"
 }
