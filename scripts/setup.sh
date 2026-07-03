@@ -186,9 +186,9 @@ step 8 "初始化 tmux 工作区"
 cat > "$HOME_DIR/.tmux.conf" << 'TMUX'
 set -g default-terminal "tmux-256color"
 set -g mouse on
-bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "xclip -selection clipboard -i"
-bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "xclip -selection clipboard -i"
-set-option -g window-size largest
+if-shell 'command -v xclip >/dev/null 2>&1' 'bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "xclip -selection clipboard -i"' 'bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection-and-cancel'
+if-shell 'command -v xclip >/dev/null 2>&1' 'bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "xclip -selection clipboard -i"' 'bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-selection-and-cancel'
+if-shell 'v=$(tmux -V | grep -oE "[0-9]+\.[0-9]+" | head -1); maj=${v%%.*}; min=${v##*.}; [ "${maj:-0}" -gt 2 ] || { [ "${maj:-0}" -eq 2 ] && [ "${min:-0}" -ge 9 ]; }' 'set-option -g window-size largest'
 set-option -g aggressive-resize on
 TMUX
 chown "$USER:$USER_GROUP" "$HOME_DIR/.tmux.conf"
