@@ -261,10 +261,25 @@ func resolveNpmRegistry(choice string) (url, label string) {
 // installed nvm node bin. fnm/volta and the user's own npm-global bin are added
 // too. All best-effort; if node is already on PATH this is a harmless no-op.
 func nodeEnvPreamble() string {
-	return `export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; ` +
+	// PRIMARY fix (environment-agnostic): re-inject THIS process's own PATH. The
+	// cicy-code server is normally launched via `npx cicy-code`, so its inherited
+	// PATH already contains node/npm's dir — wherever the machine keeps it (nvm,
+	// Cloud Shell, Homebrew, distro). The install runs in `bash -lc`, whose login
+	// profiles RESET PATH and drop that dir → "npm: command not found". Prepending
+	// our own PATH restores it regardless of how node was installed. (Confirmed on
+	// Google Cloud Shell, where node is NOT under ~/.nvm and NVM_DIR is unset, so
+	// path-guessing can't work — but the daemon's inherited PATH has npm.)
+	self := os.Getenv("PATH")
+	pre := ""
+	if strings.TrimSpace(self) != "" && !strings.Contains(self, `"`) {
+		pre = `export PATH="` + self + `:$PATH"; `
+	}
+	// FALLBACK for daemon launches that had no npm on PATH (systemd etc.): source
+	// the common version managers. Best-effort; no-op when node is already found.
+	return pre +
+		`export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; ` +
 		`[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1; ` +
 		`[ -d "$NVM_DIR/versions/node" ] && _cicy_nodebin="$(ls -d "$NVM_DIR"/versions/node/*/bin 2>/dev/null | tail -1)" && [ -n "$_cicy_nodebin" ] && export PATH="$_cicy_nodebin:$PATH"; ` +
-		`[ -d "$HOME/.fnm" ] && export PATH="$HOME/.fnm:$PATH" && eval "$(fnm env 2>/dev/null)" >/dev/null 2>&1; ` +
 		`[ -d "$HOME/.volta/bin" ] && export PATH="$HOME/.volta/bin:$PATH"; ` +
 		`export PATH="$HOME/.npm-global/bin:$PATH"; `
 }
