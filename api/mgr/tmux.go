@@ -4711,21 +4711,29 @@ func initPaneEnv(opts paneEnvOpts) {
 
 	// On macOS the tmux pane can exist before the shell prompt is actually
 	// visible/interactive. Wait for the prompt marker before sending boot.sh.
+	// cd first instead of relying on the pane's start dir: tmux silently falls
+	// back to $HOME when `new-session -c <dir>` can't chdir (seen on Windows with
+	// non-POSIX path forms), which would strand the relative source forever.
+	// POSIX form for the pane-side msys/unix bash.
+	bootCmd := "source .cicy/boot.sh"
+	if ws := strings.TrimSpace(opts.workspace); ws != "" {
+		bootCmd = fmt.Sprintf("cd %s && source .cicy/boot.sh", tmuxShellQuote(toPosixPath(ws)))
+	}
+	// ALWAYS source boot.sh — even when prompt confirmation timed out. The
+	// confirmation is only a readiness heuristic, and isShellPromptVisible fails
+	// to recognize some prompts (Google Cloud Shell's `user@cloudshell:~ (proj)$`
+	// with its MOTD banner; slow/old macOS logins). Skipping boot.sh entirely was
+	// the root cause of the "slave closed" respawn loop: boot.sh is what puts
+	// ~/.npm-global/bin on PATH, so without it the pane can't find claude/codex →
+	// the CLI exits 127 → the pty closes → cicy-code relaunches → forever. By the
+	// time the wait elapses the shell is virtually always at a prompt, so sourcing
+	// anyway is safe; boot.sh is idempotent.
 	if waitForShellPromptReady(pid) {
 		log.Printf("[init] shell prompt ready for %s", shortPaneID(pid))
-		// cd first instead of relying on the pane's start dir: tmux silently
-		// falls back to $HOME when `new-session -c <dir>` can't chdir (seen on
-		// Windows with non-POSIX path forms), which would strand the relative
-		// source forever. POSIX form for the pane-side msys/unix bash.
-		bootCmd := "source .cicy/boot.sh"
-		if ws := strings.TrimSpace(opts.workspace); ws != "" {
-			bootCmd = fmt.Sprintf("cd %s && source .cicy/boot.sh", tmuxShellQuote(toPosixPath(ws)))
-		}
-		runTmux("send-keys", "-t", pid, bootCmd, "Enter")
 	} else {
-		log.Printf("[init] shell prompt not confirmed for %s, skip auto source .cicy/boot.sh", shortPaneID(pid))
-		return
+		log.Printf("[init] shell prompt not confirmed for %s; sourcing .cicy/boot.sh anyway (best-effort)", shortPaneID(pid))
 	}
+	runTmux("send-keys", "-t", pid, bootCmd, "Enter")
 	// First-launch auto-confirm send-keys removed by design: the user goes through
 	// the CLI's own first-run prompts (theme / trust / Bypass) themselves instead
 	// of cicy auto-pressing Enter for them.
