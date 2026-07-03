@@ -253,10 +253,10 @@ export default function Select({
             {triggerIcon}
           </span>
         ) : null}
-        <span data-id="select-trigger-value" className={`flex-1 truncate ${selected || (allowCustom && value) ? 'text-zinc-200' : 'text-zinc-500'}`}>
+        <span data-id="select-trigger-value" className={`min-w-0 flex-1 truncate ${selected || (allowCustom && value) ? 'text-zinc-200' : 'text-zinc-500'}`}>
           {selected ? selected.label : (allowCustom && value ? value : resolvedPlaceholder)}
         </span>
-        <ChevronDown className={`w-3.5 h-3.5 transition-all duration-200 ${open ? 'rotate-180 text-zinc-300' : 'text-zinc-500 group-hover/trigger:text-zinc-300'}`} />
+        <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-all duration-200 ${open ? 'rotate-180 text-zinc-300' : 'text-zinc-500 group-hover/trigger:text-zinc-300'}`} />
       </button>
 
       {open && portalRect && (() => {
