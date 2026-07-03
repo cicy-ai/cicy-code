@@ -1,0 +1,39 @@
+name: Publish cicy-cft to npm
+
+# One-click publish of the cicy-cft package (lives in the separate public repo
+# cicy-ai/cft). Hosted here because the npm credential (secrets.NPM_TOKEN) is a
+# repo secret on cicy-code and repo secrets can't be shared across repositories.
+# Manual only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "cicy-ai/cft git ref to publish (branch/tag/sha)."
+        default: main
+        required: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout cicy-ai/cft
+        uses: actions/checkout@v4
+        with:
+          repository: cicy-ai/cft
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish
+        # setup-node wrote an .npmrc that reads NODE_AUTH_TOKEN. --access public
+        # is the default for an unscoped package (harmless to state it).
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          node -e "const p=require('./package.json');console.log('publishing',p.name,p.version)"
+          npm publish --access public
