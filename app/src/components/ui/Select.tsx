@@ -65,7 +65,15 @@ export default function Select({
   const [search, setSearch] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [actionMenu, setActionMenu] = useState<{ value: string; top: number; left: number } | null>(null);
-  const [portalRect, setPortalRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  // Dropdown is ALWAYS portaled to <body> with fixed positioning (computed from the
+  // trigger's viewport rect) — never in-flow — so a trigger near a scroll container's
+  // bottom edge can't clip/swallow the menu. `placement` flips it above the trigger
+  // when there isn't room below, and `maxHeight` caps it to the available viewport.
+  const [portalRect, setPortalRect] = useState<
+    { left: number; width: number; maxHeight: number; placement: 'down'; top: number }
+    | { left: number; width: number; maxHeight: number; placement: 'up'; bottom: number }
+    | null
+  >(null);
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const actionMenuRef = useRef<HTMLDivElement>(null);
@@ -101,18 +109,38 @@ export default function Select({
   }, [open, closeDropdown]);
 
   useEffect(() => {
-    if (!open || !dropdownMatchSelector) {
+    if (!open) {
       setPortalRect(null);
       return;
     }
     const compute = () => {
-      const matchEl = ref.current?.closest(dropdownMatchSelector) as HTMLElement | null
-        ?? (document.querySelector(dropdownMatchSelector) as HTMLElement | null);
       const triggerEl = ref.current;
-      if (!matchEl || !triggerEl) return;
-      const m = matchEl.getBoundingClientRect();
+      if (!triggerEl) return;
       const tr = triggerEl.getBoundingClientRect();
-      setPortalRect({ top: tr.bottom + 6, left: m.left, width: m.width });
+      // Width source: the trigger itself, or an ancestor when dropdownMatchSelector
+      // is set (lets the menu span a wider container than the compact trigger).
+      let left = tr.left;
+      let width = tr.width;
+      if (dropdownMatchSelector) {
+        const matchEl = triggerEl.closest(dropdownMatchSelector) as HTMLElement | null
+          ?? (document.querySelector(dropdownMatchSelector) as HTMLElement | null);
+        if (matchEl) { const m = matchEl.getBoundingClientRect(); left = m.left; width = m.width; }
+      }
+      const gap = 6;
+      const margin = 8;
+      const spaceBelow = window.innerHeight - tr.bottom - gap - margin;
+      const spaceAbove = tr.top - gap - margin;
+      // Flip up only when below is genuinely cramped AND above has more room —
+      // otherwise stay anchored below (the natural reading direction).
+      const openUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+      const maxHeight = Math.max(140, Math.floor(openUp ? spaceAbove : spaceBelow));
+      // Clamp horizontally so a right-edge trigger can't push the menu off-screen.
+      const clampedLeft = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+      if (openUp) {
+        setPortalRect({ left: clampedLeft, width, maxHeight, placement: 'up', bottom: window.innerHeight - tr.top + gap });
+      } else {
+        setPortalRect({ left: clampedLeft, width, maxHeight, placement: 'down', top: tr.bottom + gap });
+      }
     };
     compute();
     window.addEventListener('resize', compute);
@@ -162,6 +190,10 @@ export default function Select({
 
   const selected = options.find(o => o.value === value);
   const actionMenuOption = actionMenu ? options.find(o => o.value === actionMenu.value) : null;
+  // Search box only earns its place on longer lists — a search field (and its
+  // keyboard-hint footer) over a handful of options is pure noise. allowCustom
+  // still needs the input to type an arbitrary value, so keep it there.
+  const showSearch = searchable && (allowCustom || options.length > 8);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     // Ignore keys fired while an IME composition is active — e.g. pressing Enter
@@ -227,22 +259,25 @@ export default function Select({
         <ChevronDown className={`w-3.5 h-3.5 transition-all duration-200 ${open ? 'rotate-180 text-zinc-300' : 'text-zinc-500 group-hover/trigger:text-zinc-300'}`} />
       </button>
 
-      {open && (() => {
-        const usePortal = !!dropdownMatchSelector;
-        if (usePortal && !portalRect) return null;
+      {open && portalRect && (() => {
         const dropdownNode = (
         <div
           ref={dropdownRef}
           data-id="select-dropdown"
           role="listbox"
-          className={`${usePortal ? 'fixed z-[200]' : 'absolute z-50 top-full left-0 right-0 mt-1.5 min-w-full'} overflow-hidden
+          className={`fixed z-[200] flex flex-col overflow-hidden
             rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] backdrop-blur-md
             shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)]
             animate-select-in ${dropdownClassName}`}
-          style={usePortal && portalRect ? { top: portalRect.top, left: portalRect.left, width: portalRect.width } : undefined}
+          style={{
+            left: portalRect.left,
+            width: portalRect.width,
+            maxHeight: portalRect.maxHeight,
+            ...(portalRect.placement === 'up' ? { bottom: portalRect.bottom } : { top: portalRect.top }),
+          }}
         >
-          {searchable && (
-            <div data-id="select-search-bar" className="flex items-center gap-2 px-3 py-2.5 border-b border-white/[0.05]">
+          {showSearch && (
+            <div data-id="select-search-bar" className="shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-white/[0.05]">
               <Search className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
               <input data-id="select-search-input"
                 ref={inputRef}
@@ -268,7 +303,7 @@ export default function Select({
             </div>
           )}
 
-          <div data-id="select-options-list" ref={listRef} className="max-h-80 overflow-y-auto py-1 hide-scrollbar">
+          <div data-id="select-options-list" ref={listRef} className="min-h-0 flex-1 overflow-y-auto py-1 hide-scrollbar">
             {filtered.length ? filtered.map((o, idx) => {
               const actionMenuOpen = actionMenu?.value === o.value;
               const isSelected = o.value === value;
@@ -353,13 +388,13 @@ export default function Select({
           </div>
 
           {footer ? (
-            <div data-id="select-footer" className="border-t border-white/[0.05] bg-white/[0.01]">
+            <div data-id="select-footer" className="shrink-0 border-t border-white/[0.05] bg-white/[0.01]">
               {footer}
             </div>
           ) : null}
 
-          {searchable && filtered.length > 0 ? (
-            <div data-id="select-footer-hints" className="hidden md:flex items-center justify-between gap-3 border-t border-white/[0.05] bg-white/[0.01] px-3 py-1.5 text-[10px] text-zinc-600 select-none">
+          {showSearch && filtered.length > 0 ? (
+            <div data-id="select-footer-hints" className="shrink-0 hidden md:flex items-center justify-between gap-3 border-t border-white/[0.05] bg-white/[0.01] px-3 py-1.5 text-[10px] text-zinc-600 select-none">
               <div data-id="select-hints-group" className="flex items-center gap-2">
                 <span data-id="select-hint-navigate" className="inline-flex items-center gap-1">
                   <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-white/[0.06] bg-white/[0.02] px-1 font-mono">↑</kbd>
@@ -376,7 +411,7 @@ export default function Select({
           ) : null}
         </div>
         );
-        return usePortal ? createPortal(dropdownNode, document.body) : dropdownNode;
+        return createPortal(dropdownNode, document.body);
       })()}
 
       {open && actionMenu && actionMenuOption?.actions?.length ? createPortal(
