@@ -217,8 +217,11 @@ var cicyCompactSummarize = cicySummarizeViaGateway
 // final text, not streamed deltas).
 func cicySummarizeViaGateway(ctx context.Context, shortID, convID, model, transcript string) (string, error) {
 	payload := M{
-		"model":      model,
-		"max_tokens": 1024,
+		"model": model,
+		// 4096:摘要必须容得下「任务状态 + 当前工作 + 下一步」的完整收尾;1024 会把
+		// 长对话的摘要拦腰截断,恰好丢掉最重要的近期内容(Claude Code 的压缩摘要
+		// 同样是数千 token 量级)。
+		"max_tokens": 4096,
 		"system":     []M{{"type": "text", "text": cicyCompactSystemPrompt}},
 		"messages":   []M{{"role": "user", "content": transcript}},
 	}
@@ -245,13 +248,21 @@ func cicyResponseText(resp map[string]interface{}) string {
 	return b.String()
 }
 
-const cicyCompactSystemPrompt = `你是一个对话历史压缩器。下面给你的是一个多 agent 项目经理(PM)与用户的对话、以及它调用工具的记录。请压缩成一段结构化中文摘要,必须完整保留:
-1) 用户的原始目标与核心诉求;
-2) 已做出的关键决策与结论;
-3) 已派出的任务及其当前状态(谁负责、做什么、done/test/进行中/阻塞);
-4) 未决事项、待办;
-5) 用户明确的约束、偏好与禁令。
-提炼要点、不要逐字复述,但任何任务的状态都不能遗漏。只输出摘要正文,不要前言或客套。`
+// cicyCompactSystemPrompt 参考 Claude Code 的压缩提示词结构(cicy-claude 提取版):
+// 分小节、突出"报错与修复 / 用户纠正 / 当前工作 / 下一步",且不假设 agent 角色
+// (/compact 与 auto-compact 对所有 cicy agent 生效,不只 PM)。
+const cicyCompactSystemPrompt = `你是对话历史压缩器。输入是一个 AI agent 与用户的对话及工具调用记录。请生成一份结构化中文摘要,供该 agent 在压缩后的新上下文里无缝继续工作。必须按以下小节输出:
+
+1. 用户目标与诉求:用户所有明确提出的要求与意图,逐条保留,不得合并丢失;
+2. 关键决策与结论:已确定的方案、结论、重要发现;
+3. 任务与状态:已派出/进行中的任务(谁负责、做什么、done/test/进行中/阻塞),一条都不能漏;
+4. 文件与代码要点:涉及的具体文件路径、关键改动、重要代码片段或函数名(如有);
+5. 报错与修复:遇到过的错误及解决方式,特别是用户纠正过的做法(用户让你换一种方式做的,务必记下);
+6. 约束与禁令:用户明确的偏好、约束、禁止事项,关键表述尽量保留原话;
+7. 当前进行中的工作:压缩前最近正在做的事,具体到文件/步骤/卡在哪;
+8. 下一步:紧接着该做什么。必须与用户最近的明确要求一致,不要自行引入新任务或翻旧任务。
+
+提炼要点、不逐字复述闲聊;但用户的要求、任务状态、约束禁令必须完整,近期消息优先级高于早期消息。只输出摘要正文,不要前言、客套或解释。`
 
 const cicyCompactSummaryPrefix = "[以下是更早对话的压缩摘要,用于保持上下文连续;最近的原始对话紧随其后。]\n\n"
 
