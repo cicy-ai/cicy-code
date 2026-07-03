@@ -378,17 +378,31 @@ func listRoleTemplates() []string    { return listRoleSlugs() }
 
 // defaultGlobalMemoryTemplate seeds ~/cicy-ai/memory/global.md the first time
 // it is needed.
-const defaultGlobalMemoryTemplate = `## Collaboration
-
-You can collaborate with other agents through the ` + "`cicy-agent`" + ` skill:
-- ` + "`cicy-agent ls`" + ` — discover other agents
-- ` + "`cicy-agent msg <agent> <text>`" + ` — dispatch a task or ask for help
-- ` + "`cicy-agent capture <agent>`" + ` — check another agent's progress
-
-Run ` + "`cicy-agent help`" + ` first to see all subcommands (note it is ` + "`help`" + `, not ` + "`--help`" + `).
-
-## Constraints
-`
+const defaultGlobalMemoryTemplate = "## Collaboration\n" +
+	"\n" +
+	"Work with other agents via the `cicy-agent` skill (`cicy-agent help` for all subcommands):\n" +
+	"- `cicy-agent ls` — list agents\n" +
+	"- `cicy-agent msg <agent> <text>` — dispatch a task or ask for help\n" +
+	"- `cicy-agent capture <agent>` — check an agent's progress\n" +
+	"\n" +
+	"## Knowledge\n" +
+	"\n" +
+	"Check the team knowledge base before reinventing conventions, pitfalls, or prior decisions (`cicy-knowledge help` for all commands):\n" +
+	"- `cicy-knowledge recall <keyword>` — search the canon (verified facts only; drafts never surface)\n" +
+	"- `cicy-knowledge get <id>` — read a full entry\n" +
+	"- `cicy-knowledge add \"<title>\" --body <md> [--tags \"a b\"]` — propose an entry (lands pending for review)\n" +
+	"\n" +
+	"## Documents\n" +
+	"\n" +
+	"Don't drop docs at random paths. If another agent might need it, add it to the knowledge base, not a stray `.md`:\n" +
+	"- Finished → `cicy-knowledge add \"<title>\" --body <md> --tags \"a b\"`\n" +
+	"- Draft → `cicy-knowledge add --draft ...`\n" +
+	"\n" +
+	"Uploaded docs (`~/cicy-ai/assets`): leave for review. Private scratch: your own workspace/memory only.\n" +
+	"\n" +
+	"## Constraints\n" +
+	"\n" +
+	"- Projects: always create and clone into `~/projects` — never scatter repos at arbitrary paths. A new or cloned project lives at `~/projects/<name>`.\n"
 
 // ensureGlobalMemoryTemplate writes the default template if the file is missing.
 // Existing user edits are never overwritten.
