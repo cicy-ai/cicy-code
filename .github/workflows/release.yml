@@ -6,9 +6,14 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag to publish (e.g. v2.0.2). Created on the current commit if it does not exist."
-        required: true
+      bump:
+        description: "Manual release — bump npm/package.json by this amount, then tag + build + publish."
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
 
 jobs:
   release:
@@ -31,17 +36,39 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Patch version strings
-        # sync-version.py reads npm/package.json and propagates the version to
-        # app/src/config.ts and api/mgr/main.go. We just bump npm/package.json
-        # and let the script do the rest (it runs via build.sh all → sync_version).
+      - name: Resolve version & tag
+        id: meta
+        # Two entry points:
+        #   • push tag v* → version is taken FROM the tag (the classic flow; the
+        #     bump was done locally before `git push --tags`).
+        #   • workflow_dispatch → this is the one-click "手动发版": read the current
+        #     npm/package.json version and bump patch/minor/major to get the next one.
         run: |
-          RAW="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
-          VERSION="${RAW#v}"
-          # Patch npm/package.json — sync-version.py reads this as the source of
-          # truth. Also lockstep the per-platform optionalDependencies to the
-          # release version so the main launcher and its 4 binary sub-packages
-          # all publish at the same version (publish-all.sh builds the subs).
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CUR=$(python3 -c "import json;print(json.load(open('npm/package.json'))['version'])")
+            IFS=. read -r MA MI PA <<< "$CUR"
+            case "${{ github.event.inputs.bump }}" in
+              major) MA=$((MA+1)); MI=0; PA=0;;
+              minor) MI=$((MI+1)); PA=0;;
+              *)     PA=$((PA+1));;
+            esac
+            VERSION="$MA.$MI.$PA"
+            echo "Manual release: $CUR -> $VERSION (${{ github.event.inputs.bump }})"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "Tag-push release: $VERSION"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Patch version strings
+        # sync-version.py (run inside build.sh all) reads npm/package.json and
+        # propagates the version to app/src/config.ts and api/mgr/main.go. We only
+        # need to set npm/package.json (+ the per-platform optionalDependencies so
+        # the launcher and its 4 binary sub-packages publish at the same version)
+        # and app/package.json here; the build does the rest.
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
           python3 -c "
           import json, sys
           p = json.load(open('npm/package.json'))
@@ -51,7 +78,6 @@ jobs:
           json.dump(p, open('npm/package.json','w'), indent=2)
           print('npm/package.json version:', p['version'], '| optionalDeps ->', sys.argv[1])
           " "$VERSION"
-          # Also patch app/package.json for consistency
           python3 -c "
           import json, sys
           p = json.load(open('app/package.json'))
@@ -60,47 +86,33 @@ jobs:
           " "$VERSION"
           echo "Version patched to ${VERSION}"
 
+      - name: Commit version bump (manual release only)
+        # For workflow_dispatch we bumped npm/package.json in-CI — commit it back to
+        # the branch so main reflects the released version and the NEXT manual bump
+        # starts from the right base. (Tag-push releases already carry the bump.)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add npm/package.json app/package.json
+          git commit -m "chore(release): v${{ steps.meta.outputs.version }}" || echo "nothing to commit"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
       - name: Build all platform binaries
-        # bash build.sh all runs prepare_embed (builds the cicy-skills tarball
-        # that //go:embed picks up + builds the frontend + ttyd assets) and
-        # then cross-compiles darwin/linux amd64+arm64. Without prepare_embed
-        # the go:embed pattern for cicy_skills_assets.tar.gz fails at compile
-        # time — that was the latent bug the previous release step shipped
-        # with (cross-compile invoked go build directly with no embed prep).
+        # bash build.sh all runs prepare_embed (builds the cicy-skills tarball that
+        # //go:embed picks up + the frontend + ttyd assets) then cross-compiles
+        # darwin/linux amd64+arm64 + windows.
         run: |
           bash build.sh all
           ls -lh dist/
 
-      - name: Resolve tag
-        id: tag
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          else
-            TAG="${{ github.ref_name }}"
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-
-      # Docker images are NOT built here anymore. The image is now a stable
-      # base environment (installs cicy-code from npm at startup — no baked
-      # binary), so it only changes when the Dockerfile / base deps change.
-      # It's built + pushed + saved-to-R2 by .github/workflows/docker-image.yml
-      # (triggered on api/Dockerfile* / docker-entrypoint.sh changes), NOT on
-      # every release.
-
       - name: Generate release manifest
-        # manifest.json is the canonical source the cicy-desktop installer
-        # reads to discover the latest version + binary URLs. Hosted as a
-        # release asset so:
-        #   1. It's CN-reachable via ghproxy mirrors (same path as binaries).
-        #   2. GitHub's /releases/latest/download/manifest.json redirects to
-        #      whatever release was tagged "latest" — clients don't need to
-        #      walk git tags.
-        # Also pinned at the v<TAG> URL for clients that want a specific ver.
+        # manifest.json is the canonical source the cicy-desktop installer reads to
+        # discover the latest version + binary URLs. Hosted as a release asset so
+        # it's CN-reachable and /releases/latest/download/manifest.json resolves.
         run: |
-          TAG="${{ steps.tag.outputs.tag }}"
-          VERSION="${TAG#v}"
+          TAG="${{ steps.meta.outputs.tag }}"
+          VERSION="${{ steps.meta.outputs.version }}"
           BASE="https://github.com/${{ github.repository }}/releases/download/${TAG}"
           cat > dist/manifest.json <<EOF
           {
@@ -129,20 +141,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.tag.outputs.tag }}"
-          # For workflow_dispatch, create the tag on the current commit if it
-          # does not exist so the release has something to attach to.
+          TAG="${{ steps.meta.outputs.tag }}"
+          # Create the tag on the current commit if it doesn't exist (manual
+          # release path) so the release has something to attach to.
           if ! git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
             git tag "$TAG"
             git push origin "$TAG"
           fi
-          # Step 1: ensure release exists (no assets — keep this command simple).
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --title "$TAG" --generate-notes
           fi
-          # Step 2: upload each asset individually so a failure on one (e.g.
-          # manifest.json) is visible. --clobber overwrites a prior upload of
-          # the same asset name.
           for f in \
             dist/cicy-code-darwin-amd64 \
             dist/cicy-code-darwin-arm64 \
@@ -155,36 +163,23 @@ jobs:
           done
 
       - name: Publish to npm (5 packages + CN sync)
-        # Only publish on real tag pushes — workflow_dispatch snapshots stay
-        # GitHub-release-only to avoid burning npm version numbers.
+        # Runs for BOTH tag-push and manual (workflow_dispatch) releases — a 手动发版
+        # is a real release and should hit npm too. publish-all.sh publishes the
+        # launcher + the four per-platform binary sub-packages (reusing dist/ via
+        # --from) then triggers the npmmirror (CN) cache sync.
         #
-        # publish-all.sh publishes the main launcher + the four per-platform
-        # binary sub-packages (cicy-code-{darwin,linux}-{arm64,x64}, esbuild-
-        # style optionalDependencies), reusing the binaries already built in
-        # dist/ (--from), then auto-triggers the npmmirror (CN) cache sync for
-        # each so CN users resolve the new version without lag.
-        #
-        # secrets.NPM_TOKEN must be a Granular Access Token with "Bypass 2FA"
-        # enabled (classic automation tokens 403 against cicybot's 2FA policy).
-        if: github.event_name == 'push'
+        # secrets.NPM_TOKEN must be a Granular Access Token with "Bypass 2FA".
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd npm
-          bash publish-all.sh "${{ steps.tag.outputs.version }}" --from ../dist
+          bash publish-all.sh "${{ steps.meta.outputs.version }}" --from ../dist
 
       - name: Upload bootstrap installer to R2
         # Keep the one-liner installer (curl -fsSL https://r2.deepfetch.de5.net/code | sh)
-        # in sync with each release: upload npm/install.sh to the R2 bucket
-        # under key "code" via wrangler — the same command the cicy-r2 CLI runs
-        # locally (`wrangler r2 object put <bucket>/<key> --file <f>`), with the
-        # account/token in env. R2 is the CN-friendly host (no ICP filter, CF
-        # edge cache, no arrears freeze like COS).
-        #
-        # Required:
-        #   vars.R2_ACCOUNT_ID    Cloudflare account id (3cd74d293cda341378bb80ea52ff247d)
+        # in sync with each release.
+        #   vars.R2_ACCOUNT_ID    Cloudflare account id
         #   secrets.R2_API_TOKEN  CF API token with R2 object-write on cicy-assets-poc
-        if: github.event_name == 'push'
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.R2_API_TOKEN }}
@@ -196,16 +191,10 @@ jobs:
           echo "Uploaded npm/install.sh -> https://r2.deepfetch.de5.net/code"
 
       - name: Upload App SPA to per-release R2 dir (for --cdn)
-        # Publish app/dist to /app/v<version>/ so `cicy-code --cdn` serves this
-        # exact release's bundles from R2. Each release uses its own path
-        # (build.sh bakes /app/v<version>), so the upload is never cache-
-        # poisoned by a prior version and there is no hash collision. Per-file
-        # Content-Type is set (R2 mis-tags .svg as application/xml otherwise →
-        # Chrome ORB blocks). The default binary is self-contained and ignores
-        # this; only --cdn deployments use it.
-        if: github.event_name == 'push'
+        # Publish app/dist to /app/v<version>/ so `cicy-code --cdn` serves this exact
+        # release's bundles from R2 (build.sh bakes /app/v<version>).
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.R2_API_TOKEN }}
         run: |
-          bash npm/upload-cdn.sh "${{ steps.tag.outputs.version }}" app/dist
+          bash npm/upload-cdn.sh "${{ steps.meta.outputs.version }}" app/dist
