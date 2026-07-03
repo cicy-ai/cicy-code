@@ -930,6 +930,7 @@ export default function BrowserWindowsPanel({
   const [showSystem, setShowSystem] = useState(false);
   const isSystem = (p: Profile) => p.backend === 'electron' && p.accountIdx === 0;
   const [addingProfile, setAddingProfile] = useState(false);
+  const addingProfileRef = useRef(false); // synchronous double-fire guard (see onAdd)
   // The device-actions (eye/add/refresh) are portaled up into the panel header
   // row ("设备"), so the title + actions live on one bar instead of two.
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
@@ -980,12 +981,13 @@ export default function BrowserWindowsPanel({
   }, [clientId, backend]);
 
   const onAddProfile = useCallback(async () => {
-    if (!clientId || addingProfile) return;
+    if (!clientId || addingProfileRef.current) return;
+    addingProfileRef.current = true;
     setAddingProfile(true); setError('');
     try { await addProfile(clientId, backend); await refresh(); }
     catch (e: any) { setError(e?.message || String(e)); }
-    finally { setAddingProfile(false); }
-  }, [clientId, backend, addingProfile, refresh]);
+    finally { addingProfileRef.current = false; setAddingProfile(false); }
+  }, [clientId, backend, refresh]);
 
   // Reload + clear any open column (profile or phone) when the device/backend changes.
   useEffect(() => { onSelect(null); onSelectMobile?.(null); refresh(); }, [refresh]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -1226,6 +1228,13 @@ export function BrowserWindowsColumn({
   const [error, setError] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [adding, setAdding] = useState(false);
+  // Synchronous re-entrancy guard. `adding` (state) can't gate a double-fire:
+  // it commits on the next render, so two rapid clicks (or a hardware
+  // double-click) both pass `if (adding)` before the button disables. On the
+  // FIRST add — Chrome not yet running — each call falls to chrome_launch_profile
+  // and spawns a SEPARATE Chrome ⇒ two windows. A ref flips instantly, so the
+  // second invocation bails in the same tick.
+  const addingRef = useRef(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [, setSelKey] = useState<string | null>(null);
 
@@ -1271,7 +1280,8 @@ export function BrowserWindowsColumn({
   const canAddTab = true;
 
   const onAdd = async () => {
-    if (adding) return;
+    if (addingRef.current) return;
+    addingRef.current = true;
     setAdding(true); setError('');
     try {
       await addWindow(clientId, profile, newUrl);
@@ -1284,6 +1294,7 @@ export function BrowserWindowsColumn({
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
+      addingRef.current = false;
       setAdding(false);
     }
   };
