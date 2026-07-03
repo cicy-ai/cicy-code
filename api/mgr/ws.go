@@ -39,7 +39,17 @@ type wsAPIResponse struct {
 // static bundle, the auth/config shims, and the webtty WebSocket — all in
 // process, with no per-pane port or reverse proxy. See ttyd_inline.go.
 func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/ttyd/")
+	// Served under BOTH /ttyd/ (used internally by the SPA iframe) and the
+	// friendlier public alias /agent/ (for direct external links to a team
+	// member's terminal). Strip whichever prefix this request came in on — the
+	// ttyd page loads its assets/WS relative to that same prefix, so both must
+	// terminate here.
+	path := r.URL.Path
+	if strings.HasPrefix(path, "/agent/") {
+		path = strings.TrimPrefix(path, "/agent/")
+	} else {
+		path = strings.TrimPrefix(path, "/ttyd/")
+	}
 	parts := strings.SplitN(path, "/", 2)
 	paneID := normPaneID(parts[0])
 	subPath := "/"

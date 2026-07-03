@@ -49,7 +49,7 @@ func cdnRewriteIndex(b []byte) []byte {
 }
 
 func nonAppPath(p string) bool {
-	for _, pre := range []string{"/api/", "/ttyd/", "/mitm/", "/pma/", "/static/", "/v1/", "/oauth/"} {
+	for _, pre := range []string{"/api/", "/ttyd/", "/agent/", "/mitm/", "/pma/", "/static/", "/v1/", "/oauth/"} {
 		if strings.HasPrefix(p, pre) {
 			return true
 		}

@@ -41,7 +41,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.163"
+const version = "2.3.164"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -531,6 +531,9 @@ Options:
 
 	// In-process ttyd terminals (no per-pane port; see ttyd_inline.go)
 	http.HandleFunc("/ttyd/", handleTtydProxy)
+	// Friendlier public alias for /ttyd/ — direct external links to a team
+	// member's terminal read as /agent/<pane_id>/?token=… (same handler).
+	http.HandleFunc("/agent/", handleTtydProxy)
 	http.HandleFunc("/ttyd-shell/", handleTtydShellProxy)
 
 	// UI (SPA)
