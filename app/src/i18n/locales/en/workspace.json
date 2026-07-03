@@ -424,5 +424,6 @@
   "stPending": "Pending",
   "stDraft": "Draft",
   "stDeprecated": "Deprecated",
-  "stRejected": "Archived"
+  "stRejected": "Archived",
+  "emailNeedsSetup": "Token delivery email / SMTP not configured"
 }

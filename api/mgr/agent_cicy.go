@@ -2053,10 +2053,12 @@ func clearCicyPane(shortID, workspace string) {
 	// immediately durable. The old conversation's dir stays for scrollback; the
 	// stale reply.json is dropped (the slash ack replaces it).
 	cicySeedCurrentSnapshot(shortID, newConv, []M{})
-	// Write the ack reply under the NEW conversation — this also repoints the
-	// canonical reply.json symlink there. The old conversation keeps its own
-	// current.json/reply.json untouched for scrollback; nothing is deleted.
-	cicyWriteSlashAck(shortID, newConv, "✅ Conversation cleared.")
+	// Repoint the canonical reply.json symlink onto the NEW conversation with a
+	// terminal EMPTY reply — /clear just opens a fresh empty conversation, so the UI
+	// lands on it clean with NOTHING to render (no "✅ Conversation cleared" ack) and
+	// the composer unlocked. The old conversation keeps its own current.json/reply.json
+	// for scrollback; nothing is deleted.
+	cicyWriteTerminalReply(shortID, newConv)
 }
 
 // cicySlashAckTurnID marks a synthetic reply.json written as the visible
@@ -2490,7 +2492,8 @@ func runCicySlashCommand(ctx context.Context, session *cicySession, shortID, wor
 	switch cmd {
 	case "/clear":
 		clearCicyPane(shortID, workspace)
-		emit(M{"type": "system", "text": "✅ Conversation cleared."})
+		// No ack message — /clear just opens a fresh empty conversation. The reply.json
+		// repoint (cicyWriteTerminalReply) lands the UI on the clean new conversation.
 		emit(M{"type": "done"})
 		return true
 	case "/compact":

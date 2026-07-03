@@ -111,5 +111,9 @@
   "testModels": "models",
   "testColModel": "Model",
   "testColStatus": "Status",
-  "getDeepSeekApiKey": "Get an API key on the DeepSeek platform"
+  "getDeepSeekApiKey": "Get an API key on the DeepSeek platform",
+  "getGroqApiKey": "Get an API key on the Groq console",
+  "groqSttBanner": "Groq offers Whisper models for speech-to-text (STT). Add a whisper model to “Available models” below and point the STT route at this provider.",
+  "noKey": "No key",
+  "missingApiKey": "Missing API key"
 }

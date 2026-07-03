@@ -96,5 +96,15 @@
   "testFail": "Échec",
   "test": "Tester",
   "testing": "Test en cours…",
-  "testRetry": "Re-tester"
+  "testRetry": "Re-tester",
+  "getDeepSeekApiKey": "Obtenir une clé API sur la plateforme DeepSeek",
+  "getGroqApiKey": "Obtenir une clé API sur la console Groq",
+  "groqSttBanner": "Groq propose des modèles Whisper pour la reconnaissance vocale (STT). Ajoutez un modèle whisper dans « Modèles disponibles » ci-dessous et dirigez la route STT vers ce fournisseur.",
+  "testAll": "Tout tester",
+  "testPassed": "réussi",
+  "testModels": "modèles",
+  "testColModel": "Modèle",
+  "testColStatus": "Statut",
+  "noKey": "Sans clé",
+  "missingApiKey": "Clé API manquante"
 }

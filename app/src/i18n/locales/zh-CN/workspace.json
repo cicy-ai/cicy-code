@@ -424,5 +424,6 @@
   "stPending": "待评审",
   "stDraft": "草案",
   "stDeprecated": "废弃",
-  "stRejected": "归档"
+  "stRejected": "归档",
+  "emailNeedsSetup": "未配置令牌投递邮箱 / SMTP"
 }

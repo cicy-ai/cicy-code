@@ -420,5 +420,6 @@
   "stPending": "レビュー待ち",
   "stDraft": "ドラフト",
   "stDeprecated": "非推奨",
-  "stRejected": "アーカイブ"
+  "stRejected": "アーカイブ",
+  "emailNeedsSetup": "トークン配信メール / SMTP が未設定"
 }

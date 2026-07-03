@@ -108,6 +108,20 @@ export default function SettingsModal({
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState<{ kind: 'ok' | 'need-smtp' | 'err'; text: string } | null>(null);
   const sendReady = !!emailCfg?.send_ready;
+  // Red badge on the 通用 nav item: SMTP not ready OR no token-delivery address.
+  // Derive from emailCfg once loaded (updates live after save); otherwise fetch
+  // once on open so the badge is correct even when the modal opens on another tab.
+  const [emailNeedsSetup, setEmailNeedsSetup] = useState(false);
+  useEffect(() => {
+    if (emailCfg) { setEmailNeedsSetup(!emailCfg.smtp_ready || !String(emailCfg.default_to || '').trim()); return; }
+    if (!open) return;
+    let alive = true;
+    apiService.getEmailConfig().then((r: any) => {
+      const d = r?.data || {};
+      if (alive) setEmailNeedsSetup(!d.smtp_ready || !String(d.default_to || '').trim());
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [open, emailCfg]);
   const { confirm, node: dialogNode } = useDialogs();
 
   useEffect(() => {
@@ -285,6 +299,9 @@ export default function SettingsModal({
               >
                 <span className="shrink-0">{item.icon}</span>
                 <span data-id={`settings-modal-nav-${item.id}-label`} className="truncate">{item.label}</span>
+                {item.id === 'general' && emailNeedsSetup && (
+                  <span data-id="settings-modal-nav-general-badge" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title={t('emailNeedsSetup', { defaultValue: '未配置令牌投递邮箱 / SMTP' })} />
+                )}
               </button>
             ))}
             {version ? (

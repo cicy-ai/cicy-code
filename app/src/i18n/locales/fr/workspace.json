@@ -420,5 +420,6 @@
   "stPending": "En attente",
   "stDraft": "Brouillon",
   "stDeprecated": "Obsolète",
-  "stRejected": "Archivé"
+  "stRejected": "Archivé",
+  "emailNeedsSetup": "E-mail de remise du jeton / SMTP non configuré"
 }

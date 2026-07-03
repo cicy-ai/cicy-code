@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import {
   Plus, Save, Trash2, Zap, Eye, EyeOff, Check, X,
-  Server, Search, ChevronsUpDown, AlertTriangle, Link2, Cpu, ExternalLink,
+  Server, Search, ChevronsUpDown, AlertTriangle, Link2, Cpu, ExternalLink, Mic,
 } from 'lucide-react';
 import apiService from '../../services/api';
 import AgentAvatar from '../AgentAvatar';
@@ -644,6 +644,13 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
   );
 
   /* ───────────── RIGHT PANEL DETAIL ───────────── */
+  const providerHost = (draft.url || '').toLowerCase();
+  const isGroq = providerHost.includes('groq.com');
+  const apiKeyConsole = providerHost.includes('deepseek.com')
+    ? { href: 'https://platform.deepseek.com/api_keys', label: t('getDeepSeekApiKey', { defaultValue: '前往 DeepSeek 开放平台获取 API Key' }) }
+    : isGroq
+      ? { href: 'https://console.groq.com/keys', label: t('getGroqApiKey', { defaultValue: '前往 Groq Console 获取 API Key' }) }
+      : null;
   const detailUI = (
     <div data-id="providers-detail-root" className="absolute inset-0 z-30 flex flex-col bg-[#0A0A0A] text-zinc-300 overflow-hidden">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-white/[0.06] px-4">
@@ -654,6 +661,12 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
       </header>
       <main className="flex-1 overflow-auto">
         <div className="mx-auto max-w-[680px] px-8 py-7">
+          {isGroq && (
+            <div data-id="provider-detail-groq-stt-banner" className="mb-5 flex items-start gap-2.5 rounded-xl border border-sky-500/20 bg-sky-500/[0.07] px-3.5 py-3 text-[12px] leading-relaxed text-sky-200">
+              <Mic size={15} className="mt-0.5 shrink-0 text-sky-300" />
+              <span>{t('groqSttBanner', { defaultValue: 'Groq 提供 Whisper 模型,可用于语音转文字(STT)。把 whisper 模型加入下方「可用模型」,并在路由里把 STT 指向本供应商即可。' })}</span>
+            </div>
+          )}
           <div className="space-y-7">
             {/* Basic info */}
             <section className="space-y-3.5">
@@ -756,11 +769,11 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
                     options={PROTOCOLS.map((p) => ({ value: p, label: p }))}
                   />
                 </Field>
-                <Field label="API Key" help={(draft.url || '').toLowerCase().includes('deepseek.com') ? (
+                <Field label="API Key" help={apiKeyConsole ? (
                   <button data-id="provider-detail-get-apikey" type="button"
-                    onClick={() => window.open('https://platform.deepseek.com/api_keys', '_blank', 'noopener')}
+                    onClick={() => window.open(apiKeyConsole.href, '_blank', 'noopener')}
                     className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-400 transition-colors hover:text-blue-300">
-                    {t('getDeepSeekApiKey', { defaultValue: '前往 DeepSeek 开放平台获取 API Key' })}
+                    {apiKeyConsole.label}
                     <ExternalLink size={11} />
                   </button>
                 ) : undefined}>

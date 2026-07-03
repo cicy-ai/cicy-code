@@ -111,5 +111,9 @@
   "testModels": "个模型",
   "testColModel": "模型",
   "testColStatus": "状态",
-  "getDeepSeekApiKey": "前往 DeepSeek 开放平台获取 API Key"
+  "getDeepSeekApiKey": "前往 DeepSeek 开放平台获取 API Key",
+  "getGroqApiKey": "前往 Groq Console 获取 API Key",
+  "groqSttBanner": "Groq 提供 Whisper 模型,可用于语音转文字(STT)。把 whisper 模型加入下方「可用模型」,并在路由里把 STT 指向本供应商即可。",
+  "noKey": "无 key",
+  "missingApiKey": "缺少 API key"
 }

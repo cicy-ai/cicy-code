@@ -96,5 +96,15 @@
   "testFail": "失敗",
   "test": "テスト",
   "testing": "テスト中…",
-  "testRetry": "再テスト"
+  "testRetry": "再テスト",
+  "getDeepSeekApiKey": "DeepSeek プラットフォームで API キーを取得",
+  "getGroqApiKey": "Groq コンソールで API キーを取得",
+  "groqSttBanner": "Groq は音声認識(STT)用の Whisper モデルを提供します。下の「利用可能なモデル」に whisper モデルを追加し、STT ルートをこのプロバイダーに向けてください。",
+  "testAll": "すべてテスト",
+  "testPassed": "成功",
+  "testModels": "モデル",
+  "testColModel": "モデル",
+  "testColStatus": "ステータス",
+  "noKey": "キーなし",
+  "missingApiKey": "API キーがありません"
 }

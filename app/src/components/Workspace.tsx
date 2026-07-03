@@ -413,6 +413,19 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }).catch(() => {});
     return () => { alive = false; };
   }, [settingsOpen]);
+  // Red badge on the Settings entry + 通用 item: true when the token-delivery
+  // email isn't fully set up — SMTP not ready OR no delivery address (default_to).
+  // Refetched when the settings modal closes so configuring it clears the badge.
+  const [emailNeedsSetup, setEmailNeedsSetup] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    apiService.getEmailConfig().then((resp: any) => {
+      const d = resp?.data || {};
+      const need = !d.smtp_ready || !String(d.default_to || '').trim();
+      if (alive) setEmailNeedsSetup(need);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [settingsOpen]);
   const openSettings = useCallback((s: SettingsSection) => {
     setSettingsSection(s);
     setSettingsOpen(true);
@@ -1904,10 +1917,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             type="button"
             data-id="activity-bar-membership-trigger"
             onClick={handleToggleMembershipMenu}
-            className={cn('group flex h-10 w-10 items-center justify-center rounded-xl transition-all cursor-pointer', membershipTone(membershipCard.level), membershipMenuOpen ? 'text-zinc-100 shadow-[0_12px_30px_rgba(0,0,0,0.28)]' : 'text-zinc-400 hover:text-zinc-100')}
+            className={cn('group relative flex h-10 w-10 items-center justify-center rounded-xl transition-all cursor-pointer', membershipTone(membershipCard.level), membershipMenuOpen ? 'text-zinc-100 shadow-[0_12px_30px_rgba(0,0,0,0.28)]' : 'text-zinc-400 hover:text-zinc-100')}
             title={membershipCard.userId}
           >
             <Settings className="h-4 w-4" />
+            {emailNeedsSetup && <span data-id="activity-bar-membership-trigger-badge" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-[#0b0b0c]" title={t('emailNeedsSetup', { defaultValue: '未配置令牌投递邮箱 / SMTP' })} />}
           </button>
         </div>
       </div>
@@ -2197,7 +2211,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               onClick={() => openSettings('general')}
               className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
             >
-              <span data-id="membership-settings-general-label">{t('settingsNavGeneral', { defaultValue: '通用' })}</span>
+              <span data-id="membership-settings-general-label" className="inline-flex items-center gap-1.5">
+                {t('settingsNavGeneral', { defaultValue: '通用' })}
+                {emailNeedsSetup && <span data-id="membership-settings-general-badge" className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title={t('emailNeedsSetup', { defaultValue: '未配置令牌投递邮箱 / SMTP' })} />}
+              </span>
               <SlidersHorizontal className="h-3.5 w-3.5" />
             </button>
             <button
