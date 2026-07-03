@@ -42,7 +42,7 @@ export const CONTINUATION_PREFIX_RE = /^\s*This session is being continued from 
 // cicy /compact appends its summary as a user message opening with this fixed
 // banner (see cicyCompactSummaryPrefix, backend). The UI renders such a turn as
 // the ✨已压缩 compaction MARKER (a foldable divider), never as a user bubble.
-export const CICY_COMPACT_SUMMARY_RE = /^\s*\[以下是更早对话的压缩摘要[^\]]*\]\s*/;
+export const CICY_COMPACT_SUMMARY_RE = /^\s*\[(?:Compressed summary of the earlier conversation|以下是更早对话的压缩摘要)[^\]]*\]\s*/;
 export function cicyCompactSummaryOf(text: string | undefined | null): string | null {
   const s = String(text || '');
   const m = s.match(CICY_COMPACT_SUMMARY_RE);
@@ -72,7 +72,8 @@ export function splitLeadingHarnessBlocks(text: string): { blocks: string[]; rem
 // cicy_outcome 字段、或文本以 outcome 标记(新的干净前缀 / 旧的 ⟦…⟧ 形态)开头的项,
 // 一律按 outcome 渲染(头像左对齐 + 重试),与 role 无关。标记文本本身已是干净中文短句
 // (不含符号/JSON),不再解析 detail。
-const CICY_OUTCOME_MARK = '（本轮未生成回复';
+const CICY_OUTCOME_MARK = '(no reply this turn';
+const CICY_OUTCOME_MARK_LEGACY_CN = '（本轮未生成回复';
 const CICY_OUTCOME_LEGACY = '⟦cicy-turn-outcome⟧';
 export function parseCicyOutcome(item: any, contentText: string): { kind: string; label: string; detail?: string } | null {
   const outcomeLabel = (k: string) => k === 'cancelled' ? '已停止生成' : k === 'blocked' ? '已拦截' : '生成失败';
@@ -81,7 +82,7 @@ export function parseCicyOutcome(item: any, contentText: string): { kind: string
   if (tagged) {
     return { kind: tagged, label: outcomeLabel(tagged), detail };
   }
-  if (contentText.startsWith(CICY_OUTCOME_MARK) || contentText.startsWith(CICY_OUTCOME_LEGACY)) {
+  if (contentText.startsWith(CICY_OUTCOME_MARK) || contentText.startsWith(CICY_OUTCOME_MARK_LEGACY_CN) || contentText.startsWith(CICY_OUTCOME_LEGACY)) {
     const kind = (contentText.includes('已停止') || contentText.includes('cancelled')) ? 'cancelled'
       : (contentText.includes('已拦截') || contentText.includes('blocked')) ? 'blocked'
       : 'error';

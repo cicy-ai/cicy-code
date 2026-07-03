@@ -158,7 +158,7 @@ func cicyMaxRoundsFor(cfg liteConfig) int {
 
 // cicyWrapUpInstruction is appended to the system prompt on the final tool round
 // so the model closes out instead of being abruptly cut off.
-const cicyWrapUpInstruction = "[系统提示] 你已用满本回合的工具调用预算。这一轮不要再调用任何工具,请直接根据已经获得的信息给出尽可能完整的最终答复;如果任务确实还没做完,就说明已完成到哪一步、还差什么。"
+const cicyWrapUpInstruction = "[System notice] You have used up this turn's tool-call budget. Do not call any more tools this round — give the most complete final answer you can from the information already gathered; if the task is genuinely unfinished, state how far you got and what remains."
 
 // cicyMaybeWrapUp appends the wrap-up instruction to the system prompt on the
 // final round, leaving it untouched otherwise.
@@ -265,7 +265,17 @@ const cicyCompactSystemPrompt = `You are a conversation-history compactor. The i
 
 Distill; do not replay small talk verbatim. But user requests, task status, and constraints must be complete, and recent messages take priority over earlier ones. Write the summary in the conversation's primary language. Output ONLY the summary body — no preamble, pleasantries, or explanations.`
 
-const cicyCompactSummaryPrefix = "[以下是更早对话的压缩摘要,用于保持上下文连续;最近的原始对话紧随其后。]\n\n"
+const cicyCompactSummaryPrefix = "[Compressed summary of the earlier conversation, kept for context continuity; the most recent original messages follow.]\n\n"
+
+// cicyCompactSummaryPrefixLegacyCN is the pre-2026-07 Chinese prefix; still
+// detected (slice boundary + UI marker) so existing conversations keep working.
+const cicyCompactSummaryPrefixLegacyCN = "[以下是更早对话的压缩摘要,用于保持上下文连续;最近的原始对话紧随其后。]\n\n"
+
+// cicyIsCompactSummaryContent reports whether a message body is a compaction
+// summary (current English prefix or the legacy Chinese one).
+func cicyIsCompactSummaryContent(c string) bool {
+	return strings.HasPrefix(c, cicyCompactSummaryPrefix) || strings.HasPrefix(c, cicyCompactSummaryPrefixLegacyCN)
+}
 
 // cicyOutcomePrefix marks a synthetic assistant message that records a turn which
 // produced no normal reply — the user cancelled it or the gateway failed after
@@ -281,7 +291,11 @@ const cicyCompactSummaryPrefix = "[以下是更早对话的压缩摘要,用于�
 // compaction baked them into a garbage summary. No machine detail / no JSON here —
 // the failure reason lives in usage-log, not in the conversation. The serving layer
 // (cicyTagOutcome) detects this prefix to style it + offer 重试.
-const cicyOutcomePrefix = "（本轮未生成回复"
+const cicyOutcomePrefix = "(no reply this turn"
+
+// cicyOutcomePrefixLegacyCN is the pre-2026-07 Chinese prefix; still detected so
+// existing records keep rendering as outcomes.
+const cicyOutcomePrefixLegacyCN = "（本轮未生成回复"
 
 // cicyOutcomeLegacyMark is the pre-2026-06-09 marker; still detected by the display
 // relabel + compaction filter so any lingering old records clean up instead of
@@ -292,11 +306,11 @@ const cicyOutcomeLegacyMark = "⟦cicy-turn-outcome⟧"
 func cicyOutcomeMarkerText(kind string) string {
 	switch kind {
 	case "cancelled":
-		return cicyOutcomePrefix + "·已停止）"
+		return cicyOutcomePrefix + " · cancelled)"
 	case "blocked":
-		return cicyOutcomePrefix + "·已拦截）"
+		return cicyOutcomePrefix + " · blocked)"
 	}
-	return cicyOutcomePrefix + "·生成失败）"
+	return cicyOutcomePrefix + " · generation failed)"
 }
 
 // cicyOutcomeMessage builds the synthetic assistant record for a cancelled/failed
@@ -351,8 +365,9 @@ func cicyAttachOutcomeToSnapshot(shortID, kind, detail string) {
 // (new clean form OR the legacy "⟦cicy-turn-outcome⟧…" form), else "".
 func cicyOutcomeKindFromText(s string) string {
 	isNew := strings.HasPrefix(s, cicyOutcomePrefix)
+	isCN := strings.HasPrefix(s, cicyOutcomePrefixLegacyCN)
 	isOld := strings.HasPrefix(s, cicyOutcomeLegacyMark)
-	if !isNew && !isOld {
+	if !isNew && !isCN && !isOld {
 		return ""
 	}
 	if strings.Contains(s, "已停止") || strings.Contains(s, "cancelled") {
@@ -453,9 +468,9 @@ func cicyRenderHistoryForCompaction(msgs []M) string {
 			case "tool_use":
 				name, _ := bm["name"].(string)
 				arg, _ := json.Marshal(bm["input"])
-				b.WriteString(role + " [调用 " + name + " " + truncateForLog(string(arg), 300) + "]\n")
+				b.WriteString(role + " [calls " + name + " " + truncateForLog(string(arg), 300) + "]\n")
 			case "tool_result":
-				b.WriteString("工具结果: " + truncateForLog(cicyToolResultText(bm["content"]), 400) + "\n")
+				b.WriteString("tool result: " + truncateForLog(cicyToolResultText(bm["content"]), 400) + "\n")
 			}
 		})
 	}
@@ -989,7 +1004,7 @@ func cicyMessageHasToolResult(msg M) bool {
 // matching tool_result never arrived (a turn interrupted by a new user message
 // before the tool resolved). Without it the provider rejects the whole window
 // (Anthropic/DeepSeek: "tool_use ids were found without tool_result blocks").
-const cicySyntheticToolResult = "(工具结果不可用:上一回合在收到结果前被打断,系统已自动补平以保持 tool_use/tool_result 配对。)"
+const cicySyntheticToolResult = "(tool result unavailable: the previous turn was interrupted before the result arrived; auto-filled to keep tool_use/tool_result pairing.)"
 
 func cicyBlockType(b interface{}) (map[string]interface{}, string) {
 	// M is an alias for map[string]interface{}, so one case covers both.
@@ -1188,7 +1203,7 @@ func cicySkillTool(name string) string {
 	if name == "" {
 		entries, err := os.ReadDir(cicySkillsDir)
 		if err != nil {
-			return "(没有已安装的 skill)"
+			return "(no skills installed)"
 		}
 		var lines []string
 		for _, e := range entries {
@@ -1206,17 +1221,17 @@ func cicySkillTool(name string) string {
 			lines = append(lines, "- "+n+": "+desc)
 		}
 		if len(lines) == 0 {
-			return "(没有已安装的 skill)"
+			return "(no skills installed)"
 		}
 		sort.Strings(lines)
-		return "已安装的 skill —— 用 skill(name) 看用法,再用 shell 跑它的 CLI:\n" + strings.Join(lines, "\n")
+		return "Installed skills — call skill(name) for usage, then run its CLI via shell:\n" + strings.Join(lines, "\n")
 	}
 	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
 		return "error: bad skill name"
 	}
 	md, err := os.ReadFile(filepath.Join(cicySkillsDir, name, "SKILL.md"))
 	if err != nil {
-		return "error: skill 未找到: " + name + "(用不带参数的 skill 列出已装的)"
+		return "error: skill not found: " + name + " (call skill with no arguments to list installed ones)"
 	}
 	out := string(md)
 	if help, herr := os.ReadFile(filepath.Join(cicySkillsDir, name, "references", "help.md")); herr == nil && len(help) > 0 {
@@ -1304,16 +1319,16 @@ func cicyRunTool(selfShortID, name string, input map[string]interface{}, cfg lit
 		s := string(out)
 		const maxOut = 12000
 		if len(s) > maxOut {
-			s = s[:maxOut] + "\n…(输出已截断)"
+			s = s[:maxOut] + "\n…(output truncated)"
 		}
 		if ctx.Err() == context.DeadlineExceeded {
-			return "error: 命令超时\n" + s
+			return "error: command timed out\n" + s
 		}
 		if err != nil {
 			return fmt.Sprintf("exit error: %v\n%s", err, s)
 		}
 		if strings.TrimSpace(s) == "" {
-			return "(执行成功,无输出)"
+			return "(command succeeded, no output)"
 		}
 		return s
 	}
@@ -1350,7 +1365,7 @@ func cicyCompactSliceStart(history []M) int {
 		if r, _ := history[i]["role"].(string); r != "user" {
 			continue
 		}
-		if c, ok := history[i]["content"].(string); ok && strings.HasPrefix(c, cicyCompactSummaryPrefix) {
+		if c, ok := history[i]["content"].(string); ok && cicyIsCompactSummaryContent(c) {
 			return i
 		}
 	}
@@ -2314,7 +2329,7 @@ func handleCicyChat(w http.ResponseWriter, r *http.Request) {
 	// the queue on completion and merges all queued inputs into ONE follow-up
 	// turn (streamed on its own connection). This request returns immediately.
 	if session.enqueueIfBusy(text) {
-		sse.emit(M{"type": "queued", "text": "已加入队列,当前回复完成后一起处理。"})
+		sse.emit(M{"type": "queued", "text": "Queued — will be handled after the current reply completes."})
 		sse.emit(M{"type": "done"})
 		return
 	}
@@ -2399,7 +2414,7 @@ func runCicyOwnedTurnsCore(session *cicySession, shortID, workspace, text string
 			// Pop the failed turn's outcome marker and re-run that same user turn.
 			if !session.dropTrailingOutcomeLocked() {
 				session.mu.Unlock()
-				emit(M{"type": "error", "error": "没有可重试的回合"})
+				emit(M{"type": "error", "error": "no turn to retry"})
 				emit(M{"type": "done"})
 				return // defer clears busy
 			}
@@ -2424,7 +2439,7 @@ func runCicyOwnedTurnsCore(session *cicySession, shortID, workspace, text string
 				break
 			}
 			autoRetries++
-			emit(M{"type": "flush", "text": fmt.Sprintf("出错,自动重试 %d/%d…", autoRetries, cicyMaxTurnAutoRetries)})
+			emit(M{"type": "flush", "text": fmt.Sprintf("Error — auto-retrying %d/%d…", autoRetries, cicyMaxTurnAutoRetries)})
 			if !cicySleepBackoff(ctx, autoRetries-1, "") {
 				break // cancelled during backoff
 			}
@@ -2447,7 +2462,7 @@ func runCicyOwnedTurnsCore(session *cicySession, shortID, workspace, text string
 			break
 		}
 		cur = merged
-		emit(M{"type": "flush", "text": "处理排队的输入…"})
+		emit(M{"type": "flush", "text": "Processing queued input…"})
 	}
 	emit(M{"type": "done"})
 }
@@ -2636,10 +2651,10 @@ func retryCicyPane(shortID, workspace string) (started bool, reason string) {
 		cicyMessageOutcomeKind(session.messages[len(session.messages)-1]) != ""
 	session.mu.Unlock()
 	if !hasOutcome {
-		return false, "没有可重试的回合"
+		return false, "no turn to retry"
 	}
 	if !session.tryOwnTurn() {
-		return false, "正在生成中,请稍候"
+		return false, "still generating, please wait"
 	}
 	go func() {
 		retryCicyOwnedTurns(session, shortID, workspace, func(M) {})
@@ -2693,10 +2708,10 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 		final := round == maxRounds-1
 		// 用户已取消 → 立刻收尾:持久化已有内容,不再发下一轮网关请求。
 		if ctx.Err() != nil {
-			session.messages = append(session.messages, cicyOutcomeMessage("cancelled", "已取消"))
-			emit(M{"type": "error", "error": "已取消"})
+			session.messages = append(session.messages, cicyOutcomeMessage("cancelled", "cancelled"))
+			emit(M{"type": "error", "error": "cancelled"})
 			session.persistLocked(workspace)
-			cicyAttachOutcomeToSnapshot(shortID, "cancelled", "已取消")
+			cicyAttachOutcomeToSnapshot(shortID, "cancelled", "cancelled")
 			// reply.json 收尾成终态——否则起手的 working 占位 + 半截答案会被前端当 live tail
 			// 永久盖在上面,current.json 的「已停止」marker 显示不出来(与 blocked 路径同理)。
 			cicyWriteTerminalReply(shortID, session.convID)
@@ -2735,7 +2750,7 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 			// that already survived auto-retry, so it's terminal for this turn.
 			kind, detail := "error", err.Error()
 			if ctx.Err() != nil {
-				kind, detail = "cancelled", "已取消"
+				kind, detail = "cancelled", "cancelled"
 			}
 			session.messages = append(session.messages, cicyOutcomeMessage(kind, detail))
 			emit(M{"type": "error", "error": detail})
@@ -2763,9 +2778,9 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 				reason = strings.TrimSpace(cicyTextFromBlocks(resp["content"]))
 			}
 			if reason == "" {
-				reason = "命中审计拦截规则：" + rules
+				reason = "blocked by audit rule: " + rules
 				if blockedID != "" {
-					reason += "（事件 " + blockedID + "）"
+					reason += " (event " + blockedID + ")"
 				}
 			}
 			session.messages = append(session.messages, cicyOutcomeMessage("blocked", reason))
@@ -2833,7 +2848,7 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 	// Unreachable in normal flow: the final round runs tool-free, so it ends on a
 	// text answer (returns true above). This is a defensive fallback only — persist
 	// and return success so the partial work + last answer aren't dropped.
-	emit(M{"type": "flush", "text": fmt.Sprintf("已达 %d 轮工具上限,已收尾。", maxRounds)})
+	emit(M{"type": "flush", "text": fmt.Sprintf("Tool-round limit (%d) reached — wrapping up.", maxRounds)})
 	session.persistLocked(workspace)
 	return true
 }
