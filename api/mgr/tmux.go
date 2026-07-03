@@ -807,6 +807,23 @@ func mergeLangIntoConfigJSON(configJSON, lang string) string {
 	return configJSON
 }
 
+// mergeThinkingIntoConfigJSON sets {"thinking": <mode>} on a pane's config JSON
+// blob — the per-pane switch read by paneThinkingMode (composer 🧠 toggle).
+func mergeThinkingIntoConfigJSON(configJSON, mode string) string {
+	m := map[string]interface{}{}
+	if strings.TrimSpace(configJSON) != "" {
+		_ = json.Unmarshal([]byte(configJSON), &m)
+	}
+	if m == nil {
+		m = map[string]interface{}{}
+	}
+	m["thinking"] = mode
+	if b, err := json.Marshal(m); err == nil {
+		return string(b)
+	}
+	return configJSON
+}
+
 func createManagedPane(opts paneCreateOpts) (M, error) {
 	workspace := strings.TrimSpace(opts.workspace)
 	if err := ensureRuntimeDir(workspace, 0755); err != nil {
@@ -839,6 +856,15 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 		} else {
 			log.Printf("[create] seed runtime_ai into %s failed: %v", paneID, mErr)
 		}
+	}
+	// New cicy-lite agents default to extended thinking ON (per-pane
+	// agent_config.config {"thinking":"enabled"}, read by paneThinkingMode /
+	// shown by the composer 🧠 toggle). Covers every creation path — UI,
+	// /api/tmux/create, /api/panes/create (cicy-agent create) — since they all
+	// land here. The user can still flip it off per agent in the composer.
+	switch opts.agentType {
+	case "cicy", "dispatcher", "secretary":
+		proxyConfigJSON = mergeThinkingIntoConfigJSON(proxyConfigJSON, "enabled")
 	}
 	store.Exec(
 		fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, use_custom_gateway, proxy_enable, project_template, role_template, created_at, updated_at)
