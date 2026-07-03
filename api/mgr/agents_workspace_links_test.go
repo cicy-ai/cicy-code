@@ -8,8 +8,8 @@ import (
 func TestPaneWorkspaceConvertsRuntimePathToHostPath(t *testing.T) {
 	withTestStore(t)
 
-	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-1001:main.0", "CiCy", 10001, "/cicy/workers/w-1001", "", "{}", "master", "", "claude", true, true,
+	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?)",
+		"w-1001:main.0", "CiCy", "/cicy/workers/w-1001", "", "{}", "master", "", "claude", true, true,
 	); err != nil {
 		t.Fatalf("insert w-1001: %v", err)
 	}
@@ -24,13 +24,13 @@ func TestPaneWorkspaceConvertsRuntimePathToHostPath(t *testing.T) {
 func TestListBoundAgentWorkspacesConvertsRuntimePathToHostPath(t *testing.T) {
 	withTestStore(t)
 
-	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-1001:main.0", "CiCy", 10001, "/cicy/workers/w-1001", "", "{}", "master", "", "claude", true, true,
+	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?)",
+		"w-1001:main.0", "CiCy", "/cicy/workers/w-1001", "", "{}", "master", "", "claude", true, true,
 	); err != nil {
 		t.Fatalf("insert parent: %v", err)
 	}
-	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-20005:main.0", "Worker", 20005, "/cicy/workers/w-20005", "", "{}", "worker", "", "codex", true, true,
+	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?)",
+		"w-20005:main.0", "Worker", "/cicy/workers/w-20005", "", "{}", "worker", "", "codex", true, true,
 	); err != nil {
 		t.Fatalf("insert child: %v", err)
 	}

@@ -66,10 +66,9 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Pane must exist and be active. ttyd_port is no longer used at runtime —
-	// the row's presence is all we check.
-	var dbPort int
-	if err := store.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=? AND active=1", paneID).Scan(&dbPort); err != nil {
+	// Pane must exist and be active — the row's presence is all we check.
+	var one int
+	if err := store.QueryRow("SELECT 1 FROM agent_config WHERE pane_id=? AND active=1", paneID).Scan(&one); err != nil {
 		httpErr(w, 404, "pane not found or inactive")
 		return
 	}

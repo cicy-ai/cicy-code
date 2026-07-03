@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -734,19 +735,44 @@ func syncWorkerIndexToExistingAgents() {
 			return
 		}
 	}
-	var maxPort int
-	if err := store.QueryRow("SELECT COALESCE(MAX(ttyd_port), 0) FROM agent_config").Scan(&maxPort); err != nil {
+	// The worker number lives only in the agent id itself: pane_id
+	// "w-<n>:main.0" (agent id "w-<n>", shortPaneID semantics). Recover the
+	// high-water mark by parsing every row's agent id and taking the max <n>.
+	rows, err := store.Query("SELECT pane_id FROM agent_config")
+	if err != nil {
 		log.Printf("[startup] failed to sync worker_index from agent_config: %v", err)
 		return
 	}
-	if maxPort > 0 {
-		// Only ever RAISE worker_index, never lower it. setWorkerIndex(maxPort)
+	defer rows.Close()
+	maxAgentNum := 0
+	for rows.Next() {
+		var paneID string
+		if rows.Scan(&paneID) != nil {
+			continue
+		}
+		agentID := shortPaneID(strings.TrimSpace(paneID)) // "w-<n>:main.0" → "w-<n>"
+		if i := strings.Index(agentID, ":"); i >= 0 {     // tolerate other window suffixes
+			agentID = agentID[:i]
+		}
+		if !strings.HasPrefix(agentID, "w-") {
+			continue
+		}
+		n, convErr := strconv.Atoi(agentID[len("w-"):])
+		if convErr != nil || n <= 0 {
+			continue
+		}
+		if n > maxAgentNum {
+			maxAgentNum = n
+		}
+	}
+	if maxAgentNum > 0 {
+		// Only ever RAISE worker_index, never lower it. setWorkerIndex(max)
 		// clobbered it down to the max surviving pane on every restart (the >20000
 		// guard above never fires for 10xxx installs), so deleting high-numbered
 		// agents + restart pulled worker_index backward → fork re-minted freed ids
 		// (deleted ids leave a gap in agent_config that the create-time check can't
 		// see). Keeping it at the high-water mark makes fork ids strictly monotonic.
-		ensureWorkerIndexAtLeast(maxPort)
+		ensureWorkerIndexAtLeast(maxAgentNum)
 	}
 }
 
@@ -914,7 +940,6 @@ func createBuiltinWorker(w builtinWorker) {
 		agentType:        w.AgentType,
 		workspace:        builtinWorkerWorkspace(session),
 		initScript:       "",
-		port:             w.Port,
 		token:            token,
 		allowAllActions:  true,
 		replyInChinese:   false,
@@ -2294,7 +2319,7 @@ func ensureBuiltinAgents(selected []string) {
 	// what keeps a fresh runtime from booting/installing CLIs for agents the user
 	// hasn't pulled onto the team yet.
 	rows, err := store.Query(`
-		SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'),
+		SELECT pane_id, workspace, COALESCE(init_script,''), COALESCE(config,'{}'),
 		       COALESCE(agent_type,''), COALESCE(allow_all_actions,0),
 		       COALESCE(reply_in_chinese,0), COALESCE(use_custom_gateway,0),
 		       COALESCE(use_mitm,1)
@@ -2305,7 +2330,7 @@ func ensureBuiltinAgents(selected []string) {
 		    FROM pane_agents
 		    WHERE pane_id = 'w-1001' AND status='active'
 		  )
-		ORDER BY ttyd_port ASC, pane_id ASC
+		ORDER BY pane_id ASC
 	`)
 	if err != nil {
 		return
@@ -2319,9 +2344,8 @@ func ensureBuiltinAgents(selected []string) {
 		var replyInChinese bool
 		var useCustomGateway bool
 		var useMitm bool
-		var port int
-		rows.Scan(&paneID, &port, &workspace, &initScript, &configJSON, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm)
-		if paneID == "" || port == 0 {
+		rows.Scan(&paneID, &workspace, &initScript, &configJSON, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm)
+		if paneID == "" {
 			continue
 		}
 
@@ -2334,13 +2358,13 @@ func ensureBuiltinAgents(selected []string) {
 			agentType = desired.AgentType
 		}
 
-		startAgentFromConfig(paneID, port, workspace, initScript, configJSON, agentType, allowAllActions, replyInChinese, useCustomGateway, useMitm, token)
+		startAgentFromConfig(paneID, workspace, initScript, configJSON, agentType, allowAllActions, replyInChinese, useCustomGateway, useMitm, token)
 	}
 }
 
-// startAgentFromConfig brings up a single agent's tmux session, ttyd port,
-// and pane environment. Idempotent — skips work that's already done.
-func startAgentFromConfig(paneID string, port int, workspace, initScript, configJSON, agentType string,
+// startAgentFromConfig brings up a single agent's tmux session and pane
+// environment. Idempotent — skips work that's already done.
+func startAgentFromConfig(paneID string, workspace, initScript, configJSON, agentType string,
 	allowAllActions, replyInChinese, useCustomGateway, useMitm bool, token string) {
 	// Ensure tmux session
 	sess := strings.Split(paneID, ":")[0]
@@ -2378,7 +2402,7 @@ func startAgentFromConfig(paneID string, port int, workspace, initScript, config
 }
 
 // ensureAgentRunningByPaneID looks up a single agent in agent_config and brings
-// it up if its tmux session is missing or its ttyd port isn't listening.
+// it up if its tmux session is missing.
 // Used by bind flows so re-binding a previously killed sub-worker auto-revives it.
 func ensureAgentRunningByPaneID(paneID string) error {
 	if strings.TrimSpace(paneID) == "" {
@@ -2386,23 +2410,19 @@ func ensureAgentRunningByPaneID(paneID string) error {
 	}
 	var workspace, initScript, configJSON, agentType string
 	var allowAllActions, replyInChinese, useCustomGateway, useMitm bool
-	var port int
 	err := store.QueryRow(`
-		SELECT ttyd_port, COALESCE(workspace,''), COALESCE(init_script,''),
+		SELECT COALESCE(workspace,''), COALESCE(init_script,''),
 		       COALESCE(config,'{}'), COALESCE(agent_type,''),
 		       COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0),
 		       COALESCE(use_custom_gateway,0), COALESCE(use_mitm,1)
 		FROM agent_config
 		WHERE pane_id=? AND active=1
-	`, paneID).Scan(&port, &workspace, &initScript, &configJSON, &agentType,
+	`, paneID).Scan(&workspace, &initScript, &configJSON, &agentType,
 		&allowAllActions, &replyInChinese, &useCustomGateway, &useMitm)
 	if err != nil {
 		return fmt.Errorf("agent_config lookup for %s: %w", paneID, err)
 	}
-	if port == 0 {
-		return fmt.Errorf("agent %s has no ttyd_port", paneID)
-	}
-	startAgentFromConfig(paneID, port, workspace, initScript, configJSON, agentType,
+	startAgentFromConfig(paneID, workspace, initScript, configJSON, agentType,
 		allowAllActions, replyInChinese, useCustomGateway, useMitm, getFirstToken())
 	return nil
 }

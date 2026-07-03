@@ -19,14 +19,14 @@ func setupTodoTest(t *testing.T) {
 	withTempCicyRoot(t)
 	withTestStore(t)
 	if _, err := store.Exec(
-		"INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-1001:main.0", "Master", 10001, "/cicy/workers/w-1001", "", "{}", "master", "", "claude", true, true,
+		"INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?)",
+		"w-1001:main.0", "Master", "/cicy/workers/w-1001", "", "{}", "master", "", "claude", true, true,
 	); err != nil {
 		t.Fatalf("insert master: %v", err)
 	}
 	if _, err := store.Exec(
-		"INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-10025:main.0", "Worker", 10025, "/cicy/workers/w-10025", "", "{}", "worker", "", "kiro-cli", true, true,
+		"INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?)",
+		"w-10025:main.0", "Worker", "/cicy/workers/w-10025", "", "{}", "worker", "", "kiro-cli", true, true,
 	); err != nil {
 		t.Fatalf("insert worker: %v", err)
 	}

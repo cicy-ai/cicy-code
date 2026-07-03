@@ -197,8 +197,8 @@ func TestKnowledgeSpecialistPaneID(t *testing.T) {
 		t.Fatalf("no specialist provisioned → want empty")
 	}
 	if _, err := store.Exec(
-		"INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, role_template, active) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-30099:main.0", "KnowSpec", 30099, "/tmp/w-30099", "", "{}", "worker", "", "cicy", knowledgeSpecialistRoleTemplate, 1,
+		"INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, role_template, active) VALUES (?,?,?,?,?,?,?,?,?,?)",
+		"w-30099:main.0", "KnowSpec", "/tmp/w-30099", "", "{}", "worker", "", "cicy", knowledgeSpecialistRoleTemplate, 1,
 	); err != nil {
 		t.Fatalf("insert specialist: %v", err)
 	}

@@ -23,7 +23,6 @@ export interface EditPaneData {
   tg_chat_id?: string;
   url?: string;
   config?: string;
-  ttyd_preview?: string;
   role?: string;
   default_model?: string;
   runtime_ai?: {

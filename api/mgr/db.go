@@ -118,7 +118,7 @@ func (d *DB) Migrate() {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			pane_id TEXT NOT NULL UNIQUE,
 			node_url TEXT DEFAULT '',
-			title TEXT, ttyd_port INTEGER NOT NULL,
+			title TEXT,
 			workspace TEXT, init_script TEXT, proxy TEXT,
 			tg_token TEXT, tg_chat_id TEXT, tg_enable INTEGER DEFAULT 0,
 			created_at TEXT DEFAULT (datetime('now')),
@@ -126,7 +126,7 @@ func (d *DB) Migrate() {
 			ttyd_pid INTEGER, active INTEGER NOT NULL DEFAULT 1,
 			private_mode INTEGER DEFAULT 0, allowed_users TEXT,
 			proxy_enable INTEGER DEFAULT 0,
-			preview TEXT, config TEXT, ttyd_preview TEXT,
+			preview TEXT, config TEXT,
 			agent_type TEXT DEFAULT '', common_prompt TEXT,
 			role TEXT, default_model TEXT, trust_level TEXT,
 			allow_all_actions INTEGER DEFAULT 0,
@@ -271,6 +271,12 @@ func (d *DB) Migrate() {
 	d.ensureColumn("agent_config", "project_template", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_config", "role_template", "TEXT DEFAULT ''")
 	d.ensureColumn("pane_agents", "sort_order", "INTEGER DEFAULT 0")
+	// ttyd is served in-process under /ttyd/ and /agent/ — the per-pane port
+	// column (and the preview blob) are dead. Best-effort drop on existing
+	// installs; errors ignored (older SQLite without DROP COLUMN support, or
+	// the column is already gone).
+	_, _ = d.Exec("ALTER TABLE agent_config DROP COLUMN ttyd_port")
+	_, _ = d.Exec("ALTER TABLE agent_config DROP COLUMN ttyd_preview")
 	d.ensureColumn("agent_queue", "step_kind", "TEXT DEFAULT 'message'")
 	d.ensureColumn("agent_queue", "workflow_id", "INTEGER")
 	d.ensureColumn("agent_queue", "parent_id", "INTEGER")

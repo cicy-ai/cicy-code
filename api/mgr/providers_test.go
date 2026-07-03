@@ -219,8 +219,8 @@ func TestHandleProviderDeleteReferenceChecks(t *testing.T) {
 	if rec2.Code != 200 {
 		t.Fatalf("clear default status = %d body=%s", rec2.Code, rec2.Body.String())
 	}
-	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-12345:main.0", "Codex", 12345, "/tmp/w-12345", "", `{"runtime_ai":{"provider_name":"oai"}}`, "worker", "", "codex", true, true,
+	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?)",
+		"w-12345:main.0", "Codex", "/tmp/w-12345", "", `{"runtime_ai":{"provider_name":"oai"}}`, "worker", "", "codex", true, true,
 	); err != nil {
 		t.Fatalf("insert pane: %v", err)
 	}

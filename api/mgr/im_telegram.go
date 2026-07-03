@@ -634,7 +634,6 @@ type tgAgent struct {
 	PaneID           string
 	Title            string
 	AgentType        string
-	TTYDPort         int64
 	UseCustomGateway bool
 	ProxyEnable      bool
 	DefaultModel     string
@@ -646,7 +645,7 @@ func telegramQueryAgents() []tgAgent {
 	if store == nil {
 		return nil
 	}
-	rows, err := store.Query(`SELECT pane_id, COALESCE(title,''), COALESCE(agent_type,''), COALESCE(ttyd_port,0), COALESCE(use_custom_gateway,0), COALESCE(proxy_enable,0), COALESCE(default_model,'') FROM agent_config WHERE active=1 ORDER BY pane_id`)
+	rows, err := store.Query(`SELECT pane_id, COALESCE(title,''), COALESCE(agent_type,''), COALESCE(use_custom_gateway,0), COALESCE(proxy_enable,0), COALESCE(default_model,'') FROM agent_config WHERE active=1 ORDER BY pane_id`)
 	if err != nil {
 		return nil
 	}
@@ -655,7 +654,7 @@ func telegramQueryAgents() []tgAgent {
 	for rows.Next() {
 		var a tgAgent
 		var gw, proxy int
-		if rows.Scan(&a.PaneID, &a.Title, &a.AgentType, &a.TTYDPort, &gw, &proxy, &a.DefaultModel) == nil {
+		if rows.Scan(&a.PaneID, &a.Title, &a.AgentType, &gw, &proxy, &a.DefaultModel) == nil {
 			a.PaneID = shortPaneID(a.PaneID)
 			a.UseCustomGateway = gw == 1
 			a.ProxyEnable = proxy == 1

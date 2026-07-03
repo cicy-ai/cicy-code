@@ -124,8 +124,8 @@ func TestIMBindOnePerPlatformPerAgent(t *testing.T) {
 	imWorkersDisabled = true
 	t.Cleanup(func() { imWorkersDisabled = false })
 
-	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-20001:main.0", "Claude", 20001, "/tmp/w-20001", "", "{}", "worker", "", "claude", true, true,
+	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?)",
+		"w-20001:main.0", "Claude", "/tmp/w-20001", "", "{}", "worker", "", "claude", true, true,
 	); err != nil {
 		t.Fatalf("insert pane: %v", err)
 	}

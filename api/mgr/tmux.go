@@ -76,7 +76,6 @@ type paneCreateOpts struct {
 	agentType        string
 	workspace        string
 	initScript       string
-	port             int
 	token            string
 	allowAllActions  bool
 	replyInChinese   bool
@@ -469,10 +468,10 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if gid != "" {
-		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.use_mitm, 1), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, '')
+		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.use_mitm, 1), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, '')
 				FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
 	} else {
-		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.use_mitm, 1), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, '')
+		rows, err = store.Query(`SELECT t.pane_id, t.title, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.use_mitm, 1), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, '')
 				FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
 	}
 	if err != nil {
@@ -484,7 +483,6 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var paneID, title, workspace sql.NullString
 		var initScript sql.NullString
-		var port sql.NullInt64
 		var active sql.NullInt64
 		var createdAt, updatedAt sql.NullString
 		var groupID sql.NullInt64
@@ -496,7 +494,7 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 		var useMitm sql.NullBool
 		var useProxy sql.NullBool
 		var roleTemplate sql.NullString
-		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm, &useProxy, &roleTemplate)
+		rows.Scan(&paneID, &title, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm, &useProxy, &roleTemplate)
 		// Hide the dedicated audit-policy admin pane (w-6001) from the
 		// general agent listing — surfaced only inside the Audit Dashboard
 		// Assistant tab. Bypass with ?include_hidden=1.
@@ -504,7 +502,7 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		p := M{
-			"pane_id": paneID.String, "title": title.String, "ttyd_port": port.Int64,
+			"pane_id": paneID.String, "title": title.String,
 			"workspace": workspace.String, "init_script": initScript.String,
 			"active": active.Int64,
 			"role":   role.String, "default_model": defaultModel.String,
@@ -667,7 +665,6 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 		agentType:        agentType,
 		workspace:        builtinWorkerWorkspace(session),
 		initScript:       initScript,
-		port:             workerIdx,
 		token:            token,
 		allowAllActions:  allowAllActions,
 		replyInChinese:   replyInChinese,
@@ -867,9 +864,9 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 		proxyConfigJSON = mergeThinkingIntoConfigJSON(proxyConfigJSON, "enabled")
 	}
 	store.Exec(
-		fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, use_custom_gateway, proxy_enable, project_template, role_template, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
-		paneID, opts.title, opts.port, workspace, opts.initScript, proxyConfigJSON, opts.role, opts.defaultModel, opts.agentType, opts.allowAllActions, opts.replyInChinese, opts.useCustomGateway, opts.useProxy, opts.projectTemplate, opts.roleTemplate,
+		fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, use_custom_gateway, proxy_enable, project_template, role_template, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
+		paneID, opts.title, workspace, opts.initScript, proxyConfigJSON, opts.role, opts.defaultModel, opts.agentType, opts.allowAllActions, opts.replyInChinese, opts.useCustomGateway, opts.useProxy, opts.projectTemplate, opts.roleTemplate,
 	)
 	if strings.TrimSpace(opts.masterPaneID) != "" {
 		if _, err := bindAgentCore(opts.masterPaneID, opts.session, opts.inheritGuidance, opts.masterAgentType); err != nil {
@@ -884,7 +881,7 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 		ensureWorkerBoundToPrimary(opts.session)
 	}
 	// ttyd is served on demand inline (no per-pane port/server); nothing to
-	// start or wait for here. ttyd_port stays in the DB as unused metadata.
+	// start or wait for here.
 	// configOnly: skip booting the agent entirely — the row exists in the DB and
 	// is launched later (ensureBuiltinAgents for non-cicy / warm for cicy).
 	if !opts.configOnly {
@@ -913,7 +910,6 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 		"title":            opts.title,
 		"workspace":        workspace,
 		"init_script":      opts.initScript,
-		"ttyd_port":        opts.port,
 		"reply_in_chinese": opts.replyInChinese,
 		"use_proxy":        opts.useProxy,
 	}, nil
@@ -955,8 +951,7 @@ func handlePaneByID(w http.ResponseWriter, r *http.Request) {
 
 func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	paneID := normPaneID(id)
-	var title, workspace, initScript, agentType, config, commonPrompt, ttydPreview sql.NullString
-	var port sql.NullInt64
+	var title, workspace, initScript, agentType, config, commonPrompt sql.NullString
 	var active sql.NullInt64
 	var allowAllActions sql.NullBool
 	var replyInChinese sql.NullBool
@@ -969,8 +964,8 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	var role, defaultModel, trustLevel, roleTemplate sql.NullString
 	var machineID sql.NullInt64
 	var machineLabel, machineURL, runtimeKind, capabilitiesJSON sql.NullString
-	err := store.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script,
-		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level, COALESCE(t.role_template,''),
+	err := store.QueryRow(`SELECT t.pane_id, t.title, t.workspace, t.init_script,
+		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.config, t.common_prompt, gp.group_id, t.role, t.default_model, t.trust_level, COALESCE(t.role_template,''),
 		COALESCE(t.allow_all_actions, 0),
 		COALESCE(t.reply_in_chinese, 0),
 		COALESCE(t.use_custom_gateway, 0),
@@ -981,8 +976,8 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		LEFT JOIN group_windows gp ON t.pane_id=gp.win_id
 		LEFT JOIN machines m ON t.machine_id=m.id
 		WHERE t.pane_id=?`, paneID).Scan(
-		&paneID, &title, &port, &workspace, &initScript,
-		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel, &roleTemplate, &allowAllActions,
+		&paneID, &title, &workspace, &initScript,
+		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &config, &commonPrompt, &groupID, &role, &defaultModel, &trustLevel, &roleTemplate, &allowAllActions,
 		&replyInChinese, &useCustomGateway, &useMitm, &useProxy,
 		&machineID, &machineLabel, &machineURL, &runtimeKind, &capabilitiesJSON)
 	if err != nil {
@@ -993,11 +988,11 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	proxySettings := extractProxySettingsFromConfigJSON(config.String)
 	runtimeAIDefault := runtimeAIDefaultSummaryForAgentType(agentType.String)
 	resp := M{
-		"pane_id": shortPaneID(paneID), "title": title.String, "ttyd_port": port.Int64,
+		"pane_id": shortPaneID(paneID), "title": title.String,
 		"workspace": workspace.String, "init_script": initScript.String,
 		"tg_token": tgToken.String, "tg_chat_id": tgChatID.String, "tg_enable": tgEnable.Bool,
 		"active": active.Int64, "agent_type": agentType.String,
-		"config": config.String, "common_prompt": commonPrompt.String, "ttyd_preview": ttydPreview.String,
+		"config": config.String, "common_prompt": commonPrompt.String,
 		"allow_all_actions":  allowAllActions.Bool,
 		"reply_in_chinese":   replyInChinese.Bool,
 		"use_custom_gateway": useCustomGateway.Bool,
@@ -1044,7 +1039,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 //
 // Identity / provisioning fields are deliberately NOT in this map:
 //
-//	workspace, agent_type, role, init_script, ttyd_port, node_url
+//	workspace, agent_type, role, init_script, node_url
 //
 // — these are set at pane creation (or by bind/unbind, for role) and never via
 // PATCH. Putting them here is a security hole: a buggy or malicious caller
@@ -1054,7 +1049,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 // surface area here is the durable defense.
 var paneUpdateCols = map[string]bool{
 	"title": true, "config": true, "common_prompt": true,
-	"ttyd_preview": true, "default_model": true, "trust_level": true,
+	"default_model": true, "trust_level": true,
 	"tg_token": true, "tg_chat_id": true, "tg_enable": true, "active": true,
 	"allow_all_actions":  true,
 	"reply_in_chinese":   true,
@@ -1267,8 +1262,6 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 	paneID := normPaneID(id)
 	shortID := shortPaneID(paneID)
-	var port sql.NullInt64
-	store.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=?", paneID).Scan(&port)
 	affectedParents := []string{}
 	rows, err := store.Query("SELECT pane_id FROM pane_agents WHERE agent_name=?", shortID)
 	if err == nil {
@@ -1449,25 +1442,17 @@ func handleUpdateAgentCLI(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func restartPaneCore(paneID, token string) error {
-	var port sql.NullInt64
 	var workspace, initScript, title, config, agentType, defaultModel, trustLevel, projectTemplate sql.NullString
 	var allowAllActions sql.NullBool
 	var replyInChinese sql.NullBool
 	var useCustomGateway sql.NullBool
 	var useMitm sql.NullBool
 	var useProxy sql.NullBool
-	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, default_model, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0), COALESCE(use_custom_gateway, 0), COALESCE(use_mitm, 1), COALESCE(proxy_enable, 0), COALESCE(project_template, '') FROM agent_config WHERE pane_id=?", paneID).
-		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &defaultModel, &trustLevel, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm, &useProxy, &projectTemplate)
+	err := store.QueryRow("SELECT workspace, init_script, title, config, agent_type, default_model, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0), COALESCE(use_custom_gateway, 0), COALESCE(use_mitm, 1), COALESCE(proxy_enable, 0), COALESCE(project_template, '') FROM agent_config WHERE pane_id=?", paneID).
+		Scan(&workspace, &initScript, &title, &config, &agentType, &defaultModel, &trustLevel, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm, &useProxy, &projectTemplate)
 	if err != nil {
 		return fmt.Errorf("pane %s not found in db", paneID)
 	}
-
-	// Clean up any stray external ttyd from older versions (inline serving has
-	// no external process, but an upgrade-in-place may leave one listening).
-	if port.Valid {
-		exec.Command("bash", "-c", fmt.Sprintf("pkill -f 'ttyd.*-p %d '", port.Int64)).Run()
-	}
-	time.Sleep(500 * time.Millisecond)
 
 	// Kill and recreate tmux session
 	session := strings.Split(paneID, ":")[0]
@@ -5420,8 +5405,8 @@ func handleMouseStatus(w http.ResponseWriter, r *http.Request) {
 
 func handleTtydStatus(w http.ResponseWriter, r *http.Request) {
 	paneID := normPaneID(strings.TrimPrefix(r.URL.Path, "/api/tmux/ttyd/status/"))
-	var port sql.NullInt64
-	err := store.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=?", paneID).Scan(&port)
+	var one int
+	err := store.QueryRow("SELECT 1 FROM agent_config WHERE pane_id=?", paneID).Scan(&one)
 	if err != nil {
 		httpErr(w, 404, "pane_id not found")
 		return
@@ -5431,7 +5416,7 @@ func handleTtydStatus(w http.ResponseWriter, r *http.Request) {
 	if ttydActiveCount(paneID) > 0 {
 		status = "running"
 	}
-	J(w, M{"pane_id": paneID, "port": port.Int64, "status": status})
+	J(w, M{"pane_id": paneID, "status": status})
 }
 
 func handleSplitPane(w http.ResponseWriter, r *http.Request, id string) {

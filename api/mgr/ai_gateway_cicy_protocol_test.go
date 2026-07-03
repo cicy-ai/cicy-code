@@ -21,8 +21,8 @@ const cicyProtoProvidersJSON = `{
 func insertCicyAgent(t *testing.T, paneID, configJSON string) {
 	t.Helper()
 	if _, err := store.Exec(
-		"INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		paneID, "PM", 7001, "/tmp/"+paneID, "", configJSON, "worker", "", "cicy", true, true,
+		"INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?)",
+		paneID, "PM", "/tmp/"+paneID, "", configJSON, "worker", "", "cicy", true, true,
 	); err != nil {
 		t.Fatalf("insert cicy agent: %v", err)
 	}

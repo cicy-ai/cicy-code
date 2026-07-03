@@ -43,8 +43,8 @@ func TestHandleGetPaneIncludesStructuredRuntimeAI(t *testing.T) {
 	if err := os.WriteFile(cicyGlobalJSONPath, []byte(body), 0644); err != nil {
 		t.Fatalf("write global.json: %v", err)
 	}
-	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-10027:main.0", "Codex", 10027, "/tmp/w-10027", "", `{"runtime_ai":{"provider_name":"openai-default"}}`, "worker", "gpt-5.4", "codex", true, true,
+	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?)",
+		"w-10027:main.0", "Codex", "/tmp/w-10027", "", `{"runtime_ai":{"provider_name":"openai-default"}}`, "worker", "gpt-5.4", "codex", true, true,
 	); err != nil {
 		t.Fatalf("insert pane: %v", err)
 	}
@@ -101,8 +101,8 @@ func TestHandleUpdatePaneAcceptsStructuredRuntimeAI(t *testing.T) {
 	if err := os.WriteFile(cicyGlobalJSONPath, []byte(body), 0644); err != nil {
 		t.Fatalf("write global.json: %v", err)
 	}
-	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-10027:main.0", "Codex", 10027, "/tmp/w-10027", "", `{}`, "worker", "", "codex", true, true,
+	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?)",
+		"w-10027:main.0", "Codex", "/tmp/w-10027", "", `{}`, "worker", "", "codex", true, true,
 	); err != nil {
 		t.Fatalf("insert pane: %v", err)
 	}

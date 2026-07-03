@@ -3951,8 +3951,7 @@ func agentInspectorProviderRequestView(agentID string, current aiGatewayCurrentS
 
 func agentInspectorLoadPaneDetail(agentID string) M {
 	paneID := normPaneID(agentID)
-	var title, workspace, initScript, agentType, config, commonPrompt, ttydPreview sql.NullString
-	var port sql.NullInt64
+	var title, workspace, initScript, agentType, config, commonPrompt sql.NullString
 	var active sql.NullInt64
 	var allowAllActions sql.NullBool
 	var replyInChinese sql.NullBool
@@ -3962,8 +3961,8 @@ func agentInspectorLoadPaneDetail(agentID string) M {
 	var role, defaultModel, trustLevel, roleTemplate sql.NullString
 	var machineID sql.NullInt64
 	var machineLabel, machineURL, runtimeKind, capabilitiesJSON sql.NullString
-	err := store.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script,
-		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level, COALESCE(t.role_template,''),
+	err := store.QueryRow(`SELECT t.pane_id, t.title, t.workspace, t.init_script,
+		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.config, t.common_prompt, gp.group_id, t.role, t.default_model, t.trust_level, COALESCE(t.role_template,''),
 		COALESCE(t.allow_all_actions, 0),
 		COALESCE(t.reply_in_chinese, 0),
 		COALESCE(t.machine_id, 0), COALESCE(m.label, ''), COALESCE(m.url, ''), COALESCE(json_extract(m.capabilities_json, '$.runtime_kind'), ''), COALESCE(m.capabilities_json, '{}')
@@ -3971,19 +3970,19 @@ func agentInspectorLoadPaneDetail(agentID string) M {
 		LEFT JOIN group_windows gp ON t.pane_id=gp.win_id
 		LEFT JOIN machines m ON t.machine_id=m.id
 		WHERE t.pane_id=?`, paneID).Scan(
-		&paneID, &title, &port, &workspace, &initScript,
-		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel, &roleTemplate, &allowAllActions,
+		&paneID, &title, &workspace, &initScript,
+		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &config, &commonPrompt, &groupID, &role, &defaultModel, &trustLevel, &roleTemplate, &allowAllActions,
 		&replyInChinese,
 		&machineID, &machineLabel, &machineURL, &runtimeKind, &capabilitiesJSON)
 	if err != nil {
 		return nil
 	}
 	resp := M{
-		"pane_id": shortPaneID(paneID), "title": title.String, "ttyd_port": port.Int64,
+		"pane_id": shortPaneID(paneID), "title": title.String,
 		"workspace": workspace.String, "init_script": initScript.String,
 		"tg_token": tgToken.String, "tg_chat_id": tgChatID.String, "tg_enable": tgEnable.Bool,
 		"active": active.Int64, "agent_type": agentType.String,
-		"config": config.String, "common_prompt": commonPrompt.String, "ttyd_preview": ttydPreview.String,
+		"config": config.String, "common_prompt": commonPrompt.String,
 		"allow_all_actions": allowAllActions.Bool,
 		"reply_in_chinese":  replyInChinese.Bool,
 		"role":              role.String, "default_model": defaultModel.String,

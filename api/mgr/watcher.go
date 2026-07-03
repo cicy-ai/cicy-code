@@ -450,7 +450,7 @@ func ensurePipe(paneID string) bool {
 }
 
 func refreshCfgCache() {
-	rows, err := store.Query("SELECT pane_id, title, COALESCE(agent_type,''), COALESCE(role,''), COALESCE(default_model,''), COALESCE(trust_level,''), COALESCE(ttyd_port,0), COALESCE(workspace,'') FROM agent_config WHERE active=1")
+	rows, err := store.Query("SELECT pane_id, title, COALESCE(agent_type,''), COALESCE(role,''), COALESCE(default_model,''), COALESCE(trust_level,''), COALESCE(workspace,'') FROM agent_config WHERE active=1")
 	if err != nil {
 		return
 	}
@@ -458,9 +458,8 @@ func refreshCfgCache() {
 	m := map[string]map[string]string{}
 	for rows.Next() {
 		var pid, title, at, role, model, trust, ws string
-		var port int
-		rows.Scan(&pid, &title, &at, &role, &model, &trust, &port, &ws)
-		m[pid] = map[string]string{"title": title, "agent_type": at, "role": role, "default_model": model, "trust_level": trust, "ttyd_port": strconv.Itoa(port), "workspace": ws}
+		rows.Scan(&pid, &title, &at, &role, &model, &trust, &ws)
+		m[pid] = map[string]string{"title": title, "agent_type": at, "role": role, "default_model": model, "trust_level": trust, "workspace": ws}
 	}
 	watcherMu.Lock()
 	cfgCache = m

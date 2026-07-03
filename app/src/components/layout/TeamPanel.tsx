@@ -22,7 +22,6 @@ interface Agent {
   title?: string;
   agent_type?: string;
   role?: string;
-  ttyd_port?: number;
   active?: number;
   machine_id?: number;
   machine_label?: string;
