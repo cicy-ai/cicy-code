@@ -147,7 +147,7 @@ func npmGlobalInstallCmd(pkg string) string {
 	// binary ("native binary not installed"). Give big optional tarballs a long
 	// timeout + several retries so they actually land.
 	fetchOpts := `--fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=120000 --fetch-timeout=900000`
-	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && ` + rmOld + ` && npm install -g --include=optional ` + fetchOpts + ` --registry=` + registry + ` --prefix "$HOME/.npm-global" ` + pkg
+	return nodeEnvPreamble() + `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && ` + rmOld + ` && npm install -g --include=optional ` + fetchOpts + ` --registry=` + registry + ` --prefix "$HOME/.npm-global" ` + pkg
 }
 
 func preinstalledRuntimeInstallCmd(cmd string) string {

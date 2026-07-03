@@ -247,6 +247,28 @@ func resolveNpmRegistry(choice string) (url, label string) {
 // in postinstall — by default npm hides that output, so the log box sits empty for
 // the whole (slow) download and only bursts the tail at the end, which reads as
 // "not live". Foregrounding the scripts makes that download progress stream in.
+// nodeEnvPreamble makes `node`/`npm` resolvable inside the NON-INTERACTIVE LOGIN
+// shell we run installs in (`bash -lc`). Root cause it fixes: node is commonly
+// managed by nvm/fnm, whose PATH setup lives in ~/.bashrc — and a login shell
+// does NOT source ~/.bashrc (only ~/.profile / ~/.bash_profile), while a bare
+// `bash -c` doesn't source it either. So the install shell had no npm even though
+// the user's interactive terminal (which DID load ~/.bashrc) does — that's why
+// `npx cicy-code` worked but the spawned `npm install claude` reported
+// "npm: command not found" (seen on Google Cloud Shell).
+//
+// Sourcing nvm.sh alone isn't enough: without a `default` alias it loads the nvm
+// function but selects no node version, so we also fall back to the newest
+// installed nvm node bin. fnm/volta and the user's own npm-global bin are added
+// too. All best-effort; if node is already on PATH this is a harmless no-op.
+func nodeEnvPreamble() string {
+	return `export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; ` +
+		`[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1; ` +
+		`[ -d "$NVM_DIR/versions/node" ] && _cicy_nodebin="$(ls -d "$NVM_DIR"/versions/node/*/bin 2>/dev/null | tail -1)" && [ -n "$_cicy_nodebin" ] && export PATH="$_cicy_nodebin:$PATH"; ` +
+		`[ -d "$HOME/.fnm" ] && export PATH="$HOME/.fnm:$PATH" && eval "$(fnm env 2>/dev/null)" >/dev/null 2>&1; ` +
+		`[ -d "$HOME/.volta/bin" ] && export PATH="$HOME/.volta/bin:$PATH"; ` +
+		`export PATH="$HOME/.npm-global/bin:$PATH"; `
+}
+
 func npmInstallCmdRegistry(pkg, registry string) string {
 	rmOld := `rm -rf "$HOME/.npm-global/lib/node_modules/` + npmPkgDir(pkg) + `"`
 	// Fetch resilience: that large platform-native binary is an OPTIONAL
@@ -255,7 +277,8 @@ func npmInstallCmdRegistry(pkg, registry string) string {
 	// wrapper lands without its native binary ("native binary not installed").
 	// A long timeout + retries lets it actually complete.
 	fetchOpts := `--fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=120000 --fetch-timeout=900000`
-	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && ` +
+	return nodeEnvPreamble() +
+		`mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && ` +
 		rmOld + ` && npm install -g --include=optional ` + fetchOpts + ` --foreground-scripts --loglevel verbose --no-progress --registry=` + registry + ` --prefix "$HOME/.npm-global" ` + pkg
 }
 
