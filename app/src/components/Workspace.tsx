@@ -2165,7 +2165,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             >
               <span data-id="membership-language-trigger-label">{t('language', { ns: 'common' })}</span>
               <span data-id="membership-language-trigger-value" className="flex items-center gap-1.5 text-[11px] font-normal text-zinc-400">
-                <span data-id="workspace-auto-1" aria-hidden>{flagEmoji(currentLang)}</span>
+                <span data-id="workspace-language-current-flag" aria-hidden>{flagEmoji(currentLang)}</span>
                 <span data-id="membership-language-current">{languageDisplayName(currentLang)}</span>
                 <ChevronDown className={`h-3 w-3 transition-transform ${langMenuOpen ? 'rotate-180' : ''}`} />
               </span>
@@ -2192,7 +2192,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       title={code}
                     >
                       <span data-id={`membership-language-${code}-label`} className="flex min-w-0 items-center gap-1.5">
-                        <span data-id="workspace-auto-2" aria-hidden className="text-[12px] leading-none">{flagEmoji(code)}</span>
+                        <span data-id="workspace-language-option-flag" aria-hidden className="text-[12px] leading-none">{flagEmoji(code)}</span>
                         <span data-id={`membership-language-${code}-name`} className="truncate">{languageDisplayName(code)}</span>
                       </span>
                       {active ? <Check className="h-3 w-3 shrink-0 text-emerald-400" /> : null}
@@ -3176,11 +3176,11 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
         {!globalVar?.helper_mode && (
           <>
             <ResourceChip label="C" pct={cpuPct} dataId="system-resource-summary-cpu" />
-            <span data-id="workspace-auto-3" className="h-3 w-px bg-white/[0.06]" aria-hidden />
+            <span data-id="workspace-system-resource-summary-divider-cpu" className="h-3 w-px bg-white/[0.06]" aria-hidden />
           </>
         )}
         <ResourceChip label="M" pct={memPct} dataId="system-resource-summary-memory" />
-        <span data-id="workspace-auto-4" className="h-3 w-px bg-white/[0.06]" aria-hidden />
+        <span data-id="workspace-system-resource-summary-divider-memory" className="h-3 w-px bg-white/[0.06]" aria-hidden />
         <ResourceChip label="D" pct={dskPct} dataId="system-resource-summary-disk" />
         <ChevronDown
           data-id="system-resource-chevron"
@@ -3230,9 +3230,9 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
             <span data-id="system-resource-load-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">{t('systemResourceLoad')}</span>
             <div data-id="system-resource-load-values" className="flex items-baseline gap-1 font-mono text-[11px] text-zinc-400">
               <span data-id="system-resource-load-1" className="tabular-nums">{formatLoadValue(systemResources?.load_1)}</span>
-              <span data-id="workspace-auto-5" className="text-zinc-700">·</span>
+              <span data-id="workspace-system-resource-load-separator-1" className="text-zinc-700">·</span>
               <span data-id="system-resource-load-5" className="tabular-nums">{formatLoadValue(systemResources?.load_5)}</span>
-              <span data-id="workspace-auto-6" className="text-zinc-700">·</span>
+              <span data-id="workspace-system-resource-load-separator-2" className="text-zinc-700">·</span>
               <span data-id="system-resource-load-15" className="tabular-nums">{formatLoadValue(systemResources?.load_15)}</span>
               <span data-id="system-resource-load-units" className="ml-1 text-[9px] tracking-wider text-zinc-700">1m / 5m / 15m</span>
             </div>

@@ -38,32 +38,32 @@ export function WindowManager({ session, onActiveChange }: { session: string; on
   };
 
   return (
-    <div data-id="window-manager-auto-1" ref={ref} className="relative z-50">
-      <button data-id="window-manager-auto-2" onClick={() => setOpen(!open)}
+    <div data-id="window-manager-root" ref={ref} className="relative z-50">
+      <button data-id="window-manager-toggle-button" onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-white/[0.04] border border-white/[0.08] rounded-md text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] transition-colors cursor-pointer">
-        <span data-id="window-manager-auto-3" className="font-mono truncate max-w-[120px]">{active ? `${active.index}:${active.name}` : session}</span>
+        <span data-id="window-manager-active-label" className="font-mono truncate max-w-[120px]">{active ? `${active.index}:${active.name}` : session}</span>
         <ChevronDown className="w-3 h-3 shrink-0" />
       </button>
       {open && (
-        <div data-id="window-manager-auto-4" className="absolute right-0 top-full mt-1 w-64 bg-[#1c1c1e]/95 backdrop-blur-xl border border-white/[0.1] rounded-lg shadow-2xl overflow-hidden">
-          <div data-id="window-manager-auto-5" className="max-h-64 overflow-y-auto">
+        <div data-id="window-manager-dropdown" className="absolute right-0 top-full mt-1 w-64 bg-[#1c1c1e]/95 backdrop-blur-xl border border-white/[0.1] rounded-lg shadow-2xl overflow-hidden">
+          <div data-id="window-manager-window-list" className="max-h-64 overflow-y-auto">
             {wins.map(w => (
-              <div data-id="window-manager-auto-6" key={w.index} className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/[0.06] group ${w.active ? 'bg-white/[0.04]' : ''}`}>
+              <div data-id="window-manager-window-row" key={w.index} className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/[0.06] group ${w.active ? 'bg-white/[0.04]' : ''}`}>
                 {editing === w.index ? (
-                  <form data-id="window-manager-auto-7" className="flex-1 flex items-center gap-1" onSubmit={e => { e.preventDefault(); rename(w.index); }}>
-                    <input data-id="window-manager-auto-8" autoFocus value={editName} onChange={e => setEditName(e.target.value)}
+                  <form data-id="window-manager-rename-form" className="flex-1 flex items-center gap-1" onSubmit={e => { e.preventDefault(); rename(w.index); }}>
+                    <input data-id="window-manager-rename-input" autoFocus value={editName} onChange={e => setEditName(e.target.value)}
                       className="flex-1 bg-white/[0.06] border border-white/[0.1] rounded px-1.5 py-0.5 text-xs text-zinc-200 outline-none" />
-                    <button data-id="window-manager-auto-9" type="submit" className="p-0.5 text-emerald-400 hover:text-emerald-300 cursor-pointer"><Check size={12} /></button>
-                    <button data-id="window-manager-auto-10" type="button" onClick={() => setEditing(null)} className="p-0.5 text-zinc-500 hover:text-zinc-300 cursor-pointer"><X size={12} /></button>
+                    <button data-id="window-manager-rename-confirm-button" type="submit" className="p-0.5 text-emerald-400 hover:text-emerald-300 cursor-pointer"><Check size={12} /></button>
+                    <button data-id="window-manager-rename-cancel-button" type="button" onClick={() => setEditing(null)} className="p-0.5 text-zinc-500 hover:text-zinc-300 cursor-pointer"><X size={12} /></button>
                   </form>
                 ) : (
                   <>
-                    <button data-id="window-manager-auto-11" onClick={() => select(w.index)} className="flex-1 text-left truncate text-zinc-300 cursor-pointer">
-                      <span data-id="window-manager-auto-12" className="text-zinc-500 font-mono mr-1.5">{w.index}</span>{w.name}
+                    <button data-id="window-manager-window-select-button" onClick={() => select(w.index)} className="flex-1 text-left truncate text-zinc-300 cursor-pointer">
+                      <span data-id="window-manager-window-index" className="text-zinc-500 font-mono mr-1.5">{w.index}</span>{w.name}
                     </button>
-                    <div data-id="window-manager-auto-13" className="hidden group-hover:flex items-center gap-0.5">
-                      <button data-id="window-manager-auto-14" onClick={() => { setEditing(w.index); setEditName(w.name); }} className="p-1 text-zinc-500 hover:text-zinc-300 cursor-pointer"><Pencil size={11} /></button>
-                      <button data-id="window-manager-auto-15" onClick={() => del(w.index)} className="p-1 text-zinc-500 hover:text-red-400 cursor-pointer"><Trash2 size={11} /></button>
+                    <div data-id="window-manager-window-actions" className="hidden group-hover:flex items-center gap-0.5">
+                      <button data-id="window-manager-edit-button" onClick={() => { setEditing(w.index); setEditName(w.name); }} className="p-1 text-zinc-500 hover:text-zinc-300 cursor-pointer"><Pencil size={11} /></button>
+                      <button data-id="window-manager-delete-button" onClick={() => del(w.index)} className="p-1 text-zinc-500 hover:text-red-400 cursor-pointer"><Trash2 size={11} /></button>
                     </div>
                     {w.active && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/60 shrink-0" />}
                   </>
@@ -71,8 +71,8 @@ export function WindowManager({ session, onActiveChange }: { session: string; on
               </div>
             ))}
           </div>
-          <div data-id="window-manager-auto-16" className="border-t border-white/[0.08]">
-            <button data-id="window-manager-auto-17" onClick={create} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] cursor-pointer">
+          <div data-id="window-manager-footer" className="border-t border-white/[0.08]">
+            <button data-id="window-manager-create-button" onClick={create} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] cursor-pointer">
               <Plus size={12} /> {t('windowCreateButton')}
             </button>
           </div>

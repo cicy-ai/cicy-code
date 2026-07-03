@@ -167,7 +167,7 @@ function createInspectorMarkdownComponents(query: string) {
 
   return {
     a: ({ href, children, ...props }: any) => (
-      <a data-id="agent-inspector-auto-1" {...props} href={href} target="_blank" rel="noreferrer noopener">
+      <a data-id="agent-inspector-markdown-link" {...props} href={href} target="_blank" rel="noreferrer noopener">
         {highlightReactNode(children, query)}
       </a>
     ),
@@ -618,8 +618,8 @@ export default function AgentInspector({
       <div data-id="agent-inspector-shell" className="flex h-full flex-col">
         {tab === 'history' && (
           <div data-id="agent-inspector-history-search-wrap" className="relative z-20 border-b border-white/[0.06] bg-[#09090b] px-1 pb-2 pt-2">
-            <div data-id="agent-inspector-auto-2" className="relative overflow-hidden rounded-xl border border-white/[0.08] bg-[#111215] shadow-[0_10px_24px_rgba(0,0,0,0.28)]">
-              <div data-id="agent-inspector-auto-3" className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-zinc-500">
+            <div data-id="agent-inspector-history-search-box" className="relative overflow-hidden rounded-xl border border-white/[0.08] bg-[#111215] shadow-[0_10px_24px_rgba(0,0,0,0.28)]">
+              <div data-id="agent-inspector-history-search-icon" className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-zinc-500">
                 <Search className="h-4 w-4" />
               </div>
               <input
@@ -645,11 +645,11 @@ export default function AgentInspector({
             <div data-id="agent-inspector-overview" className="space-y-4">
               <div data-id="agent-inspector-overview-summary-grid" className="space-y-2 px-1">
                 <div data-id="agent-inspector-overview-card-status" className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-                  <div data-id="agent-inspector-auto-4" className="min-w-0">
+                  <div data-id="agent-inspector-overview-card-status-block" className="min-w-0">
                     <div data-id="agent-inspector-overview-card-status-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">{t('overviewStatus')}</div>
                     <div data-id="agent-inspector-overview-card-status-value" className="mt-1 text-base font-medium text-zinc-100">{formatStatusLabel(overview.status_label, t('statusIdle'))}</div>
                   </div>
-                  <div data-id="agent-inspector-auto-5" className="mt-3 min-w-0">
+                  <div data-id="agent-inspector-overview-card-model-block" className="mt-3 min-w-0">
                     <div data-id="agent-inspector-overview-card-model-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">{t('overviewModel')}</div>
                     <div data-id="agent-inspector-overview-card-model-value" className="mt-1 break-all text-sm font-medium leading-5 text-zinc-100">
                       {compactText(overview.model, t('modelUnknown'))}
@@ -662,22 +662,22 @@ export default function AgentInspector({
                   </div>
                 </div>
 
-                <div data-id="agent-inspector-auto-6" className="grid grid-cols-2 gap-2">
+                <div data-id="agent-inspector-overview-usage-grid" className="grid grid-cols-2 gap-2">
                   <div data-id="agent-inspector-overview-card-input-tokens" className="rounded-xl bg-white/[0.02] px-3 py-2.5">
                     <div data-id="agent-inspector-overview-card-input-tokens-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">In</div>
                     <div data-id="agent-inspector-overview-card-input-tokens-value" className="mt-1 text-sm font-medium text-zinc-100">{formatTokens(displayInputTokens)}</div>
                   </div>
-                  <div data-id="agent-inspector-auto-7" className="rounded-xl bg-white/[0.02] px-3 py-2.5">
-                    <div data-id="agent-inspector-auto-8" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Out</div>
-                    <div data-id="agent-inspector-auto-9" className="mt-1 text-sm font-medium text-zinc-100">{formatTokens(displayOutputTokens)}</div>
+                  <div data-id="agent-inspector-overview-card-output-tokens" className="rounded-xl bg-white/[0.02] px-3 py-2.5">
+                    <div data-id="agent-inspector-overview-card-output-tokens-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Out</div>
+                    <div data-id="agent-inspector-overview-card-output-tokens-value" className="mt-1 text-sm font-medium text-zinc-100">{formatTokens(displayOutputTokens)}</div>
                   </div>
                   <div data-id="agent-inspector-overview-card-total-tokens" className="rounded-xl bg-white/[0.02] px-3 py-2.5">
                     <div data-id="agent-inspector-overview-card-total-tokens-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Total</div>
                     <div data-id="agent-inspector-overview-card-total-tokens-value" className="mt-1 text-sm font-medium text-zinc-100">{formatTokens(displayTotalTokens)}</div>
                   </div>
-                  <div data-id="agent-inspector-auto-10" className="rounded-xl bg-white/[0.02] px-3 py-2.5">
-                    <div data-id="agent-inspector-auto-11" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Cost</div>
-                    <div data-id="agent-inspector-auto-12" className="mt-1 text-sm font-medium text-zinc-100">
+                  <div data-id="agent-inspector-overview-card-cost" className="rounded-xl bg-white/[0.02] px-3 py-2.5">
+                    <div data-id="agent-inspector-overview-card-cost-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Cost</div>
+                    <div data-id="agent-inspector-overview-card-cost-value" className="mt-1 text-sm font-medium text-zinc-100">
                       {formatCostEstimate(displayCostCredit)}
                     </div>
                   </div>
@@ -685,7 +685,7 @@ export default function AgentInspector({
               </div>
 
               <div data-id="agent-inspector-overview-notes-section" className="space-y-2 px-1">
-                <div data-id="agent-inspector-auto-13" className="flex items-center justify-between gap-3 text-[11px] text-zinc-500">
+                <div data-id="agent-inspector-overview-notes-header" className="flex items-center justify-between gap-3 text-[11px] text-zinc-500">
                   <span data-id="agent-inspector-overview-notes-label" className="uppercase tracking-[0.14em]">{t('notesLabel')}</span>
                   <span data-id="agent-inspector-overview-notes-updated" className="truncate">
                     {notesSaving ? t('notesSaving') : formatTime(data?.notes?.updated_at)}
@@ -752,7 +752,7 @@ export default function AgentInspector({
                   <div data-id="agent-inspector-history-pagination-meta" className="truncate">
                     {historyStart}-{historyEnd} / {history.total}
                   </div>
-                  <div data-id="agent-inspector-auto-14" className="flex items-center gap-1.5">
+                  <div data-id="agent-inspector-history-pagination-actions" className="flex items-center gap-1.5">
                     <button
                       type="button"
                       data-id="agent-inspector-history-pagination-prev"
@@ -799,7 +799,7 @@ export default function AgentInspector({
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" />
-                      <span data-id="agent-inspector-auto-19">{t(item.labelKey)}</span>
+                      <span data-id="agent-inspector-settings-section-label">{t(item.labelKey)}</span>
                     </button>
                   );
                 })}
@@ -1004,8 +1004,8 @@ function InspectorField({
   children: React.ReactNode;
 }) {
   return (
-    <div data-id="agent-inspector-auto-33">
-      <label data-id="agent-inspector-auto-34" className={`mb-1.5 block ${mutedLabel ? 'text-[11px] font-normal text-zinc-500' : 'text-[13px] font-medium text-zinc-300'} ${mono ? 'font-mono' : ''}`}>{label}</label>
+    <div data-id="agent-inspector-field">
+      <label data-id="agent-inspector-field-label" className={`mb-1.5 block ${mutedLabel ? 'text-[11px] font-normal text-zinc-500' : 'text-[13px] font-medium text-zinc-300'} ${mono ? 'font-mono' : ''}`}>{label}</label>
       {children}
       {desc ? <p className="mt-1 text-[11px] text-zinc-600">{desc}</p> : null}
     </div>

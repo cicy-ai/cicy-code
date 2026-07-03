@@ -104,7 +104,7 @@ function renderBrainCard(title: string, text: string, translationState: Translat
   return (
     <div data-id={cardId} className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
       <div data-id={`${cardId}-header`} className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.14em] text-zinc-500">
-        <div data-id="agent-provider-request-view-auto-1" className="flex items-center gap-2">
+        <div data-id="agent-provider-request-brain-card-heading" className="flex items-center gap-2">
           <Brain data-id={`${cardId}-icon`} className="h-3.5 w-3.5" />
           <span data-id={`${cardId}-title`}>{title}</span>
         </div>
@@ -125,7 +125,7 @@ function renderPromptItems(items: any[], translationState: TranslationState, onT
         return (
           <div key={index} data-id={cardId} className="rounded-lg bg-[#101114] px-3 py-2.5 text-[12px] leading-5 text-zinc-300">
             <div data-id={`agent-provider-request-prompt-item-header-${index}`} className="mb-1 flex items-center justify-between gap-3 text-[11px] text-zinc-500">
-              <div data-id="agent-provider-request-view-auto-2" className="flex items-center gap-2">
+              <div data-id="agent-provider-request-prompt-item-badges" className="flex items-center gap-2">
                 <span data-id={`agent-provider-request-prompt-item-index-${index}`} className="rounded bg-white/[0.05] px-1.5 py-0.5">#{typeof item?.index === 'number' ? item.index : index}</span>
                 {item?.part_type ? <span data-id={`agent-provider-request-prompt-item-type-${index}`} className="rounded bg-white/[0.05] px-1.5 py-0.5">{compactText(item.part_type, 'text')}</span> : null}
               </div>
@@ -148,7 +148,7 @@ function renderDeveloperCards(items: any[], translationState: TranslationState, 
         const text = compactText(item?.text, i18n.t('fallbackNone', { ns: 'agentProviderRequest' }));
         return (
           <div key={index} data-id={cardId} className="rounded-lg bg-[#101114] px-3 py-2.5 text-[12px] leading-5 text-zinc-300">
-            <div data-id="agent-provider-request-view-auto-3" className="mb-1 flex items-center justify-between gap-3">
+            <div data-id="agent-provider-request-developer-item-header" className="mb-1 flex items-center justify-between gap-3">
               <div data-id={`agent-provider-request-developer-item-role-${index}`} className="text-[11px] text-zinc-500">{compactText(item?.role, 'developer')}</div>
               {renderTranslateToggleButton(cardId, translationState[translationKey], () => onTranslate(translationKey, text))}
             </div>
@@ -196,7 +196,7 @@ function renderToolDetail(tool: any, summaryTranslationState: TranslationState[s
     <div data-id={`agent-provider-request-tool-detail-${safeName}`} className="space-y-3">
       <div data-id={`agent-provider-request-tool-summary-${safeName}`} className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
         <div data-id={`agent-provider-request-tool-summary-header-${safeName}`} className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.14em] text-zinc-500">
-          <div data-id="agent-provider-request-view-auto-4" className="flex items-center gap-2">
+          <div data-id="agent-provider-request-tool-summary-heading" className="flex items-center gap-2">
             <Wrench data-id={`agent-provider-request-tool-summary-icon-${safeName}`} className="h-3.5 w-3.5" />
             <span data-id={`agent-provider-request-tool-summary-title-${safeName}`}>Summary</span>
           </div>
@@ -490,7 +490,7 @@ export default function AgentProviderRequestView({
               : (promptSection?.items?.length ? renderPromptItems(promptSection.items, translationState, (key, text) => handleTranslateContent(key, text, t('errorTranslateInstructions'))) : (promptSection ? renderBrainCard(compactText(promptSection?.label, 'Instructions'), compactText(promptSection?.text, t('fallbackNone')), translationState['brain:instructions-card'], () => handleTranslateContent('brain:instructions-card', compactText(promptSection?.text, t('fallbackNone')), t('errorTranslateInstructions')), 'agent-provider-request-brain-card-instructions') : <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">{t('noInstructionsContent')}</div>))
           ) : (
             promptSection || developerSection ? (
-              <div data-id="agent-provider-request-view-auto-5" className="space-y-3">
+              <div data-id="agent-provider-request-brain-content" className="space-y-3">
                 {promptSection?.items?.length ? renderPromptItems(promptSection.items, translationState, (key, text) => handleTranslateContent(key, text, t('errorTranslateBrain'))) : (promptSection ? renderBrainCard(compactText(promptSection?.label, 'Brain'), compactText(promptSection?.text, t('fallbackNone')), translationState['brain:prompt-card'], () => handleTranslateContent('brain:prompt-card', compactText(promptSection?.text, t('fallbackNone')), t('errorTranslateBrain')), 'agent-provider-request-brain-card-prompt') : null)}
                 {developerSection?.items?.length ? renderDeveloperCards(developerSection.items, translationState, (key, text) => handleTranslateContent(key, text, t('errorTranslateDeveloper'))) : null}
               </div>
@@ -502,10 +502,10 @@ export default function AgentProviderRequestView({
       {tab === 'meta' ? (
         <div data-id="agent-provider-request-meta-panel" className="space-y-3">
           <div data-id="agent-provider-request-header" className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-            <div data-id="agent-provider-request-view-auto-6" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">{t('requestView')}</div>
-            <div data-id="agent-provider-request-view-auto-7" className="mt-1 text-sm font-medium text-zinc-100">{compactText(data.model, t('unknownModel'))}</div>
-            <div data-id="agent-provider-request-view-auto-8" className="mt-1 text-[11px] text-zinc-500">{compactText(data.provider, 'unknown')} · {compactText(data.request_kind, 'generic')}</div>
-            <div data-id="agent-provider-request-view-auto-9" className="mt-2 text-[11px] text-zinc-500">{t('updatedAt', { time: formatTime(data.updated_at) || '--' })} · Tools {typeof data.tool_count === 'number' ? data.tool_count : 0}</div>
+            <div data-id="agent-provider-request-header-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">{t('requestView')}</div>
+            <div data-id="agent-provider-request-header-model" className="mt-1 text-sm font-medium text-zinc-100">{compactText(data.model, t('unknownModel'))}</div>
+            <div data-id="agent-provider-request-header-provider" className="mt-1 text-[11px] text-zinc-500">{compactText(data.provider, 'unknown')} · {compactText(data.request_kind, 'generic')}</div>
+            <div data-id="agent-provider-request-header-updated" className="mt-2 text-[11px] text-zinc-500">{t('updatedAt', { time: formatTime(data.updated_at) || '--' })} · Tools {typeof data.tool_count === 'number' ? data.tool_count : 0}</div>
           </div>
           {metaSection?.items?.length ? renderMetaItems(metaSection.items) : <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">{t('noMeta')}</div>}
         </div>
