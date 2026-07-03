@@ -5652,18 +5652,10 @@ func handleForkPreview(w http.ResponseWriter, r *http.Request) {
 
 	// Default inherit prompt — the same text the fork would auto-receive today,
 	// pre-filled into the modal's textarea so the user can edit before sending.
-	defaultPrompt := ""
-	if normalizeAgentType(srcAgentType.String) == "cicy" {
-		if summaryContent != "" {
-			defaultPrompt = fmt.Sprintf(cicyForkInheritPrompt, short, strings.TrimSpace(summaryContent))
-		} else {
-			defaultPrompt = fmt.Sprintf("You are a fork of agent %s. No prior-conversation summary is available — wait for instructions.", short)
-		}
-	} else if summaryPath != "" {
-		defaultPrompt = fmt.Sprintf(forkInheritPrompt, short, summaryPath)
-	} else {
-		defaultPrompt = "Hello, this is a fork. Please continue the work from the source agent."
-	}
+	// Both languages ship so the modal's 中/EN toggle switches templates without
+	// a round-trip; default_prompt stays the EN text for backward compatibility.
+	promptEN, promptZH := buildForkInheritPrompts(srcAgentType.String, short, summaryPath, summaryContent)
+	defaultPrompt := promptEN
 
 	J(w, M{
 		"success":        true,
@@ -5680,6 +5672,7 @@ func handleForkPreview(w http.ResponseWriter, r *http.Request) {
 		"summary_tokens_est": summaryTokensEst,
 		"compression":        M{"ratio": ratio, "token_ratio": tokenRatio, "original_bytes": curSize, "summary_bytes": summarySize},
 		"default_prompt":     defaultPrompt,
+		"default_prompts":    M{"en": promptEN, "zh": promptZH},
 	})
 }
 
@@ -5702,6 +5695,23 @@ Strict rules:
 - Do NOT describe or comment on the file's contents.
 
 Once you have absorbed the context, silently take over exactly where the source agent left off and continue its unfinished work. If the very next step is genuinely ambiguous, stop and wait for instructions rather than asking or reporting.`
+
+// forkInheritPromptZH is the Chinese variant of forkInheritPrompt — same
+// handover semantics (absorb-as-own-memory, no summarizing, no reporting,
+// silent takeover). The fork-confirm modal lets the user pick the language;
+// the CLI default path picks it from the source's reply_in_chinese.
+// Args: %s = source agent id, %s = path to the dump.
+const forkInheritPromptZH = `你是 agent %s 的分身(fork)——它的延续,不是一个全新的助手。
+
+文件 %s 是该 agent 此前的完整对话记录,现在就是你自己的记忆和工作上下文。读取并吸收全部内容:任务目标、已做出的决定、当前进展、还剩哪些没做。
+
+严格规则:
+- 把这个文件当作你自己的历史——不是别人交给你审阅的文档。
+- 不要输出对它的总结。
+- 不要就交接一事向任何人发消息、汇报或回复——源 agent、master/监管者、用户都不要。交接保持沉默。
+- 不要描述或评论文件内容。
+
+吸收完上下文后,从源 agent 停下的确切位置静默接手,继续完成未完成的工作。如果下一步确实有歧义,停下等待指示,不要提问也不要汇报。`
 
 // cicyForkInheritPrompt seeds a HEADLESS cicy fork. Unlike the CLI path (which
 // hands the fork a file path to read), the summary CONTENT is embedded inline
@@ -5727,6 +5737,40 @@ exactly where the source agent left off and continue its unfinished work. Do
 NOT summarize the context back, do NOT report the handoff to anyone. If the
 very next step is genuinely ambiguous, briefly state that you are ready and
 wait for instructions.`
+
+// cicyForkInheritPromptZH is the Chinese variant of cicyForkInheritPrompt.
+// Args: %s = source agent id, %s = summary content.
+const cicyForkInheritPromptZH = `<fork-inherited-context>
+你是 agent %s 的分身(fork)——它的延续,不是一个全新的助手。
+
+以下是该 agent 此前对话的摘要,现在就是你自己的记忆和工作上下文:任务目标、已做出的决定、当前进展、还剩哪些没做。
+
+%s
+</fork-inherited-context>
+
+以上上下文你已吸收为自己的历史。从源 agent 停下的确切位置静默接手,继续完成未完成的工作。不要把上下文总结回来,也不要向任何人汇报交接。如果下一步确实有歧义,简短说明你已就绪,然后等待指示。`
+
+// Language-independent fallbacks for forks with no summary available.
+const forkNoSummaryPromptEN = "You are a fork of agent %s. No prior-conversation summary is available — wait for instructions."
+const forkNoSummaryPromptZH = "你是 agent %s 的分身。没有可用的历史对话摘要——请等待指示。"
+const forkGenericPromptEN = "Hello, this is a fork. Please continue the work from the source agent."
+const forkGenericPromptZH = "你好,这是一个分身。请从源 agent 停下的地方继续它的工作。"
+
+// buildForkInheritPrompts renders the inherit prompt in BOTH languages for a
+// source pane, so the fork-confirm modal can offer a 中/EN toggle. agentType
+// picks the shape (cicy = inline summary content, CLI = file path).
+func buildForkInheritPrompts(agentType, short, summaryPath, summaryContent string) (en, zh string) {
+	if normalizeAgentType(agentType) == "cicy" {
+		if s := strings.TrimSpace(summaryContent); s != "" {
+			return fmt.Sprintf(cicyForkInheritPrompt, short, s), fmt.Sprintf(cicyForkInheritPromptZH, short, s)
+		}
+		return fmt.Sprintf(forkNoSummaryPromptEN, short), fmt.Sprintf(forkNoSummaryPromptZH, short)
+	}
+	if summaryPath != "" {
+		return fmt.Sprintf(forkInheritPrompt, short, summaryPath), fmt.Sprintf(forkInheritPromptZH, short, summaryPath)
+	}
+	return forkGenericPromptEN, forkGenericPromptZH
+}
 
 // POST /api/tmux/fork { source_pane_id: "w-1001", title?: "..." }
 func handleForkPane(w http.ResponseWriter, r *http.Request) {
@@ -5899,11 +5943,13 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 					summary = strings.TrimSpace(string(b))
 				}
 			}
-			msg := fmt.Sprintf("You are a fork of agent %s. No prior-conversation summary is available — wait for instructions.", short)
-			if summary != "" {
-				msg = fmt.Sprintf(cicyForkInheritPrompt, short, summary)
+			// Default language follows the source's reply_in_chinese; the modal's
+			// user-edited prompt (already in the chosen language) wins over both.
+			msgEN, msgZH := buildForkInheritPrompts("cicy", short, "", summary)
+			msg := msgEN
+			if srcReplyChinese.Bool {
+				msg = msgZH
 			}
-			// User-edited prompt from the fork-confirm modal wins over the default.
 			if customPrompt != "" {
 				msg = customPrompt
 			}
@@ -5953,14 +5999,15 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
+			// Default language follows the source's reply_in_chinese.
+			promptEN, promptZH := buildForkInheritPrompts(srcAgentType.String, short, usedPath, "")
+			prompt := promptEN
+			if srcReplyChinese.Bool {
+				prompt = promptZH
+			}
 			if usedPath == "" {
 				log.Printf("[fork] %s no summary available — sending generic prompt", newPaneID)
-				if err := sendTextToPane(newPaneID, "Hello, this is a fork. Please continue the work from the source agent.", true); err != nil {
-					log.Printf("[fork] %s send generic prompt failed: %v", newPaneID, err)
-				}
-				return
 			}
-			prompt := fmt.Sprintf(forkInheritPrompt, short, usedPath)
 			if err := sendTextToPane(newPaneID, prompt, true); err != nil {
 				log.Printf("[fork] %s send prompt failed: %v", newPaneID, err)
 			} else {

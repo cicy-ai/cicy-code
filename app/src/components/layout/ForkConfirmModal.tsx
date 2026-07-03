@@ -33,7 +33,12 @@ interface ForkPreview {
   summary_tokens_est: number;
   compression: { ratio: number; token_ratio: number; original_bytes: number; summary_bytes: number };
   default_prompt: string;
+  // Both language templates of the inherit prompt; the 中/EN toggle swaps the
+  // textarea between them without a round-trip.
+  default_prompts?: { en: string; zh: string };
 }
+
+type PromptLang = 'en' | 'zh';
 
 interface ForkConfirmModalProps {
   sourcePaneId: string;
@@ -71,8 +76,25 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, onClose, 
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<ForkPreview | null>(null);
   const [prompt, setPrompt] = useState('');
+  // Inherit-prompt language; defaults to the UI language. Switching replaces
+  // the textarea with that language's template (it's a template picker, so
+  // manual edits are discarded on switch).
+  const [promptLang, setPromptLang] = useState<PromptLang>(() => (i18n.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en');
   const [sending, setSending] = useState(false);
   const [anchor, setAnchor] = useState<AnchorRect | null>(null);
+
+  const defaultPromptFor = useCallback((p: ForkPreview | null, lang: PromptLang): string => {
+    if (!p) return '';
+    return String(p.default_prompts?.[lang] || p.default_prompt || '');
+  }, []);
+
+  const switchLang = useCallback(
+    (lang: PromptLang) => {
+      setPromptLang(lang);
+      setPrompt(defaultPromptFor(preview, lang));
+    },
+    [preview, defaultPromptFor],
+  );
 
   // Anchor over the source agent's stack card (data-id="agent-stack-card-<id>").
   // Only the ACTIVE card is rendered (others are display:none → zero rect), so
@@ -119,8 +141,9 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, onClose, 
       .forkPreview({ source_pane_id: sourcePaneId })
       .then(({ data }) => {
         if (!alive) return;
-        setPreview(data as ForkPreview);
-        setPrompt(String((data as ForkPreview).default_prompt || ''));
+        const p = data as ForkPreview;
+        setPreview(p);
+        setPrompt(String(p.default_prompts?.[promptLang] || p.default_prompt || ''));
       })
       .catch(() => alive && setError(t('forkPreviewFailed') as string))
       .finally(() => alive && setLoading(false));
@@ -282,7 +305,26 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, onClose, 
 
             {/* prompt — grows to fill the rest of the card */}
             <div data-id="fork-confirm-prompt" className="flex min-h-0 flex-1 flex-col">
-              <label className="mb-1.5 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{t('forkPromptLabel')}</label>
+              <div className="mb-1.5 flex shrink-0 items-center justify-between">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{t('forkPromptLabel')}</label>
+                {/* 中/EN template picker — switching swaps the textarea to that
+                    language's handover template (manual edits are replaced). */}
+                <div data-id="fork-confirm-prompt-lang" className="flex items-center gap-0.5 rounded-md border border-white/[0.08] p-0.5">
+                  {(['zh', 'en'] as PromptLang[]).map((lang) => (
+                    <button
+                      key={lang}
+                      type="button"
+                      data-id={`fork-confirm-prompt-lang-${lang}`}
+                      onClick={() => switchLang(lang)}
+                      className={`rounded px-2 py-0.5 text-[11px] transition ${
+                        promptLang === lang ? 'bg-blue-500/20 text-blue-300' : 'text-zinc-500 hover:text-zinc-300'
+                      }`}
+                    >
+                      {lang === 'zh' ? '中文' : 'EN'}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <textarea
                 data-id="fork-confirm-prompt-textarea"
                 value={prompt}
