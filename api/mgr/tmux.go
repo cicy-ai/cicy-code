@@ -5682,8 +5682,9 @@ func handleForkPreview(w http.ResponseWriter, r *http.Request) {
 //
 // forkInheritPrompt is sent to a freshly-forked agent. It reframes the source's
 // conversation dump as the fork's OWN inherited memory (not a document to
-// review), so the fork resumes the work instead of summarizing it and reporting
-// back to the source agent. Args: %s = source agent id, %s = path to the dump.
+// review). The fork absorbs the context and then WAITS for the user's
+// instructions — it must not resume the work on its own initiative.
+// Args: %s = source agent id, %s = path to the dump.
 const forkInheritPrompt = `You are a fork of agent %s — its continuation, not a fresh assistant.
 
 The file %s contains that agent's COMPLETE prior conversation. It is now YOUR OWN memory and working context. Read it to absorb everything so far: the task, the decisions already made, the current state, and what still remains to be done.
@@ -5691,15 +5692,16 @@ The file %s contains that agent's COMPLETE prior conversation. It is now YOUR OW
 Strict rules:
 - Treat the file as your own history — NOT as a document handed to you to review.
 - Do NOT write or output a summary of it.
-- Do NOT message, notify, report to, or reply to anyone about it — not the source agent, not a master/supervisor, not the user. Stay silent about the handoff.
+- Do NOT message, notify, report to, or reply to anyone about the handoff — not the source agent, not a master/supervisor.
 - Do NOT describe or comment on the file's contents.
+- Do NOT continue the work or take any action on your own initiative.
 
-Once you have absorbed the context, silently take over exactly where the source agent left off and continue its unfinished work. If the very next step is genuinely ambiguous, stop and wait for instructions rather than asking or reporting.`
+Once you have absorbed the context, reply with one short line confirming you are ready, then WAIT for the user's instructions.`
 
 // forkInheritPromptZH is the Chinese variant of forkInheritPrompt — same
 // handover semantics (absorb-as-own-memory, no summarizing, no reporting,
-// silent takeover). The fork-confirm modal lets the user pick the language;
-// the CLI default path picks it from the source's reply_in_chinese.
+// then wait for the user). The fork-confirm modal lets the user pick the
+// language; the CLI default path picks it from the source's reply_in_chinese.
 // Args: %s = source agent id, %s = path to the dump.
 const forkInheritPromptZH = `你是 agent %s 的分身(fork)——它的延续,不是一个全新的助手。
 
@@ -5708,10 +5710,11 @@ const forkInheritPromptZH = `你是 agent %s 的分身(fork)——它的延续,�
 严格规则:
 - 把这个文件当作你自己的历史——不是别人交给你审阅的文档。
 - 不要输出对它的总结。
-- 不要就交接一事向任何人发消息、汇报或回复——源 agent、master/监管者、用户都不要。交接保持沉默。
+- 不要就交接一事向任何人发消息或汇报——源 agent、master/监管者都不要。
 - 不要描述或评论文件内容。
+- 不要自行继续工作或采取任何行动。
 
-吸收完上下文后,从源 agent 停下的确切位置静默接手,继续完成未完成的工作。如果下一步确实有歧义,停下等待指示,不要提问也不要汇报。`
+吸收完上下文后,只回复一行简短确认表示已就绪,然后等待用户的指示。`
 
 // cicyForkInheritPrompt seeds a HEADLESS cicy fork. Unlike the CLI path (which
 // hands the fork a file path to read), the summary CONTENT is embedded inline
@@ -5732,11 +5735,10 @@ and what still remains to be done.
 %s
 </fork-inherited-context>
 
-You have absorbed the context above as your own history. Silently take over
-exactly where the source agent left off and continue its unfinished work. Do
-NOT summarize the context back, do NOT report the handoff to anyone. If the
-very next step is genuinely ambiguous, briefly state that you are ready and
-wait for instructions.`
+You have absorbed the context above as your own history. Do NOT summarize the
+context back, do NOT report the handoff to anyone, and do NOT continue the work
+on your own initiative. Reply with one short line confirming you are ready,
+then WAIT for the user's instructions.`
 
 // cicyForkInheritPromptZH is the Chinese variant of cicyForkInheritPrompt.
 // Args: %s = source agent id, %s = summary content.
@@ -5748,13 +5750,13 @@ const cicyForkInheritPromptZH = `<fork-inherited-context>
 %s
 </fork-inherited-context>
 
-以上上下文你已吸收为自己的历史。从源 agent 停下的确切位置静默接手,继续完成未完成的工作。不要把上下文总结回来,也不要向任何人汇报交接。如果下一步确实有歧义,简短说明你已就绪,然后等待指示。`
+以上上下文你已吸收为自己的历史。不要把上下文总结回来,不要向任何人汇报交接,也不要自行继续工作。只回复一行简短确认表示已就绪,然后等待用户的指示。`
 
 // Language-independent fallbacks for forks with no summary available.
 const forkNoSummaryPromptEN = "You are a fork of agent %s. No prior-conversation summary is available — wait for instructions."
 const forkNoSummaryPromptZH = "你是 agent %s 的分身。没有可用的历史对话摘要——请等待指示。"
-const forkGenericPromptEN = "Hello, this is a fork. Please continue the work from the source agent."
-const forkGenericPromptZH = "你好,这是一个分身。请从源 agent 停下的地方继续它的工作。"
+const forkGenericPromptEN = "Hello, this is a fork of the source agent. Wait for the user's instructions."
+const forkGenericPromptZH = "你好,这是一个分身。请等待用户的指示。"
 
 // buildForkInheritPrompts renders the inherit prompt in BOTH languages for a
 // source pane, so the fork-confirm modal can offer a 中/EN toggle. agentType

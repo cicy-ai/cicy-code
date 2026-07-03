@@ -214,7 +214,10 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, onClose, 
       >
         <span className="shrink-0 text-zinc-400 group-hover:text-blue-300">{icon}</span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs font-mono text-zinc-200">{f.path ? relPath(f.path) : '—'}</span>
+          {/* Show the ABSOLUTE path — the fork prompt references these files by
+              absolute path, so the row must match what the agent will read.
+              (openFile still converts to workspace-relative for the FS API.) */}
+          <span className="block truncate text-xs font-mono text-zinc-200">{f.path || '—'}</span>
           <span className="block text-[11px] text-zinc-500">
             {fmtBytes(f.size)}
             {f.truncated ? ` · ${t('forkTruncated')}` : ''}
