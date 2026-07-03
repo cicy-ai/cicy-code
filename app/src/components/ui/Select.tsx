@@ -265,7 +265,7 @@ export default function Select({
           ref={dropdownRef}
           data-id="select-dropdown"
           role="listbox"
-          className={`fixed z-[200] flex flex-col overflow-hidden
+          className={`fixed z-[2147483647] flex flex-col overflow-hidden
             rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] backdrop-blur-md
             shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)]
             animate-select-in ${dropdownClassName}`}
@@ -418,7 +418,7 @@ export default function Select({
         <div
           ref={actionMenuRef}
           data-id="select-option-more-dropdown"
-          className="fixed z-[260] min-w-[200px] whitespace-nowrap overflow-hidden rounded-lg border border-white/[0.08] bg-[#111113]/[0.98] p-1 shadow-2xl backdrop-blur-md animate-select-in"
+          className="fixed z-[2147483647] min-w-[200px] whitespace-nowrap overflow-hidden rounded-lg border border-white/[0.08] bg-[#111113]/[0.98] p-1 shadow-2xl backdrop-blur-md animate-select-in"
           style={{ top: actionMenu.top, left: actionMenu.left }}
         >
           {actionMenuOption.actions.map((action) => (
