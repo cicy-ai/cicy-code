@@ -35,5 +35,7 @@
   "retrying": "Retrying…",
   "compacting": "Compacting…",
   "compactionMarker": "Compacted · earlier context summarized (click to view)",
-  "compactionMarkerOpen": "Compacted · hide summary"
+  "compactionMarkerOpen": "Compacted · hide summary",
+  "composerQueuedHeader": "{{n}} queued · sent automatically when the current reply finishes",
+  "composerQueueRemove": "Remove from queue"
 }

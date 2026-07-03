@@ -35,5 +35,7 @@
   "retrying": "Nouvelle tentative…",
   "compacting": "Compression…",
   "compactionMarker": "Compacté · contexte précédent résumé (cliquer pour voir)",
-  "compactionMarkerOpen": "Compacté · masquer le résumé"
+  "compactionMarkerOpen": "Compacté · masquer le résumé",
+  "composerQueuedHeader": "{{n}} en attente · envoyé automatiquement à la fin de la réponse en cours",
+  "composerQueueRemove": "Retirer de la file"
 }

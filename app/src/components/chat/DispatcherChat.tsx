@@ -126,6 +126,12 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
   // 回复进行中(busy)→ 锁发送、显示 waiting。只有 reply complete / fail 才解锁。
   // 信号来自 CurrentHistoryView 的轮询(cicy:dispatcher-busy)。
   const [busy, setBusy] = useState(false);
+  // 发送队列(学 Claude Code 的 queuedCommands,队列归前端所有):busy 期间的输入
+  // 不发后端,先堆在 prompt 上方(逐条可删),空闲时按顺序自动放行 —— 队首连续的
+  // 普通消息合并成一条发出;斜杠命令(/clear /compact)独占一轮,绝不在 busy 时执行。
+  // 停止生成只取消当前回复,队列保留(不再静默丢弃)。
+  const [queue, setQueue] = useState<{ id: number; text: string }[]>([]);
+  const queueSeqRef = useRef(1);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const composingRef = useRef(false);
@@ -313,6 +319,17 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
         .join('\n\n');
       body = (value ? value + '\n\n' : '') + md;
     }
+    // busy(正在输出/thinking)→ 消息入队,不打后端。队列渲染在 prompt 上方,
+    // 空闲后由 flush effect 自动放行。斜杠命令同样排队(必须等不 busy 才执行)。
+    if (busy) {
+      const id = queueSeqRef.current;
+      queueSeqRef.current += 1;
+      setQueue((prev) => [...prev, { id, text: body }]);
+      setText('');
+      setAttachments((prev) => { prev.forEach((a) => a.previewURL && URL.revokeObjectURL(a.previewURL)); return []; });
+      inputRef.current?.focus();
+      return;
+    }
     setSending(true);
     setBusy(true); // 立刻锁住,不等轮询事件回传
     setText('');
@@ -331,7 +348,27 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [paneId, text, sending, uploading]);
+  }, [paneId, text, sending, uploading, busy]);
+
+  // 空闲放行:busy→idle 且队列非空时,自动发出队首批次 —— 队首是斜杠命令就单独发
+  // (独占一轮);否则把队首连续的普通消息合并成一条。剩余项留队列,等下一次空闲。
+  useEffect(() => {
+    if (busy || sending || uploading || queue.length === 0) return;
+    const isSlash = (s: string) => /^\/\w+(\s|$)/.test(s.trim());
+    let batch: { id: number; text: string }[];
+    if (isSlash(queue[0].text)) {
+      batch = [queue[0]];
+    } else {
+      batch = [];
+      for (const it of queue) { if (isSlash(it.text)) break; batch.push(it); }
+    }
+    const ids = new Set(batch.map((b) => b.id));
+    setQueue((prev) => prev.filter((it) => !ids.has(it.id)));
+    void send(batch.map((b) => b.text).join('\n'));
+  }, [busy, sending, uploading, queue, send]);
+
+  // 切换 agent → 队列不跨 pane。
+  useEffect(() => { setQueue([]); }, [paneId]);
 
   // 取消生成,按 agent 形态分流:
   // - cicy 是 headless(无 tmux pane)→ /api/cicy/cancel,服务端取消正在跑的网关请求。
@@ -374,6 +411,42 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
         {dragOver ? (
           <div data-id="dispatcher-chat-drop-hint" className="pointer-events-none absolute inset-1 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-blue-500/50 bg-[#0c0d10]/80 text-sm text-blue-200">
             {t('composerDropHint')}
+          </div>
+        ) : null}
+        {/* 发送队列(Claude Code 风格):busy 期间发出的消息堆在 prompt 上方,
+            逐条可移除;当前回复完成后按顺序自动放行。 */}
+        {queue.length > 0 ? (
+          <div data-id="dispatcher-chat-queue" className="mb-2 flex w-full flex-col gap-1">
+            <div data-id="dispatcher-chat-queue-header" className="flex items-center gap-1.5 px-1 text-[11px] text-zinc-500">
+              <Loader2 className="h-3 w-3 animate-spin text-zinc-600" />
+              {t('composerQueuedHeader', { n: queue.length, defaultValue: '{{n}} 条排队中 · 当前回复完成后自动发送' })}
+            </div>
+            {queue.map((it) => {
+              const isSlashItem = /^\/\w+(\s|$)/.test(it.text.trim());
+              return (
+                <div
+                  key={it.id}
+                  data-id="dispatcher-chat-queue-item"
+                  className="group flex items-start gap-2 rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-1.5"
+                >
+                  <span
+                    data-id="dispatcher-chat-queue-item-text"
+                    className={`min-w-0 flex-1 whitespace-pre-wrap break-words text-[13px] leading-5 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden ${isSlashItem ? 'font-mono text-amber-200/80' : 'text-zinc-400'}`}
+                  >
+                    {it.text}
+                  </span>
+                  <button
+                    type="button"
+                    data-id="dispatcher-chat-queue-item-remove"
+                    onClick={() => setQueue((prev) => prev.filter((q) => q.id !== it.id))}
+                    title={t('composerQueueRemove', { defaultValue: '移出队列' })}
+                    className="mt-0.5 shrink-0 rounded-md p-0.5 text-zinc-600 opacity-0 transition-opacity hover:bg-white/[0.06] hover:text-zinc-300 group-hover:opacity-100"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         ) : null}
         {attachments.length > 0 ? (

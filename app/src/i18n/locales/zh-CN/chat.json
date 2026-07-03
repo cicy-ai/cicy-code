@@ -35,5 +35,7 @@
   "retrying": "重试中…",
   "compacting": "压缩中…",
   "compactionMarker": "已压缩 · 上文已归纳（点开看摘要）",
-  "compactionMarkerOpen": "已压缩 · 收起摘要"
+  "compactionMarkerOpen": "已压缩 · 收起摘要",
+  "composerQueuedHeader": "{{n}} 条排队中 · 当前回复完成后自动发送",
+  "composerQueueRemove": "移出队列"
 }

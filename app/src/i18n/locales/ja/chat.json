@@ -35,5 +35,7 @@
   "retrying": "再試行中…",
   "compacting": "圧縮中…",
   "compactionMarker": "圧縮済み · これまでの文脈を要約（クリックで表示）",
-  "compactionMarkerOpen": "圧縮済み · 要約を閉じる"
+  "compactionMarkerOpen": "圧縮済み · 要約を閉じる",
+  "composerQueuedHeader": "{{n}} 件キュー中 · 現在の返信が完了すると自動送信",
+  "composerQueueRemove": "キューから削除"
 }

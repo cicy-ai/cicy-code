@@ -2515,6 +2515,19 @@ func runCicySlashCommand(ctx context.Context, session *cicySession, shortID, wor
 			cmd = strings.TrimSpace(cmd[i+2:])
 		}
 	}
+	// Conversation-management commands must NEVER run mid-turn: /clear would rotate
+	// the conversation under an in-flight reply, /compact would archive/reseed
+	// snapshots the running turn still writes to. The composer queues them
+	// client-side until idle (dispatcher-chat-queue); this is the backend backstop
+	// for raw API / relayed deliveries.
+	if cmd == "/clear" || cmd == "/compact" {
+		if session.isBusy() {
+			log.Printf("[cicy %s] %s refused while a reply is in flight (queue it and retry when idle)", shortID, cmd)
+			emit(M{"type": "error", "error": cmd + " can only run when the agent is idle — it was NOT executed; resend after the current reply finishes"})
+			emit(M{"type": "done"})
+			return true
+		}
+	}
 	switch cmd {
 	case "/clear":
 		clearCicyPane(shortID, workspace)
@@ -2569,6 +2582,13 @@ func (s *cicySession) drainPending() (merged string, more bool) {
 	merged = strings.Join(s.pending, "\n")
 	s.pending = nil
 	return merged, true
+}
+
+// isBusy reports whether a turn is currently in flight for this session.
+func (s *cicySession) isBusy() bool {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	return s.busy
 }
 
 // forceRelease clears busy on an abnormal exit so the session never wedges.
