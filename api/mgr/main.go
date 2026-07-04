@@ -35,13 +35,14 @@ var (
 	previewMode   bool
 	hotMode       bool
 	cdnMode       bool
+	cftMode       bool
 	containerMode bool
 	helperMode    bool // --helper=1 → ships a single headless cicy 团队助手 on w-1001
 	desktopCmd    *exec.Cmd
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.166"
+const version = "2.3.169"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -128,6 +129,11 @@ Options:
                           containers. Only pass this when you intend to expose
                           the API, and use a strong, non-default api_token.
   --port N                API port (overrides PORT env; default: 8008)
+  --cft                   Expose this instance through a Cloudflare quick
+                          tunnel (https://<random>.trycloudflare.com). The URL
+                          is logged, written to ~/cicy-ai/db/cft.json, and
+                          reported by /api/health as tunnel_url. cloudflared is
+                          auto-downloaded to ~/cicy-ai/runtime/cloudflared/.
   --audit                 Enable audit mode
   --helper=1              Team-Helper mode: ship a single headless cicy
                           "团队助手" on w-1001 that installs Docker + cicy-code
@@ -152,6 +158,8 @@ Options:
 		case arg == "--audit":
 			auditMode = true
 			os.Setenv("AUDIT_MODE", "1")
+		case arg == "--cft":
+			cftMode = true
 		case arg == "--helper" || arg == "--helper=1":
 			helperMode = true
 			os.Setenv("CICY_HELPER", "1")
@@ -612,6 +620,11 @@ Options:
 	}
 	log.Printf("cicy-code starting on %s:%s", bind, port)
 	token := getFirstToken()
+	// --cft starts EARLY so the assigned URL can make it into the banner below
+	// (cloudflared retries the origin on its own, so listening later is fine).
+	if cftMode {
+		go startCFT(port)
+	}
 	openHost := bind
 	if openHost == "0.0.0.0" {
 		openHost = "127.0.0.1"
@@ -629,6 +642,20 @@ Options:
 	// because that's the address you click locally even when bound to 0.0.0.0.
 	log.Printf("  Listen: %s:%s%s", bind, port, map[bool]string{true: "  (--public)", false: "  (loopback)"}[publicMode])
 	log.Printf("  URL:   %s", openURL)
+	// --cft: show the public tunnel URL right under the local one. The tunnel is
+	// assigned asynchronously — wait briefly for it; if it isn't ready (e.g.
+	// first run downloads cloudflared), the [cft] logger prints it when it lands.
+	if cftMode {
+		deadline := time.Now().Add(20 * time.Second)
+		for cftCurrentURL() == "" && time.Now().Before(deadline) {
+			time.Sleep(200 * time.Millisecond)
+		}
+		if u := cftCurrentURL(); u != "" {
+			log.Printf("  Public: %s/?token=%s", u, token)
+		} else {
+			log.Printf("  Public: (cloudflare tunnel starting — watch for the [cft] URL line)")
+		}
+	}
 	log.Printf("============================================================")
 	log.Printf("")
 	go func() {
@@ -810,7 +837,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	if rows, err := listAgentsByPane("all"); err == nil {
 		agentsCount = len(rows)
 	}
-	J(w, M{
+	out := M{
 		"status":       "ok",
 		"source":       "cicy-code",
 		"version":      version,
@@ -819,7 +846,11 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 		"mem_bytes":    ms.Sys,
 		"goroutines":   runtime.NumGoroutine(),
 		"agents_count": agentsCount,
-	})
+	}
+	if u := cftCurrentURL(); u != "" {
+		out["tunnel_url"] = u
+	}
+	J(w, out)
 }
 
 func handlePing(w http.ResponseWriter, r *http.Request) {
