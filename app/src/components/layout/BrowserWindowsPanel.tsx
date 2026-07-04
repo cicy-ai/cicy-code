@@ -432,10 +432,12 @@ body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:c
 h1{font-size:18px;font-weight:600;margin:0 0 16px}
 pre{text-align:left;white-space:pre-wrap;word-break:break-word;background:#141414;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:16px 18px;color:#d4d4d8;font-size:13px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin:0 0 14px}
 button{background:rgba(255,255,255,.1);border:none;border-radius:10px;padding:10px 18px;color:#fff;font-size:14px;cursor:pointer}
-button:hover{background:rgba(255,255,255,.18)}</style></head>
+button:hover{background:rgba(255,255,255,.18)}
+.pid{display:inline-block;margin:0 0 16px;padding:4px 12px;border-radius:999px;background:rgba(139,92,246,.18);border:1px solid rgba(139,92,246,.35);color:#c4b5fd;font-size:13px;font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}</style></head>
 <body><div class="wrap">
 <div class="logo">&#10022;</div>
 <h1>${tl('bwStartHeading')}</h1>
+<div class="pid" data-id="chrome-start-profile-id">Profile #${o.accountIdx}</div>
 <pre id="cicy-prompt">${esc}</pre>
 <button id="cicy-copy" onclick="(function(b){var t=document.getElementById('cicy-prompt').textContent;function ok(){b.textContent='${copiedLabel}';setTimeout(function(){b.textContent='${copyLabel}'},1500)}function fb(){var a=document.createElement('textarea');a.value=t;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();try{document.execCommand('copy')}catch(e){}document.body.removeChild(a);ok()}if(navigator.clipboard){navigator.clipboard.writeText(t).then(ok).catch(fb)}else{fb()}})(this)">${copyLabel}</button>
 </div></body></html>`;
