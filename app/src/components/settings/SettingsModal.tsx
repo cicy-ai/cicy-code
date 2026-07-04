@@ -82,12 +82,17 @@ export default function SettingsModal({
   const [savedUrl, setSavedUrl] = useState(false);
   // Re-seed the draft whenever the modal (re)opens or the saved value changes.
   useEffect(() => { setUrlDraft(publicUrl); setSavedUrl(false); }, [publicUrl, open]);
-  const urlDirty = urlDraft.trim() !== publicUrl.trim();
+  // A trailing slash breaks the QR link building (it appends ?token=… after the
+  // path), so normalize it away — on blur (visible) and on save (persisted).
+  const normPublicUrl = (s: string) => s.trim().replace(/\/+$/, '');
+  const urlDirty = normPublicUrl(urlDraft) !== normPublicUrl(publicUrl);
   const savePublicUrl = async () => {
     setSavingUrl(true);
     setSavedUrl(false);
     try {
-      await onSavePublicUrl(urlDraft.trim());
+      const normalized = normPublicUrl(urlDraft);
+      if (normalized !== urlDraft) setUrlDraft(normalized);
+      await onSavePublicUrl(normalized);
       setSavedUrl(true);
     } finally {
       setSavingUrl(false);
@@ -336,6 +341,7 @@ export default function SettingsModal({
                             type="text"
                             value={urlDraft}
                             onChange={(e) => { setUrlDraft(e.target.value); setSavedUrl(false); }}
+                            onBlur={() => setUrlDraft((v) => normPublicUrl(v))}
                             onKeyDown={(e) => { if (e.key === 'Enter' && urlDirty && !savingUrl) void savePublicUrl(); }}
                             placeholder="https://app-xxxx.example.com"
                             spellCheck={false}
@@ -412,7 +418,7 @@ export default function SettingsModal({
                         <div className="flex items-center gap-2">
                           <div className="text-[13px] font-semibold text-zinc-100">{t('settingsEmailTitle', { defaultValue: '令牌投递邮箱' })}</div>
                           {emailCfg ? (
-                            <span data-id="settings-email-status" className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${sendReady ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-400'}`}>
+                            <span data-id="settings-email-status" className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${sendReady ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'}`}>
                               {sendReady ? t('settingsEmailReady', { defaultValue: '已配置' }) : t('settingsEmailUnset', { defaultValue: '未配置' })}
                             </span>
                           ) : null}
