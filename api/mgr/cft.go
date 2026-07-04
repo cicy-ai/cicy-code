@@ -152,6 +152,25 @@ func cftExtractTgzMember(r io.Reader, name string, w io.Writer) error {
 // in code).
 var cftURLRe = regexp.MustCompile(`https://[a-z0-9-]+\.trycloudflare\.com`)
 
+// cftKillStale kills any cloudflared quick tunnel left over from a previous
+// cicy-code run that was tunneling THIS port. When cicy-code is SIGKILLed the
+// child cloudflared is orphaned but keeps its (now useless) tunnel alive; a
+// fresh start must clear it so only one tunnel + one current URL exists. The
+// match is exact — `--url http://127.0.0.1:<port>` — so a named tunnel or an
+// unrelated cloudflared on another port is never touched.
+func cftKillStale(port string) {
+	if runtime.GOOS == "windows" {
+		return // no fine-grained match on Windows; skip rather than nuke all cloudflared
+	}
+	pattern := "cloudflared tunnel --url http://127.0.0.1:" + port
+	// pkill -f matches the pattern against the full command line; -f is a regex,
+	// but our pattern's metacharacters (., /, :) are all matched literally enough.
+	if err := exec.Command("pkill", "-f", pattern).Run(); err == nil {
+		log.Printf("[cft] killed a stale tunnel on port %s from a previous run", port)
+		time.Sleep(300 * time.Millisecond) // let the OS release the process
+	}
+}
+
 // startCFT launches + supervises the quick tunnel for the given local port.
 // Called as a goroutine right before the main listener starts; cloudflared
 // retries the origin on its own, so the small startup race is harmless.
@@ -161,6 +180,9 @@ func startCFT(port string) {
 		log.Printf("[cft] DISABLED — %v", err)
 		return
 	}
+	// Clear any orphaned tunnel to this port BEFORE starting a fresh one, so the
+	// new URL is the only live tunnel and the published address is current.
+	cftKillStale(port)
 	backoff := 2 * time.Second
 	for {
 		start := time.Now()
