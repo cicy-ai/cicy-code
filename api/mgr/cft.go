@@ -47,11 +47,14 @@ func cftRuntimeDir() string {
 	if err != nil {
 		return filepath.Join(".", "cloudflared")
 	}
-	return filepath.Join(home, "cicy-ai", "runtime", "cloudflared")
+	return filepath.Join(home, ".local", "bin")
 }
 
-// cloudflaredBinPath is where a downloaded cloudflared is cached (persisted
-// under ~/cicy-ai/runtime, which survives Cloud Shell's rootfs reset).
+// cloudflaredBinPath is where a downloaded cloudflared is cached: ~/.local/bin/
+// cloudflared. This is on PATH, so ensureCloudflared's LookPath hits it — and
+// the mac cicy-desktop cp's its bundled cloudflared to exactly this path at
+// startup, so cicy-code never needs the GitHub download. (Windows is unaffected:
+// the docker image ships cloudflared.)
 func cloudflaredBinPath() string {
 	bin := filepath.Join(cftRuntimeDir(), "cloudflared")
 	if runtime.GOOS == "windows" {
