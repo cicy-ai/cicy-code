@@ -91,7 +91,13 @@ func ensureCloudflared() (string, error) {
 	if err := os.MkdirAll(cftRuntimeDir(), 0755); err != nil {
 		return "", err
 	}
-	resp, err := http.Get(url)
+	// A bounded client — http.DefaultClient has no timeout, so a stalled GitHub
+	// fetch would hang the tunnel goroutine forever with no error. On timeout we
+	// error out; startCFT's ensureCloudflared retry loop tries again with backoff.
+	// The window covers the redirect to objects.githubusercontent.com plus the
+	// ~30MB body on a slow link.
+	client := &http.Client{Timeout: 90 * time.Second}
+	resp, err := client.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("download cloudflared: %w", err)
 	}
@@ -175,10 +181,20 @@ func cftKillStale(port string) {
 // Called as a goroutine right before the main listener starts; cloudflared
 // retries the origin on its own, so the small startup race is harmless.
 func startCFT(port string) {
-	bin, err := ensureCloudflared()
-	if err != nil {
-		log.Printf("[cft] DISABLED — %v", err)
-		return
+	// Resolve cloudflared with retry — a transient download failure (timeout /
+	// network blip) must not permanently disable the tunnel for this process.
+	var bin string
+	for prep := 2 * time.Second; ; {
+		b, err := ensureCloudflared()
+		if err == nil {
+			bin = b
+			break
+		}
+		log.Printf("[cft] cloudflared not ready: %v — retrying in %s", err, prep)
+		time.Sleep(prep)
+		if prep < time.Minute {
+			prep *= 2
+		}
 	}
 	// Clear any orphaned tunnel to this port BEFORE starting a fresh one, so the
 	// new URL is the only live tunnel and the published address is current.
