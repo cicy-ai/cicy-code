@@ -42,7 +42,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.169"
+const version = "2.3.170"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -642,19 +642,12 @@ Options:
 	// because that's the address you click locally even when bound to 0.0.0.0.
 	log.Printf("  Listen: %s:%s%s", bind, port, map[bool]string{true: "  (--public)", false: "  (loopback)"}[publicMode])
 	log.Printf("  URL:   %s", openURL)
-	// --cft: show the public tunnel URL right under the local one. The tunnel is
-	// assigned asynchronously — wait briefly for it; if it isn't ready (e.g.
-	// first run downloads cloudflared), the [cft] logger prints it when it lands.
+	// --cft: the tunnel is assigned asynchronously (and cloudflared may need a
+	// one-time download). We do NOT block the banner / listener waiting for it —
+	// the [cft] goroutine prints the public URL the moment it lands, wherever
+	// that falls in the log.
 	if cftMode {
-		deadline := time.Now().Add(20 * time.Second)
-		for cftCurrentURL() == "" && time.Now().Before(deadline) {
-			time.Sleep(200 * time.Millisecond)
-		}
-		if u := cftCurrentURL(); u != "" {
-			log.Printf("  Public: %s/?token=%s", u, token)
-		} else {
-			log.Printf("  Public: (cloudflare tunnel starting — watch for the [cft] URL line)")
-		}
+		log.Printf("  Public: (Cloudflare tunnel starting — the URL prints below when ready)")
 	}
 	log.Printf("============================================================")
 	log.Printf("")

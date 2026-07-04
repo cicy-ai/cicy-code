@@ -50,16 +50,23 @@ func cftRuntimeDir() string {
 	return filepath.Join(home, "cicy-ai", "runtime", "cloudflared")
 }
 
+// cloudflaredBinPath is where a downloaded cloudflared is cached (persisted
+// under ~/cicy-ai/runtime, which survives Cloud Shell's rootfs reset).
+func cloudflaredBinPath() string {
+	bin := filepath.Join(cftRuntimeDir(), "cloudflared")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	return bin
+}
+
 // ensureCloudflared returns a runnable cloudflared path: PATH first, then the
 // cached download, else downloads the official release binary for this OS/arch.
 func ensureCloudflared() (string, error) {
 	if p, err := exec.LookPath("cloudflared"); err == nil {
 		return p, nil
 	}
-	bin := filepath.Join(cftRuntimeDir(), "cloudflared")
-	if runtime.GOOS == "windows" {
-		bin += ".exe"
-	}
+	bin := cloudflaredBinPath()
 	if fileExistsPlain(bin) {
 		return bin, nil
 	}
