@@ -1269,6 +1269,11 @@ func cicySkillMeta(md string) (name, desc string) {
 	return
 }
 
+// cicySudoRe matches sudo in COMMAND position — start of line/script, or right
+// after a separator (; & | && || $( ` ). An argument mention like `grep sudo f`
+// stays allowed; `x && sudo y` / `echo p | sudo -S y` are caught.
+var cicySudoRe = regexp.MustCompile("(?m)(^|[;&|(`]|\\$\\()\\s*sudo\\b")
+
 // platformShellArgv builds the argv to run a single command string through the
 // host's native shell: PowerShell on Windows (cicy-code ships as a native exe
 // there, PowerShell is always present), bash elsewhere.
@@ -1307,6 +1312,13 @@ func cicyRunTool(turnCtx context.Context, selfShortID, name string, input map[st
 		command := str("command")
 		if command == "" {
 			return "error: command required"
+		}
+		// sudo in a headless agent has no tty to read the password from — it
+		// just hangs until the timeout (a real w-1001 turn sat 30+ min on
+		// `sudo pmset`, unkillable from the UI before the ctx fix). Refuse it
+		// up front so the model reroutes instead of wedging the turn.
+		if cicySudoRe.MatchString(command) {
+			return "error: sudo is not available to a headless agent (no tty for the password prompt — it would hang until timeout). Re-run without sudo, or ask the user to run the privileged step themselves."
 		}
 		timeout := 120 * time.Second
 		if v, ok := input["timeout"].(float64); ok && v > 0 {
