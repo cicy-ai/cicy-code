@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -91,6 +92,11 @@ func handleProviderBalance(w http.ResponseWriter, r *http.Request) {
 
 	var res providerBalanceResult
 	switch {
+	// CiCy cloud gateway must win over the DeepSeek check: gateway providers
+	// default to deepseek-* models, which isDeepSeekFlavored would match, and
+	// the gateway has no /user/balance — its wallet lives at /api/balance.
+	case isCicyGatewayHost(host):
+		res = cicyGatewayBalance(pc)
 	case isDeepSeekFlavored(host, pc.DefaultModel):
 		res = deepSeekBalance(pc)
 	case gemini:
@@ -154,6 +160,75 @@ func deepSeekBalance(pc *providerConfig) providerBalanceResult {
 		out.Currency = parsed.BalanceInfos[0].Currency
 		out.Total = parsed.BalanceInfos[0].TotalBalance
 	}
+	return out
+}
+
+// isCicyGatewayHost reports whether the upstream is the CiCy cloud gateway
+// (cicy-ai.com or any subdomain, e.g. gateway.cicy-ai.com).
+func isCicyGatewayHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if i := strings.Index(h, ":"); i >= 0 {
+		h = h[:i]
+	}
+	return h == "cicy-ai.com" || strings.HasSuffix(h, ".cicy-ai.com")
+}
+
+// cicyGatewayBalance queries the CiCy cloud gateway wallet (GET /api/balance,
+// authenticated by the provider's sk-cicy team key). Several provider entries
+// (defaultAnthropic / defaultOpenAi …) typically share ONE gateway + key = ONE
+// wallet, so results are cached per (base|key): opening a picker that lists
+// many models/providers hits the cloud at most once per TTL.
+var (
+	cicyBalanceMu    sync.Mutex
+	cicyBalanceCache = map[string]providerBalanceResult{}
+)
+
+func cicyGatewayBalance(pc *providerConfig) providerBalanceResult {
+	out := providerBalanceResult{Kind: "balance", Currency: "USD"}
+	base := strings.TrimRight(pc.URL, "/")
+	if u, err := url.Parse(pc.URL); err == nil && u.Host != "" {
+		base = u.Scheme + "://" + u.Host
+	}
+	ck := base + "|" + pc.APIKey
+	cicyBalanceMu.Lock()
+	if c, ok := cicyBalanceCache[ck]; ok && time.Since(time.Unix(c.CachedAt, 0)) < balanceCacheTTL {
+		cicyBalanceMu.Unlock()
+		return c
+	}
+	cicyBalanceMu.Unlock()
+
+	req, _ := http.NewRequest("GET", base+"/api/balance", nil)
+	req.Header.Set("Authorization", "Bearer "+pc.APIKey)
+	req.Header.Set("Accept", "application/json")
+	resp, err := balanceHTTPClient().Do(req)
+	if err != nil {
+		out.Error = err.Error()
+		return out
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if resp.StatusCode != 200 {
+		out.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		return out
+	}
+	var parsed struct {
+		Success    bool    `json:"success"`
+		BalanceUSD float64 `json:"balance_usd"`
+		Currency   string  `json:"currency"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil || !parsed.Success {
+		out.Error = "parse: unexpected response"
+		return out
+	}
+	out.OK = true
+	if parsed.Currency != "" {
+		out.Currency = parsed.Currency
+	}
+	out.Total = strconv.FormatFloat(parsed.BalanceUSD, 'f', 2, 64)
+	out.CachedAt = time.Now().Unix()
+	cicyBalanceMu.Lock()
+	cicyBalanceCache[ck] = out
+	cicyBalanceMu.Unlock()
 	return out
 }
 
