@@ -69,8 +69,12 @@ func liteCustomToolDefs(cfg liteConfig) []M {
 
 // runLiteCustomTool executes a declared custom tool after re-checking the gate
 // (defense in depth — the def layer already filtered, but never trust one gate)
-// and validating every param against its schema.
-func runLiteCustomTool(cfg liteConfig, selfShortID, name string, input map[string]interface{}) string {
+// and validating every param against its schema. turnCtx is the turn's
+// cancellable context: a user cancel kills the subprocess immediately.
+func runLiteCustomTool(turnCtx context.Context, cfg liteConfig, selfShortID, name string, input map[string]interface{}) string {
+	if turnCtx == nil {
+		turnCtx = context.Background()
+	}
 	// Gate #2: external profiles never run custom tools; the tool must be in
 	// this instance's resolved custom set.
 	if cfg.external {
@@ -112,10 +116,15 @@ func runLiteCustomTool(cfg liteConfig, selfShortID, name string, input map[strin
 	if timeout > liteToolMaxTimeoutSec {
 		timeout = liteToolMaxTimeoutSec
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	// Derive from the turn ctx so a user cancel kills the tool immediately
+	// (Background would let it run out its own timeout while the turn hangs).
+	ctx, cancel := context.WithTimeout(turnCtx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	// Grandchildren inheriting the output pipe would block CombinedOutput past
+	// the kill; WaitDelay forces Wait to return shortly after ctx ends.
+	cmd.WaitDelay = 5 * time.Second
 	if cfg.workspace != "" {
 		cmd.Dir = cfg.workspace
 	}
@@ -129,7 +138,10 @@ func runLiteCustomTool(cfg liteConfig, selfShortID, name string, input map[strin
 	result := truncateForLog(string(out), maxKB*1024)
 
 	exit := 0
-	if ctx.Err() == context.DeadlineExceeded {
+	if turnCtx.Err() != nil {
+		result = fmt.Sprintf("error: tool %s cancelled by user\n%s", name, result)
+		exit = -3
+	} else if ctx.Err() == context.DeadlineExceeded {
 		result = fmt.Sprintf("error: tool %s timed out after %ds\n%s", name, timeout, result)
 		exit = -2
 	} else if err != nil {

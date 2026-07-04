@@ -71,7 +71,7 @@ func TestLiteCustomToolArgvNoShellInjection(t *testing.T) {
 	}
 	// A value loaded with shell metacharacters must be passed as ONE literal arg,
 	// never interpreted (printf prints it verbatim, no command runs).
-	out := runLiteCustomTool(cfg, "w-1", "echoer", map[string]interface{}{
+	out := runLiteCustomTool(nil, cfg, "w-1", "echoer", map[string]interface{}{
 		"msg": "; rm -rf / | whoami && echo pwned $(id)",
 	})
 	if out != "; rm -rf / | whoami && echo pwned $(id)" {
@@ -88,10 +88,10 @@ func TestLiteCustomToolSchemaRejects(t *testing.T) {
 				Params: map[string]liteToolParam{"idx": {Type: "string", Pattern: `[0-9]{1,3}`, Required: true}}},
 		},
 	}
-	if out := runLiteCustomTool(cfg, "w-1", "t", map[string]interface{}{"idx": "abc"}); out == "abc" || out[:5] != "error" {
+	if out := runLiteCustomTool(nil, cfg, "w-1", "t", map[string]interface{}{"idx": "abc"}); out == "abc" || out[:5] != "error" {
 		t.Errorf("pattern violation should error, got %q", out)
 	}
-	if out := runLiteCustomTool(cfg, "w-1", "t", map[string]interface{}{}); out[:5] != "error" {
+	if out := runLiteCustomTool(nil, cfg, "w-1", "t", map[string]interface{}{}); out[:5] != "error" {
 		t.Errorf("missing required should error, got %q", out)
 	}
 }
@@ -102,7 +102,7 @@ func TestLiteCustomToolExternalRefused(t *testing.T) {
 		enabledTools: map[string]bool{"t": true},
 		customTools:  map[string]liteCustomTool{"t": {Argv: []string{"echo"}}},
 	}
-	if out := runLiteCustomTool(cfg, "w-1", "t", nil); out[:5] != "error" {
+	if out := runLiteCustomTool(nil, cfg, "w-1", "t", nil); out[:5] != "error" {
 		t.Errorf("external profile must refuse custom tools, got %q", out)
 	}
 }
@@ -112,7 +112,7 @@ func TestLiteCustomToolNotEnabledRefused(t *testing.T) {
 		enabledTools: map[string]bool{}, // not enabled
 		customTools:  map[string]liteCustomTool{"t": {Argv: []string{"echo"}}},
 	}
-	if out := runLiteCustomTool(cfg, "w-1", "t", nil); out[:5] != "error" {
+	if out := runLiteCustomTool(nil, cfg, "w-1", "t", nil); out[:5] != "error" {
 		t.Errorf("disabled tool must be refused, got %q", out)
 	}
 }

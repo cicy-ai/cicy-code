@@ -44,7 +44,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.180"
+const version = "2.3.181"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -207,10 +207,15 @@ Options:
 		}
 	}
 
-	// A named-tunnel token in the env turns on --cft too (so you can enable a
-	// stable tunnel purely via CICY_CFT_TOKEN, no flag).
-	if !cftMode && strings.TrimSpace(os.Getenv("CICY_CFT_TOKEN")) != "" {
-		cftMode = true
+	// A named-tunnel token in the env or in ~/cicy-ai/db/cft.json turns on
+	// --cft too. The file path matters operationally: a container recreated
+	// without -e CICY_CFT_TOKEN loses the env, but cft.json lives on the
+	// persisted data volume — a token written there keeps the stable tunnel
+	// alive across container/host restarts with no flags at all.
+	if !cftMode {
+		if token, _ := cftResolveTokenHost(); token != "" {
+			cftMode = true
+		}
 	}
 
 	// --cdn activates the baked-in R2 prefixes for the ttyd bundle (the App SPA

@@ -1279,14 +1279,22 @@ func platformShellArgv(command string) []string {
 	return []string{"bash", "-lc", command}
 }
 
-func cicyRunTool(selfShortID, name string, input map[string]interface{}, cfg liteConfig) string {
+// cicyRunTool executes one built-in / custom tool call. turnCtx is the TURN's
+// cancellable context — the user's 停止 press cancels it, and every subprocess
+// here derives from it so a cancel actually kills the running command instead
+// of letting it run out its own timeout while the turn hangs (that hang was
+// exactly the "点取消停不下来" bug: the shell tool used context.Background()).
+func cicyRunTool(turnCtx context.Context, selfShortID, name string, input map[string]interface{}, cfg liteConfig) string {
+	if turnCtx == nil {
+		turnCtx = context.Background()
+	}
 	enabled := cfg.enabledTools
 	if !enabled[name] {
 		return "error: tool " + name + " is not enabled for this agent"
 	}
 	// Custom tools (declared in lite-config.json) route to the guarded executor.
 	if _, isCustom := cfg.customTools[name]; isCustom {
-		return runLiteCustomTool(cfg, selfShortID, name, input)
+		return runLiteCustomTool(turnCtx, cfg, selfShortID, name, input)
 	}
 	str := func(key string) string {
 		v, _ := input[key].(string)
@@ -1307,10 +1315,17 @@ func cicyRunTool(selfShortID, name string, input map[string]interface{}, cfg lit
 				timeout = 30 * time.Minute
 			}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		// Derive from the TURN ctx (not Background): a user cancel kills the
+		// command immediately instead of the turn hanging until the command's own
+		// timeout elapses.
+		ctx, cancel := context.WithTimeout(turnCtx, timeout)
 		defer cancel()
 		argv := platformShellArgv(command)
 		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+		// bash -lc spawns grandchildren that inherit the output pipe; killing only
+		// the direct child would leave CombinedOutput blocked on the open pipe
+		// forever. WaitDelay forces Wait to return shortly after ctx ends anyway.
+		cmd.WaitDelay = 5 * time.Second
 		if cwd := str("cwd"); cwd != "" {
 			cmd.Dir = cwd
 		}
@@ -1320,6 +1335,9 @@ func cicyRunTool(selfShortID, name string, input map[string]interface{}, cfg lit
 		const maxOut = 12000
 		if len(s) > maxOut {
 			s = s[:maxOut] + "\n…(output truncated)"
+		}
+		if turnCtx.Err() != nil {
+			return "error: command cancelled by user\n" + s
 		}
 		if ctx.Err() == context.DeadlineExceeded {
 			return "error: command timed out\n" + s
@@ -2021,6 +2039,16 @@ func handleCicyCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	canceled := cancelCicyPane(shortID)
+	// No in-flight turn (e.g. the server restarted and the in-memory session is
+	// gone) but reply.json is stuck non-terminal from before — the UI shows a
+	// forever-busy turn that cancel can't reach. Treat the user's 停止 as "make
+	// it stop": finalize the stale snapshot so the UI unlocks immediately.
+	if !canceled {
+		if reply := aiGatewayLoadReplySnapshot(shortID); reply.Status != "" && !isAIGatewayReplyTerminal(reply.Status) {
+			cicyWriteTerminalReply(shortID, reply.ConversationID)
+			canceled = true
+		}
+	}
 	J(w, M{"success": true, "canceled": canceled, "pane_id": shortID})
 }
 
@@ -2847,7 +2875,15 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 				name, _ := bm["name"].(string)
 				toolID, _ := bm["id"].(string)
 				input, _ := bm["input"].(map[string]interface{})
-				result := cicyRunTool(shortID, name, input, cfg)
+				var result string
+				if ctx.Err() != nil {
+					// User cancelled mid-round: don't start further tools; still emit
+					// a tool_result for each remaining tool_use so the history keeps
+					// no orphan tool_use (which would 400 every later request).
+					result = "error: cancelled by user"
+				} else {
+					result = cicyRunTool(ctx, shortID, name, input, cfg)
+				}
 				argJSON, _ := json.Marshal(input)
 				emit(M{"type": "tool", "name": name, "arg": string(argJSON), "result": truncateForLog(result, 600)})
 				toolResults = append(toolResults, M{
