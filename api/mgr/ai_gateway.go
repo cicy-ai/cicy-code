@@ -510,6 +510,9 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 			resp.Header.Del("Content-Length")
 			resp.ContentLength = -1
 		}
+		// CiCy cloud gateway 402 (insufficient_balance): rewrite the terse upstream
+		// body into a user-facing "请充值" message so the riding agent surfaces it.
+		rewriteCicyGateway402(resp)
 		// Gemini: record per-model availability from real traffic (so the picker
 		// never has to probe + burn the tiny free quota) and rewrite raw upstream
 		// error bodies into clean Anthropic errors. No-op for non-Gemini / 2xx-body.
@@ -528,6 +531,39 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 		httpErr(w, 502, "ai_gateway_proxy_upstream_error")
 	}
 	return proxy
+}
+
+// rewriteCicyGateway402 turns the CiCy cloud gateway's 402 insufficient_balance
+// response into a clear, user-facing error telling the user to top up. Only
+// fires for cicy-ai.com upstreams; other providers' 402s pass through untouched.
+// The body is shaped Anthropic-style for /messages callers and OpenAI-style for
+// everything else, so claude-code / codex render the message verbatim.
+func rewriteCicyGateway402(resp *http.Response) {
+	if resp == nil || resp.StatusCode != http.StatusPaymentRequired || resp.Request == nil || resp.Request.URL == nil {
+		return
+	}
+	host := strings.ToLower(resp.Request.URL.Hostname())
+	if host != "cicy-ai.com" && !strings.HasSuffix(host, ".cicy-ai.com") {
+		return
+	}
+	if resp.Body != nil {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+	}
+	msg := "CiCy 云网关:团队钱包余额不足,AI 调用已暂停。请前往 https://cicy-ai.com/dash 充值后重试。 " +
+		"(CiCy gateway: insufficient balance — top up at https://cicy-ai.com/dash and retry.)"
+	var payload any
+	if strings.Contains(resp.Request.URL.Path, "/messages") {
+		payload = map[string]any{"type": "error", "error": map[string]any{"type": "payment_required", "message": msg}}
+	} else {
+		payload = map[string]any{"error": map[string]any{"message": msg, "type": "insufficient_quota", "code": "insufficient_balance"}}
+	}
+	body, _ := json.Marshal(payload)
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	resp.Header.Set("Content-Type", "application/json")
+	resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	resp.Header.Del("Content-Encoding")
 }
 
 // aiGatewayActiveProvider returns the providerConfig currently routing for this
