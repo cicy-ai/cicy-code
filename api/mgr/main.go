@@ -36,13 +36,15 @@ var (
 	hotMode       bool
 	cdnMode       bool
 	cftMode       bool
+	cftToken      string // --cft-token → run a NAMED tunnel (stable hostname) instead of a quick tunnel
+	cftName       string // --cft-name  → the public hostname to report for a named tunnel
 	containerMode bool
 	helperMode    bool // --helper=1 → ships a single headless cicy 团队助手 on w-1001
 	desktopCmd    *exec.Cmd
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.170"
+const version = "2.3.175"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -134,6 +136,18 @@ Options:
                           is logged, written to ~/cicy-ai/db/cft.json, and
                           reported by /api/health as tunnel_url. cloudflared is
                           auto-downloaded to ~/cicy-ai/runtime/cloudflared/.
+                          Note: the quick-tunnel hostname is RANDOM and changes
+                          every restart.
+  --cft-token TOKEN       Run a NAMED Cloudflare tunnel with this connector
+                          token instead of a quick tunnel — the hostname is
+                          STABLE across restarts (implies --cft). Create the
+                          tunnel + token in the Cloudflare Zero Trust dashboard
+                          and point a public hostname at http://localhost:PORT.
+                          Also readable from CICY_CFT_TOKEN or ~/cicy-ai/db/cft.json.
+  --cft-name HOST         The public hostname of the named tunnel (e.g.
+                          cloudshell.example.com) — used only to report the URL
+                          (the token doesn't reveal it). Also CICY_CFT_NAME /
+                          cft.json.
   --audit                 Enable audit mode
   --helper=1              Team-Helper mode: ship a single headless cicy
                           "团队助手" on w-1001 that installs Docker + cicy-code
@@ -160,6 +174,22 @@ Options:
 			os.Setenv("AUDIT_MODE", "1")
 		case arg == "--cft":
 			cftMode = true
+		case arg == "--cft-token":
+			if i+1 < len(cliArgs) {
+				cftToken = cliArgs[i+1]
+				i++
+			}
+			cftMode = true
+		case strings.HasPrefix(arg, "--cft-token="):
+			cftToken = strings.TrimPrefix(arg, "--cft-token=")
+			cftMode = true
+		case arg == "--cft-name":
+			if i+1 < len(cliArgs) {
+				cftName = cliArgs[i+1]
+				i++
+			}
+		case strings.HasPrefix(arg, "--cft-name="):
+			cftName = strings.TrimPrefix(arg, "--cft-name=")
 		case arg == "--helper" || arg == "--helper=1":
 			helperMode = true
 			os.Setenv("CICY_HELPER", "1")
@@ -175,6 +205,12 @@ Options:
 		case strings.HasPrefix(arg, "--port="):
 			portFlag = strings.TrimPrefix(arg, "--port=")
 		}
+	}
+
+	// A named-tunnel token in the env turns on --cft too (so you can enable a
+	// stable tunnel purely via CICY_CFT_TOKEN, no flag).
+	if !cftMode && strings.TrimSpace(os.Getenv("CICY_CFT_TOKEN")) != "" {
+		cftMode = true
 	}
 
 	// --cdn activates the baked-in R2 prefixes for the ttyd bundle (the App SPA

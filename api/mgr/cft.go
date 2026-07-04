@@ -177,10 +177,53 @@ func cftKillStale(port string) {
 	}
 }
 
-// startCFT launches + supervises the quick tunnel for the given local port.
-// Called as a goroutine right before the main listener starts; cloudflared
-// retries the origin on its own, so the small startup race is harmless.
+// cftResolveTokenName resolves the named-tunnel token + public hostname from,
+// in order: the --cft-token/--cft-name flags, the CICY_CFT_TOKEN/CICY_CFT_NAME
+// env vars, then ~/cicy-ai/db/cft.json ({"token":..,"name":..}). A token
+// selects the NAMED (stable-hostname) tunnel; empty token → quick tunnel.
+func cftResolveTokenName() (token, name string) {
+	token = strings.TrimSpace(cftToken)
+	name = strings.TrimSpace(cftName)
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("CICY_CFT_TOKEN"))
+	}
+	if name == "" {
+		name = strings.TrimSpace(os.Getenv("CICY_CFT_NAME"))
+	}
+	if token != "" && name != "" {
+		return token, name
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return token, name
+	}
+	b, err := os.ReadFile(filepath.Join(home, "cicy-ai", "db", "cft.json"))
+	if err != nil {
+		return token, name
+	}
+	var m map[string]interface{}
+	if json.Unmarshal(b, &m) != nil {
+		return token, name
+	}
+	if token == "" {
+		if s, ok := m["token"].(string); ok {
+			token = strings.TrimSpace(s)
+		}
+	}
+	if name == "" {
+		if s, ok := m["name"].(string); ok {
+			name = strings.TrimSpace(s)
+		}
+	}
+	return token, name
+}
+
+// startCFT launches + supervises the tunnel for the given local port. Called as
+// a goroutine right before the main listener starts; cloudflared retries the
+// origin on its own, so the small startup race is harmless. With a named-tunnel
+// token it runs the stable-hostname tunnel; otherwise a random quick tunnel.
 func startCFT(port string) {
+	token, name := cftResolveTokenName()
 	// Resolve cloudflared with retry — a transient download failure (timeout /
 	// network blip) must not permanently disable the tunnel for this process.
 	var bin string
@@ -196,8 +239,16 @@ func startCFT(port string) {
 			prep *= 2
 		}
 	}
-	// Clear any orphaned tunnel to this port BEFORE starting a fresh one, so the
-	// new URL is the only live tunnel and the published address is current.
+
+	if token != "" {
+		// Named tunnel: stable hostname, no stale-kill (multiple connectors to
+		// the same named tunnel are fine — Cloudflare load-balances them).
+		cftRunNamed(bin, token, name, port) // never returns
+		return
+	}
+
+	// Quick tunnel: clear any orphaned tunnel to this port BEFORE starting a
+	// fresh one, so the new (random) URL is the only live tunnel.
 	cftKillStale(port)
 	backoff := 2 * time.Second
 	for {
@@ -215,6 +266,82 @@ func startCFT(port string) {
 		log.Printf("[cft] restarting tunnel in %s (each restart gets a NEW URL)", backoff)
 		time.Sleep(backoff)
 	}
+}
+
+// cftRunNamed launches + supervises a NAMED tunnel (stable hostname). The token
+// is passed via TUNNEL_TOKEN env, NOT argv, so it never appears in `ps`. name
+// (the public hostname configured in the Cloudflare dashboard) is only used to
+// report/publish the URL — cloudflared doesn't print it and the token doesn't
+// reveal it.
+func cftRunNamed(bin, token, name, port string) {
+	url := ""
+	if name != "" {
+		h := strings.TrimPrefix(strings.TrimPrefix(name, "https://"), "http://")
+		url = "https://" + strings.TrimRight(h, "/")
+	}
+	log.Printf("[cft] named tunnel mode — hostname is STABLE across restarts (%s)", func() string {
+		if url != "" {
+			return url
+		}
+		return "hostname set in Cloudflare dashboard; pass --cft-name to display it"
+	}())
+	backoff := 2 * time.Second
+	for {
+		start := time.Now()
+		if err := cftNamedOnce(bin, token, url, port); err != nil {
+			log.Printf("[cft] named tunnel exited: %v", err)
+		}
+		cftTunnelURL.Store("")
+		if time.Since(start) > 2*time.Minute {
+			backoff = 2 * time.Second
+		} else if backoff < time.Minute {
+			backoff *= 2
+		}
+		log.Printf("[cft] reconnecting named tunnel in %s (hostname unchanged)", backoff)
+		time.Sleep(backoff)
+	}
+}
+
+func cftNamedOnce(bin, token, url, port string) error {
+	cmd := exec.Command(bin, "tunnel", "run")
+	cmd.Env = append(os.Environ(), "TUNNEL_TOKEN="+token) // keep the token out of ps
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() {
+		sc := bufio.NewScanner(pr)
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		announced := false
+		for sc.Scan() {
+			line := sc.Text()
+			low := strings.ToLower(line)
+			if strings.Contains(line, "ERR") || strings.Contains(low, "error") || strings.Contains(low, "failed") {
+				log.Printf("[cft][cloudflared] %s", line)
+			}
+			// cloudflared logs "Registered tunnel connection" once each edge
+			// connection is up — that's our "connected" signal.
+			if !announced && strings.Contains(low, "registered tunnel connection") {
+				announced = true
+				apitoken := getFirstToken()
+				if url != "" {
+					cftTunnelURL.Store(url)
+					cftWriteState(url, port)
+					log.Printf("[cft] ─────────────────────────────────────────────")
+					log.Printf("[cft] ✅ Public (named, stable): %s/?token=%s", url, apitoken)
+					log.Printf("[cft]   cicy-agent team add <name> %s %s", url, apitoken)
+					log.Printf("[cft] ─────────────────────────────────────────────")
+				} else {
+					log.Printf("[cft] ✅ named tunnel connected (hostname configured in the Cloudflare dashboard; pass --cft-name to display/publish it)")
+				}
+			}
+		}
+	}()
+	err := cmd.Wait()
+	pw.Close()
+	return err
 }
 
 func cftRunOnce(bin, port string) error {
@@ -263,6 +390,8 @@ func cftRunOnce(bin, port string) error {
 }
 
 // cftWriteState persists the current URL for tooling (~/cicy-ai/db/cft.json).
+// It MERGES into the existing file so a user-provided token/name config there
+// is preserved (not clobbered by the runtime state write).
 func cftWriteState(url, port string) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -270,10 +399,13 @@ func cftWriteState(url, port string) {
 	}
 	path := filepath.Join(home, "cicy-ai", "db", "cft.json")
 	_ = os.MkdirAll(filepath.Dir(path), 0755)
-	b, _ := json.MarshalIndent(M{
-		"url":        url,
-		"port":       port,
-		"started_at": time.Now().UTC().Format(time.RFC3339),
-	}, "", "  ")
+	m := map[string]interface{}{}
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &m) // keep existing keys (token, name, …)
+	}
+	m["url"] = url
+	m["port"] = port
+	m["started_at"] = time.Now().UTC().Format(time.RFC3339)
+	b, _ := json.MarshalIndent(m, "", "  ")
 	_ = os.WriteFile(path, append(b, '\n'), 0644)
 }
