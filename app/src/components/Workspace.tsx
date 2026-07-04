@@ -1726,42 +1726,54 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           className="absolute inset-0"
           style={{ display: cliContentTab === 'memory' ? 'block' : 'none' }}
         >
-          <AgentInspector
-            paneId={activeCliPaneId}
-            paneTitle={
-              paneDetails[activeCliPaneId]?.title
-              || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
-              || activeCliPaneId
-            }
-            open={cliContentOpen && cliContentTab === 'memory'}
-            embedded
-            requestedTab={'memory'}
-            liveStatus={chatWsLiveStatus}
-            inspectorVersion={chatWsInspectorVersion}
-            onPanePatch={applyPanePatch}
-            onClose={() => {}}
-          />
+          {/* Mount ONLY while active (#5): AgentInspector's memory tab carries
+              MemoryView + AgentDocRoleEditor (2 CodeMirror instances). Keeping it
+              mounted-but-hidden left those editors resident forever, stacking
+              .cm-editor across every tab ever opened. Unmount on switch-away —
+              the editors autosave + flush before unmount, so this is safe. */}
+          {cliContentOpen && cliContentTab === 'memory' && (
+            <AgentInspector
+              paneId={activeCliPaneId}
+              paneTitle={
+                paneDetails[activeCliPaneId]?.title
+                || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
+                || activeCliPaneId
+              }
+              open
+              embedded
+              requestedTab={'memory'}
+              liveStatus={chatWsLiveStatus}
+              inspectorVersion={chatWsInspectorVersion}
+              onPanePatch={applyPanePatch}
+              onClose={() => {}}
+            />
+          )}
         </div>
         <div
           data-id="cli-content-settings-host"
           className="absolute inset-0"
           style={{ display: cliContentTab === 'settings' ? 'block' : 'none' }}
         >
-          <AgentInspector
-            paneId={activeCliPaneId}
-            paneTitle={
-              paneDetails[activeCliPaneId]?.title
-              || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
-              || activeCliPaneId
-            }
-            open
-            embedded
-            requestedTab={'settings'}
-            liveStatus={chatWsLiveStatus}
-            inspectorVersion={chatWsInspectorVersion}
-            onPanePatch={applyPanePatch}
-            onClose={() => {}}
-          />
+          {/* Mount ONLY while active (#5): same as memory — the settings editors
+              were previously always mounted AND always open (open hardcoded true),
+              so they stayed resident in the background across every pane/tab. */}
+          {cliContentOpen && cliContentTab === 'settings' && (
+            <AgentInspector
+              paneId={activeCliPaneId}
+              paneTitle={
+                paneDetails[activeCliPaneId]?.title
+                || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
+                || activeCliPaneId
+              }
+              open
+              embedded
+              requestedTab={'settings'}
+              liveStatus={chatWsLiveStatus}
+              inspectorVersion={chatWsInspectorVersion}
+              onPanePatch={applyPanePatch}
+              onClose={() => {}}
+            />
+          )}
         </div>
       </div>
     </div>

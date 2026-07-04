@@ -37,14 +37,14 @@ var (
 	cdnMode       bool
 	cftMode       bool
 	cftToken      string // --cft-token → run a NAMED tunnel (stable hostname) instead of a quick tunnel
-	cftName       string // --cft-name  → the public hostname to report for a named tunnel
+	cftHost       string // --cft-host  → the public FQDN to report for a named tunnel (e.g. cloudshell.cicy-ai.com)
 	containerMode bool
 	helperMode    bool // --helper=1 → ships a single headless cicy 团队助手 on w-1001
 	desktopCmd    *exec.Cmd
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.175"
+const version = "2.3.177"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -144,10 +144,10 @@ Options:
                           tunnel + token in the Cloudflare Zero Trust dashboard
                           and point a public hostname at http://localhost:PORT.
                           Also readable from CICY_CFT_TOKEN or ~/cicy-ai/db/cft.json.
-  --cft-name HOST         The public hostname of the named tunnel (e.g.
-                          cloudshell.example.com) — used only to report the URL
-                          (the token doesn't reveal it). Also CICY_CFT_NAME /
-                          cft.json.
+  --cft-host FQDN         The public hostname of the named tunnel — a full domain
+                          e.g. cloudshell.cicy-ai.com — used only to report the URL
+                          (the token doesn't reveal it). Also CICY_CFT_HOST /
+                          cft.json {"host"}.
   --audit                 Enable audit mode
   --helper=1              Team-Helper mode: ship a single headless cicy
                           "团队助手" on w-1001 that installs Docker + cicy-code
@@ -183,13 +183,13 @@ Options:
 		case strings.HasPrefix(arg, "--cft-token="):
 			cftToken = strings.TrimPrefix(arg, "--cft-token=")
 			cftMode = true
-		case arg == "--cft-name":
+		case arg == "--cft-host":
 			if i+1 < len(cliArgs) {
-				cftName = cliArgs[i+1]
+				cftHost = cliArgs[i+1]
 				i++
 			}
-		case strings.HasPrefix(arg, "--cft-name="):
-			cftName = strings.TrimPrefix(arg, "--cft-name=")
+		case strings.HasPrefix(arg, "--cft-host="):
+			cftHost = strings.TrimPrefix(arg, "--cft-host=")
 		case arg == "--helper" || arg == "--helper=1":
 			helperMode = true
 			os.Setenv("CICY_HELPER", "1")

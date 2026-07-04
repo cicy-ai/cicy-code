@@ -177,45 +177,45 @@ func cftKillStale(port string) {
 	}
 }
 
-// cftResolveTokenName resolves the named-tunnel token + public hostname from,
-// in order: the --cft-token/--cft-name flags, the CICY_CFT_TOKEN/CICY_CFT_NAME
-// env vars, then ~/cicy-ai/db/cft.json ({"token":..,"name":..}). A token
+// cftResolveTokenHost resolves the named-tunnel token + public hostname from,
+// in order: the --cft-token/--cft-host flags, the CICY_CFT_TOKEN/CICY_CFT_HOST
+// env vars, then ~/cicy-ai/db/cft.json ({"token":..,"host":..}). A token
 // selects the NAMED (stable-hostname) tunnel; empty token → quick tunnel.
-func cftResolveTokenName() (token, name string) {
+func cftResolveTokenHost() (token, host string) {
 	token = strings.TrimSpace(cftToken)
-	name = strings.TrimSpace(cftName)
+	host = strings.TrimSpace(cftHost)
 	if token == "" {
 		token = strings.TrimSpace(os.Getenv("CICY_CFT_TOKEN"))
 	}
-	if name == "" {
-		name = strings.TrimSpace(os.Getenv("CICY_CFT_NAME"))
+	if host == "" {
+		host = strings.TrimSpace(os.Getenv("CICY_CFT_HOST"))
 	}
-	if token != "" && name != "" {
-		return token, name
+	if token != "" && host != "" {
+		return token, host
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return token, name
+		return token, host
 	}
 	b, err := os.ReadFile(filepath.Join(home, "cicy-ai", "db", "cft.json"))
 	if err != nil {
-		return token, name
+		return token, host
 	}
 	var m map[string]interface{}
 	if json.Unmarshal(b, &m) != nil {
-		return token, name
+		return token, host
 	}
 	if token == "" {
 		if s, ok := m["token"].(string); ok {
 			token = strings.TrimSpace(s)
 		}
 	}
-	if name == "" {
-		if s, ok := m["name"].(string); ok {
-			name = strings.TrimSpace(s)
+	if host == "" {
+		if s, ok := m["host"].(string); ok {
+			host = strings.TrimSpace(s)
 		}
 	}
-	return token, name
+	return token, host
 }
 
 // startCFT launches + supervises the tunnel for the given local port. Called as
@@ -223,7 +223,7 @@ func cftResolveTokenName() (token, name string) {
 // origin on its own, so the small startup race is harmless. With a named-tunnel
 // token it runs the stable-hostname tunnel; otherwise a random quick tunnel.
 func startCFT(port string) {
-	token, name := cftResolveTokenName()
+	token, host := cftResolveTokenHost()
 	// Resolve cloudflared with retry — a transient download failure (timeout /
 	// network blip) must not permanently disable the tunnel for this process.
 	var bin string
@@ -243,7 +243,7 @@ func startCFT(port string) {
 	if token != "" {
 		// Named tunnel: stable hostname, no stale-kill (multiple connectors to
 		// the same named tunnel are fine — Cloudflare load-balances them).
-		cftRunNamed(bin, token, name, port) // never returns
+		cftRunNamed(bin, token, host, port) // never returns
 		return
 	}
 
@@ -269,21 +269,21 @@ func startCFT(port string) {
 }
 
 // cftRunNamed launches + supervises a NAMED tunnel (stable hostname). The token
-// is passed via TUNNEL_TOKEN env, NOT argv, so it never appears in `ps`. name
-// (the public hostname configured in the Cloudflare dashboard) is only used to
+// is passed via TUNNEL_TOKEN env, NOT argv, so it never appears in `ps`. host
+// (the public FQDN configured in the Cloudflare dashboard) is only used to
 // report/publish the URL — cloudflared doesn't print it and the token doesn't
 // reveal it.
-func cftRunNamed(bin, token, name, port string) {
+func cftRunNamed(bin, token, host, port string) {
 	url := ""
-	if name != "" {
-		h := strings.TrimPrefix(strings.TrimPrefix(name, "https://"), "http://")
+	if host != "" {
+		h := strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
 		url = "https://" + strings.TrimRight(h, "/")
 	}
 	log.Printf("[cft] named tunnel mode — hostname is STABLE across restarts (%s)", func() string {
 		if url != "" {
 			return url
 		}
-		return "hostname set in Cloudflare dashboard; pass --cft-name to display it"
+		return "hostname set in Cloudflare dashboard; pass --cft-host to display it"
 	}())
 	backoff := 2 * time.Second
 	for {
@@ -334,7 +334,7 @@ func cftNamedOnce(bin, token, url, port string) error {
 					log.Printf("[cft]   cicy-agent team add <name> %s %s", url, apitoken)
 					log.Printf("[cft] ─────────────────────────────────────────────")
 				} else {
-					log.Printf("[cft] ✅ named tunnel connected (hostname configured in the Cloudflare dashboard; pass --cft-name to display/publish it)")
+					log.Printf("[cft] ✅ named tunnel connected (hostname configured in the Cloudflare dashboard; pass --cft-host to display/publish it)")
 				}
 			}
 		}

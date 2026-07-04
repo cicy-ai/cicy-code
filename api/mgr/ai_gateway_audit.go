@@ -1564,6 +1564,34 @@ func aiGatewayNormPrompt(s string) string {
 	return b.String()
 }
 
+// aiGatewayTranscriptTypedRow is a minimal projection of a transcript JSONL row.
+// Only the three fields the typed-set needs are decoded; Message.Content stays a
+// RawMessage (no deep parse) and is only decoded for the few rows that actually
+// qualify. This replaces the old map[string]interface{} decode of EVERY line —
+// which dominated backend allocation (objectInterface/unquote, ~47% of total).
+type aiGatewayTranscriptTypedRow struct {
+	Type         string `json:"type"`
+	PromptSource string `json:"promptSource"`
+	Message      struct {
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+}
+
+// aiGatewayTypedSetEntry caches, per conversation id, the typed-prompt set built
+// so far plus the byte offset consumed. lastOffset marks the end of the last
+// NEWLINE-terminated line processed, so a trailing partial write (a turn mid-
+// flush) is re-read next time rather than skipped.
+type aiGatewayTypedSetEntry struct {
+	path       string
+	lastOffset int64
+	set        map[string]bool
+}
+
+var (
+	aiGatewayTypedSetMu    sync.Mutex
+	aiGatewayTypedSetCache = map[string]*aiGatewayTypedSetEntry{}
+)
+
 // aiGatewayTranscriptTypedSet reads the Claude Code session transcript for a
 // conversation and returns the set of NORMALIZED prompts the human actually
 // entered — every JSONL row with type=user and promptSource ∈ {typed, queued}.
@@ -1572,6 +1600,15 @@ func aiGatewayNormPrompt(s string) string {
 // continuations, recap wakeups, inter-agent bells) ever carries that label.
 // Returns nil when there is no transcript (non-Claude backends) → caller falls
 // back to the regex-filtered current.json path.
+//
+// The transcript is append-only and grows to MB over a long session, and this
+// runs once PER TURN — a full re-parse each time is O(N) per turn = O(N²) total
+// (pprof: 73-84% of backend allocation). So results are cached per cid with an
+// incremental byte offset: each call stat()s the file and, when the path is
+// unchanged and it only grew, seeks to lastOffset and scans ONLY the new lines,
+// merging into the cached set. A shrink / missing file / path change (e.g.
+// /clear mints a new cid → new file → cache miss) forces a full rebuild. /compact
+// only appends, so the cache stays valid across it.
 func aiGatewayTranscriptTypedSet(conversationID string) map[string]bool {
 	cid := strings.TrimSpace(conversationID)
 	if cid == "" {
@@ -1585,37 +1622,82 @@ func aiGatewayTranscriptTypedSet(conversationID string) map[string]bool {
 	if len(matches) == 0 {
 		return nil
 	}
-	f, err := os.Open(matches[0])
+	path := matches[0]
+	fi, err := os.Stat(path)
 	if err != nil {
 		return nil
 	}
+	size := fi.Size()
+
+	aiGatewayTypedSetMu.Lock()
+	defer aiGatewayTypedSetMu.Unlock()
+
+	entry := aiGatewayTypedSetCache[cid]
+	// Incremental only when the same file grew (or is unchanged); anything else
+	// (first sight, path changed, file shrank/rotated) → full rebuild from 0.
+	if entry == nil || entry.path != path || size < entry.lastOffset {
+		entry = &aiGatewayTypedSetEntry{path: path, set: map[string]bool{}}
+		aiGatewayTypedSetCache[cid] = entry
+	}
+	if size == entry.lastOffset {
+		return aiGatewayTypedSetResult(entry.set) // nothing new appended
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return aiGatewayTypedSetResult(entry.set)
+	}
 	defer f.Close()
-	set := map[string]bool{}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 1024*1024), 32*1024*1024)
-	for sc.Scan() {
-		var row map[string]interface{}
-		if json.Unmarshal(sc.Bytes(), &row) != nil {
-			continue
-		}
-		if aiGatewayString(row["type"]) != "user" {
-			continue
-		}
-		switch aiGatewayString(row["promptSource"]) {
-		case "typed", "queued":
-		default:
-			continue
-		}
-		msg := aiGatewayMap(row["message"])
-		norm := aiGatewayNormPrompt(aiGatewaySanitizeUserQuestion(aiGatewayPromptTextFromUserMessage(msg["content"])))
-		if norm != "" {
-			set[norm] = true
+	if entry.lastOffset > 0 {
+		if _, err := f.Seek(entry.lastOffset, io.SeekStart); err != nil {
+			// Seek failed → rebuild from the top rather than risk a gap.
+			entry.set = map[string]bool{}
+			entry.lastOffset = 0
+			_, _ = f.Seek(0, io.SeekStart)
 		}
 	}
+
+	r := bufio.NewReaderSize(f, 1024*1024)
+	consumed := entry.lastOffset
+	for {
+		line, readErr := r.ReadBytes('\n')
+		if len(line) > 0 && line[len(line)-1] == '\n' {
+			consumed += int64(len(line)) // advance only past complete lines
+			var row aiGatewayTranscriptTypedRow
+			if json.Unmarshal(bytes.TrimRight(line, "\n"), &row) == nil &&
+				row.Type == "user" &&
+				(row.PromptSource == "typed" || row.PromptSource == "queued") {
+				var content interface{}
+				if len(row.Message.Content) > 0 {
+					_ = json.Unmarshal(row.Message.Content, &content)
+				}
+				norm := aiGatewayNormPrompt(aiGatewaySanitizeUserQuestion(aiGatewayPromptTextFromUserMessage(content)))
+				if norm != "" {
+					entry.set[norm] = true
+				}
+			}
+		}
+		if readErr != nil {
+			break // io.EOF (or real error); a trailing partial line is left for next time
+		}
+	}
+	entry.lastOffset = consumed
+	return aiGatewayTypedSetResult(entry.set)
+}
+
+// aiGatewayTypedSetResult returns a COPY of the cached set (or nil when empty),
+// so a caller reading it can never observe a later turn merging into the live
+// cache map. The copy is O(unique prompts) — tiny next to the MB re-parse it
+// replaces.
+func aiGatewayTypedSetResult(set map[string]bool) map[string]bool {
 	if len(set) == 0 {
 		return nil
 	}
-	return set
+	out := make(map[string]bool, len(set))
+	for k := range set {
+		out[k] = true
+	}
+	return out
 }
 
 // aiGatewayMatchesTyped reports whether a sanitized current.json prompt matches
