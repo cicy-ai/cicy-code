@@ -1049,6 +1049,9 @@ func checkEnv() {
 	ensureTmuxConf()
 	ensureCicyTmuxConf()
 	ensureCicyShellInit()
+	// Seed ~/cicy-ai/assets/ (with a README) so there's always a known place to
+	// drop uploaded resources.
+	ensureAssetsDir()
 	// Seed ~/cicy-ai/memory/global.md with the default template on first boot so
 	// the memory editor and agent-creation always have a base layer to compose.
 	ensureGlobalMemoryTemplate()
@@ -1685,6 +1688,39 @@ func startCicyMihomoIfNeeded() {
 		log.Printf("[startup] cicy-mihomo not up after start attempt %d/3; retrying", attempt)
 	}
 	log.Printf("[startup] cicy-mihomo failed to come up after 3 attempts (proxy-using workers may not connect)")
+}
+
+// ensureAssetsDir creates ~/cicy-ai/assets/ and seeds a README on first boot,
+// giving users (and agents) a known, stable location to drop uploaded
+// resources. The README is only written when absent — an operator's edits are
+// never clobbered; the directory is left alone if it already exists.
+func ensureAssetsDir() {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		log.Printf("[assets] resolve home failed (skip seed): %v", err)
+		return
+	}
+	dir := filepath.Join(home, "cicy-ai", "assets")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("[assets] mkdir failed (skip seed): %v", err)
+		return
+	}
+	readme := filepath.Join(dir, "README.md")
+	if _, err := os.Stat(readme); err == nil {
+		return // already present — never clobber
+	} else if !os.IsNotExist(err) {
+		log.Printf("[assets] stat README failed (skip seed): %v", err)
+		return
+	}
+	body := "# Assets\n\n" +
+		"This directory holds uploaded resources — images, documents, data files,\n" +
+		"and any other assets you or your agents need to reference.\n\n" +
+		"Drop files here and reference them by their path under `~/cicy-ai/assets/`.\n"
+	if err := os.WriteFile(readme, []byte(body), 0o644); err != nil {
+		log.Printf("[assets] seed README write failed: %v", err)
+		return
+	}
+	log.Printf("[assets] seeded %s", readme)
 }
 
 // ensureMITMConfig seeds ~/cicy-ai/mitm/config.json with {"enabled": true} on
