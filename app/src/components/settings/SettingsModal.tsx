@@ -36,6 +36,8 @@ const emailDomain = (addr: string): string => {
 const providerPreset = (addr: string): MailProvider | null => EMAIL_PROVIDERS[emailDomain(addr)] || null;
 const providerLabel = (addr: string): string => (providerPreset(addr)?.label || '');
 const isPresetHost = (host: string): boolean => Object.values(EMAIL_PROVIDERS).some((p) => p.host === host);
+// Leftover scaffold placeholder like "<paste-smtp-host>" — treat as unset.
+const isEmailPlaceholder = (s: any): boolean => /^<paste/.test(String(s || '').trim());
 
 interface NavItem {
   id: SettingsSection;
@@ -107,6 +109,7 @@ export default function SettingsModal({
   const [emailForm, setEmailForm] = useState({ host: '', port: 465, secure: true, user: '', pass: '', default_to: '' });
   const [emailSaving, setEmailSaving] = useState(false);
   const [emailSaved, setEmailSaved] = useState(false);
+  const [showEmailPass, setShowEmailPass] = useState(false);
   const [apiToken, setApiToken] = useState('');
   const [tokenShown, setTokenShown] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -138,7 +141,11 @@ export default function SettingsModal({
         const d = ec.data || {};
         setEmailCfg(d);
         const s = d.smtp || {};
-        setEmailForm({ host: s.host || '', port: s.port || 465, secure: s.secure !== false, user: s.user || '', pass: '', default_to: d.default_to || '' });
+        // Drop leftover scaffold placeholders ("<paste-…>") so the field reads as
+        // empty → onEmailUserChange / save can auto-fill the real host from the
+        // provider preset instead of writing the placeholder back.
+        const loadedHost = isEmailPlaceholder(s.host) ? '' : (s.host || '');
+        setEmailForm({ host: loadedHost, port: s.port || 465, secure: s.secure !== false, user: s.user || '', pass: '', default_to: isEmailPlaceholder(d.default_to) ? '' : (d.default_to || '') });
         setApiToken(tk.data?.token || '');
       })
       .catch(() => {});
@@ -150,16 +157,17 @@ export default function SettingsModal({
     setEmailSaved(false);
     try {
       const user = emailForm.user.trim();
-      const host = emailForm.host.trim();
+      const preset = providerPreset(user);
+      // Host: use what's typed, but if it's empty or a leftover placeholder,
+      // derive it from the provider preset (qq.com → smtp.qq.com) so we never
+      // save a placeholder. from defaults to the account.
+      let host = emailForm.host.trim();
+      if (!host || isEmailPlaceholder(host)) host = preset?.host || '';
       const port = Number(emailForm.port) || 465;
       const secure = !!emailForm.secure;
-      // from/default_to default to the account on the server; receive (imap/pop3)
-      // is derived from the same provider preset so a known provider needs only
-      // account + password.
-      const preset = providerPreset(user);
       const payload: any = {
-        smtp: { host, port, secure, user },
-        default_to: emailForm.default_to.trim(),
+        smtp: { host, port, secure, user, from: user },
+        default_to: emailForm.default_to.trim() || user,
       };
       if (emailForm.pass.trim()) payload.smtp.pass = emailForm.pass;
       if (preset) {
@@ -436,7 +444,19 @@ export default function SettingsModal({
                       {/* Auth code / password */}
                       <div data-id="settings-email-pass-field">
                         <label className={lbl}>{t('settingsEmailPassLabel', { defaultValue: '授权码 / 密码' })}</label>
-                        <input data-id="settings-email-pass" type="password" placeholder={emailCfg?.smtp?.pass_set ? t('settingsEmailPassSet', { defaultValue: '已设置 (留空保持不变)' }) : t('settingsEmailPassPh', { defaultValue: 'QQ/163 等填授权码，非登录密码' })} value={emailForm.pass} onChange={(e) => setEmailForm((f) => ({ ...f, pass: e.target.value }))} className={`${inp} w-full`} autoComplete="new-password" />
+                        <div className="relative">
+                          <input data-id="settings-email-pass" type={showEmailPass ? 'text' : 'password'} placeholder={emailCfg?.smtp?.pass_set ? t('settingsEmailPassSet', { defaultValue: '已设置 (留空保持不变)' }) : t('settingsEmailPassPh', { defaultValue: 'QQ/163 等填授权码，非登录密码' })} value={emailForm.pass} onChange={(e) => setEmailForm((f) => ({ ...f, pass: e.target.value }))} className={`${inp} w-full pr-9`} autoComplete="new-password" />
+                          <button
+                            type="button"
+                            data-id="settings-email-pass-toggle"
+                            onClick={() => setShowEmailPass((v) => !v)}
+                            className="absolute inset-y-0 right-0 flex items-center px-2.5 text-zinc-500 hover:text-zinc-300"
+                            title={showEmailPass ? t('settingsHidePassword', { defaultValue: '隐藏' }) : t('settingsShowPassword', { defaultValue: '显示' })}
+                            tabIndex={-1}
+                          >
+                            {showEmailPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
                       </div>
                       {/* SMTP server — auto-filled from the account; editable for custom providers */}
                       <div data-id="settings-email-server-field">

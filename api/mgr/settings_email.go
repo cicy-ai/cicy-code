@@ -135,23 +135,41 @@ func mergeEmailConfig(cur, req map[string]any) map[string]any {
 	if v, ok := req["default_to"]; ok {
 		cur["default_to"] = v
 	}
+	// Strip leftover scaffold placeholders ("<paste-…>") from every section so
+	// they never count as "set" — otherwise the UI (which loads what's on disk
+	// and may not retype host/from) writes the placeholder straight back, and
+	// the from←user default below never fires. Deleting them lets the default
+	// kick in and keeps status honest ("missing" rather than a fake value).
+	for _, sect := range []string{"smtp", "imap", "pop3"} {
+		if b, _ := cur[sect].(map[string]any); b != nil {
+			for k, v := range b {
+				if s, ok := v.(string); ok && !emailFilled(strings.TrimSpace(s)) && k != "pass" {
+					delete(b, k)
+				}
+			}
+		}
+	}
 	// Derive sensible defaults so the UI only needs the account + password:
 	//   smtp.from  ← smtp.user  (the `email` skill requires a non-empty from)
 	//   default_to ← smtp.user  (send the rotated token to yourself by default)
 	if sb, _ := cur["smtp"].(map[string]any); sb != nil {
-		user, _ := sb["user"].(string)
-		user = strings.TrimSpace(user)
+		user := strings.TrimSpace(emailStr2(sb, "user"))
 		if user != "" {
-			if from, _ := sb["from"].(string); strings.TrimSpace(from) == "" {
+			if !emailFilled(strings.TrimSpace(emailStr2(sb, "from"))) {
 				sb["from"] = user
 			}
-			if dt, _ := cur["default_to"].(string); strings.TrimSpace(dt) == "" {
+			if dt, _ := cur["default_to"].(string); !emailFilled(strings.TrimSpace(dt)) {
 				cur["default_to"] = user
 			}
 		}
 		cur["smtp"] = sb
 	}
 	return cur
+}
+
+func emailStr2(b map[string]any, k string) string {
+	s, _ := b[k].(string)
+	return s
 }
 
 // GET  /api/settings/email  → public (secret-stripped) config + readiness
