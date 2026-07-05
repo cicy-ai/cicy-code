@@ -413,6 +413,27 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }).catch(() => {});
     return () => { alive = false; };
   }, [settingsOpen]);
+  // Red badge on the Skills entry (btn-skill): true when any PUBLIC-registry skill
+  // has an update available. Public = from the public registry (registry_source
+  // empty) and not a locally-authored skill (source !== 'user'). Refetched on the
+  // `cicy:skills-changed` event (install/update/uninstall) so the badge clears
+  // once everything is up to date.
+  const [publicSkillUpdate, setPublicSkillUpdate] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const res: any = await apiService.listMarketSkills();
+        const skills: any[] = Array.isArray(res?.data?.skills) ? res.data.skills : [];
+        const has = skills.some((s) => s?.has_update && !s?.registry_source && s?.source !== 'user');
+        if (alive) setPublicSkillUpdate(has);
+      } catch { /* leave the badge as-is on transient failures */ }
+    };
+    check();
+    const onChange = () => { check(); };
+    window.addEventListener('cicy:skills-changed', onChange);
+    return () => { alive = false; window.removeEventListener('cicy:skills-changed', onChange); };
+  }, []);
   // Red badge on the Settings entry + 通用 item: true when the token-delivery
   // email isn't fully set up — SMTP not ready OR no delivery address (default_to).
   // Refetched when the settings modal closes so configuring it clears the badge.
@@ -1909,7 +1930,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               setup.go and /api/settings/global → helper_mode. */}
           {!globalVar?.helper_mode && (
             <>
-              <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
+              <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} badge={publicSkillUpdate} badgeTitle={t('skillUpdateAvailable', { defaultValue: '有技能可更新' })} />
               {/* Browser windows: Chrome / Electron profiles → live windows + screenshots */}
               <SideBtn dataId="btn-windows" active={leftActive === 'windows'} icon={<AppWindow className="w-5 h-5" />} title="浏览器窗口" onClick={() => toggleLeft('windows')} />
               {/* LLM providers: opens the Settings modal on the providers tab. Red
@@ -2281,12 +2302,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   );
 }
 
-function SideBtn({ dataId, active, icon, title, onClick, disabled = false, badge = false }: { dataId: string; active: boolean; icon: React.ReactNode; title: string; onClick: () => void; disabled?: boolean; badge?: boolean }) {
+function SideBtn({ dataId, active, icon, title, onClick, disabled = false, badge = false, badgeTitle = '缺少 API key' }: { dataId: string; active: boolean; icon: React.ReactNode; title: string; onClick: () => void; disabled?: boolean; badge?: boolean; badgeTitle?: string }) {
   return (
     <button data-id={dataId} onClick={disabled ? undefined : onClick} disabled={disabled} aria-disabled={disabled} className={cn("p-2.5 rounded-xl transition-all relative", disabled ? "text-zinc-700 opacity-50 cursor-not-allowed" : cn("cursor-pointer", active ? "text-zinc-300 bg-white/[0.06]" : "text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.03]"))} title={title}>
       {icon}
       {active && !disabled && <div data-id={`${dataId}-active-indicator`} className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-blue-500/60 rounded-r" />}
-      {badge && <span data-id={`${dataId}-badge`} className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-[#0b0b0c]" title="缺少 API key" />}
+      {badge && <span data-id={`${dataId}-badge`} className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-[#0b0b0c]" title={badgeTitle} />}
     </button>
   );
 }
