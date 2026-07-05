@@ -1144,6 +1144,10 @@ var preinstalledSkills = []string{
 	// Author custom cicy agents (persona + tools + model) from the CLI; backs the
 	// "build an agent like a skill" flow (~/cicy-ai/agents/<slug>/AGENT.md).
 	"agent-creator",
+	// Self-hosted email (SMTP/IMAP/POP3) — lets any agent send mail / notify the
+	// user on task completion out of the box; reuses the same email.json the
+	// token-delivery UI configures. `email status --check` verifies live login.
+	"email",
 }
 
 func ensurePreinstalledSkills() {
