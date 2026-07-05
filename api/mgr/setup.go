@@ -1052,6 +1052,9 @@ func checkEnv() {
 	// Seed ~/cicy-ai/assets/ (with a README) so there's always a known place to
 	// drop uploaded resources.
 	ensureAssetsDir()
+	// On a dev machine with the repo checked out, symlink the packaged seed dir
+	// to ~/cicy-ai/memory-seed for easy editing (no-op elsewhere).
+	ensureMemorySeedLink()
 	// Seed ~/cicy-ai/memory/global.md with the default template on first boot so
 	// the memory editor and agent-creation always have a base layer to compose.
 	ensureGlobalMemoryTemplate()
@@ -1692,6 +1695,39 @@ func startCicyMihomoIfNeeded() {
 		log.Printf("[startup] cicy-mihomo not up after start attempt %d/3; retrying", attempt)
 	}
 	log.Printf("[startup] cicy-mihomo failed to come up after 3 attempts (proxy-using workers may not connect)")
+}
+
+// ensureMemorySeedLink symlinks the repo's packaged seed dir
+// (~/projects/cicy-code/api/mgr/embed/memory-seed) to ~/cicy-ai/memory-seed on a
+// DEV machine that has the repo checked out — a convenience so the seed
+// templates can be edited from the cicy-ai tree. It's a pure shortcut: no code
+// reads ~/cicy-ai/memory-seed (the binary seeds from the EMBEDDED copy). No-op
+// when the repo dir is absent (non-dev hosts) or when the link path already
+// exists (never clobber an operator's own file/dir/link).
+func ensureMemorySeedLink() {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return
+	}
+	src := filepath.Join(home, "projects", "cicy-code", "api", "mgr", "embed", "memory-seed")
+	if fi, err := os.Stat(src); err != nil || !fi.IsDir() {
+		return // repo seed dir not present — nothing to link
+	}
+	link := filepath.Join(cicyRootDir, "memory-seed")
+	if _, err := os.Lstat(link); err == nil {
+		return // already exists (link/dir/file) — don't clobber
+	} else if !os.IsNotExist(err) {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(link), 0755); err != nil {
+		log.Printf("[memory-seed] mkdir failed: %v", err)
+		return
+	}
+	if err := os.Symlink(src, link); err != nil {
+		log.Printf("[memory-seed] symlink %s -> %s failed: %v", link, src, err)
+		return
+	}
+	log.Printf("[memory-seed] linked %s -> %s", link, src)
 }
 
 // ensureAssetsDir creates ~/cicy-ai/assets/ and seeds a README on first boot,

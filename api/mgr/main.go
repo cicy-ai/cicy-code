@@ -44,7 +44,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.184"
+const version = "2.3.186"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -276,6 +276,7 @@ Options:
 	// Health
 	http.HandleFunc("/health", w(handleHealth))
 	http.HandleFunc("/api/health", w(handleHealth))
+	http.HandleFunc("/newtab", w(handleNewtab))
 	http.HandleFunc("/api/ping", w(handlePing))
 	http.HandleFunc("/api/poll", authM(handlePoll))
 	http.HandleFunc("/api/stt", authM(handleSTT))

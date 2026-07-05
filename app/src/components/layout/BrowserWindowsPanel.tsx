@@ -419,30 +419,40 @@ const startPagePromptText = (o: { clientId: string; accountIdx: number; targetId
     title: tl('bwStartTitle'), url: tl('bwStartPageData'),
     c: `agent-chrome --client ${o.clientId}`,
   });
-const buildStartPageHtml = (o: { clientId: string; accountIdx: number; targetId: string }) => {
-  const esc = startPagePromptText(o).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const copyLabel = tl('bwCopyPrompt', { defaultValue: '复制提示词' });
-  const copiedLabel = tl('bwCopied', { defaultValue: '已复制' });
-  return `<!doctype html><html lang="${i18n.language || 'en'}"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>${tl('bwStartTitle')}</title>
-<style>:root{color-scheme:dark}*{box-sizing:border-box}
-body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0a;color:#e4e4e7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:24px}
-.wrap{width:min(640px,92vw);text-align:center}
-.logo{width:56px;height:56px;margin:0 auto 18px;border-radius:16px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:700}
-h1{font-size:18px;font-weight:600;margin:0 0 16px}
-pre{text-align:left;white-space:pre-wrap;word-break:break-word;background:#141414;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:16px 18px;color:#d4d4d8;font-size:13px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin:0 0 14px}
-button{background:rgba(255,255,255,.1);border:none;border-radius:10px;padding:10px 18px;color:#fff;font-size:14px;cursor:pointer}
-button:hover{background:rgba(255,255,255,.18)}
-.pid{display:inline-block;margin:0 0 16px;padding:4px 12px;border-radius:999px;background:rgba(139,92,246,.18);border:1px solid rgba(139,92,246,.35);color:#c4b5fd;font-size:13px;font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}</style></head>
-<body><div class="wrap">
-<div class="logo">&#10022;</div>
-<h1>${tl('bwStartHeading')}</h1>
-<div class="pid" data-id="chrome-start-profile-id">Profile #${o.accountIdx}</div>
-<pre id="cicy-prompt">${esc}</pre>
-<button id="cicy-copy" onclick="(function(b){var t=document.getElementById('cicy-prompt').textContent;function ok(){b.textContent='${copiedLabel}';setTimeout(function(){b.textContent='${copyLabel}'},1500)}function fb(){var a=document.createElement('textarea');a.value=t;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();try{document.execCommand('copy')}catch(e){}document.body.removeChild(a);ok()}if(navigator.clipboard){navigator.clipboard.writeText(t).then(ok).catch(fb)}else{fb()}})(this)">${copyLabel}</button>
-</div></body></html>`;
+// newtabBaseUrl is the host-local cicy-code origin the browser should open for the
+// start page. The tab is opened ON THE HOST (Chrome process / Electron), so it must
+// be a host-reachable cicy-code URL — the current origin when we're already talking
+// to a local daemon, else the conventional local port.
+const newtabBaseUrl = (): string => {
+  const o = window.location.origin;
+  if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(o)) return o;
+  return 'http://127.0.0.1:8008';
 };
-const startPageUrl = (o: { clientId: string; accountIdx: number; targetId: string }) => `data:text/html;charset=utf-8,${encodeURIComponent(buildStartPageHtml(o))}`;
+
+// startPageUrl points a new tab at cicy-code's SINGLE-SOURCE start page
+// (/newtab?profile=N) — the logo / layout / profile pill live there, shared by
+// Chrome and the Electron tab browser. The agent-driver prompt is NOT baked into
+// the page (it needs the live targetId/webContentsId); the panel injects it after
+// the tab loads via buildPromptInjectionJS.
+const startPageUrl = (o: { accountIdx: number }) =>
+  `${newtabBaseUrl()}/newtab?profile=${encodeURIComponent(String(o.accountIdx))}`;
+
+// buildPromptInjectionJS returns the JS the panel evaluates INSIDE a freshly-opened
+// start page (Chrome via Runtime.evaluate, Electron via electron_tab_eval) to graft
+// the agent-driver prompt + a copy button onto the page's `.w` container. It carries
+// the live identifiers only the panel knows; the base page stays identical for both
+// surfaces. Idempotent (bails if already injected).
+const buildPromptInjectionJS = (prompt: string, copyLabel: string, copiedLabel: string): string =>
+  `(function(){if(document.getElementById('cicy-prompt'))return;` +
+  `var w=document.querySelector('.w')||document.body;` +
+  `var pre=document.createElement('pre');pre.id='cicy-prompt';pre.textContent=${JSON.stringify(prompt)};` +
+  `pre.style.cssText='text-align:left;white-space:pre-wrap;word-break:break-word;background:#2a2b2e;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:14px 16px;color:#cfd2d6;font-size:12px;line-height:1.6;font-family:ui-monospace,Menlo,Consolas,monospace;margin:18px auto 12px;max-width:560px';` +
+  `var b=document.createElement('button');b.textContent=${JSON.stringify(copyLabel)};` +
+  `b.style.cssText='background:rgba(255,255,255,.12);border:none;border-radius:10px;padding:9px 16px;color:#fff;font-size:13px;cursor:pointer';` +
+  `b.onclick=function(){var t=pre.textContent;function ok(){b.textContent=${JSON.stringify(copiedLabel)};setTimeout(function(){b.textContent=${JSON.stringify(copyLabel)}},1500)}` +
+  `function fb(){var a=document.createElement('textarea');a.value=t;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();try{document.execCommand('copy')}catch(e){}document.body.removeChild(a);ok()}` +
+  `if(navigator.clipboard){navigator.clipboard.writeText(t).then(ok).catch(fb)}else{fb()}};` +
+  `w.appendChild(pre);w.appendChild(b);})()`;
 
 // Open a new window/tab for a profile.
 async function addWindow(clientId: string, p: Profile, url: string): Promise<void> {
@@ -469,16 +479,9 @@ async function addWindow(clientId: string, p: Profile, url: string): Promise<voi
     });
     const copyLabel = tl('bwCopyPrompt', { defaultValue: '复制提示词' });
     const copiedLabel = tl('bwCopied', { defaultValue: '已复制' });
-    const js = `(function(){if(document.getElementById('cicy-prompt'))return;` +
-      `var w=document.querySelector('.w')||document.body;` +
-      `var pre=document.createElement('pre');pre.id='cicy-prompt';pre.textContent=${JSON.stringify(prompt)};` +
-      `pre.style.cssText='text-align:left;white-space:pre-wrap;word-break:break-word;background:#2a2b2e;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:14px 16px;color:#cfd2d6;font-size:12px;line-height:1.6;font-family:ui-monospace,Menlo,Consolas,monospace;margin:18px auto 12px;max-width:560px';` +
-      `var b=document.createElement('button');b.textContent=${JSON.stringify(copyLabel)};` +
-      `b.style.cssText='background:rgba(255,255,255,.12);border:none;border-radius:10px;padding:9px 16px;color:#fff;font-size:13px;cursor:pointer';` +
-      `b.onclick=function(){var t=pre.textContent;function ok(){b.textContent=${JSON.stringify(copiedLabel)};setTimeout(function(){b.textContent=${JSON.stringify(copyLabel)}},1500)}` +
-      `function fb(){var a=document.createElement('textarea');a.value=t;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();try{document.execCommand('copy')}catch(e){}document.body.removeChild(a);ok()}` +
-      `if(navigator.clipboard){navigator.clipboard.writeText(t).then(ok).catch(fb)}else{fb()}};` +
-      `w.appendChild(pre);w.appendChild(b);})()`;
+    // Base page (logo + Profile #N) comes from cicy-code /newtab; inject only the
+    // agent prompt + copy button (shared with the chrome path).
+    const js = buildPromptInjectionJS(prompt, copyLabel, copiedLabel);
     // small delay so cicyui://newtab has finished loading before we inject
     await new Promise((res) => setTimeout(res, 400));
     await deviceCall(clientId, 'electron_tab_eval', { webContentsId: wc, code: js }).catch(() => {});
@@ -504,12 +507,26 @@ async function addWindow(clientId: string, p: Profile, url: string): Promise<voi
     targetId = (pages.find((t) => t.url === 'about:blank') || pages[pages.length - 1] || {}).id || '';
   }
   // Step 2: navigate the new tab to its destination — the user's URL if given,
-  // else the start page carrying THIS tab's real targetId in the agent prompt.
-  const dest = u || startPageUrl({ clientId, accountIdx: p.accountIdx, targetId });
+  // else cicy-code's single-source start page (/newtab?profile=N).
+  const dest = u || startPageUrl({ accountIdx: p.accountIdx });
   if (targetId) {
     await deviceCall(clientId, 'chrome_cdp_call', {
       accountIdx: p.accountIdx, method: 'Page.navigate', target: targetId, params: { url: dest },
     }).catch(() => {});
+    // Empty url → inject the agent-chrome prompt + copy button onto the start page
+    // (parity with the electron path; the base page/logo/pill come from /newtab).
+    if (!u) {
+      const prompt = startPagePromptText({ clientId, accountIdx: p.accountIdx, targetId });
+      const copyLabel = tl('bwCopyPrompt', { defaultValue: '复制提示词' });
+      const copiedLabel = tl('bwCopied', { defaultValue: '已复制' });
+      const js = buildPromptInjectionJS(prompt, copyLabel, copiedLabel);
+      // let /newtab finish loading before evaluating
+      await new Promise((res) => setTimeout(res, 500));
+      await deviceCall(clientId, 'chrome_cdp_call', {
+        accountIdx: p.accountIdx, method: 'Runtime.evaluate', target: targetId,
+        params: { expression: js },
+      }).catch(() => {});
+    }
   }
 }
 

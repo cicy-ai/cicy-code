@@ -36,9 +36,11 @@ func ensureDefaultProject() {
 	path := projectTemplatePath(defaultProjectSlug)
 	if path != "" {
 		if _, err := os.Stat(path); err != nil {
+			// Seed from the dedicated seed dir (embed/memory-seed/projects/
+			// default.md); tiny literal fallback if the embed read ever fails.
 			// No frontmatter — the project name IS the file slug.
 			_ = os.MkdirAll(filepath.Dir(path), 0o755)
-			_ = os.WriteFile(path, []byte("## Project\n"), 0o644)
+			_ = os.WriteFile(path, []byte(memorySeedFile("projects/default.md", "## Project\n")), 0o644)
 		}
 	}
 }

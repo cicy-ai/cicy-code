@@ -36,8 +36,26 @@ func agentLangFromConfig(config string) string {
 // agent's CLAUDE.md/AGENTS.md; the greeting lives only in meta.yaml (shown in the
 // chat view, never injected into the agent's memory).
 //
-//go:embed embed/agent-roles
-var agentRoleTemplatesFS embed.FS
+// memorySeedFS is the ONE dedicated seed directory baked into the binary
+// (embed/memory-seed/). It holds everything a fresh install seeds into
+// ~/cicy-ai/memory/:
+//
+//	global.md              → ~/cicy-ai/memory/global.md      (base rules)
+//	projects/default.md    → ~/cicy-ai/memory/projects/default.md
+//	agents/<slug>/…        → ~/cicy-ai/memory/agents/<slug>/ (role templates)
+//
+// This is the single source of what ships as the default seed — edit these
+// files to change the packaged defaults; nothing is read from ~/cicy-ai at
+// build time.
+//
+//go:embed embed/memory-seed
+var memorySeedFS embed.FS
+
+const memorySeedRoot = "embed/memory-seed"
+
+// agentRoleTemplatesFS is retained as an alias so the role readers below keep
+// working; it points at the same embedded FS.
+var agentRoleTemplatesFS = memorySeedFS
 
 // roleMeta is the parsed <slug>/meta.yaml.
 type roleMeta struct {
@@ -86,7 +104,8 @@ func readRoleFile(slug, name string) string {
 	if b, err := os.ReadFile(filepath.Join(agentTemplatesDir(), clean, name)); err == nil && strings.TrimSpace(string(b)) != "" {
 		return string(b)
 	}
-	if b, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + clean + "/" + name); err == nil {
+	// Fall back to the packaged seed (embed/memory-seed/agents/…).
+	if b, ok := memorySeedRead("agents/" + clean + "/" + name); ok {
 		return string(b)
 	}
 	return ""
@@ -278,7 +297,7 @@ func listRoleFiles(slug string) []string {
 			}
 		}
 	}
-	if entries, err := agentRoleTemplatesFS.ReadDir("embed/agent-roles/" + clean); err == nil {
+	if entries, err := agentRoleTemplatesFS.ReadDir("embed/memory-seed/agents/" + clean); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
 				set[e.Name()] = true
@@ -317,7 +336,7 @@ func listAllRoleDirs() []roleDirInfo {
 			}
 		}
 	}
-	if entries, err := agentRoleTemplatesFS.ReadDir("embed/agent-roles"); err == nil {
+	if entries, err := agentRoleTemplatesFS.ReadDir("embed/memory-seed/agents"); err == nil {
 		for _, e := range entries {
 			if e.IsDir() {
 				names[e.Name()] = true
@@ -376,33 +395,31 @@ func roleTemplateBody(slug string) string {
 func listProjectTemplates() []string { return listTemplateSlugs(projectTemplatesDir()) }
 func listRoleTemplates() []string    { return listRoleSlugs() }
 
-// defaultGlobalMemoryTemplate seeds ~/cicy-ai/memory/global.md the first time
-// it is needed.
-const defaultGlobalMemoryTemplate = "## Collaboration\n" +
-	"\n" +
-	"Work with other agents via the `cicy-agent` skill (`cicy-agent help` for all subcommands):\n" +
-	"- `cicy-agent ls` — list agents\n" +
-	"- `cicy-agent msg <agent> <text>` — dispatch a task or ask for help\n" +
-	"- `cicy-agent capture <agent>` — check an agent's progress\n" +
-	"\n" +
-	"## Knowledge\n" +
-	"\n" +
-	"Check the team knowledge base before reinventing conventions, pitfalls, or prior decisions (`cicy-knowledge help` for all commands):\n" +
-	"- `cicy-knowledge recall <keyword>` — search the canon (verified facts only; drafts never surface)\n" +
-	"- `cicy-knowledge get <id>` — read a full entry\n" +
-	"- `cicy-knowledge add \"<title>\" --body <md> [--tags \"a b\"]` — propose an entry (lands pending for review)\n" +
-	"\n" +
-	"## Documents\n" +
-	"\n" +
-	"Don't drop docs at random paths. If another agent might need it, add it to the knowledge base, not a stray `.md`:\n" +
-	"- Finished → `cicy-knowledge add \"<title>\" --body <md> --tags \"a b\"`\n" +
-	"- Draft → `cicy-knowledge add --draft ...`\n" +
-	"\n" +
-	"Uploaded docs (`~/cicy-ai/assets`): leave for review. Private scratch: your own workspace/memory only.\n" +
-	"\n" +
-	"## Constraints\n" +
-	"\n" +
-	"- Projects: always create and clone into `~/projects` — never scatter repos at arbitrary paths. A new or cloned project lives at `~/projects/<name>`.\n"
+// defaultGlobalMemoryTemplate returns the text seeded into
+// ~/cicy-ai/memory/global.md on first boot — read from the packaged seed dir
+// (embed/memory-seed/global.md), with a tiny literal fallback.
+func defaultGlobalMemoryTemplate() string {
+	return memorySeedFile("global.md",
+		"## Constraints\n\n- Projects: always create and clone into `~/projects`.\n")
+}
+
+// memorySeedRead reads a seed file (path relative to the seed root) from the
+// dedicated seed dir baked into the binary (embed/memory-seed/). ok=false if
+// absent.
+func memorySeedRead(rel string) ([]byte, bool) {
+	if b, err := memorySeedFS.ReadFile(memorySeedRoot + "/" + rel); err == nil {
+		return b, true
+	}
+	return nil, false
+}
+
+// memorySeedFile is memorySeedRead as a string with a fallback for missing/empty.
+func memorySeedFile(rel, fallback string) string {
+	if b, ok := memorySeedRead(rel); ok && strings.TrimSpace(string(b)) != "" {
+		return string(b)
+	}
+	return fallback
+}
 
 // ensureGlobalMemoryTemplate writes the default template if the file is missing.
 // Existing user edits are never overwritten.
@@ -415,7 +432,7 @@ func ensureGlobalMemoryTemplate() string {
 		log.Printf("[memory-template] mkdir failed: %v", err)
 		return path
 	}
-	if err := os.WriteFile(path, []byte(defaultGlobalMemoryTemplate), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(defaultGlobalMemoryTemplate()), 0644); err != nil {
 		log.Printf("[memory-template] seed write failed: %v", err)
 	}
 	return path
@@ -432,8 +449,8 @@ func ensureRoleMemoryTemplates() {
 		log.Printf("[memory-template] mkdir agents failed: %v", err)
 		return
 	}
-	const root = "embed/agent-roles"
-	roleDirs, err := agentRoleTemplatesFS.ReadDir(root)
+	const root = memorySeedRoot + "/agents"
+	roleDirs, err := memorySeedFS.ReadDir(root)
 	if err != nil {
 		log.Printf("[memory-template] read embedded role templates failed: %v", err)
 		return
@@ -444,7 +461,7 @@ func ensureRoleMemoryTemplates() {
 		}
 		dstDir := filepath.Join(dir, rd.Name())
 		_ = os.MkdirAll(dstDir, 0755)
-		files, _ := agentRoleTemplatesFS.ReadDir(root + "/" + rd.Name())
+		files, _ := memorySeedFS.ReadDir(root + "/" + rd.Name())
 		for _, f := range files {
 			if f.IsDir() {
 				continue
@@ -453,7 +470,7 @@ func ensureRoleMemoryTemplates() {
 			if _, err := os.Stat(dst); err == nil {
 				continue // never clobber a user-edited file
 			}
-			raw, err := agentRoleTemplatesFS.ReadFile(root + "/" + rd.Name() + "/" + f.Name())
+			raw, err := memorySeedFS.ReadFile(root + "/" + rd.Name() + "/" + f.Name())
 			if err != nil {
 				continue
 			}
@@ -593,7 +610,7 @@ func composeAgentMemory(agentID, workspace, agentType, projectSlug, roleSlug, la
 
 	composed := strings.Join(parts, "\n\n")
 	if strings.TrimSpace(composed) == "" {
-		composed = defaultGlobalMemoryTemplate
+		composed = defaultGlobalMemoryTemplate()
 	}
 	return substituteTemplatePlaceholders(composed, agentID, workspace, agentType)
 }
