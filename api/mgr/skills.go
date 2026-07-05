@@ -587,6 +587,19 @@ func versionLess(a, b string) bool {
 }
 
 func computeMarketStatus(skill *marketSkill) {
+	// Reset installed-state before recomputing. The catalog slice handed in may
+	// be the CACHED one (mergedMarketCatalog aliases it when there are no user
+	// skills), and the logic below only ever SETS HasUpdate/Installed — never
+	// clears them. Without this reset, a skill that was just updated (or
+	// uninstalled) via the CLI would keep a stale HasUpdate=true in the cached
+	// struct until the 5-min catalog cache expires, so the UI's update badge
+	// never clears. Recompute everything fresh from installed.json each call.
+	skill.Status = marketSkillStatus{}
+	skill.InstalledVersion = ""
+	skill.HasUpdate = false
+	if skill.Source == "local" {
+		skill.Source = "" // re-derived from installed.json below
+	}
 	installed := loadInstalledFull()
 	if entry, ok := installed[skill.Name]; ok {
 		skill.Status.Installed = true

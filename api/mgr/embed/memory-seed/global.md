@@ -12,6 +12,10 @@ Check the team knowledge base before reinventing conventions, pitfalls, or prior
 - `cicy-knowledge get <id>` — read a full entry
 - `cicy-knowledge add "<title>" --body <md> [--tags "a b"]` — propose an entry (lands pending for review)
 
+## Skills
+
+Building, installing, or publishing a skill? Read `cicy-skill-spec` first — it covers the public / private / team conventions and scaffolding.
+
 ## Documents
 
 Don't drop docs at random paths. If another agent might need it, add it to the knowledge base, not a stray `.md`:

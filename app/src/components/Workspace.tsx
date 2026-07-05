@@ -415,25 +415,29 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, [settingsOpen]);
   // Red badge on the Skills entry (btn-skill): true when any PUBLIC-registry skill
   // has an update available. Public = from the public registry (registry_source
-  // empty) and not a locally-authored skill (source !== 'user'). Refetched on the
-  // `cicy:skills-changed` event (install/update/uninstall) so the badge clears
-  // once everything is up to date.
+  // empty) and not a locally-authored skill (source !== 'user'). Rechecked on
+  // mount, on the `cicy:skills-changed` UI event, on window focus, and when the
+  // Skills panel is opened — so a CLI-side `skill install` (which fires no browser
+  // event) still clears the badge as soon as you return to / open the panel.
   const [publicSkillUpdate, setPublicSkillUpdate] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    const check = async () => {
-      try {
-        const res: any = await apiService.listMarketSkills();
-        const skills: any[] = Array.isArray(res?.data?.skills) ? res.data.skills : [];
-        const has = skills.some((s) => s?.has_update && !s?.registry_source && s?.source !== 'user');
-        if (alive) setPublicSkillUpdate(has);
-      } catch { /* leave the badge as-is on transient failures */ }
-    };
-    check();
-    const onChange = () => { check(); };
-    window.addEventListener('cicy:skills-changed', onChange);
-    return () => { alive = false; window.removeEventListener('cicy:skills-changed', onChange); };
+  const checkPublicSkillUpdate = useCallback(async () => {
+    try {
+      const res: any = await apiService.listMarketSkills();
+      const skills: any[] = Array.isArray(res?.data?.skills) ? res.data.skills : [];
+      const has = skills.some((s) => s?.has_update && !s?.registry_source && s?.source !== 'user');
+      setPublicSkillUpdate(has);
+    } catch { /* leave the badge as-is on transient failures */ }
   }, []);
+  useEffect(() => {
+    checkPublicSkillUpdate();
+    const onChange = () => { checkPublicSkillUpdate(); };
+    window.addEventListener('cicy:skills-changed', onChange);
+    window.addEventListener('focus', onChange);
+    return () => {
+      window.removeEventListener('cicy:skills-changed', onChange);
+      window.removeEventListener('focus', onChange);
+    };
+  }, [checkPublicSkillUpdate]);
   // Red badge on the Settings entry + 通用 item: true when the token-delivery
   // email isn't fully set up — SMTP not ready OR no delivery address (default_to).
   // Refetched when the settings modal closes so configuring it clears the badge.
@@ -626,6 +630,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // left panel and the mid panel. Cleared whenever we leave the windows view.
   const [browserSel, setBrowserSel] = useState<{ clientId: string; deviceId: string; profile: BrowserProfile } | null>(null);
   useEffect(() => { if (leftActive !== 'windows') setBrowserSel(null); }, [leftActive]);
+  // Opening the Skills panel rechecks the update badge (catches CLI-side installs).
+  useEffect(() => { if (leftActive === 'skills') checkPublicSkillUpdate(); }, [leftActive, checkPublicSkillUpdate]);
   // Selected phone (Android/iOS tab inside the windows panel) → drives the inserted
   // mobile-device column instead of the browser-windows column. Cleared on leave.
   const [mobileSel, setMobileSel] = useState<MobileSel | null>(null);
