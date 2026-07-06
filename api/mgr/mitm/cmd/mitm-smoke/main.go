@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // mitm-smoke is a minimal standalone driver that exercises the cicy-mitm
 // pipeline end-to-end without requiring the full cicy-code binary.
 //

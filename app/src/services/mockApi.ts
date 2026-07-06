@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import apiService from './api';
 
 export const sendCommandToTmux = async (command: string, tmuxTarget: string, submit = true): Promise<{ success: boolean; message: string }> => {

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 // Adapter between the mitm sub-package and audit-v2.

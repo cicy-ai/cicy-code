@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Code generated for package server by go-bindata DO NOT EDIT. (@generated)
 // sources:
 // bindata/static/css/index.css

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 export type HistoryTurn = {
   history_id?: number;
   conversation_id?: string;

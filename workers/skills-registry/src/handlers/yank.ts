@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // src/handlers/yank.ts
 //
 // DELETE /v1/admin/skills/:name/:version

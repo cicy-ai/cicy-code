@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package skillcmd
 
 // registry_pack.go — pack a local skill directory into a <name>/-rooted zip,

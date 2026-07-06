@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { memo, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import Markdown from 'react-markdown';

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 // local_registry.go — the node's always-on self-hosted skill registry.

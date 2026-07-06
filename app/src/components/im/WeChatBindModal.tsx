@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import apiService from '../../services/api';

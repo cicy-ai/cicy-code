@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, CaseSensitive, X, RefreshCw } from 'lucide-react';
 import { fsApi, FsGrepMatch } from './api';

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // CN mirror catalog. For each category we list candidates and how to (a) probe
 // them with a 1 MB Range-GET and (b) apply the choice via shell. The default
 // id is what we'd pick if the probe is skipped — it's the one we've measured

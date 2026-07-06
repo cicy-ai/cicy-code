@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 // --cft: bind this instance's API port onto a Cloudflare quick tunnel at

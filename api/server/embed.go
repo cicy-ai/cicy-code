@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package server
 
 // embed.go exposes the webtty session + static-asset serving as standalone

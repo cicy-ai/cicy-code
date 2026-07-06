@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // src/lib/router.ts
 //
 // Pattern-matching router with URL params. No external dependency.

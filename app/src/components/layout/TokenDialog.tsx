@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Copy, Key, Check } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Thin wrapper around cicy-desktop's electronRPC bridge. Renderer is trusted
 // (registered backend hostname) so window.electronRPC is auto-injected by
 // cicy-desktop. When not in cicy-desktop (plain browser), every call rejects.

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Call any Electron MCP tool via IPC, fallback null
 async function electronRPC(tool: string, args: Record<string, any> = {}): Promise<any> {
   try {

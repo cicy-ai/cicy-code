@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Pure link-detection helpers shared by the xterm link provider and the unit
 // tests. No DOM / xterm dependencies — only string scanning.
 

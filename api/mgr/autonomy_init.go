@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 // startAutonomy wires the audit-v2 autonomous policy agent into the

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import i18n from '../../../../i18n';
 
 export function isPatchText(text: string) {

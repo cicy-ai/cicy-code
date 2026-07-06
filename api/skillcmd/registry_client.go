@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package skillcmd
 
 // registry_client.go — multi-source resolution for the client side.

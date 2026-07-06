@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package audit
 
 // decision_explain — ask the autonomy agent to narrate a past decision in

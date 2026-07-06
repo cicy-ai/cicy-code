@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Pencil, Trash2, ChevronDown, Check, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';

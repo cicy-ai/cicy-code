@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 // outbound.json — diagnostic snapshot of EVERY outbound HTTP request body for the

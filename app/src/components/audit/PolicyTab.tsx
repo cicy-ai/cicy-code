@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Mail, ListChecks, AlertTriangle, X, SlidersHorizontal, RotateCcw, Plus, Trash2, ChevronLeft, Activity } from 'lucide-react';

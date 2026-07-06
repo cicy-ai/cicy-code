@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { X, RefreshCw, Loader2, Monitor, Globe, Cpu, Copy, Check, Zap, MessageSquare, Wifi, WifiOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';

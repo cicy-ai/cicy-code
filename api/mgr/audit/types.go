@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Package audit provides cicy-code's enterprise audit pipeline.
 //
 // Design reference: docs/v1/audit-system-design.md.

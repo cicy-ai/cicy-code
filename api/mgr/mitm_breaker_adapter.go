@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 // mitmBreakerAdapter routes mitm.BreakerHook.Check into audit.PreventiveCheck.

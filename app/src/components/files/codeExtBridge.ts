@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Page-side :code-ext bridge that replaces the code-server VSIX extension.
 // Re-uses the existing chat-ws singleton (services/chatWs.ts) instead of
 // opening a second socket; the server aliases "<pageClientId>:code-ext" to

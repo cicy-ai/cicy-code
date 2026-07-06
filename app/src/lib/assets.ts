@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const publicAssetPrefix = (import.meta.env.VITE_PUBLIC_ASSET_PREFIX || '').replace(/\/+$/, '');
 
 export function assetUrl(path: string) {

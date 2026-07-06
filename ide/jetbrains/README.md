@@ -37,4 +37,4 @@ Signing/publish credentials come from env (set as CI secrets):
 
 ## License
 
-MIT
+Apache-2.0

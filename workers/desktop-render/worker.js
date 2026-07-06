@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Origin for /cos-assets/* proxy. Switched from Tencent COS to Cloudflare R2
 // (r2.deepfetch.de5.net) — COS returns HTTP 451 to overseas IPs and freezes
 // the whole bucket on arrears. R2 has a permanent free tier, no ICP filter,

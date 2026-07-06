@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Module-level singleton that owns the chat WebSocket. The WS lifetime is
 // completely decoupled from React: components only `configure()`, `subscribe()`,
 // and `send()`. configure() reconnects ONLY when URL-affecting params change;

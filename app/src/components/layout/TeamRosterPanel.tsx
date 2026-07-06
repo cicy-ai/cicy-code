@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type ComponentType } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';

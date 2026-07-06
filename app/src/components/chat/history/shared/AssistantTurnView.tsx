@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { memo } from 'react';
 import AgentAvatar from '../../../AgentAvatar';
 import type { HistoryTurn } from '../types';

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { keymap, EditorView } from '@codemirror/view';
 
 // Shared clipboard ops for the CodeMirror editors (file editor + memory editor).

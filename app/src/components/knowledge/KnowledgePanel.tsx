@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { lazy, Suspense, useState } from 'react';
 import { FolderTree, Share2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 export const CURRENT_HISTORY_TOOL_DB_NAME = 'cicy-current-history-tool-cache';
 export const CURRENT_HISTORY_TOOL_DB_VERSION = 3;
 export const CURRENT_HISTORY_TOOL_STORE = 'tool_details';

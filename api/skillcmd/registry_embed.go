@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package skillcmd
 
 // registry_embed.go — exported helpers so the mgr daemon can host a private

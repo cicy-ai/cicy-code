@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // oauth-flow: Google OAuth code-relay for cicy-code workers.
 //
 // Architecture: stateless code relay. The Worker briefly holds the OAuth

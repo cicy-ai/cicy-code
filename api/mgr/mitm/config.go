@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Package mitm implements a man-in-the-middle proxy that captures plaintext
 // from non-cooperative AI clients (those that ignore ANTHROPIC_BASE_URL etc.)
 // and feeds it into the existing audit pipeline.

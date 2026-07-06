@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import axios, { AxiosError } from 'axios';
 import config from '../../config';
 import { TokenManager } from '../../services/tokenManager';

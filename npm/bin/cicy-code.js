@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Launcher for the npm distribution. Resolves the prebuilt binary that ships
 // in the platform-specific optionalDependency (cicy-code-<os>-<cpu>) and execs
 // it — no network, no postinstall download. ALL binary args/subcommands are

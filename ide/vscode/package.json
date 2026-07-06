@@ -4,7 +4,7 @@
   "description": "Embed your cicy-code team workspace (multi-agent terminals, files, artifacts) inside VS Code.",
   "version": "0.0.0",
   "publisher": "cicy",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/cicy-ai/cicy-code.git",
@@ -79,10 +79,16 @@
           "items": {
             "type": "object",
             "properties": {
-              "name": { "type": "string" },
-              "url": { "type": "string" }
+              "name": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
             },
-            "required": ["url"]
+            "required": [
+              "url"
+            ]
           }
         },
         "cicyCode.activeTeamUrl": {

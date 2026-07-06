@@ -447,4 +447,4 @@ Docker 容器的 host home 现在挂到 `~/docker-homes/<container-name>`（默�
 
 ## 许可证
 
-MIT
+Apache-2.0

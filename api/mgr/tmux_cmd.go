@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 // tmuxRunner is the subset of *exec.Cmd that cicy's tmux call sites use. It

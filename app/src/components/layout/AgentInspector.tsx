@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { Children, cloneElement, isValidElement, lazy, Suspense, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Settings } from 'lucide-react';
 import Markdown from 'react-markdown';

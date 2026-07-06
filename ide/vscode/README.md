@@ -41,4 +41,4 @@ changed, never overwrites an existing team name.)
 
 ## License
 
-MIT
+Apache-2.0

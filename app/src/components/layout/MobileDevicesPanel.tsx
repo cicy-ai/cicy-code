@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Mobile-device helpers + screenshot column, used by BrowserWindowsPanel's
 // Android / iOS backend tabs (peer to Electron / Chrome). The phones plug into a
 // connected cicy-desktop machine; every action runs a shell command ON that

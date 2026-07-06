@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 // Lite-agent configuration layer (todo #103, Barry 2026-06-07).

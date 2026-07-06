@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Stale-while-revalidate cache for /api/fs/* responses.
 //
 // Pattern: consumers peek the cache for an instant first render, then call the

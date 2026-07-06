@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package mitm
 
 // BreakerHook is the contract between the MITM pump and the audit

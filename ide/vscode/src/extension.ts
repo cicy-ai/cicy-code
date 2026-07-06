@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import * as vscode from "vscode";
 
 // cicy-code is a SaaS: there is no local backend to spawn. A user manually

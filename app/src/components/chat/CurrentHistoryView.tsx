@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { isCicyLiteAgent } from '../../lib/agentType';
 import CicyHistoryView from './history/CicyHistoryView';
 import CodingAgentHistoryView from './history/CodingAgentHistoryView';

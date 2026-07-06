@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Global dev store — all context state registered here for inspection/mutation
 type Listener = () => void;
 type Setter = (path: string, value: any) => void;

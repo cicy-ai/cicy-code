@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Global drag/resize lock — prevents iframes from stealing pointer events
 let count = 0;
 const listeners = new Set<(v: boolean) => void>();

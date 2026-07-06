@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Tiny i18n helper for the ttyd UI side.
 // The hosting app passes ?lang=<code> through the WebFrame URL; we
 // fall back to navigator.language when the query string is missing,

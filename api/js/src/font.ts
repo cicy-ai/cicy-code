@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 function getPlatformName(): string {
     var nav = window.navigator as Navigator & {
         userAgentData?: {

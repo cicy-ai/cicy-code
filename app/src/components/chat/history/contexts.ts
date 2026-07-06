@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { createContext } from 'react';
 
 // Markdown link handling. URLs (http/https/mailto) are confirmed via a modal then

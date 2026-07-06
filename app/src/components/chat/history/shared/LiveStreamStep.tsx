@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MarkdownBlock } from './Markdown';
 import { ThinkingBlock } from './ThinkingBlock';

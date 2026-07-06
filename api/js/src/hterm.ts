@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import * as bare from "libapps";
 import { applyMonoFontVar, monoFontStack, isMacPlatform } from "./font";
 import { openExternalLinkWithConfirm, openFileReferencePopup } from "./link_confirm";

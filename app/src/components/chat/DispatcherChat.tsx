@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUp, Loader2, Square, Paperclip, X, FileText, FileSpreadsheet, FileCode, FileArchive, Brain } from 'lucide-react';
 import { useTranslation } from 'react-i18next';

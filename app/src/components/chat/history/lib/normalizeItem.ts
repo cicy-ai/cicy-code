@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import type { HistoryTurn, RawHistoryItem, EnvironmentContextData } from '../types';
 import { extractContentText } from './turns';
 

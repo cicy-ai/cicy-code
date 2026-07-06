@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // src/handlers/list.ts
 //
 // GET /v1/skills?q=&category=&agent=&limit=&offset=

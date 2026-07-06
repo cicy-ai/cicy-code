@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import config from '../../config'
 import apiService from '../../services/api'

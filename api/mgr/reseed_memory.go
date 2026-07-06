@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 // `cicy-code reseed-memory` — one-shot CLI that regenerates agents' guidance

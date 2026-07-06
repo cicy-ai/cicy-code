@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import apiService from '../../../../services/api';
 import type { RawHistoryItem } from '../types';
 import { CURRENT_HISTORY_WINDOW } from '../constants';

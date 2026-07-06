@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Phase 6 (audit-v2) — Agent Decisions tab.
 //
 // The autonomous policy agent (api/mgr/audit/autonomy.go) runs without

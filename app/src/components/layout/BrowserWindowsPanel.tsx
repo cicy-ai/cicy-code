@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // BrowserWindowsPanel — unified "browser windows" view across the two profile
 // backends (Chrome profiles + Electron sessions), usable from ANY client
 // (plain browser too), not just inside the Electron webview.

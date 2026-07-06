@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Per-agent live header metrics (status / model / context usage / cost),
 // derived from /api/agents/current-reply (reply.json). Extracted from the
 // retired Office window header so TeamPanel (and future surfaces) reuse the

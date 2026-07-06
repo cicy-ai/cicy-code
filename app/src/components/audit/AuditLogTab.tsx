@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Activity, ArrowDown, ArrowUp, RefreshCw, ShieldX, EyeOff, Bell, FileText, Check, Flag, CircleAlert, Terminal, ShieldCheck, Loader2, ChevronLeft, ChevronRight, ListChecks, Trash2, X } from 'lucide-react';

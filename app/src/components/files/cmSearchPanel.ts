@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Productized in-file search panel for the CodeEditor.
 //
 // CodeMirror ships a default search panel (via basicSetup's searchKeymap), but

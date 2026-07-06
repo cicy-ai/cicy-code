@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { useCallback, useEffect, useState } from 'react';
 import { Sparkles, Pencil, Trash2, Zap, Bot, Cpu } from 'lucide-react';
 import { useTranslation } from 'react-i18next';

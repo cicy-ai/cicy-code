@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { Terminal, WebTTY, normalizeTerminalText } from "./webtty";
 import { ttydT } from "./cicy_i18n";
 import { applyMonoFontVar, monoFontStack } from "./font";

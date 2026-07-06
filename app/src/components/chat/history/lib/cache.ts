@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import {
   CURRENT_HISTORY_TOOL_DB_NAME,
   CURRENT_HISTORY_TOOL_DB_VERSION,
