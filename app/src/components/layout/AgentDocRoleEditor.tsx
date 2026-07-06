@@ -7,13 +7,13 @@ import { Loader2, Check, AlertCircle, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 
-// The roster drawer's per-agent editor: THREE tabs across the top —
-//   [ CLAUDE.md / AGENTS.md ] [ meta.yaml ] [ system.md ]
-// Tab 1 is the agent's OWN guidance doc (per-agent, DB-resolved via scope 'agent').
-// Tabs 2–3 are the SHARED role-template files (scope 'role', <slug>/<file>) — many
-// agents share one role dir, so editing them affects every agent on that role.
-// meta.yaml/system.md only appear when the agent selects a role template.
-// One CodeMirror shows the active tab; switching flushes the prior buffer.
+// The roster drawer's per-agent editor. Tab 1 is always the agent's OWN guidance
+// doc — [ CLAUDE.md / AGENTS.md ] — (per-agent, DB-resolved via scope 'agent').
+// For CICY agents there are two more tabs — [ meta.yaml ] [ system.md ] — the
+// SHARED role-template files (scope 'role', <slug>/<file>); many agents share one
+// role dir, so editing them affects every agent on that role. Non-cicy agents
+// (claude/codex/opencode/kiro) don't use the cicy role template, so they get the
+// doc tab only. One CodeMirror shows the active tab; switching flushes the buffer.
 
 interface Props {
   paneId: string;
@@ -142,17 +142,26 @@ export default function AgentDocRoleEditor({ paneId, className }: Props) {
     return () => { cancelled = true; };
   }, [paneId]);
 
+  const isCicy = agentType.toLowerCase() === 'cicy';
   const docName = agentType.toLowerCase() === 'claude' ? 'CLAUDE.md' : 'AGENTS.md';
-  // Every agent gets a role template: agents without their own role_template fall
-  // back to the universal `assistant` role, so meta.yaml / system.md are always
-  // editable (they edit the shared assistant template).
+  // Cicy agents fall back to the universal `assistant` role when they have no
+  // role_template of their own, so meta.yaml / system.md are always editable.
   const slug = roleSlug.trim() || 'assistant';
 
-  const tabs: TabDef[] = useMemo(() => [
-    { key: 'doc', label: docName, scope: 'agent', name: paneId, shared: false },
-    { key: 'meta', label: 'meta.yaml', scope: 'role', name: `${slug}/meta.yaml`, shared: true },
-    { key: 'system', label: 'system.md', scope: 'role', name: `${slug}/system.md`, shared: true },
-  ], [paneId, docName, slug]);
+  // meta.yaml / system.md are the cicy ROLE template — system.md is the system
+  // prompt sent on every cicy turn (cicySystemBase). Only cicy agents use them.
+  // Non-cicy agents (claude/codex/opencode/kiro) run their native CLI off their
+  // own CLAUDE.md / AGENTS.md only, so they get just the doc tab.
+  const tabs: TabDef[] = useMemo(() => {
+    const list: TabDef[] = [
+      { key: 'doc', label: docName, scope: 'agent', name: paneId, shared: false },
+    ];
+    if (isCicy) {
+      list.push({ key: 'meta', label: 'meta.yaml', scope: 'role', name: `${slug}/meta.yaml`, shared: true });
+      list.push({ key: 'system', label: 'system.md', scope: 'role', name: `${slug}/system.md`, shared: true });
+    }
+    return list;
+  }, [paneId, docName, slug, isCicy]);
 
   const active = tabs.find((x) => x.key === tab) || tabs[0];
   const file = useTemplateFile(active?.scope || null, active?.name || null);
