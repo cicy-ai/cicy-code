@@ -1058,6 +1058,10 @@ func checkEnv() {
 	// On a dev machine with the repo checked out, symlink the packaged seed dir
 	// to ~/cicy-ai/memory-seed for easy editing (no-op elsewhere).
 	ensureMemorySeedLink()
+	// A newer cicy-code binary can boot inside an older Docker base image whose
+	// baked cicy-code-update.sh still installs into the legacy store path; make
+	// the store location canonical (~/.local/cicy-code) regardless. Container-only.
+	healLegacyCicyCodeRuntime()
 	// Seed ~/cicy-ai/memory/global.md with the default template on first boot so
 	// the memory editor and agent-creation always have a base layer to compose.
 	ensureGlobalMemoryTemplate()

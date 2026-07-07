@@ -6,15 +6,18 @@
 #   cicy-code-update            # → latest
 #   cicy-code-update 2.3.16     # → a pinned version
 #
-# Layout (matches the mihomo runtime store baked into the base image):
-#   ~/cicy-ai/runtime/cicy-code/<ver>/bin/cicy-code   (npm prefix install)
+# Layout (version store lives under ~/.local, next to the on-PATH symlink):
+#   ~/.local/cicy-code/<ver>/bin/cicy-code            (npm prefix install)
 #   ~/.local/bin/cicy-code  ->  …/<ver>/bin/cicy-code  ← THE symlink we swap
 #   ~/cicy-ai/runtime/versions.json  { "cicy-code": { "current": "<ver>" } }
+# versions.json stays under cicy-ai/runtime — it's the SHARED pointer file the
+# mihomo runtime store & the Go server (setup.go) also read; only cicy-code's
+# binary tree moved to ~/.local. Override the store dir with CICY_CODE_STORE.
 set -euo pipefail
 
 HOME_DIR="${HOME:-/home/cicy}"
 REG="${NPM_REGISTRY:-https://registry.npmmirror.com}"
-RT="$HOME_DIR/cicy-ai/runtime/cicy-code"
+RT="${CICY_CODE_STORE:-$HOME_DIR/.local/cicy-code}"
 LINK="$HOME_DIR/.local/bin/cicy-code"
 VERSIONS="$HOME_DIR/cicy-ai/runtime/versions.json"
 SVCTL="supervisorctl -c /etc/supervisor/supervisord.conf"

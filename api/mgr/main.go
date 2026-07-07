@@ -47,7 +47,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.192"
+const version = "2.3.193"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -506,6 +506,7 @@ Options:
 	http.HandleFunc("/api/skills/run", wa(handleSkillRun))
 	http.HandleFunc("/api/skill-market", wa(handleSkillMarketList))
 	http.HandleFunc("/api/skill-market/", wa(handleSkillMarketAction))
+	http.HandleFunc("/api/cicy-update", wa(handleCicyUpdateStatus)) // 是否有 cicy-code 新版(缓存)
 	http.HandleFunc("/api/skill-registries", wa(handleSkillRegistries))
 	http.HandleFunc("/api/skill-registries/", wa(handleSkillRegistries))
 	http.HandleFunc("/api/local-registry", wa(handleLocalRegistry))

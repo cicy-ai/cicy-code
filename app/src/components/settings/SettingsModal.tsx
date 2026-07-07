@@ -133,6 +133,17 @@ export default function SettingsModal({
     }).catch(() => {});
     return () => { alive = false; };
   }, [open, emailCfg]);
+  // Red badge on the version line when a newer cicy-code is published (cached
+  // backend lookup). Fetched once per open, mirroring the email badge above.
+  const [versionUpdate, setVersionUpdate] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    apiService.getCicyUpdateStatus().then((r: any) => {
+      if (alive) setVersionUpdate(!!r?.data?.has_update);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [open]);
   const { confirm, node: dialogNode } = useDialogs();
 
   useEffect(() => {
@@ -321,8 +332,9 @@ export default function SettingsModal({
               </button>
             ))}
             {version ? (
-              <div data-id="settings-modal-version" className="mt-auto px-3 py-2 text-[10.5px] text-zinc-600">
-                {t('membershipVersion', { defaultValue: '版本' })} {version}
+              <div data-id="settings-modal-version" className="mt-auto flex items-center gap-1.5 px-3 py-2 text-[10.5px] text-zinc-600">
+                {versionUpdate && <span data-id="settings-modal-version-badge" className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title={t('versionUpdateAvailable', { defaultValue: '有新版本可更新' })} />}
+                <span>{t('membershipVersion', { defaultValue: '版本' })} {version}</span>
               </div>
             ) : null}
           </nav>

@@ -185,6 +185,11 @@ const api = {
   syncMachines: (data?: any) => http.post('/api/machines/sync', data || {}),
   getMachinePanes: (id: number | string) => http.get(`/api/machines/${id}/panes`),
 
+  // {current, latest, has_update} — is a newer cicy-code published on npm (cached).
+  getCicyUpdateStatus: () => http.get('/api/cicy-update'),
+  // Trigger an in-place update to the latest version (server restarts itself).
+  applyCicyUpdate: () => http.post('/api/cicy-update', {}),
+
   getSkills: () => http.get('/api/skills'),
   // Locally installed cicy-skills only (name+version) — fast, no remote registry.
   // Use this for install checks instead of listMarketSkills() (~2s remote).

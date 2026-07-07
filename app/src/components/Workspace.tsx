@@ -89,6 +89,7 @@ const CLI_DRAWER_DEFAULT_WIDTH = 520;
 const CLI_DRAWER_MAX_WIDTH = 960;
 const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
 const GITHUB_ISSUES_URL = 'https://github.com/cicy-ai/cicy-code/issues';
+const DOCS_URL = 'https://docs.cicy-ai.com';
 const UPGRADE_URL = 'https://cicy-ai.com/team/upgrade';
 
 type MembershipCardState = {
@@ -441,6 +442,46 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       window.removeEventListener('focus', onChange);
     };
   }, [checkPublicSkillUpdate]);
+  // Red badge (version row + activity-bar trigger) when a newer cicy-code is
+  // published on npm. Backend caches the registry lookup; we re-check on focus.
+  const [versionUpdate, setVersionUpdate] = useState(false);
+  const checkVersionUpdate = useCallback(async () => {
+    try {
+      const res: any = await apiService.getCicyUpdateStatus();
+      setVersionUpdate(!!res?.data?.has_update);
+    } catch { /* leave the badge as-is on transient failures */ }
+  }, []);
+  useEffect(() => {
+    checkVersionUpdate();
+    const onFocus = () => { checkVersionUpdate(); };
+    window.addEventListener('focus', onFocus);
+    // Periodic re-check (30min == backend cache TTL) so the badge appears even
+    // if the tab is left open and never re-focused, on top of the focus trigger.
+    const timer = window.setInterval(() => { checkVersionUpdate(); }, 30 * 60 * 1000);
+    return () => { window.removeEventListener('focus', onFocus); window.clearInterval(timer); };
+  }, [checkVersionUpdate]);
+  // Click-to-update: POST triggers cicy-code-update (server restarts itself), then
+  // we poll until it's back on a new version and reload to pick up the new build.
+  const [updating, setUpdating] = useState(false);
+  const applyUpdate = useCallback(async () => {
+    if (updating) return;
+    setUpdating(true);
+    try {
+      const res: any = await apiService.applyCicyUpdate();
+      if (!res?.data?.started) { setUpdating(false); return; }
+      const startedAt = Date.now();
+      const poll = async () => {
+        if (Date.now() - startedAt > 180000) { setUpdating(false); return; } // give up after 3min
+        try {
+          const s: any = await apiService.getCicyUpdateStatus();
+          const cur = s?.data?.current;
+          if (cur && cur !== config.version) { window.location.reload(); return; }
+        } catch { /* server restarting — keep polling */ }
+        window.setTimeout(poll, 4000);
+      };
+      window.setTimeout(poll, 6000); // let the restart begin before first poll
+    } catch { setUpdating(false); }
+  }, [updating]);
   // Red badge on the Settings entry + 通用 item: true when the token-delivery
   // email isn't fully set up — SMTP not ready OR no delivery address (default_to).
   // Refetched when the settings modal closes so configuring it clears the badge.
@@ -1963,7 +2004,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             title={membershipCard.userId}
           >
             <Settings className="h-4 w-4" />
-            {emailNeedsSetup && <span data-id="activity-bar-membership-trigger-badge" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-[#0b0b0c]" title={t('emailNeedsSetup', { defaultValue: '未配置令牌投递邮箱 / SMTP' })} />}
+            {(emailNeedsSetup || versionUpdate) && <span data-id="activity-bar-membership-trigger-badge" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-[#0b0b0c]" title={emailNeedsSetup ? t('emailNeedsSetup', { defaultValue: '未配置令牌投递邮箱 / SMTP' }) : t('versionUpdateAvailable', { defaultValue: '有新版本可更新' })} />}
           </button>
         </div>
       </div>
@@ -2178,6 +2219,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             <span data-id="top-bar-github-issues-label">GitHub Issues</span>
             <Github className="h-3.5 w-3.5" />
           </button>
+          <button
+            type="button"
+            data-id="top-bar-docs"
+            onClick={() => {
+              setMembershipMenuOpen(false);
+              window.open(DOCS_URL, '_blank', 'noopener,noreferrer');
+            }}
+            className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+          >
+            <span data-id="top-bar-docs-label">{t('docsLink', { defaultValue: '文档' })}</span>
+            <BookOpen className="h-3.5 w-3.5" />
+          </button>
           {false && isDev ? (
           <button
             type="button"
@@ -2280,7 +2333,22 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           </div>
           <div data-id="membership-version" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] text-zinc-500">
             <span data-id="membership-version-label">Version</span>
-            <span data-id="membership-version-value" id="version" className="font-mono text-zinc-300">{config.version}</span>
+            <span className="flex items-center gap-2">
+              {versionUpdate && (
+                <button
+                  type="button"
+                  data-id="membership-version-update"
+                  onClick={applyUpdate}
+                  disabled={updating}
+                  className="rounded-md bg-red-500/15 px-2 py-0.5 text-[10px] font-medium text-red-400 transition-colors hover:bg-red-500/25 disabled:opacity-60"
+                  title={t('versionUpdateAvailable', { defaultValue: '有新版本可更新' })}
+                >
+                  {updating ? t('updating', { defaultValue: '更新中…' }) : t('updateNow', { defaultValue: '更新' })}
+                </button>
+              )}
+              {versionUpdate && !updating && <span data-id="membership-version-badge" className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" title={t('versionUpdateAvailable', { defaultValue: '有新版本可更新' })} />}
+              <span data-id="membership-version-value" id="version" className="font-mono text-zinc-300">{config.version}</span>
+            </span>
           </div>
         </div>,
         document.body
