@@ -1,10 +1,8 @@
 # cicy-code
 
-`cicy-code` 是一个本地优先的多 agent 开发工作区:tmux worker + WebTTY 终端 + React 工作区 + code-server 代理 + AI 网关 + skill 市场,收在同一个仓库里,通过 npm(`npx cicy-code`)分发单二进制。
+`cicy-code` 是一个本地优先的多 agent 开发工作区:tmux worker + WebTTY 终端 + React 工作区 + AI 网关 + skill 市场,收在同一个仓库里,通过 npm(`npx cicy-code`)分发单二进制,静态资产 / 安装脚本走 Cloudflare R2 CDN。
 
 ![cicy-code](assets/home.png)
-
-> 这份 README 只描述**当前**代码状态。约定俗成的口径不算数,以仓库为准。
 
 ## 仓库结构
 
@@ -113,7 +111,7 @@ npx cicy-code                   # 临时跑一次
 ## 架构
 
 **后端 `api/mgr`** — `main.go` 注册全部路由与启动。关键文件:
-- `setup.go`:环境检查、内置 worker、code-server 启动、开机 seed(dotfiles / memory 模板 / 内置 skill)
+- `setup.go`:环境检查、内置 worker、开机 seed(dotfiles / memory 模板 / 内置 skill)
 - `tmux.go`:pane 生命周期、tmux send、agent 启动脚本(boot.sh)、fork
 - `chatbus.go`:聊天 WebSocket、poll、client 广播
 - `agent_memory_template.go`:agent 记忆模板组装(见下)
@@ -125,7 +123,7 @@ npx cicy-code                   # 临时跑一次
 
 **终端层** — `api/server`(HTTP/WS)、`api/webtty`(协议)、`api/js`(浏览器端资产,改后 `make asset`)。
 
-**前端 `app`** — `App.tsx` 路由;`Workspace.tsx` 主工作区(agent stack / code-server / 团队面板 / skill 市场 / Todo / WS 状态);`services/api.ts` 统一 API 客户端;`config.ts` 版本号与 API base。
+**前端 `app`** — `App.tsx` 路由;`Workspace.tsx` 主工作区(agent stack / 团队面板 / skill 市场 / Todo / WS 状态);`services/api.ts` 统一 API 客户端;`config.ts` 版本号与 API base。
 
 **Cloudflare Workers `workers/`**(独立 `wrangler deploy`,与主程序解耦):
 - `oauth-flow` → `oauth-flow.cicy-ai.com`:Google OAuth 授权码**无状态中继**(只暂存 code,TTL 10min、一次性;永不接触 client_secret / token)
