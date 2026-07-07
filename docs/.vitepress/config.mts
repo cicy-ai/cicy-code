@@ -28,7 +28,7 @@ export default defineConfig({
     logo: '/favicon.svg',
     siteTitle: 'cicy-code',
     nav: [
-      { text: '首页', link: 'https://cicy-ai.com' },
+      { text: '首页', link: 'https://cicy-ai.com', target: '_self' },
       { text: '快速开始', link: '/guide/getting-started' },
       { text: '下载', link: '/guide/download' },
       { text: '文档', link: '/guide/introduction', activeMatch: '/guide/' },
