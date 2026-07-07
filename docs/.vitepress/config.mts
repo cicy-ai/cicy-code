@@ -67,7 +67,7 @@ export default defineConfig({
   },
   themeConfig: {
     logo: '/favicon.svg',
-    siteTitle: 'cicy-code',
+    siteTitle: 'cicy-ai',
     nav: [
       { text: '首页', link: 'https://cicy-ai.com', target: '_self' },
       { text: '快速开始', link: '/guide/getting-started' },
