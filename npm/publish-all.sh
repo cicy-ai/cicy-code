@@ -38,11 +38,7 @@ declare -A ASSET=(
   [darwin-x64]=cicy-code-darwin-amd64
   [linux-x64]=cicy-code-linux-amd64
   [linux-arm64]=cicy-code-linux-arm64
-  # Package name says "windows", NOT "win32": npm's spam filter 403s new
-  # packages with win32 in the name (hit live on cicy-mihomo-win32-x64,
-  # 2026-06-07). The package.json "os" field still needs the literal
-  # process.platform value — pkg_os() maps it back.
-  [windows-x64]=cicy-code-windows-amd64.exe
+  # Windows is not shipped.
 )
 # npm sub-package ships ONE binary; on Windows it must keep the .exe extension
 # (CreateProcess needs it) — the launcher resolves the name per-platform.

@@ -340,7 +340,6 @@ build_all() {
   build_one linux   arm64  $DIST_DIR/cicy-code-linux-arm64
   build_one darwin  amd64  $DIST_DIR/cicy-code-darwin-amd64
   build_one darwin  arm64  $DIST_DIR/cicy-code-darwin-arm64
-  build_one windows amd64  $DIST_DIR/cicy-code-windows-amd64.exe
   echo ""; ls -lh $DIST_DIR/
 }
 

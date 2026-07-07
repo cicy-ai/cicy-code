@@ -31,7 +31,7 @@ try {
 } catch {
   console.error(`cicy-code: no prebuilt binary for ${process.platform}-${process.arch}.`);
   console.error(`The optional dependency "${platformPkg}" is not installed.`);
-  console.error(`Supported platforms: darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64.`);
+  console.error(`Supported platforms: darwin-arm64, darwin-x64, linux-x64, linux-arm64.`);
   console.error(`Reinstall: npm install -g cicy-code` +
     ` (in China add --registry=https://registry.npmmirror.com)`);
   process.exit(1);

@@ -19,8 +19,7 @@
     "cicy-code-darwin-arm64": "2.1.47",
     "cicy-code-darwin-x64": "2.1.47",
     "cicy-code-linux-arm64": "2.1.47",
-    "cicy-code-linux-x64": "2.1.47",
-    "cicy-code-windows-x64": "2.1.47"
+    "cicy-code-linux-x64": "2.1.47"
   },
   "repository": {
     "type": "git",

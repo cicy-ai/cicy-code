@@ -101,7 +101,7 @@ jobs:
       - name: Build all platform binaries
         # bash build.sh all runs prepare_embed (builds the cicy-skills tarball that
         # //go:embed picks up + the frontend + ttyd assets) then cross-compiles
-        # darwin/linux amd64+arm64 + windows.
+        # darwin/linux amd64+arm64.
         run: |
           bash build.sh all
           ls -lh dist/
@@ -123,15 +123,13 @@ jobs:
               "darwin-amd64":  "${BASE}/cicy-code-darwin-amd64",
               "darwin-arm64":  "${BASE}/cicy-code-darwin-arm64",
               "linux-amd64":   "${BASE}/cicy-code-linux-amd64",
-              "linux-arm64":   "${BASE}/cicy-code-linux-arm64",
-              "windows-amd64": "${BASE}/cicy-code-windows-amd64.exe"
+              "linux-arm64":   "${BASE}/cicy-code-linux-arm64"
             },
             "sizes": {
               "darwin-amd64":  $(stat -c%s dist/cicy-code-darwin-amd64),
               "darwin-arm64":  $(stat -c%s dist/cicy-code-darwin-arm64),
               "linux-amd64":   $(stat -c%s dist/cicy-code-linux-amd64),
-              "linux-arm64":   $(stat -c%s dist/cicy-code-linux-arm64),
-              "windows-amd64": $(stat -c%s dist/cicy-code-windows-amd64.exe)
+              "linux-arm64":   $(stat -c%s dist/cicy-code-linux-arm64)
             }
           }
           EOF
@@ -156,13 +154,12 @@ jobs:
             dist/cicy-code-darwin-arm64 \
             dist/cicy-code-linux-amd64 \
             dist/cicy-code-linux-arm64 \
-            dist/cicy-code-windows-amd64.exe \
             dist/manifest.json; do
             echo "Uploading $f ..."
             gh release upload "$TAG" "$f" --clobber
           done
 
-      - name: Publish to npm (5 packages + CN sync)
+      - name: Publish to npm (4 packages + CN sync)
         # Runs for BOTH tag-push and manual (workflow_dispatch) releases — a 手动发版
         # is a real release and should hit npm too. publish-all.sh publishes the
         # launcher + the four per-platform binary sub-packages (reusing dist/ via
