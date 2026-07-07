@@ -32,3 +32,9 @@
 .dark .VPFeature:hover{border-color:rgba(124,92,255,.35)}
 /* inline code accent toward cyan on dark */
 .dark :not(pre)>code{color:#8fd6ff}
+/* Left sidebar pinned flush to the viewport's left edge. VitePress offsets it
+   rightward on ≥1440px screens to center it within --vp-layout-max-width; keep
+   it at left:0 and align the nav's brand above it. */
+@media (min-width:1440px){
+  .VPSidebar{padding-left:32px;width:var(--vp-sidebar-width)}
+}
