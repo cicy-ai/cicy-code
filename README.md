@@ -2,6 +2,8 @@
 
 `cicy-code` 是一个本地优先的多 agent 开发工作区:tmux worker + WebTTY 终端 + React 工作区 + code-server 代理 + AI 网关 + skill 市场,收在同一个仓库里,通过 npm(`npx cicy-code`)分发单二进制。
 
+![cicy-code](assets/home.png)
+
 > 这份 README 只描述**当前**代码状态。约定俗成的口径不算数,以仓库为准。
 
 ## 仓库结构
