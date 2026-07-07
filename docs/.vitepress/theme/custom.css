@@ -19,7 +19,10 @@
 .dark body{background-image:
   radial-gradient(90% 48% at 80% -10%, rgba(124,92,255,.15), transparent 60%),
   radial-gradient(60% 40% at 8% -4%, rgba(75,227,255,.08), transparent 60%);}
-.dark .VPNavBar{backdrop-filter:blur(14px)}
+/* Full-width solid-black fixed header bar (top:0, left/right:0, height 64) —
+   opaque + no backdrop-blur + no scroll-state bg change, so it's rock-stable. */
+.VPNav{position:fixed;top:0;left:0;right:0;height:var(--vp-nav-height);background:#000;z-index:var(--vp-z-index-nav)}
+.VPNavBar,.VPNavBar.top,.VPNavBar:not(.top){background-color:#000 !important;backdrop-filter:none !important}
 /* gradient CTA on home */
 .VPButton.medium.brand,.VPButton.big.brand{
   background:linear-gradient(120deg,#7c5cff,#4be3ff);border:0;color:#0a0a12;font-weight:600}
