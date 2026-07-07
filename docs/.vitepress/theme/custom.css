@@ -32,17 +32,16 @@
 .dark .VPFeature:hover{border-color:rgba(124,92,255,.35)}
 /* inline code accent toward cyan on dark */
 .dark :not(pre)>code{color:#8fd6ff}
-/* Left-align the whole layout: neutralise VitePress's ≥1440px "center within
-   --vp-layout-max-width" offsets (sidebar, navbar, content, local nav) so the
-   sidebar stays flush at left:0 and content hugs it at every desktop width.
-   !important is required — the default ≥1440px rules otherwise win the cascade. */
 /* Left-aligned layout. The ≥1440px "center within max-width" rules are stripped
    from the built CSS by the strip-vp-1440-media Vite plugin (see config.mts);
-   these keep the sidebar + navbar + content pinned left at all desktop widths. */
-.VPNavBar .title{transition:none}
+   these keep the sidebar/navbar/content pinned left at every desktop width. The
+   navbar title also gets a FIXED width so its box can never resize (no reflow /
+   "闪一下" from font-load or hydration) and no transition to animate it. */
+.VPNavBar .title{transition:none !important}
 @media (min-width:960px){
   .VPSidebar{left:0;padding-left:32px;width:var(--vp-sidebar-width)}
   .VPContent.has-sidebar{padding-left:var(--vp-sidebar-width)}
-  .VPNavBar.has-sidebar .content{padding-left:var(--vp-sidebar-width)}
+  .VPNavBar.has-sidebar .content{padding-left:var(--vp-sidebar-width);padding-right:32px}
+  .VPNavBar.has-sidebar .title{width:var(--vp-sidebar-width);overflow:hidden}
   .VPLocalNav.has-sidebar{padding-left:var(--vp-sidebar-width)}
 }
