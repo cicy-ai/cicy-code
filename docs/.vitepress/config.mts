@@ -27,20 +27,38 @@ export default defineConfig({
   vite: {
     plugins: [
       {
-        // Physically strip VitePress's ≥1440px `.VPNavBar.has-sidebar .title`
-        // rule (the padding/width calc that made the navbar title jitter) from
-        // the built CSS — it's the only .title rule referencing
-        // --vp-layout-max-width, so the ≥960px default (fixed sidebar-width)
-        // takes over cleanly. Deletes the rule outright instead of !important-ing.
-        name: 'strip-vp-1440-navtitle',
+        // Physically delete EVERY `@media (min-width: 1440px)` block from the
+        // built CSS — VitePress uses them only to "center within
+        // --vp-layout-max-width" on wide screens (the source of the navbar-title
+        // jitter and the off-left layout). Removing them makes the <1440px
+        // (left-aligned, fixed sidebar-width) layout apply at all widths.
+        // Brace-matched so the whole block + its nested rules are stripped.
+        name: 'strip-vp-1440-media',
         enforce: 'post',
         generateBundle(_options: unknown, bundle: Record<string, any>) {
+          const strip1440 = (css: string): string => {
+            const open = /@media[^{]*min-width:\s*1440px[^{]*\{/g;
+            let out = '';
+            let last = 0;
+            let m: RegExpExecArray | null;
+            while ((m = open.exec(css)) !== null) {
+              out += css.slice(last, m.index);
+              let depth = 1;
+              let p = m.index + m[0].length;
+              while (p < css.length && depth > 0) {
+                const c = css[p++];
+                if (c === '{') depth++;
+                else if (c === '}') depth--;
+              }
+              last = p;
+              open.lastIndex = p;
+            }
+            out += css.slice(last);
+            return out;
+          };
           for (const file of Object.values(bundle)) {
             if (file.type === 'asset' && file.fileName.endsWith('.css') && typeof file.source === 'string') {
-              file.source = file.source.replace(
-                /\.VPNavBar\.has-sidebar \.title\[data-v-[a-f0-9]+\]\{[^}]*--vp-layout-max-width[^}]*\}/g,
-                '',
-              );
+              file.source = strip1440(file.source);
             }
           }
         },
