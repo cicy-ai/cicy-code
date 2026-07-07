@@ -36,14 +36,18 @@
    --vp-layout-max-width" offsets (sidebar, navbar, content, local nav) so the
    sidebar stays flush at left:0 and content hugs it at every desktop width.
    !important is required — the default ≥1440px rules otherwise win the cascade. */
-/* Reserve the scrollbar gutter always, so navigating between a page WITH a
-   scrollbar and one WITHOUT it doesn't shift the whole layout (incl. the navbar
-   title) sideways by the scrollbar width — the "title 一跳一跳" jitter. */
-html{scrollbar-gutter:stable}
+/* The navbar title jitters ("一跳一跳") because its ≥1440px width is a calc()
+   that recomputes on reflow / during client-side nav (when .has-sidebar briefly
+   toggles) and the default `transition` ANIMATES the width change. Kill the
+   transition unconditionally (any state, any width) so the title can never
+   animate — width changes snap instantly, no visible jump. */
+.VPNavBar .title{transition:none !important}
 @media (min-width:960px){
   .VPSidebar{left:0 !important;padding-left:32px !important;width:var(--vp-sidebar-width) !important}
   .VPContent.has-sidebar{padding-left:var(--vp-sidebar-width) !important}
-  .VPNavBar.has-sidebar .title{width:var(--vp-sidebar-width) !important;padding-left:24px !important;transition:none !important}
+  /* Also override the ≥1440px width calc so the title stays a fixed, stable width
+     (no calc, nothing to recompute). */
+  .VPNavBar .title{width:var(--vp-sidebar-width) !important;padding-left:24px !important}
   .VPNavBar.has-sidebar .content{padding-left:var(--vp-sidebar-width) !important}
   .VPLocalNav.has-sidebar{padding-left:var(--vp-sidebar-width) !important}
 }

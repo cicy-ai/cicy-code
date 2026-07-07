@@ -6,7 +6,7 @@ export default defineConfig({
   lang: 'zh-CN',
   title: 'cicy-code',
   description: desc,
-  appearance: 'dark',        // 默认暗色
+  appearance: 'force-dark',  // 强制暗色,隐藏 light/dark 切换开关
   cleanUrls: true,
   lastUpdated: true,
   metaChunk: true,
@@ -24,6 +24,29 @@ export default defineConfig({
     ['meta', { name: 'twitter:description', content: desc }],
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
   ],
+  vite: {
+    plugins: [
+      {
+        // Physically strip VitePress's ≥1440px `.VPNavBar.has-sidebar .title`
+        // rule (the padding/width calc that made the navbar title jitter) from
+        // the built CSS — it's the only .title rule referencing
+        // --vp-layout-max-width, so the ≥960px default (fixed sidebar-width)
+        // takes over cleanly. Deletes the rule outright instead of !important-ing.
+        name: 'strip-vp-1440-navtitle',
+        enforce: 'post',
+        generateBundle(_options: unknown, bundle: Record<string, any>) {
+          for (const file of Object.values(bundle)) {
+            if (file.type === 'asset' && file.fileName.endsWith('.css') && typeof file.source === 'string') {
+              file.source = file.source.replace(
+                /\.VPNavBar\.has-sidebar \.title\[data-v-[a-f0-9]+\]\{[^}]*--vp-layout-max-width[^}]*\}/g,
+                '',
+              );
+            }
+          }
+        },
+      },
+    ],
+  },
   themeConfig: {
     logo: '/favicon.svg',
     siteTitle: 'cicy-code',
