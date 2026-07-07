@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -127,11 +126,12 @@ func handleCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detach fully: setsid + own process group so supervisor's restart of
-	// cicy-code doesn't take the updater down with us mid-install.
+	// Detach fully: `setsid` runs the updater in a NEW session, so supervisor's
+	// restart of cicy-code (which kills our process group) doesn't take the
+	// updater down mid-install. (setsid alone suffices — no Windows-incompatible
+	// SysProcAttr needed; this path is container/Linux-only anyway.)
 	cmd := exec.Command("setsid", "bash", legacyUpdaterPath, target)
 	cmd.Env = os.Environ()
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		log.Printf("[cicy-update] launch failed: %v", err)
 		J(w, M{"started": false, "error": "failed to launch updater: " + err.Error()})
