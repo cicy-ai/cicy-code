@@ -30,24 +30,59 @@ export default defineConfig({
     nav: [
       { text: '首页', link: 'https://cicy-ai.com' },
       { text: '快速开始', link: '/guide/getting-started' },
-      { text: '下载', link: '/download' },
+      { text: '下载', link: '/guide/download' },
       { text: '文档', link: '/guide/introduction', activeMatch: '/guide/' },
     ],
     sidebar: [
-      { text: '入门', collapsed: false, items: [
+      { text: '开始', collapsed: false, items: [
         { text: '介绍', link: '/guide/introduction' },
+        { text: '下载与安装', link: '/guide/download' },
         { text: '快速开始', link: '/guide/getting-started' },
-        { text: '下载', link: '/download' },
-        { text: '构建与测试', link: '/guide/build-test' },
-        { text: '发版', link: '/guide/release' },
       ]},
-      { text: '核心', collapsed: false, items: [
-        { text: '架构', link: '/guide/architecture' },
-        { text: 'agent · pane · 记忆', link: '/guide/agents' },
-        { text: 'skill 生态', link: '/guide/skills' },
+      { text: '核心概念', collapsed: false, items: [
+        { text: 'Agent 与 Pane', link: '/concepts/agent-pane' },
+        { text: '记忆与模板', link: '/concepts/memory' },
+        { text: '团队与协作', link: '/concepts/teams' },
+        { text: 'Fork 分身', link: '/concepts/fork' },
+        { text: 'Skill 能力', link: '/concepts/skill' },
       ]},
-      { text: '参考', collapsed: false, items: [
+      { text: '指南', collapsed: false, items: [
+        { text: '创建与管理 agent', link: '/guides/create-agent' },
+        { text: '项目与角色模板', link: '/guides/templates' },
+        { text: '派活与任务', link: '/guides/tasks' },
+        { text: '跨 agent 协作', link: '/guides/collaboration' },
+        { text: '装用 skill', link: '/guides/skills-use' },
+        { text: '浏览器 / 桌面控制', link: '/guides/browser-desktop' },
+        { text: '定制记忆', link: '/guides/memory-customize' },
+        { text: '团队知识库', link: '/guides/knowledge' },
+      ]},
+            { text: '进阶', collapsed: false, items: [
+        { text: '本地 AI 网关', link: '/advanced/gateway' },
+        { text: '网关 vs 非网关启动', link: '/advanced/gateway-modes' },
+        { text: 'MITM 审计代理', link: '/advanced/mitm' },
+        { text: '审计策略', link: '/advanced/audit' },
+      ]},
+      { text: 'Skill 生态', collapsed: true, items: [
+        { text: '概览与安装', link: '/skills/overview' },
+        { text: '三类 skill', link: '/skills/kinds' },
+        { text: '写自己的 skill', link: '/skills/authoring' },
+      ]},
+      { text: '开发', collapsed: true, items: [
+        { text: '仓库结构', link: '/develop/repo-structure' },
+        { text: '本地开发', link: '/develop/local-dev' },
+        { text: '构建与测试', link: '/develop/build-test' },
+        { text: '发版', link: '/develop/release' },
+        { text: '架构', link: '/develop/architecture' },
+      ]},
+      { text: '部署', collapsed: true, items: [
+        { text: '单机 / 本地', link: '/deploy/single' },
+        { text: 'Docker / runtime', link: '/deploy/docker' },
+        { text: '云端 (cicy-cloud)', link: '/deploy/cloud' },
+      ]},
+      { text: '参考', collapsed: true, items: [
         { text: '配置与路径', link: '/reference/config' },
+        { text: 'CLI 命令', link: '/reference/cli' },
+        { text: '环境变量', link: '/reference/env' },
       ]},
     ],
     outline: { level: [2, 3], label: '本页导航' },
