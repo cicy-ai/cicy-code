@@ -151,6 +151,16 @@ Options:
                           e.g. cloudshell.cicy-ai.com — used only to report the URL
                           (the token doesn't reveal it). Also CICY_CFT_HOST /
                           cft.json {"host"}.
+  --gateway URL           Dial OUT to a cicy zero-trust gateway and serve this
+                          instance over a WSS reverse tunnel — NO inbound port is
+                          opened. Clients reach it via the gateway, which verifies
+                          their short-lived access token; this node injects its own
+                          api_token so the client never holds it. Also
+                          CICY_GATEWAY_URL / ~/cicy-ai/db/gateway.json {"url"}.
+  --gateway-token JWT     The node identity token (typ=node) for the gateway.
+                          Also CICY_GATEWAY_TOKEN / gateway.json {"token"}, or
+                          --gateway-token-file PATH.
+  --gateway-insecure      Skip gateway TLS verification (dev self-signed cert only).
   --audit                 Enable audit mode
   --helper=1              Team-Helper mode: ship a single headless cicy
                           "团队助手" on w-1001 that installs Docker + cicy-code
@@ -193,6 +203,31 @@ Options:
 			}
 		case strings.HasPrefix(arg, "--cft-host="):
 			cftHost = strings.TrimPrefix(arg, "--cft-host=")
+		case arg == "--gateway":
+			if i+1 < len(cliArgs) {
+				gatewayURL = cliArgs[i+1]
+				i++
+			}
+			gatewayMode = true
+		case strings.HasPrefix(arg, "--gateway="):
+			gatewayURL = strings.TrimPrefix(arg, "--gateway=")
+			gatewayMode = true
+		case arg == "--gateway-token":
+			if i+1 < len(cliArgs) {
+				gatewayToken = cliArgs[i+1]
+				i++
+			}
+		case strings.HasPrefix(arg, "--gateway-token="):
+			gatewayToken = strings.TrimPrefix(arg, "--gateway-token=")
+		case arg == "--gateway-token-file":
+			if i+1 < len(cliArgs) {
+				if b, err := os.ReadFile(cliArgs[i+1]); err == nil {
+					gatewayToken = strings.TrimSpace(string(b))
+				}
+				i++
+			}
+		case arg == "--gateway-insecure":
+			gatewayInsecure = true
 		case arg == "--helper" || arg == "--helper=1":
 			helperMode = true
 			os.Setenv("CICY_HELPER", "1")
@@ -670,6 +705,12 @@ Options:
 	// (cloudflared retries the origin on its own, so listening later is fine).
 	if cftMode {
 		go startCFT(port)
+	}
+	// --gateway (or CICY_GATEWAY_URL/db/gateway.json): dial OUT to a zero-trust
+	// gateway and serve over the reverse tunnel — no inbound port opened here.
+	if gatewayMode || strings.TrimSpace(os.Getenv("CICY_GATEWAY_URL")) != "" {
+		gatewayMode = true
+		go startGatewayTunnel(port)
 	}
 	openHost := bind
 	if openHost == "0.0.0.0" {
