@@ -38,3 +38,14 @@ api/mgr/.cicy_tmux.conf
 
 # stray dev logs (current dev.py writes to ~/logs/.dev-logs, outside the repo)
 /.dev-logs/
+
+# prebuilt binaries / stray build artifacts (never commit — they bloated history to 388M)
+api/cicy-code
+api/cicy-code-darwin
+api/cicy-code-linux*
+api/mgr/mgr
+api/mgr/cicy-code-api
+npm/bin/cicy-code
+bin/frpc
+api/mgr/mihomo_bin.gz
+.dev-logs/
