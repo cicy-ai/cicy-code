@@ -1,6 +1,6 @@
 # cicy-code
 
-`cicy-code` 是一个本地优先的多 agent 开发工作区:tmux worker + WebTTY 终端 + React 工作区 + AI 网关 + skill 市场,收在同一个仓库里,通过 npm(`npx cicy-code`)分发单二进制,静态资产 / 安装脚本走 Cloudflare R2 CDN。
+`cicy-code` 是一个本地优先的多 agent 开发工作区:tmux worker + WebTTY 终端 + React 工作区 + AI 网关 + skill 市场,收在同一个仓库里,通过 npm(`npx cicy-code`)分发单二进制。
 
 ![cicy-code](assets/home.png)
 
@@ -74,7 +74,7 @@ cd api && go run ./mgr/ --dev --public   # 后端把非 API 请求反代到 :802
 
 版本号统一由 `scripts/sync-version.py` 写入这几处:`npm/package.json`、`app/package.json`、`app/package-lock.json`、`app/src/config.ts`、`api/mgr/main.go`、`.cicy_tmux.conf`。
 
-**正式发版(npm + R2,走 CI):**
+**正式发版(走 CI):**
 ```bash
 python3 scripts/sync-version.py --set 2.3.NN   # 1) bump 所有版本文件
 cd app && npm run build                        # 2) 前端 build(把 config.version 烘进 dist)
@@ -82,7 +82,7 @@ cd .. && git add <你的文件> && git commit ...   # 3) 提交(共享 checkout:
 git push origin main
 git tag v2.3.NN && git push origin v2.3.NN      # 4) 打 tag → 触发 .github/workflows/release.yml
 ```
-CI 从 **tag** 构建各平台二进制、发布 npm 五连包 + 上传 R2 资产。
+CI 从 **tag** 构建各平台二进制、发布 npm 五连包。
 
 **只更新本地 Mac 桌面(不发 npm,更快):** 桌面跑 `~/.local/bin/cicy-code`(symlink → 版本化二进制)。流程见项目内约定(每次必 bump 版本 → `./build.sh build darwin amd64` → 拷成版本化名 → 原子换 symlink → 同步 `~/.local/bin/.cicy-localbin.json`)。
 
@@ -128,12 +128,6 @@ npx cicy-code                   # 临时跑一次
 **Cloudflare Workers `workers/`**(独立 `wrangler deploy`,与主程序解耦):
 - `oauth-flow` → `oauth-flow.cicy-ai.com`:Google OAuth 授权码**无状态中继**(只暂存 code,TTL 10min、一次性;永不接触 client_secret / token)
 - `skills-registry` → `skills.cicy-ai.com`:**public skill 注册表 API**(`/v1/skills*`、`/v1/admin/publish`),`skill install` 打的就是它
-
-## agent / pane 与记忆
-
-pane 是核心运行单位,ID 形如 `w-1001` / `w-1001:main.0`。内置 agent(`api/mgr/setup.go`):`claude` / `codex` / `opencode` / `kiro-cli` / `cicy`(cicy 为内置 headless 会话)等;**非 lab 模式默认只暴露 `claude` / `codex` / `opencode`**。默认 dev agent 是 `claude`,首个内置 worker 是 `w-1001`。
-
-**记忆/guidance 文件**:每个 agent 在其 workspace 拥有一份自包含的原生 guidance 文件(`CLAUDE.md` / `AGENTS.md` / `.kiro/steering/memory.md`)。内容在**创建时**由分层模板**组装并逐字写入**——`global`(`~/cicy-ai/memory/global.md`)+ 可选 project(`projects/<slug>.md`)+ 可选 role(`agents/<slug>/`)。**没有继承、没有网关注入**,CLI 直接原生读取该文件(`agent_memory_template.go` 组装,`tmux.go` `writeAgentGuidanceFile` 落盘)。打包默认 seed 在 `api/mgr/embed/memory-seed/`(改这里改的是发给所有人的默认)。`cicy-code reseed-memory` 可按当前模板重新生成(会备份、保留自定义标记以下内容)。
 
 ## skill 生态
 
