@@ -1,0 +1,26 @@
+name: Deploy docs to Cloudflare Pages
+
+on:
+  push:
+    tags: ['v*']          # 发版(打 tag)即自动部署文档
+  workflow_dispatch: {}    # 也可手动触发
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build docs
+        working-directory: docs
+        run: |
+          npm ci
+          npm run build
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy docs/.vitepress/dist --project-name=cicy-code-docs --branch=main
