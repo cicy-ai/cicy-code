@@ -1098,12 +1098,6 @@ def run_docker_build(version_override=""):
     build_env["SKIP_NPM"] = "0"
     build_env["SKIP_TTYD_ASSET"] = "0"
     run_checked(["./build.sh", "assets"], cwd=ROOT_DIR, env=build_env)
-    run_checked(
-        ["python3", "./scripts/r2-upload.py", "app"], cwd=ROOT_DIR, env=build_env
-    )
-    run_checked(
-        ["python3", "./scripts/r2-upload.py", "ttyd"], cwd=ROOT_DIR, env=build_env
-    )
     build_env["SKIP_NPM"] = "1"
     build_env["SKIP_TTYD_ASSET"] = "1"
     run_checked(["./build.sh", "docker", version], cwd=ROOT_DIR, env=build_env)

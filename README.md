@@ -1,449 +1,156 @@
 # cicy-code
 
-`cicy-code` 是一个本地优先的多 agent 开发工作区。
+`cicy-code` 是一个本地优先的多 agent 开发工作区:tmux worker + WebTTY 终端 + React 工作区 + code-server 代理 + AI 网关 + skill 市场,收在同一个仓库里,通过 npm(`npx cicy-code`)分发单二进制。
 
-它把 tmux worker、WebTTY、React 工作区、code-server 代理、OpenClaw 网关、shared workspace API、runtime/machines API、skill 市场、npm 启动器以及一组本地 Go skills（hosttools / skill 管理 / STT / TTS）收在同一个仓库里。
+> 这份 README 只描述**当前**代码状态。约定俗成的口径不算数,以仓库为准。
 
-## 当前结论
-
-这份 README 只描述当前代码状态。
-
-- 本地开发主入口：`python3 dev.py`
-- 正式构建入口：`./build.sh`
-- 后端主入口：`api/mgr/main.go`
-- 前端主入口：`app/src/App.tsx`
-- 主工作区组件：`app/src/components/Workspace.tsx`
-- 版本号源头：`npm/package.json`
-- cicy 状态根：`~/cicy-ai`
-- 运行时日志根：`~/logs`
-- Docker home 挂载根：`~/docker-homes`
-
-## 目录
+## 仓库结构
 
 ```text
 cicy-code/
-├── app/                    React + Vite 前端
-├── api/                    Go 后端、WebTTY、ttyd 资产、manager 运行时
-│   ├── mgr/                主程序与业务路由（~90 个 .go 文件）
-│   ├── server/             WebTTY HTTP/WebSocket 服务
-│   ├── webtty/             WebTTY 协议实现
-│   ├── js/                 终端前端静态资源源码
-│   ├── code-server-extension/  code-server / VS Code 扩展源码与 vsix
-│   └── resources/          后端静态资源
-├── npm/                    npm 发布包与启动器
-├── skills/                 本地 Go skill 工具链 + 各类 SKILL.md
-│   ├── cmd/                cicy-hosttools / cicy-skills / cicy-skillsd / stt / tts
-│   ├── internal/           agentgen, bundle, config, hosttools, registry, voice
-│   ├── cicy-code           bash CLI：调当前节点的 cicy-code 后端
-│   ├── cicy-master         python CLI：管理 ~/Private/cicy-node.json 节点表
-│   ├── cicy-todo/          每工作区 todo 列表 skill（前端 Todo tab 对端）
-│   ├── proxy_ssh/          ssh 子代理 skill 脚本
-│   ├── us-spot-dev/, hk-spot-dev/, us-spot-proxy/  spot/dev 节点 provisioning
-│   ├── cf/                 install-worker for Cloudflare Worker dev
-│   ├── docker/             skill 测试用的 base/google-smoke Dockerfile
-│   ├── configs/            示例配置
-│   ├── migrations/         SKILL_REGISTRY / SKILL_DEV_GUIDE 等迁移文档
-│   ├── legacy/             历史 markdown skill 资料
-│   └── dist/               本地构建产物（cicy-hosttools 等二进制）
-├── docs/                   当前文档与历史记录
-├── dev.py                  本地开发入口
-├── build.sh                标准构建入口
-├── versions.json           基础镜像与静态资源版本
-└── Makefile                常用别名
+├── app/          React + Vite 前端(入口 app/src/App.tsx,主界面 Workspace.tsx)
+├── api/          Go 后端 + 终端层
+│   ├── mgr/      主程序与业务路由(main.go 注册路由与启动)
+│   ├── server/   WebTTY HTTP/WebSocket 服务
+│   ├── webtty/   WebTTY 协议
+│   ├── js/       浏览器端终端资产源码(改后需 `cd api && make asset`)
+│   ├── skillcmd/ `cicy-code skill <…>` 子命令(安装/卸载/列表)
+│   └── resources/ 后端静态资源
+├── npm/          npm 发布包与启动器(bin/cicy-code.js + publish-all.sh + install.sh)
+├── scripts/      构建/发版/测试脚本(build-image.sh / fresh-instance.sh / sync-version.py)
+├── workers/      Cloudflare Workers(见下「Cloudflare Workers」)
+├── build.sh      标准构建入口(唯一正确的构建/测试方式)
+├── dev.py        本地开发入口
+├── versions.json base 镜像 / app 资产 / ttyd 版本
+└── Makefile      常用别名
 ```
 
-## 运行方式
+主入口:
+- 本地开发 `python3 dev.py`
+- 构建/测试 `./build.sh`
+- 后端 `api/mgr/main.go`,前端 `app/src/App.tsx`,主工作区 `app/src/components/Workspace.tsx`
+- 版本号源头 `npm/package.json`
+- cicy 状态根 `~/cicy-ai`
 
-### 1. 本地开发
+## 构建与测试(重要)
+
+**必须走 `./build.sh`,不要直接 `go build` / `go test`。** `build.sh` 会在编译前准备内嵌资源;裸 `go build ./mgr/` 会跳过这些步骤、和真实流水线不等价,还会在仓库根丢一个 `./mgr` 产物。
+
+`./build.sh` 依次:
+1. 同步版本号
+2. 复制 `api/resources` → `api/mgr/resources`
+3. 复制 `.tmux.conf`、`.cicy_tmux.conf` → `api/mgr/`
+4. 构建 `app/dist`(除非 `SKIP_NPM=1`)
+5. 刷新 ttyd 内嵌资产(除非 `SKIP_TTYD_ASSET=1`)
+6. 复制 `app/dist` → `api/mgr/ui`(前端嵌进二进制)
+7. 编译 `api/mgr` → `api/cicy-code`
+
+```bash
+./build.sh build [os arch]     # 当前/指定平台构建
+./build.sh all                 # 全平台
+./build.sh test-go             # Go 测试(稳定入口)
+./build.sh test-go ./mgr/...   # 单包测试
+./build.sh docker <tag>        # runtime 镜像
+./build.sh docker-base <tag>   # base 镜像
+```
+
+## 本地开发
 
 ```bash
 cd ~/projects/cicy-code
-python3 dev.py
+python3 dev.py                 # 构建 + 后台起 api/cicy-code --dev --public,tail 日志
 ```
 
-`dev.py` 当前会：
+默认端口:API `8008`、Vite `8022`。前端源码改动:`dev.py` 默认 `SKIP_NPM=1` 复用 `app/dist`,要生效先 `cd app && npm run build`,再 `python3 dev.py`。
 
-1. 读取 `~/cicy-ai/global.json`
-2. 停掉占用 `8008` 的旧 `cicy-code`
-3. 刷新 ttyd 嵌入资产
-4. 同步版本号
-5. 执行 `./build.sh build <platform>`
-6. 后台启动 `api/cicy-code --public --dev`
-7. tail `.dev-logs/cicy-code.log`
-
-默认端口：
-
-- API：`8008`
-- Vite：`8022`
-- code-server：`8002`
-
-改了代码后必须重跑 `python3 dev.py` 重建（前端嵌入 + Go 编译都靠它），单跑 `go build ./mgr/` 会跳过嵌入步骤。
-
-### 2. 前后端分开调试
-
-前端：
-
+前后端分开调试:
 ```bash
-cd app
-npm ci
-npm run dev
+cd app && npm ci && npm run dev          # 前端 HMR(:8022)
+cd api && go run ./mgr/ --dev --public   # 后端把非 API 请求反代到 :8022
 ```
+（`--dev` 仅用于本地起服务;正式产物仍必须走 `./build.sh`。）
 
-后端：
+## 发版
 
+版本号统一由 `scripts/sync-version.py` 写入这几处:`npm/package.json`、`app/package.json`、`app/package-lock.json`、`app/src/config.ts`、`api/mgr/main.go`、`.cicy_tmux.conf`。
+
+**正式发版(npm + R2,走 CI):**
 ```bash
-cd api
-go run ./mgr/ --dev --public
+python3 scripts/sync-version.py --set 2.3.NN   # 1) bump 所有版本文件
+cd app && npm run build                        # 2) 前端 build(把 config.version 烘进 dist)
+cd .. && git add <你的文件> && git commit ...   # 3) 提交(共享 checkout:只 add 自己的文件)
+git push origin main
+git tag v2.3.NN && git push origin v2.3.NN      # 4) 打 tag → 触发 .github/workflows/release.yml
+```
+CI 从 **tag** 构建各平台二进制、发布 npm 五连包 + 上传 R2 资产。
+
+**只更新本地 Mac 桌面(不发 npm,更快):** 桌面跑 `~/.local/bin/cicy-code`(symlink → 版本化二进制)。流程见项目内约定(每次必 bump 版本 → `./build.sh build darwin amd64` → 拷成版本化名 → 原子换 symlink → 同步 `~/.local/bin/.cicy-localbin.json`)。
+
+> 前端改动务必在 bump 之后 `npm run build`,否则 `SKIP_NPM=1` 会复用旧 dist,`membership-version` 显示的还是旧号。
+
+## npm 分发:per-platform optionalDependencies
+
+主包 `cicy-code` 只是个 launcher(几 KB),二进制按平台拆成子包,npm 按 `os`/`cpu` **只装匹配当前机器的那个**:
+
+```
+cicy-code                  launcher(bin/cicy-code.js → require.resolve 平台子包并 exec)
+├─ cicy-code-darwin-arm64
+├─ cicy-code-darwin-x64
+├─ cicy-code-linux-x64
+└─ cicy-code-linux-arm64
 ```
 
-`--dev` 下，后端把非 API 请求反代到 `http://127.0.0.1:8022`。
-
-### 3. npm 用户入口
-
-**一键安装（自动选最近 registry，推荐）**
-
+安装:
 ```bash
-curl -fsSL https://r2.deepfetch.de5.net/code | sh
+npm install -g cicy-code        # 海外
+npm install -g cicy-code --registry=https://registry.npmmirror.com   # 国内(缓存二进制,不走 GitHub)
+npx cicy-code                   # 临时跑一次
 ```
-
-`install.sh` 会探测 `registry.npmmirror.com` 与 `registry.npmjs.org` 的延迟，
-从最快的源全局安装 —— 国内自动落到 npmmirror，海外落到 npmjs，无需手动 `--registry`。
-
-**手动安装**
-
-```bash
-# 海外
-npm install -g cicy-code
-# 国内（npmmirror 缓存二进制，不走 GitHub）
-npm install -g cicy-code --registry=https://registry.npmmirror.com
-# 临时跑一次
-npx cicy-code
-```
-
-#### 发布模型：per-platform optionalDependencies
-
-主包 `cicy-code` 只是一个 launcher（几 KB），二进制按平台拆成 4 个子包：
-
-```
-cicy-code                  主包，bin/cicy-code.js → require.resolve 平台子包并 exec
-├─ cicy-code-darwin-arm64  (os:darwin cpu:arm64)
-├─ cicy-code-darwin-x64    (os:darwin cpu:x64)
-├─ cicy-code-linux-x64     (os:linux  cpu:x64)
-└─ cicy-code-linux-arm64   (os:linux  cpu:arm64)
-```
-
-npm 按 `os`/`cpu` 字段**只装匹配当前机器的那个子包**（~30MB），其余跳过 ——
-不走 GitHub、不需 postinstall 下载、npmmirror 直接缓存二进制。
-
-发布用 `npm/publish-all.sh <npm-version> [gh-tag]`：从对应 GitHub release
-的资产拉 4 个平台二进制，生成并发布 4 个子包 + 主包（共 5 个）。子包先发，
-主包后发，保证 `optionalDependencies` 可解析。
-
-## 常用命令
-
-```bash
-# 本地开发
-python3 dev.py
-
-# 仅刷新 ttyd 嵌入资产
-python3 dev.py --ttydAssets
-
-# 前端热更新
-cd app && npm run dev
-
-# 后端 dev 模式
-cd api && go run ./mgr/ --dev --public
-
-# Go 测试
-cd api && go test ./...
-
-# 构建当前平台
-./build.sh build
-
-# 构建所有平台
-./build.sh all
-
-# 构建 Docker runtime 镜像
-./build.sh docker <tag>
-
-# 构建 Docker base 镜像
-./build.sh docker-base <tag>
-
-# 构建本地 skill 二进制（cicy-hosttools / cicy-skills / stt / tts ...）
-cd skills && make build-local-binaries
-
-# 安装 skill 命令到 ~/.local/bin
-cd skills && make install-local-cli
-```
-
-`make dev-api` 当前只是 `go run ./mgr/`，不带 `--dev --public`；调试 Vite 代理时请直接用上面的显式命令。
-
-## 构建规则
-
-标准构建入口是 `build.sh`，不是直接 `go build ./mgr/`。
-
-`build.sh` 当前会：
-
-1. 同步版本号
-2. 复制 `api/resources` 到 `api/mgr/resources`
-3. 复制 `.tmux.conf` 与 `.cicy_tmux.conf` 到 `api/mgr/`
-4. 构建 `app/dist`（除非 `SKIP_NPM=1`）
-5. 刷新 `api/server/asset.go`（除非 `SKIP_TTYD_ASSET=1`）
-6. 复制 `app/dist` 到 `api/mgr/ui`
-7. 最后再编译 `api/mgr`
-
-只直接执行 `go build ./mgr/` 会跳过这些嵌入步骤。
+`npm/publish-all.sh <npm-version> [gh-tag]` 从对应 GitHub release 资产打包发布 4 个平台子包 + 主包(子包先发、主包后发,保证 optionalDependencies 可解析)。CI 已自动化这条链。
 
 ## 架构
 
-### 后端：`api/mgr`
+**后端 `api/mgr`** — `main.go` 注册全部路由与启动。关键文件:
+- `setup.go`:环境检查、内置 worker、code-server 启动、开机 seed(dotfiles / memory 模板 / 内置 skill)
+- `tmux.go`:pane 生命周期、tmux send、agent 启动脚本(boot.sh)、fork
+- `chatbus.go`:聊天 WebSocket、poll、client 广播
+- `agent_memory_template.go`:agent 记忆模板组装(见下)
+- `newtab.go`:`/newtab` 单源浏览器起始页(chrome + electron tab 共用)
+- `skills.go` / `skill_market*.go`:skill 市场 API(`/api/skill-market/*`)
+- `ai_gateway_*.go` / `providers*.go`:各 provider 适配与 AI 网关
+- `runtime.go` / `machines.go`:managed runtime、机器表
+- `ui.go`:内嵌 UI 或 Vite 反代;`paths.go`:状态根与路径常量
 
-主入口是 `api/mgr/main.go`。当前路由前缀包括：
+**终端层** — `api/server`(HTTP/WS)、`api/webtty`(协议)、`api/js`(浏览器端资产,改后 `make asset`)。
 
-- `/api/auth/*`
-- `/api/proxy/*`、`/api/proxy-ssh/*`
-- `/api/frp-server/*`（status / lifecycle / connections / clients / logs）
-- `/api/panes`、`/api/tmux/*`
-- `/api/chat/*`、`/api/poll`、`/api/stt`、`/api/tts`
-- `/api/code-server/*`
-- `/api/stats/*`、`/api/queue/*`
-- `/api/agents/*`、`/api/workers/*`
-- `/api/groups/*`、`/api/pair`
-- `/api/nodes`、`/api/machines/*`
-- `/api/runtime/*`
-- `/api/shared-workspace/*`、`/api/collab/*`
-- `/api/skills/*`、`/api/skill-market/*`、`/api/skill-config/*`
-- `/api/settings/*`、`/api/system/*`、`/api/utils/*`
-- `/api/openclaw/*`、`/api/ai-gateway/*`、`/api/providers/*`、`/api/cicy/*`
-- `/api/im/*`、`/api/tg/*`、`/api/notify/*`、`/api/correctEnglish`、`/api/file-exists`
-- `/api/todo/*`
-- `/api/desktop/*`
-- `/code/*`、`/ttyd/*`
+**前端 `app`** — `App.tsx` 路由;`Workspace.tsx` 主工作区(agent stack / code-server / 团队面板 / skill 市场 / Todo / WS 状态);`services/api.ts` 统一 API 客户端;`config.ts` 版本号与 API base。
 
-关键文件：
+**Cloudflare Workers `workers/`**(独立 `wrangler deploy`,与主程序解耦):
+- `oauth-flow` → `oauth-flow.cicy-ai.com`:Google OAuth 授权码**无状态中继**(只暂存 code,TTL 10min、一次性;永不接触 client_secret / token)
+- `skills-registry` → `skills.cicy-ai.com`:**public skill 注册表 API**(`/v1/skills*`、`/v1/admin/publish`),`skill install` 打的就是它
 
-- `api/mgr/setup.go`：环境检查、worker 初始化、code-server 启动、agent catalog
-- `api/mgr/tmux.go`：pane 生命周期、tmux send、agent 启动脚本
-- `api/mgr/chatbus.go`：聊天 WebSocket、poll 数据、client 间广播
-- `api/mgr/runtime.go`：runtime instance/session/task/artifact
-- `api/mgr/machines.go`：机器列表、同步、配置落盘
-- `api/mgr/shared_workspace.go`、`api/mgr/collab.go`：文件式协作层
-- `api/mgr/skills.go`、`api/mgr/skill_market*.go`：skill 注册表与市场 API
-- `api/mgr/frp_server_handlers.go`：FRP server 抽屉式管理（脱敏，不暴露 config 原文）
-- `api/mgr/gateway_reply_callback.go`、`gateway_reply_text.go`、`gateway_chat_history.go`、`gateway_cicy_tools.go`：跨 agent reply、结构化 reply/history 工具
-- `api/mgr/ai_gateway_*.go`：OpenClaw / DeepSeek / Codex / Claude provider 适配
-- `api/mgr/stt.go`、`api/mgr/tts.go`：语音转写 / 合成代理
-- `api/mgr/todo.go`：`/api/todo/*`，对应 `cicy-todo` CLI 与前端 Todo tab
-- `api/mgr/im*.go`、`im_telegram.go`、`im_wechat.go`、`im_reply_hook.go`：即时通讯桥接
-- `api/mgr/proxy.go`、`api/mgr/ai_gateway.go`：代理与通用 AI 网关(`/api/ai-gateway/*`)
-- `api/mgr/openclaw_gateway.go`:OpenClaw(🦞 IM agent)专属网关(`/api/openclaw/*`,微信会话/provider 代理)
-- `api/mgr/ui.go`：内嵌 UI 或 Vite 反代
-- `api/mgr/paths.go`：cicy 状态根 + 运行时路径常量
+## agent / pane 与记忆
 
-### 终端层
+pane 是核心运行单位,ID 形如 `w-1001` / `w-1001:main.0`。内置 agent(`api/mgr/setup.go`):`claude` / `codex` / `opencode` / `kiro-cli` / `cicy`(cicy 为内置 headless 会话)等;**非 lab 模式默认只暴露 `claude` / `codex` / `opencode`**。默认 dev agent 是 `claude`,首个内置 worker 是 `w-1001`。
 
-- `api/server`：终端 HTTP/WebSocket 服务
-- `api/webtty`：协议层
-- `api/js`：浏览器端终端资产源码
+**记忆/guidance 文件**:每个 agent 在其 workspace 拥有一份自包含的原生 guidance 文件(`CLAUDE.md` / `AGENTS.md` / `.kiro/steering/memory.md`)。内容在**创建时**由分层模板**组装并逐字写入**——`global`(`~/cicy-ai/memory/global.md`)+ 可选 project(`projects/<slug>.md`)+ 可选 role(`agents/<slug>/`)。**没有继承、没有网关注入**,CLI 直接原生读取该文件(`agent_memory_template.go` 组装,`tmux.go` `writeAgentGuidanceFile` 落盘)。打包默认 seed 在 `api/mgr/embed/memory-seed/`(改这里改的是发给所有人的默认)。`cicy-code reseed-memory` 可按当前模板重新生成(会备份、保留自定义标记以下内容)。
 
-如果改的是 `api/js/src/*`，还需要：
+## skill 生态
 
-```bash
-cd api && make asset
-```
-
-### 前端：`app`
-
-- `app/src/App.tsx`：入口与 hash 路由切换
-- `app/src/components/Workspace.tsx`：主工作区、agent stack、code-server、team panel、skills、Todo、WebSocket 状态
-- `app/src/components/TodoPanel.tsx`：todo tab（与 `cicy-todo` skill 同源数据）
-- `app/src/components/layout/FrpServerManagerDialog.tsx`：FRP server 抽屉
-- `app/src/components/layout/ProxySshManagerDialog.tsx`：proxy_ssh / CiCy SSH 抽屉
-- `app/src/components/audit/`、`app/src/components/dev/`、`app/src/components/im/`：审计 / dev 控制 / IM 桥
-- `app/src/services/api.ts`：统一 API 客户端
-- `app/src/config.ts`：前端版本号、API base、路径辅助函数
-
-前端视图当前主要有：
-
-- `desktop`
-- `workspace`
-- `audit`（部分接口仍未在 `api/mgr/main.go` 注册，属于残留面）
-
-### skills/：本地 Go 工具链
-
-`skills/` 现在是一个独立 Go module（`github.com/cicy-ai/cicy-skills`），构建出几个二进制：
-
-| 二进制 | 用途 |
-|---|---|
-| `cicy-hosttools` | argv[0] 分发的 host 工具集合：`frp-server` / `frp-client` / `cicy-mihomo` / `cf-tunnel` / `cf` / `globalApiToken` / `email` / `aliyun-cli` / `ssh-list` / `agent-editor` / `tg` / `gpt` / `gemini-ask` / `gemini-vision` / `mysql-exec` / `cping` / `cicy-agent` 等 |
-| `cicy-skills` | skill 安装 / 卸载 / 列表 CLI（前端 skill 市场后端） |
-| `cicy-skillsd` | 常驻 daemon（marketplace 后台事件） |
-| `stt` | 调 Cloudflare Workers AI Whisper 的语音转写 CLI |
-| `tts` | 文本转语音 CLI |
-
-- `internal/registry/`：所有 skill 用 `init()` 注册进同一张表，避免在 bundle / agentgen / 前端三处重复登记（见 `skills/migrations/SKILL_REGISTRY.md`）
-- `internal/hosttools/`：每个 host 工具一个文件（`frp.go`、`mihomo.go`、`cf_tunnel.go`、`cf_api.go`、`google.go`、`ssh.go`、`email.go`、`aliyun.go`）
-- `internal/bundle/`：聚合 SKILL.md / 资源到分发包
-- `internal/agentgen/`：根据 SKILL.md 与 registry 生成 agent 的 skill 目录
-- `internal/voice/`、`internal/voicecmd/`：语音管线公共逻辑
-- `internal/skills/`：扫描已安装 skill
-
-#### FRP server / client 配置硬编码
-
-`frp-server` / `frp-client` 包装器现在只看 `~/cicy-ai/db/frps.toml` / `~/cicy-ai/db/frpc.toml`，不再支持 `FRP_SERVER_CONFIG` / `FRP_CLIENT_CONFIG` 环境变量（保留 `--config <path>` 显式覆写）。日志统一进 `~/logs/frps.log` / `~/logs/frpc.log`。
-
-### npm 与扩展
-
-- `npm/bin/cicy-code.js`：npm 启动器，按 `os-arch` require.resolve 平台子包二进制并 exec
-- `npm/publish-all.sh`：从 GitHub release 资产打包并发布 4 个平台子包 + 主包
-- `npm/install.sh`：延迟路由 bootstrap（探测最近 registry 后全局安装），托管在 R2 `/code`
-- `api/code-server-extension/`：发送文件路径给当前 agent 的扩展源码，配套 `cicy-code-server-bridge-0.0.4.vsix`
-
-## worker 与 agent
-
-pane 是核心运行单位，典型 ID 形态：
-
-- `w-1001`
-- `w-1001:main.0`
-
-`builtinAgents` catalog（来自 `api/mgr/setup.go`）：
-
-- `claude` — Claude
-- `codex` — Codex
-- `opencode` — OpenCode
-- `cursor` — Cursor
-- `kiro-cli` — Kiro CLI
-- `copilot` — GitHub Copilot
-- `openclaw` — OpenClaw
-- `hermes` — Hermes Agent
-- `cicy-claude` — CiCy
-
-**非 lab 模式**（默认）只允许 `claude` / `codex` / `opencode`（`nonLabAllowedBuiltinAgents`），lab 模式才会暴露整套 catalog。
-
-当前事实：
-
-- `python3 dev.py` 默认 dev agent 是 `claude`
-- 首个内置 worker 是 `w-1001`（`primaryWorkerPaneID = w-1001:main.0`）
-- `--agents=all` 时按 builtinAgents 顺序从端口 `10001` 起递增分配
-- 前端创建对话框以非 lab 允许列表为准
-
-`App.tsx` 仍保留前端兜底：登录后若 `w-1001` 不存在，会尝试创建一个 `hermes` pane，是 UI 侧补救逻辑，不是主启动链路默认值。
+- 装/卸/列表:`cicy-code skill install|remove|installed <name>`(`api/skillcmd/`)
+- public 注册表:`workers/skills-registry`(`skills.cicy-ai.com`),public skill 源码在独立仓库 `cicy-skills`,tag 触发 `/v1/admin/publish`
+- 规范:三类 skill(public / private / team)的落盘位置与发布约定见 `cicy-skill-spec`
+- 前端市场入口 `/api/skill-market/*`,红点提示 public skill 有更新
 
 ## 配置与路径
 
-### cicy 状态根
-
-`~/cicy-ai` 仅保留 cicy 自身状态和内置 skill：
-
-- `~/cicy-ai/global.json`
-- `~/cicy-ai/db/`（敏感配置：`frps.toml`、`frpc.toml`、`mihomo.yaml`、`google.json`、`cf.json` 等，均 chmod 600）
-- `~/cicy-ai/.cicy/`
-- `~/cicy-ai/workers/`
-- `~/cicy-ai/projects/`
-- `~/cicy-ai/skills/`（用户本地 skill）
-- `~/cicy-ai/shared-workspace/`
-- `~/cicy-ai/cicy-node.json`
-
-### 运行时分离的根目录
-
-`commit 7b9cffa` 之后，运行时产物搬出 `~/cicy-ai`，分开管理：
-
-- **`~/logs/`** — 所有运行时日志（skills install、code-server、tmux send/trace、agent install 日志、`frps.log`、translate-cache 等）
-- **`~/docker-homes/`** — Docker home mount 目标（之前是 `~/cicy-ai/docker-homes`）
-
-### 机器注册表：仍有两套默认路径
-
-1. **后端 runtime 默认文件**：`~/cicy-ai/cicy-node.json`
-   - 来自 `api/mgr/paths.go`
-   - `api/mgr/machines.go` 读写
-2. **skills CLI 默认文件**：`~/Private/cicy-node.json`
-   - `skills/cicy-api` 与 `skills/cicy-master` 默认值
-   - 可用 `CICY_NODES_FILE` 改写
-
-如果希望 skills 与后端同一份：
-
-```bash
-export CICY_NODES_FILE=~/cicy-ai/cicy-node.json
-```
-
-### 常用环境变量
-
-- `PORT`、`CS_PORT`、`SQLITE_PATH`
-- `CICY_API_TOKEN`、`CICY_API_KEY`、`CICY_API_URL`、`CICY_ANTHROPIC_URL`
-- `CICY_DEFAULT_OPENCODE_MODEL`、`CICY_DEFAULT_CLAUDE_MODEL`、`CICY_CODEX_MODEL`、`CICY_OPENCLAW_MODEL`
-- `CICY_RUNTIME_KIND`、`CICY_RUNTIME_MODE`、`CICY_RUNTIME_API_ONLY`
-- `CICY_PUBLIC_URL`、`CICY_MASTER_URL`、`CICY_MASTER_TOKEN`
-- `CICY_TEAM_TOKEN`、`CICY_TEAMCENTER_URL`
-
-其中：
-
-- `CICY_RUNTIME_MODE=api-only` 或 `CICY_RUNTIME_API_ONLY=1` 会让部分 tmux/desktop 接口返回 `not_supported_in_api_only_runtime`
-- `CICY_MASTER_URL` / `CICY_MASTER_TOKEN` / `CICY_PUBLIC_URL` 会触发 managed runtime 的自注册路径
-
-## skill 市场
-
-`/api/skill-market/*` 是 UI 侧的 skill 安装/卸载入口；`/api/skill-config/*` 暴露每个 skill 的状态卡。
-
-注册侧靠 `skills/internal/registry/`，每个 skill 在自己的 `init()` 里 `Register(Skill{...})`，bundle、agent SKILL.md 生成、前端列表都从这一张表读。生产链路（`feat(skill-market): wire production install/uninstall flow`）：
-
-1. UI 选 skill → `/api/skill-market/install`
-2. 后端调 `cicy-skills install <name>`
-3. `cicy-skills` 把所需文件 link 到 `~/.local/bin/`、`~/.claude/skills/<name>/` 等
-4. agent 启动时 `agentgen` 按当前已安装的 skill 列表生成 SKILL.md
-
-已落地的 skill 示例：`google`（多用户 OAuth）、`email`（Resend）、`aliyun-cli`、`frp-server` / `frp-client`、`cf` / `cf-tunnel`、`cicy-mihomo`、`proxy_ssh`（重命名 CiCy SSH）、`ssh-list`、`cicy-todo`。
-
-## managed runtime / Docker
-
-仓库仍保留完整 Docker 与 managed runtime 能力：
-
-- `api/Dockerfile.runtime`
-- `api/Dockerfile.runtime.base`
-- `./build.sh docker <tag>`
-- `./build.sh docker-base <tag>`
-- `python3 dev.py --docker`
-- `python3 dev.py --dockerBuild`
-- `python3 dev.py --cloudRun`
-- `python3 dev.py --cloudRunList`
-
-`python3 dev.py --dockerBuild` 当前还会先做 CDN 资产构建与 COS 上传，再 push runtime 镜像，并更新 `~/cicy-ai/global.json -> images.runtime*`。
-
-Docker 容器的 host home 现在挂到 `~/docker-homes/<container-name>`（默认值，见 `dev.py:1518`）。
-
-## code-server 扩展
-
-`api/code-server-extension` 提供两个用户动作：
-
-- 资源管理器右键：发送路径给当前 agent
-- 编辑器右键：发送当前文档 / 选区给当前 agent
-
-它通过：
-
-- `POST /api/code-server/send-path`
-
-与当前页面所属的 `cicy-code` 后端通信。
-
-## 已知差异
-
-当前代码与历史文档相比，至少有这几处需要按代码为准：
-
-- 状态根分裂：`~/cicy-ai`（状态 + skills）、`~/logs`（运行时日志）、`~/docker-homes`（Docker home mount）
-- builtinAgents 是 9 个；非 lab 模式只暴露 `claude / codex / opencode` 这 3 个
-- 默认 dev agent 是 `claude`，不是一组固定的四 agent 启动模版
-- 机器配置文件后端 (`~/cicy-ai/cicy-node.json`) 与 skills (`~/Private/cicy-node.json`) 默认路径仍不一致
-- FRP server / client 配置已硬编码到 `~/cicy-ai/db/`；老的 `FRP_*_CONFIG` 环境变量已删
-- skills 是独立 Go module，构建 / 安装走 `skills/Makefile`，不是 `api/` 那条链
-- 前端仍保留 audit 页面与 `/api/audit/*` 调用，但 `api/mgr/main.go` 没有注册这些路由
-
-## 当前建议工作流
-
-1. 本地开发先用 `python3 dev.py`
-2. 需要前端热更新时，再开一个 `cd app && npm run dev`
-3. 改 `api/js` 后执行 `cd api && make asset`
-4. 改 `skills/`（hosttools / SKILL.md）后 `cd skills && make build-local-binaries`
-5. 正式构建走 `./build.sh`
-6. 节点注册表管理走 `skills/cicy-master`
-7. 节点 API 调用走 `skills/cicy-api`(原 `skills/cicy-code`,5/30 重命名避免与 cicy-code 二进制撞名)
+cicy 状态根 `~/cicy-ai`:
+- `~/cicy-ai/global.json`:全局配置 + api_token
+- `~/cicy-ai/db/`:敏感配置(`email.json`、`cf.json`、`frps.toml`、`mihomo.yaml` 等,chmod 600)
+- `~/cicy-ai/memory/`:记忆模板(`global.md`、`projects/`、`agents/`)
+- `~/cicy-ai/workers/`:各 agent workspace
+- `~/cicy-ai/skills/`:已装 skill(public 扁平 / `private/` / `team/<team>/`)
+- `~/cicy-ai/assets/`:上传资源目录
 
 ## 许可证
 
