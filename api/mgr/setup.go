@@ -1999,6 +1999,31 @@ func setupAIConfigs() {
 
 func ensureTmuxConf() {
 	ensureManagedDotfile(".tmux.conf", embeddedTmuxConf)
+	reloadRunningTmuxConf()
+}
+
+// reloadRunningTmuxConf re-sources ~/.tmux.conf into an ALREADY-RUNNING tmux
+// server. tmux reads its config only at server start; if a server was started
+// (e.g. by an external bootstrap on Google Cloud Shell / Colab) BEFORE cicy-code
+// seeded ~/.tmux.conf, that server keeps an empty default-command → panes spawn
+// a plain shell that never sources ~/.cicy_shell_init, so boot.sh dies on
+// __cicy_check_command. Re-sourcing on every startup self-heals that race.
+// No-op when no server is running (the client command just errors harmlessly;
+// we skip it to avoid spinning up a server here).
+func reloadRunningTmuxConf() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	if _, err := runTmux("ls"); err != nil {
+		return // no running server → nothing to reload
+	}
+	conf := filepath.Join(home, ".tmux.conf")
+	if _, err := runTmux("source-file", conf); err != nil {
+		log.Printf("[startup] tmux source-file %s failed: %v", conf, err)
+		return
+	}
+	log.Printf("[startup] reloaded running tmux config from %s", conf)
 }
 
 func ensureCicyTmuxConf() {
