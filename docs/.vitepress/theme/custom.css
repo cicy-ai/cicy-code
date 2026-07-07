@@ -36,5 +36,5 @@
    widths (VitePress otherwise offsets it rightward on ≥1440px to center within
    --vp-layout-max-width). */
 @media (min-width:960px){
-  .VPSidebar{left:0;padding-left:32px;width:var(--vp-sidebar-width)}
+  .VPSidebar{left:0 !important;padding-left:32px !important;width:var(--vp-sidebar-width) !important}
 }
