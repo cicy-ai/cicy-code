@@ -32,9 +32,14 @@
 .dark .VPFeature:hover{border-color:rgba(124,92,255,.35)}
 /* inline code accent toward cyan on dark */
 .dark :not(pre)>code{color:#8fd6ff}
-/* Left sidebar pinned flush to the viewport's left edge across all desktop
-   widths (VitePress otherwise offsets it rightward on ≥1440px to center within
-   --vp-layout-max-width). */
+/* Left-align the whole layout: neutralise VitePress's ≥1440px "center within
+   --vp-layout-max-width" offsets (sidebar, navbar, content, local nav) so the
+   sidebar stays flush at left:0 and content hugs it at every desktop width.
+   !important is required — the default ≥1440px rules otherwise win the cascade. */
 @media (min-width:960px){
   .VPSidebar{left:0 !important;padding-left:32px !important;width:var(--vp-sidebar-width) !important}
+  .VPContent.has-sidebar{padding-left:var(--vp-sidebar-width) !important}
+  .VPNavBar.has-sidebar .title{width:var(--vp-sidebar-width) !important;padding-left:24px !important}
+  .VPNavBar.has-sidebar .content{padding-left:var(--vp-sidebar-width) !important}
+  .VPLocalNav.has-sidebar{padding-left:var(--vp-sidebar-width) !important}
 }
