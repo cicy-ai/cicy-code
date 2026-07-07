@@ -2,7 +2,7 @@ name: Deploy docs to Cloudflare Pages
 
 on:
   push:
-    tags: ['v*']          # 发版(打 tag)即自动部署文档
+    branches: [docs]       # 合并/推到 docs 分支即部署文档(不绑发版 tag)
   workflow_dispatch: {}    # 也可手动触发
 
 jobs:
