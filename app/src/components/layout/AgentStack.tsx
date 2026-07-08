@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { BookOpen, Braces, Brain, Check, Copy, Folder, History, LineChart, ListTodo, Pencil, Settings, ShieldCheck, X } from 'lucide-react'
+import { BookOpen, Braces, Brain, Check, Copy, Folder, History, LineChart, ListTodo, Loader2, Paperclip, Pencil, Settings, ShieldCheck, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -14,6 +14,63 @@ import CurrentHistoryView from '../chat/CurrentHistoryView'
 import DispatcherChat from '../chat/DispatcherChat'
 import TipBelow from '../ui/TipBelow'
 import { isCicyLiteAgent } from '../../lib/agentType'
+import apiService from '../../services/api'
+
+// Header attach button for NON-cicy agents (claude/codex/opencode run in tmux).
+// Like dispatcher-chat-attach but "upload → send immediately": pick file(s) →
+// upload to the pane's asset store → send them straight into the agent's REPL
+// as standard markdown (![name](abs) / [name](abs)) via the same /api/tmux/send
+// pipe, so the agent can Read the real host path. No staging, no text box.
+function AttachSendButton({ paneId }: { paneId: string }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const onFiles = useCallback(async (files: FileList | null) => {
+    const list = files ? Array.from(files) : []
+    if (!list.length) return
+    setBusy(true)
+    try {
+      const parts: string[] = []
+      for (const file of list) {
+        const resp: any = await apiService.uploadAssetFile(paneId, file)
+        const f = resp?.data?.file || {}
+        const ref = String(f.file_ref || f.fileRef || '')
+        const url = String(f.url || f.URL || '')
+        const abs = ref ? '/' + ref.replace(/^file:\/\//, '').replace(/^\/+/, '') : url
+        if (!abs) continue
+        parts.push(file.type.startsWith('image/') ? `![${file.name}](${abs})` : `[${file.name}](${abs})`)
+      }
+      if (parts.length) await apiService.sendCommand(paneId, parts.join('\n\n'), true)
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '附件上传失败' }))
+    } finally {
+      setBusy(false)
+    }
+  }, [paneId])
+  return (
+    <div data-id={`agent-stack-attach-${paneId}`} className="inline-flex">
+      <input
+        ref={inputRef}
+        data-id={`agent-stack-attach-input-${paneId}`}
+        type="file"
+        multiple
+        accept="*"
+        className="hidden"
+        onChange={(e) => { void onFiles(e.target.files); e.target.value = '' }}
+      />
+      <button
+        type="button"
+        data-id={`agent-stack-attach-button-${paneId}`}
+        disabled={busy}
+        onClick={() => inputRef.current?.click()}
+        title="上传附件并直接发送给 agent"
+        aria-label="Attach and send"
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/[0.08] hover:text-zinc-200 disabled:opacity-50"
+      >
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+      </button>
+    </div>
+  )
+}
 // AgentCanvasItem outlived its namesake: the draggable-canvas component was
 // dead code (never rendered, tree-shaken) and was deleted 2026-06-05; the
 // item shape lives on as the stack's card model.
@@ -697,9 +754,14 @@ function AgentStackCard({
             agent's body, self-hides when the CLI is present. */}
         <AgentInstallOverlay paneId={item.paneId} agentType={item.agentType} active={active} onReloadTerminal={() => setTermReloadNonce((n) => n + 1)} />
       </div>
-      {headerControls ? (
-        <div data-id={`agent-stack-card-header-controls-${item.paneId}`} className="flex h-10 shrink-0 items-center justify-end gap-3 border-t border-white/[0.04] bg-black/[0.18] px-3">
-          {headerControls}
+      {(headerControls || !isCicyLiteAgent(item.agentType)) ? (
+        <div data-id={`agent-stack-card-header-controls-${item.paneId}`} className="flex h-10 shrink-0 items-center justify-between border-t border-white/[0.04] bg-black/[0.18] px-3">
+          <div data-id={`agent-stack-header-controls-left-${item.paneId}`} className="flex items-center">
+            {!isCicyLiteAgent(item.agentType) ? <AttachSendButton paneId={item.paneId} /> : null}
+          </div>
+          <div data-id={`agent-stack-header-controls-right-${item.paneId}`} className="flex items-center gap-3">
+            {headerControls}
+          </div>
         </div>
       ) : null}
       {!item.isApiOnly && item.ttydSrc ? (
