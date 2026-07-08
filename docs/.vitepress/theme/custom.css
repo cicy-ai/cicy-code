@@ -44,8 +44,12 @@
 @media (min-width:960px){
   .VPSidebar{left:0;padding-left:32px;width:var(--vp-sidebar-width)}
   .VPContent.has-sidebar{padding-left:var(--vp-sidebar-width)}
-  .VPNavBar.has-sidebar .content{padding-left:var(--vp-sidebar-width);padding-right:32px}
-  .VPNavBar.has-sidebar .title{width:var(--vp-sidebar-width);overflow:hidden}
+  /* Apply the sidebar-width offset UNCONDITIONALLY (no `.has-sidebar`). VitePress
+     adds `.has-sidebar` only AFTER client hydration, so a `.has-sidebar`-scoped
+     padding jumps the search box from left:0 → 272px on load. Making it always
+     272px means first paint already matches — no shift. */
+  .VPNavBar .content{padding-left:var(--vp-sidebar-width) !important;padding-right:32px}
+  .VPNavBar .title{width:var(--vp-sidebar-width) !important;overflow:hidden}
   .VPLocalNav.has-sidebar{padding-left:var(--vp-sidebar-width)}
 }
 /* Custom scrollbar (dark, thin, rounded) */
