@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -346,11 +347,13 @@ func TestTodoStorage_AllInMasterWorkspace(t *testing.T) {
 		t.Fatalf("expected 2 todos in master workspace, got %d", len(todos))
 	}
 
-	// Worker workspace must NOT have a todos file.
+	// Single store lives under cicyDBDir, not per-workspace: the worker's own
+	// workspace must have no separate todos file. loadTodos() ignores its arg and
+	// reads the shared store, so assert on the legacy per-workspace path instead.
 	workerWs := paneWorkspace("w-10025")
-	workerTodos, _ := loadTodos(workerWs)
-	if len(workerTodos) != 0 {
-		t.Fatalf("worker workspace should be empty, got %d", len(workerTodos))
+	legacyWorkerFile := filepath.Join(workspaceRuntimeDir(workerWs), "todos.yaml")
+	if _, err := os.Stat(legacyWorkerFile); !os.IsNotExist(err) {
+		t.Fatalf("worker workspace should have no todos file, but %s exists (err=%v)", legacyWorkerFile, err)
 	}
 }
 
@@ -412,6 +415,9 @@ func TestLoadTodos_AcceptsPythonTimestampFormat(t *testing.T) {
   created_at: 2026-05-25 02:59:48+00:00
   updated_at: 2026-05-25 02:59:48+00:00
 `)
+	if err := os.MkdirAll(filepath.Dir(todoFilePath(ws)), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
 	if err := os.WriteFile(todoFilePath(ws), raw, 0644); err != nil {
 		t.Fatalf("write: %v", err)
 	}

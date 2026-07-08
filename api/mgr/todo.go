@@ -75,12 +75,18 @@ func requesterPaneID(r *http.Request) string {
 }
 
 func todoFilePath(workspace string) string {
-	// Single store relocated to ~/cicy-ai/db/todos.yaml (was
+	// Single store relocated to <cicy-root>/db/todos.yaml (was
 	// <masterWs>/.cicy/todos.yaml) so it lives alongside the other syncable
-	// config under ~/cicy-ai/db. The workspace arg is now unused but kept for
+	// config under the cicy DB dir. The workspace arg is now unused but kept for
 	// call-site compatibility.
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "cicy-ai", "db", "todos.yaml")
+	//
+	// MUST use cicyDBDir (the resolvable path var), NOT os.UserHomeDir() +
+	// hardcoded "cicy-ai/db": withTempCicyRoot overrides cicyDBDir to a temp dir
+	// for tests, but os.UserHomeDir() would bypass that and read/WRITE the real
+	// ~/cicy-ai/db/todos.yaml — which corrupted the operator's real todos when
+	// the mgr tests finally started running. In prod cicyDBDir == ~/cicy-ai/db,
+	// so behaviour is unchanged.
+	return filepath.Join(cicyDBDir, "todos.yaml")
 }
 
 func loadTodos(workspace string) ([]Todo, error) {

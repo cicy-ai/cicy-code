@@ -355,7 +355,21 @@ build_assets() {
 test_go() {
   local pkg="${1:-./mgr/...}"
   shift || true
-  prepare_embed
+  # Test-only embed prep: place the files the mgr package go:embeds so it COMPILES
+  # (conf + resources + monitor + a UI placeholder) WITHOUT building the frontend
+  # (npm) or regenerating ttyd assets (make). Tests don't need the real UI, and the
+  # minimal distro CI containers have no `make` (and flaky musl esbuild). Real
+  # builds use prepare_embed; this keeps `go test ./mgr/...` green everywhere.
+  acquire_build_embed_lock
+  rm -rf "$API_DIR/mgr/resources" "$API_DIR/mgr/ui" "$API_DIR/mgr/tmux.conf" "$API_DIR/mgr/monitor"
+  cp -r "$API_DIR/resources" "$API_DIR/mgr/resources"
+  cp "$ROOT_DIR/.tmux.conf" "$API_DIR/mgr/.tmux.conf"
+  cp "$ROOT_DIR/.cicy_tmux.conf" "$API_DIR/mgr/.cicy_tmux.conf"
+  if [ -d "$ROOT_DIR/mitmproxy" ]; then
+    cp -r "$ROOT_DIR/mitmproxy" "$API_DIR/mgr/monitor"
+  fi
+  restore_ui_placeholder
+  release_build_embed_lock
   cd "$API_DIR" && go test "$pkg" "$@" && cd "$ROOT_DIR"
 }
 

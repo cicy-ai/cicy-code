@@ -26,6 +26,13 @@ func testStepsSlice(value interface{}) []map[string]interface{} {
 func withTempCicyRoot(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
+	// Isolate os.UserHomeDir() too, not just the cicy* path vars below. Lots of
+	// production code (todoFilePath, settings/email, seeds, boot files, …) builds
+	// ~/cicy-ai/… or ~/.claude/… paths straight from os.UserHomeDir(), bypassing
+	// the vars — without this, tests read AND WRITE the operator's real config
+	// (this actually clobbered the real todos store). t.Setenv restores on cleanup.
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root) // Windows
 	oldRootDir := cicyRootDir
 	oldDBDir := cicyDBDir
 	oldProjectsDir := cicyProjectsDir
