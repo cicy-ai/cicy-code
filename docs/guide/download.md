@@ -1,29 +1,38 @@
 ---
-title: 下载
-description: 下载 / 安装 cicy-code —— npm(npx / 全局安装),按平台自动装匹配二进制。
+title: 下载与安装
+description: 下载 cicy-code —— 首选桌面版 cicy-desktop(macOS / Windows / 移动端)开箱即用;服务器用 Docker 自托管;npm 供 headless / 进阶。
 ---
-# 下载
+# 下载与安装
 
-cicy-code 通过 **npm** 分发单二进制,macOS / Linux 开箱即用。
+## 桌面版(推荐)
 
-## npm(推荐)
+多数人用 **cicy-desktop** —— 打包好 cicy-code 的原生桌面外壳(内置浏览器沙箱 + 系统 Chrome 驱动),下载即用、免配置。
+
+👉 **[cicy-ai.com/download](https://cicy-ai.com/download)**
+
+| 平台 | 形式 |
+| --- | --- |
+| macOS · Apple Silicon / Intel | `.pkg` |
+| Windows 10 / 11 · x64 | `.exe` |
+| iOS · Android | Web App / 原生 |
+
+## Docker(服务器 / 自托管)
+
+在服务器上跑一个团队工作区。发布镜像 `cicybot/cicy-code`(Docker Hub),或自己 `./build.sh docker <tag>` 构建。
+
+> 容器默认绑 `127.0.0.1`(含容器内)—— 对外暴露走 Cloudflare 隧道或 `--public`。镜像构建、版本化热更新、`CICY_RUNTIME_MODE=api-only` 等**运行细节见 [Docker / runtime](/deploy/docker)**。
+
+## npm(headless / 进阶)
+
+只要引擎、不要桌面外壳(接进自己的脚本 / CI / 服务器):
 
 ```bash
-# 临时跑一次
-npx cicy-code
-
-# 全局安装
-npm i -g cicy-code
-
-# 国内(npmmirror 缓存二进制,不走 GitHub)
-npm i -g cicy-code --registry=https://registry.npmmirror.com
+npx cicy-code                       # 临时跑一次
+npm i -g cicy-code                  # 全局安装
+npm i -g cicy-code --registry=https://registry.npmmirror.com   # 国内(缓存二进制,不走 GitHub)
 ```
 
-装好后浏览器打开 `http://127.0.0.1:8008`。
-
-## 支持平台
-
-npm 按 `os` / `cpu` **只装匹配当前机器的那个子包**(~30 MB),其余跳过。
+单二进制,npm 按 `os`/`cpu` **只装匹配当前机器的子包**(~30 MB),浏览器开 `http://127.0.0.1:8008`。
 
 | 平台 | 子包 |
 | --- | --- |
@@ -34,10 +43,5 @@ npm 按 `os` / `cpu` **只装匹配当前机器的那个子包**(~30 MB),其余�
 
 ## 更新
 
-```bash
-npm i -g cicy-code@latest
-```
-
-::: tip 桌面版
-需要原生桌面外壳(浏览器沙箱 / 系统 Chrome 驱动)见 [CiCy AI](https://cicy-ai.com)。
-:::
+- **桌面版**:应用内更新(cicy-desktop hot-patch)。
+- **Docker / headless**:`cicy-code-update`(见 [Docker / runtime](/deploy/docker)),或 `npm i -g cicy-code@latest`。
