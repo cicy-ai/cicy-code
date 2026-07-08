@@ -52,6 +52,9 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		// "scan to add to mobile" QR; absent ⇒ "" and the UI hides the icon. No
 		// CICY_PUBLIC_URL env fallback — global.json is the single source.
 		result["public_url"] = configuredPublicURL()
+		// 派发 chat 附件上传上限(MB)。持久化在 ~/cicy-ai/global.json
+		// ("max_attachment_mb"),通用配置里可改;缺省 100。前端据此约束上传。
+		result["max_attachment_mb"] = configuredMaxAttachmentMB()
 		J(w, result)
 	case "POST":
 		var req M
@@ -81,6 +84,28 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 			delete(req, "public_url") // don't duplicate into the DB blob
 		}
+		// max_attachment_mb persisted to ~/cicy-ai/global.json (same single-source
+		// pattern as public_url) so a partial POST doesn't clobber the blob.
+		if raw, ok := req["max_attachment_mb"]; ok {
+			mb := 0
+			if n, isNum := raw.(float64); isNum {
+				mb = int(n)
+			}
+			providersFileMu.Lock()
+			cfg := readGlobalJSONConfig()
+			if mb > 0 {
+				cfg["max_attachment_mb"] = mb
+			} else {
+				delete(cfg, "max_attachment_mb")
+			}
+			werr := writeGlobalJSONConfig(cfg)
+			providersFileMu.Unlock()
+			if werr != nil {
+				httpErr(w, 500, "write global.json: "+werr.Error())
+				return
+			}
+			delete(req, "max_attachment_mb") // don't duplicate into the DB blob
+		}
 		data, _ := json.Marshal(req)
 		store.Exec(store.Upsert("global_vars", "key_name", []string{"key_name", "value"}, []string{"value"}), "global_settings", string(data))
 		// If the user is configuring global settings with CJK content
@@ -101,6 +126,18 @@ func configuredPublicURL() string {
 		return strings.TrimSpace(s)
 	}
 	return ""
+}
+
+// configuredMaxAttachmentMB returns the dispatcher-chat attachment upload cap in
+// MB from ~/cicy-ai/global.json ("max_attachment_mb"). Defaults to 100 when
+// unset or invalid. Enforced client-side; this is the single configurable source.
+func configuredMaxAttachmentMB() int {
+	if v, ok := readGlobalJSONConfig()["max_attachment_mb"]; ok {
+		if n, isNum := v.(float64); isNum && n > 0 {
+			return int(n)
+		}
+	}
+	return 100
 }
 
 // globalSettingsBlob loads the persisted global_settings JSON object (the

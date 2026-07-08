@@ -9,6 +9,10 @@ const DEFAULT_CICY_ROOT = '~/cicy-ai';
 const DEFAULT_HOST_HOME = import.meta.env.VITE_HOST_HOME || DEFAULT_CICY_ROOT;
 const APP_VERSION = pkg.version;
 
+// 派发 chat 附件上传上限(MB)。default 100;可用 VITE_MAX_ATTACHMENT_MB 覆盖。
+export const MAX_ATTACHMENT_MB = Number(import.meta.env.VITE_MAX_ATTACHMENT_MB) || 100;
+export const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024;
+
 // 前端一律同域名直连:apiBase 为空 → 走当前 origin(本地实例 / 自托管)。dev 可用
 // VITE_API_BASE 覆盖。旧的 cicy-ai.com SaaS 域名路由(app/api/audit/workspace/tunnel)已下线。
 function inferApiBase(): string {

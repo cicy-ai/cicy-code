@@ -7,6 +7,8 @@ import { useTranslation } from 'react-i18next';
 import CurrentHistoryView from './CurrentHistoryView';
 import { isCicyLiteAgent } from '../../lib/agentType';
 import apiService from '../../services/api';
+import { MAX_ATTACHMENT_MB } from '../../config';
+import { useApp } from '../../contexts/AppContext';
 
 /*
  * DispatcherChat — dispatcher(PM) agent 的专属卡片主体(data-id="dispatcher-chat")。
@@ -29,6 +31,7 @@ type Attachment = {
   progress: number; // 0..100
   fileRef?: string; // 后端 FileRef(主机路径)——拼进消息
   url?: string; // 可访问 URL
+  errorText?: string; // 出错原因(如超过大小上限),优先于通用文案
 };
 
 let attachSeq = 0;
@@ -103,7 +106,7 @@ function AttachmentChip({ att, onRemove }: { att: Attachment; onRemove: () => vo
       <div className="min-w-0 flex-1">
         <div data-id={`attachment-name-${att.id}`} className="truncate text-[13px] font-medium text-zinc-100">{att.name}</div>
         <div className="truncate text-[11px] text-zinc-500">
-          {error ? <span className="text-rose-300">{t('attachUploadFailed')}</span> : uploading ? t('attachUploading', { progress: att.progress }) : `${meta.label} · ${fmtSize(att.size)}`}
+          {error ? <span className="text-rose-300">{att.errorText || t('attachUploadFailed')}</span> : uploading ? t('attachUploading', { progress: att.progress }) : `${meta.label} · ${fmtSize(att.size)}`}
         </div>
       </div>
       <RemoveBtn id={att.id} onRemove={onRemove} />
@@ -178,6 +181,12 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
       setThinkingSaving(false);
     }
   }, [paneId, thinkingOn]);
+
+  // 附件上传上限:运行时读通用配置 globalVar.max_attachment_mb(设置面板可改),
+  // 缺省回落到编译期默认 MAX_ATTACHMENT_MB(100)。
+  const { globalVar } = useApp();
+  const maxAttachMB = Number(globalVar?.max_attachment_mb) || MAX_ATTACHMENT_MB;
+  const maxAttachBytes = maxAttachMB * 1024 * 1024;
 
   const uploading = attachments.some((a) => a.status === 'uploading');
 
@@ -287,12 +296,17 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     const list = Array.from(files);
     for (const file of list) {
       const id = nextAttachId();
+      // 超过配置上限(默认 100MB,VITE_MAX_ATTACHMENT_MB 可覆盖)→ 标错、不上传。
+      if (file.size > maxAttachBytes) {
+        setAttachments((prev) => [...prev, { id, name: file.name, size: file.size, isImage: false, status: 'error', progress: 0, errorText: `超过 ${maxAttachMB}MB` }]);
+        continue;
+      }
       const isImage = file.type.startsWith('image/');
       const previewURL = isImage ? URL.createObjectURL(file) : undefined;
       setAttachments((prev) => [...prev, { id, name: file.name, size: file.size, isImage, previewURL, status: 'uploading', progress: 0 }]);
       startUpload(id, file);
     }
-  }, [startUpload]);
+  }, [startUpload, maxAttachBytes, maxAttachMB]);
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => {
@@ -491,7 +505,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
             data-id="dispatcher-chat-file-input"
             type="file"
             multiple
-            accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.tsv,.xlsx,.json,.zip,.log"
+            accept="*"
             className="hidden"
             onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }}
           />

@@ -1,7 +1,9 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { memo, useContext } from 'react';
+import { memo, useContext, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { Download } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { OpenUrlContext } from '../contexts';
@@ -34,7 +36,61 @@ export function MarkdownLink({ href, children, ...props }: any) {
 }
 
 export function MarkdownImg({ src, alt, ...props }: any) {
-  return <img {...props} data-id="current-history-md-img" src={assetAbsPathToURL(String(src || ''))} alt={alt || ''} />;
+  const [zoom, setZoom] = useState(false);
+  const url = assetAbsPathToURL(String(src || ''));
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setZoom(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoom]);
+  return (
+    <>
+      <img
+        {...props}
+        data-id="current-history-md-img"
+        src={url}
+        alt={alt || ''}
+        loading="lazy"
+        className="my-1 h-auto max-h-80 max-w-full cursor-zoom-in rounded-md border border-white/5 object-contain"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setZoom(true); }}
+      />
+      {zoom && createPortal(
+        <div
+          data-id="current-history-md-img-lightbox"
+          className="fixed inset-0 z-[100] flex cursor-zoom-out items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
+          onClick={() => setZoom(false)}
+        >
+          <img src={url} alt={alt || ''} className="max-h-full max-w-full rounded-md object-contain shadow-2xl" />
+          <div
+            data-id="current-history-md-img-actions"
+            className="absolute right-4 top-4 flex items-center gap-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <a
+              data-id="current-history-md-img-download"
+              href={url}
+              download={alt || 'image'}
+              title="下载"
+              className="flex h-9 items-center gap-1.5 rounded-lg bg-white/10 px-3 text-sm text-zinc-100 ring-1 ring-white/15 backdrop-blur hover:bg-white/20"
+            >
+              <Download className="h-4 w-4" /> 下载
+            </a>
+            <button
+              data-id="current-history-md-img-close"
+              type="button"
+              onClick={() => setZoom(false)}
+              title="关闭 (Esc)"
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-lg leading-none text-zinc-100 ring-1 ring-white/15 backdrop-blur hover:bg-white/20"
+            >
+              ✕
+            </button>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
 }
 
 export const markdownComponents = { a: MarkdownLink, img: MarkdownImg } as const;

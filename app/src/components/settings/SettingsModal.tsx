@@ -4,7 +4,8 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { SlidersHorizontal, Globe, MessageCircle, Route, Boxes, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle } from 'lucide-react';
+import { SlidersHorizontal, Globe, MessageCircle, Route, Boxes, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle, Paperclip } from 'lucide-react';
+import { useApp } from '../../contexts/AppContext';
 import ProviderDashboard from '../providers/ProviderDashboard';
 import IMDashboard from '../im/IMDashboard';
 import apiService from '../../services/api';
@@ -85,6 +86,30 @@ export default function SettingsModal({
   const [urlDraft, setUrlDraft] = useState(publicUrl);
   const [savingUrl, setSavingUrl] = useState(false);
   const [savedUrl, setSavedUrl] = useState(false);
+
+  // General → 附件上传上限(MB)。持久化在 global.json max_attachment_mb(通用配置),
+  // DispatcherChat 运行时读它约束上传。
+  const { globalVar, updateGlobalVar } = useApp();
+  const currentMaxAttach = Number(globalVar?.max_attachment_mb) || 100;
+  const [attachDraft, setAttachDraft] = useState(String(currentMaxAttach));
+  const [attachSaving, setAttachSaving] = useState(false);
+  const [attachSaved, setAttachSaved] = useState(false);
+  const attachClean = Math.max(1, Math.round(Number(attachDraft) || 0));
+  const attachDirty = attachClean !== currentMaxAttach;
+  useEffect(() => {
+    if (open && section === 'general') { setAttachDraft(String(currentMaxAttach)); setAttachSaved(false); }
+  }, [open, section, currentMaxAttach]);
+  const saveMaxAttach = async () => {
+    setAttachSaving(true);
+    setAttachSaved(false);
+    try {
+      await updateGlobalVar({ max_attachment_mb: attachClean });
+      setAttachDraft(String(attachClean));
+      setAttachSaved(true);
+    } finally {
+      setAttachSaving(false);
+    }
+  };
   // Re-seed the draft whenever the modal (re)opens or the saved value changes.
   useEffect(() => { setUrlDraft(publicUrl); setSavedUrl(false); }, [publicUrl, open]);
   // A trailing slash breaks the QR link building (it appends ?token=… after the
@@ -384,6 +409,45 @@ export default function SettingsModal({
                           </button>
                           {savedUrl && !urlDirty ? (
                             <span data-id="settings-public-url-saved" className="flex items-center gap-1 text-[11px] text-emerald-400">
+                              <Check className="h-3.5 w-3.5" />{t('settingsSaved', { defaultValue: '已保存' })}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Card: 附件上传上限 */}
+                  <section data-id="settings-attachment-block" className={card}>
+                    <div className="flex items-start gap-3">
+                      <span className={iconTile}><Paperclip className="h-4 w-4" /></span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-semibold text-zinc-100">{t('settingsAttachLimitTitle', { defaultValue: '附件上传上限' })}</div>
+                        <div className="mt-0.5 text-[11px] leading-5 text-zinc-500">{t('settingsAttachLimitHint', { defaultValue: '派发 chat 单个附件的最大体积(MB)。任意文档类型均可上传;超过则拒绝。默认 100。' })}</div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <input
+                            data-id="settings-attachment-limit-input"
+                            type="number"
+                            min={1}
+                            value={attachDraft}
+                            onChange={(e) => { setAttachDraft(e.target.value); setAttachSaved(false); }}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && attachDirty && !attachSaving) void saveMaxAttach(); }}
+                            className={`${inp} w-28`}
+                          />
+                          <span className="text-[12px] text-zinc-500">MB</span>
+                        </div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            type="button"
+                            data-id="settings-attachment-limit-save"
+                            disabled={!attachDirty || attachSaving}
+                            onClick={() => void saveMaxAttach()}
+                            className={`${btnBase} ${attachDirty && !attachSaving ? btnActive : btnDisabled}`}
+                          >
+                            {attachSaving ? t('settingsSaving', { defaultValue: '保存中…' }) : t('settingsSave', { defaultValue: '保存' })}
+                          </button>
+                          {attachSaved && !attachDirty ? (
+                            <span data-id="settings-attachment-limit-saved" className="flex items-center gap-1 text-[11px] text-emerald-400">
                               <Check className="h-3.5 w-3.5" />{t('settingsSaved', { defaultValue: '已保存' })}
                             </span>
                           ) : null}

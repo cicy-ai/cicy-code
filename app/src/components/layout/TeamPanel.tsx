@@ -824,10 +824,10 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 	            {collapsed && childCount > 0 ? (
 	              <span
 	                data-id={`team-panel-worker-collapsed-count-${wid}`}
-	                className="flex shrink-0 items-center gap-0.5 rounded-full bg-white/[0.05] px-1.5 py-px font-mono text-[10px] text-zinc-500"
+	                className="flex shrink-0 items-center gap-0.5 rounded-full bg-sky-500/15 px-1.5 py-px font-mono text-[11px] font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/25"
 	                title={i18n.t('treeHiddenForks', { ns: 'teamPanel', defaultValue: '已收起 {{n}} 个 fork', n: childCount })}
 	              >
-	                <GitBranch className="h-2.5 w-2.5" />{childCount}
+	                <GitBranch className="h-3 w-3" />{childCount}
 	              </span>
 	            ) : null}
 	          </div>
