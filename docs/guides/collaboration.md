@@ -20,9 +20,21 @@ cicy-agent broadcast "<text>"       # 只发给在线 agent
 `cicy-agent ls` 是 online ∪ offline 的全量列表;要「真正在线」用 `get_online_agents`。群发用 `broadcast`(自动跳过 offline),别手动 loop `ls`。
 :::
 
+## 追踪一次派发
+
+`cicy-agent msgs` 把「谁 → 谁、状态、id」连同**双方**的 q→answer 摘要 JOIN 出来 —— 派出去的活到哪一步、对方做了什么,一眼看清:
+
+```bash
+$ cicy-agent msgs --from w-1001 --status done
+# from   to      id  status  q ⟶ answer
+# w-1001 w-1004  42  done    "接 todo a1b2… health 加 tunnel_url" ⟶ "已加字段+单测,标 test"
+```
+
+配合 `cicy-agent msg … --notify`(对方做完推一条唤醒),就不用手动 `capture` 轮询了。
+
 ## 跨团队
 
-注册别的团队后可跨团队 msg / reply / capture。团队注册/探活见 `cicy-agent team ...`。
+注册别的团队后可跨团队 msg / reply / capture。
 
 ## 相关
 
