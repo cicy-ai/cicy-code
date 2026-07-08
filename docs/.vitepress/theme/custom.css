@@ -44,12 +44,16 @@
 @media (min-width:960px){
   .VPSidebar{left:0;padding-left:32px;width:var(--vp-sidebar-width)}
   .VPContent.has-sidebar{padding-left:var(--vp-sidebar-width)}
-  /* Apply the sidebar-width offset UNCONDITIONALLY (no `.has-sidebar`). VitePress
-     adds `.has-sidebar` only AFTER client hydration, so a `.has-sidebar`-scoped
-     padding jumps the search box from left:0 → 272px on load. Making it always
-     272px means first paint already matches — no shift. */
-  .VPNavBar .content{padding-left:var(--vp-sidebar-width) !important;padding-right:32px}
-  .VPNavBar .title{width:var(--vp-sidebar-width) !important;overflow:hidden}
+  /* VitePress adds `.has-sidebar` to .VPNavBar only AFTER client hydration, so
+     every `.has-sidebar`-scoped navbar rule (title→absolute, content/divider
+     padding, wrapper/container) snaps into place on load — the title + search
+     shift. Replicate that whole sidebar layout UNCONDITIONALLY so the first
+     paint already matches the hydrated state: no shift. */
+  .VPNavBar .wrapper{padding:0}
+  .VPNavBar .container{max-width:100%}
+  .VPNavBar .title{position:absolute !important;top:0;left:0;z-index:2;padding:0 32px !important;width:var(--vp-sidebar-width) !important;height:var(--vp-nav-height);overflow:hidden}
+  .VPNavBar .content{position:relative;z-index:1;padding-left:var(--vp-sidebar-width) !important;padding-right:32px !important}
+  .VPNavBar .divider{padding-left:var(--vp-sidebar-width)}
   .VPLocalNav.has-sidebar{padding-left:var(--vp-sidebar-width)}
 }
 /* Custom scrollbar (dark, thin, rounded) */
