@@ -8,8 +8,21 @@ import (
 	"testing"
 )
 
+// evalTempDir returns t.TempDir() with symlinks resolved. On macOS t.TempDir()
+// is /var/folders/… which is a symlink to /private/var/…; resolveSafePath
+// EvalSymlinks the workspace root and would otherwise flag every path as escaping
+// (path_symlink_escape). Linux /tmp is not a symlink so this is a no-op there.
+func evalTempDir(t *testing.T) string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("evalsymlinks tempdir: %v", err)
+	}
+	return real
+}
+
 func TestResolveSafePath_EmptyReturnsWorkspace(t *testing.T) {
-	ws := t.TempDir()
+	ws := evalTempDir(t)
 	for _, in := range []string{"", ".", "./"} {
 		got, err := resolveSafePath(ws, in)
 		if err != nil {
@@ -22,7 +35,7 @@ func TestResolveSafePath_EmptyReturnsWorkspace(t *testing.T) {
 }
 
 func TestResolveSafePath_AbsoluteOutsideRejected(t *testing.T) {
-	ws := t.TempDir()
+	ws := evalTempDir(t)
 	// Absolute paths outside the workspace must still be rejected.
 	cases := []string{"/etc/passwd", "/"}
 	for _, in := range cases {
@@ -33,7 +46,7 @@ func TestResolveSafePath_AbsoluteOutsideRejected(t *testing.T) {
 }
 
 func TestResolveSafePath_AbsoluteInsideAccepted(t *testing.T) {
-	ws := t.TempDir()
+	ws := evalTempDir(t)
 	if err := os.MkdirAll(filepath.Join(ws, "src"), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -51,7 +64,7 @@ func TestResolveSafePath_AbsoluteInsideAccepted(t *testing.T) {
 }
 
 func TestResolveSafePath_RejectsParentEscape(t *testing.T) {
-	ws := t.TempDir()
+	ws := evalTempDir(t)
 	cases := []string{
 		"..",
 		"../",
@@ -67,7 +80,7 @@ func TestResolveSafePath_RejectsParentEscape(t *testing.T) {
 }
 
 func TestResolveSafePath_AcceptsInside(t *testing.T) {
-	ws := t.TempDir()
+	ws := evalTempDir(t)
 	if err := os.MkdirAll(filepath.Join(ws, "src", "sub"), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -95,7 +108,7 @@ func TestResolveSafePath_AcceptsInside(t *testing.T) {
 }
 
 func TestResolveSafePath_NewFileUnderExistingParent(t *testing.T) {
-	ws := t.TempDir()
+	ws := evalTempDir(t)
 	if err := os.MkdirAll(filepath.Join(ws, "src"), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -116,7 +129,7 @@ func TestResolveSafePath_RejectsSymlinkEscape(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("s"), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	ws := t.TempDir()
+	ws := evalTempDir(t)
 	link := filepath.Join(ws, "escape")
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatalf("symlink: %v", err)
@@ -130,7 +143,7 @@ func TestResolveSafePath_AllowsInternalSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on windows")
 	}
-	ws := t.TempDir()
+	ws := evalTempDir(t)
 	target := filepath.Join(ws, "real")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -158,7 +171,7 @@ func TestResolveSafeLeaf_DoesNotFollowLeafSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on windows")
 	}
-	ws := t.TempDir()
+	ws := evalTempDir(t)
 	target := filepath.Join(ws, "real")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -192,7 +205,7 @@ func TestResolveSafeLeaf_DoesNotFollowLeafSymlink(t *testing.T) {
 }
 
 func TestIsProtectedWritePath(t *testing.T) {
-	ws := t.TempDir()
+	ws := evalTempDir(t)
 	cases := map[string]bool{
 		filepath.Join(ws, ".git", "HEAD"):                  true,
 		filepath.Join(ws, "node_modules", "x", "y.js"):     true,
@@ -226,7 +239,7 @@ func TestNormalizeAgentID(t *testing.T) {
 }
 
 func TestWorkspaceRel(t *testing.T) {
-	ws := t.TempDir()
+	ws := evalTempDir(t)
 	cases := map[string]string{
 		ws:                                "",
 		filepath.Join(ws, "a"):            "a",

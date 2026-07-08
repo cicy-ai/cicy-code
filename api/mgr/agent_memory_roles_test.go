@@ -11,7 +11,7 @@ import (
 func TestRoleRosterTemplatesEmbedded(t *testing.T) {
 	want := []string{"knowledge-specialist", "audit-policy-specialist"}
 	for _, slug := range want {
-		raw, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + slug + "/role.md")
+		raw, err := agentRoleTemplatesFS.ReadFile("embed/memory-seed/agents/" + slug + "/role.md")
 		if err != nil {
 			t.Errorf("role persona %q not embedded: %v", slug, err)
 			continue
@@ -38,7 +38,7 @@ func TestOfficialRosterRoleTemplatesExist(t *testing.T) {
 		if w.RoleTemplate == "" {
 			continue
 		}
-		if _, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + w.RoleTemplate + "/role.md"); err != nil {
+		if _, err := agentRoleTemplatesFS.ReadFile("embed/memory-seed/agents/" + w.RoleTemplate + "/role.md"); err != nil {
 			t.Errorf("roster %s (w-%d) role %q not embedded: %v", w.Title, w.Port, w.RoleTemplate, err)
 		}
 	}
