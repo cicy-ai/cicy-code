@@ -1,6 +1,6 @@
 ---
 title: 下载与安装
-description: 下载 cicy-code —— 首选桌面版 cicy-desktop(macOS / Windows / 移动端)开箱即用;服务器用 Docker 自托管;npm 供 headless / 进阶。
+description: 下载 cicy-code —— 桌面版 cicy-desktop(macOS / Windows)+ 移动端开箱即用;服务器用 Docker 自托管;npm 供 headless / 进阶。
 ---
 # 下载与安装
 
@@ -8,13 +8,20 @@ description: 下载 cicy-code —— 首选桌面版 cicy-desktop(macOS / Window
 
 多数人用 **cicy-desktop** —— 打包好 cicy-code 的原生桌面外壳(内置浏览器沙箱 + 系统 Chrome 驱动),下载即用、免配置。
 
-👉 **[cicy-ai.com/download](https://cicy-ai.com/download)**
+### macOS · 12 Monterey 或更新
 
-| 平台 | 形式 |
-| --- | --- |
-| macOS · Apple Silicon / Intel | `.pkg` |
-| Windows 10 / 11 · x64 | `.exe` |
-| iOS · Android | Web App / 原生 |
+- [`.pkg` · Apple Silicon](https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases/cicy-desktop-mac-arm64-latest.pkg)
+- [`.pkg` · Intel](https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases/cicy-desktop-mac-x64-latest.pkg)
+
+### Windows · 10 / 11 · x64
+
+- [`.exe` Installer (64-bit)](https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases/cicy-desktop-latest.exe)
+
+### 移动端 · iOS / Android
+
+- **Web App**(免安装,iPhone / iPad / Android):[m.cicy-ai.com](https://m.cicy-ai.com)
+- iOS · [IPA(Sideloadly 侧载)](https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/cicy-mobile/cicy-latest-ios.zip)
+- Android · [APK](https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/cicy-mobile/cicy-latest.zip)
 
 ## Docker(服务器 / 自托管)
 
