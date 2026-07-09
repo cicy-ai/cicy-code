@@ -164,8 +164,11 @@ func TestAgentBootLinesClaudeWritesSettingsFile(t *testing.T) {
 	if !strings.Contains(script, `cat > "$WORKSPACE/.cicy/claude-settings.json" <<EOF`) {
 		t.Fatalf("claude boot lines missing settings file write: %s", script)
 	}
-	if !strings.Contains(script, `"ANTHROPIC_BASE_URL": "http://127.0.0.1:8008/api/ai-gateway/anthropic/${X_AGENT_SHORT_ID}"`) {
-		t.Fatalf("claude boot lines missing anthropic base url template in settings content: %s", script)
+	// The settings JSON now embeds the resolved gateway base URL (not the
+	// ${X_AGENT_SHORT_ID} shell template it used to). Assert via the same helper
+	// the boot code uses so it stays correct regardless of the exact URL shape.
+	if wantURL := anthropicRuntimeBaseURL("w-1001"); !strings.Contains(script, `"ANTHROPIC_BASE_URL": "`+wantURL+`"`) {
+		t.Fatalf("claude boot lines missing anthropic base url %q in settings content: %s", wantURL, script)
 	}
 	if !strings.Contains(script, `claude --settings "$WORKSPACE/.cicy/claude-settings.json"`) {
 		t.Fatalf("claude boot lines missing claude startup: %s", script)

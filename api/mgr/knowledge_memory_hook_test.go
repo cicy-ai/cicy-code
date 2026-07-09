@@ -192,17 +192,18 @@ func TestMemoryWriteHookDisabled(t *testing.T) {
 // The 知识专员 resolver finds a live agent carrying role_template=知识专员.
 func TestKnowledgeSpecialistPaneID(t *testing.T) {
 	withTempCicyRoot(t)
-	withTestStore(t)
-	if knowledgeSpecialistPaneID() != "" {
-		t.Fatalf("no specialist provisioned → want empty")
+	// Config-driven now (no DB role query — that flaky "most-recently-updated
+	// agent carrying the role" heuristic was intentionally dropped). Unset →
+	// defaults to the master pane.
+	if got := knowledgeSpecialistPaneID(); got != knowledgeSpecialistDefaultPane {
+		t.Fatalf("unpinned specialist = %q, want default %q", got, knowledgeSpecialistDefaultPane)
 	}
-	if _, err := store.Exec(
-		"INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, role_template, active) VALUES (?,?,?,?,?,?,?,?,?,?)",
-		"w-30099:main.0", "KnowSpec", "/tmp/w-30099", "", "{}", "worker", "", "cicy", knowledgeSpecialistRoleTemplate, 1,
-	); err != nil {
-		t.Fatalf("insert specialist: %v", err)
+	// Pinning via config (global.json) resolves to that pane.
+	want := normPaneID("w-30099:main.0")
+	if err := setKnowledgeSpecialistPane("w-30099:main.0"); err != nil {
+		t.Fatalf("pin: %v", err)
 	}
-	if got := knowledgeSpecialistPaneID(); got != "w-30099:main.0" {
-		t.Fatalf("resolver = %q, want w-30099:main.0", got)
+	if got := knowledgeSpecialistPaneID(); got != want {
+		t.Fatalf("pinned specialist = %q, want %q", got, want)
 	}
 }

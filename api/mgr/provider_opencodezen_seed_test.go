@@ -51,8 +51,11 @@ func TestOpenCodeZenSeed_FreshInstall(t *testing.T) {
 			t.Errorf("default[%q] = %v, want opencodeZen", at, defaults[at])
 		}
 	}
-	if defaults["claude"] != "defaultAnthropic" {
-		t.Errorf("default[claude] = %v, want defaultAnthropic (claude needs an anthropic provider)", defaults["claude"])
+	// claude routes to deepseek_claude by default — an anthropic-protocol provider
+	// (api.deepseek.com/anthropic). The default was set in v2.3.138's provider seed
+	// cleanup; this asserts the current seed, not the old "defaultAnthropic" key.
+	if defaults["claude"] != "deepseek_claude" {
+		t.Errorf("default[claude] = %v, want deepseek_claude", defaults["claude"])
 	}
 	if !ocSeedContains(keys, "opencodeZen") {
 		t.Errorf("opencodeZen item missing; keys=%v", keys)
