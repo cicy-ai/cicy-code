@@ -148,14 +148,49 @@ func gwForward(stream net.Conn, local string) {
 // gwInjectAuth reads the HTTP request head from stream, writes it to up with an
 // injected Authorization header (unless the request already carries one), and
 // returns a reader positioned at the remaining bytes (body / WS frames).
+// gwRewriteReqLineToken rewrites a token= query param in an HTTP request line to
+// the node's api_token. ttyd and the chat WebSocket authenticate via ?token= (not
+// the Authorization header), and the value the client sent there is the cloud
+// access token, which cicy-code's authM rejects. No-op when there is no token=.
+func gwRewriteReqLineToken(line, apiToken string) string {
+	trimmed := strings.TrimRight(line, "\r\n")
+	parts := strings.SplitN(trimmed, " ", 3)
+	if len(parts) < 2 {
+		return line
+	}
+	qi := strings.IndexByte(parts[1], '?')
+	if qi < 0 {
+		return line
+	}
+	path, query := parts[1][:qi], parts[1][qi+1:]
+	kvs := strings.Split(query, "&")
+	changed := false
+	for i, kv := range kvs {
+		if strings.HasPrefix(kv, "token=") {
+			kvs[i] = "token=" + apiToken
+			changed = true
+		}
+	}
+	if !changed {
+		return line
+	}
+	parts[1] = path + "?" + strings.Join(kvs, "&")
+	return strings.Join(parts, " ") + "\r\n"
+}
+
 func gwInjectAuth(stream, up net.Conn, apiToken string) (io.Reader, error) {
 	br := bufio.NewReader(stream)
 	var head bytes.Buffer
 	hasAuth := false
+	first := true
 	for {
 		line, err := br.ReadString('\n')
 		if err != nil {
 			return nil, err
+		}
+		if first {
+			line = gwRewriteReqLineToken(line, apiToken) // ttyd/WS auth via ?token=
+			first = false
 		}
 		if strings.HasPrefix(strings.ToLower(line), "authorization:") {
 			hasAuth = true
