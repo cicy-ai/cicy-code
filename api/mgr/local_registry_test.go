@@ -14,7 +14,15 @@ import (
 // publish/unpublish manage the shared dir, the mounted /registry handler serves
 // /v1/skills with the Bearer token, and start/stop are back-compat no-ops.
 func TestLocalRegistryLifecycle(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	// Full isolation (HOME + cicy path vars incl. global.json). Setting only HOME
+	// left cicyGlobalJSONPath on the real ~/cicy-ai/global.json, so the test read
+	// the operator's real skill_registry_token instead of exercising generation —
+	// green on a configured dev box, red on a fresh CI runner.
+	withTempCicyRoot(t)
+	// Boot-time init generates the read token into global.json (the /start action
+	// is a back-compat no-op that only reads it). Run it so a fresh isolated env
+	// has a token, matching real startup.
+	ensureLocalRegistry()
 
 	// minimal valid skill dir
 	skill := filepath.Join(t.TempDir(), "demo")
