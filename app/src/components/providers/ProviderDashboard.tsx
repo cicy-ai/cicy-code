@@ -86,6 +86,11 @@ function resolveModelFor(p: ProviderRecord | null | undefined, agentType: string
 function compactDM(dm?: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(dm || {}).filter(([, v]) => String(v || '').trim()).map(([k, v]) => [k, String(v).trim()]));
 }
+// One model per line, trimmed, empties dropped, deduped (a repeated line in the
+// textarea would otherwise produce duplicate React keys / Select options).
+function parseModels(modelsText: string): string[] {
+  return Array.from(new Set(modelsText.split('\n').map((l) => l.trim()).filter(Boolean)));
+}
 // A model-mapping rule edited as a structured row: "when the agent requests
 // `from`, send `to` upstream instead". `from` may end with "*" for a prefix
 // match, or be empty for the catch-all. Rows are the editable shape; they
@@ -117,7 +122,7 @@ function editorSnapshot(d: ProviderRecord, modelsText: string, mappingRows: Mapp
     protocol: proto(d) || 'openai',
     defaultModel: (d.defaultModel || '').trim(),
     defaultModels: compactDM(d.defaultModels),
-    models: modelsText.split('\n').map((s) => s.trim()).filter(Boolean),
+    models: parseModels(modelsText),
     modelMapping: rowsToMapping(mappingRows),
   });
 }
@@ -394,7 +399,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
     protocol: proto(draft) || 'openai',
     defaultModel: (draft.defaultModel || '').trim(),
     defaultModels: compactDM(draft.defaultModels),
-    models: modelsText.split('\n').map((s) => s.trim()).filter(Boolean),
+    models: parseModels(modelsText),
     modelMapping: rowsToMapping(mappingRows),
   }), [draft, modelsText, mappingRows]);
 
@@ -454,7 +459,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
   // Test every declared model — bounded concurrency (3 in-flight) so a long
   // model list doesn't fire dozens of upstream requests at once.
   const testAllModels = useCallback(async () => {
-    const models = modelsText.split('\n').map((l) => l.trim()).filter(Boolean);
+    const models = parseModels(modelsText);
     if (models.length === 0) return;
     setTestingAll(true);
     try {
@@ -688,7 +693,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
             <section className="space-y-3.5">
               <SectionHeader>{t('sectionModels')}</SectionHeader>
               {(() => {
-                const availableModels = modelsText.split('\n').map((l) => l.trim()).filter(Boolean);
+                const availableModels = parseModels(modelsText);
                 const currentDefault = draft.defaultModel || '';
                 return (
                   <Field label={t('fieldDefaultModel')} help={t('fieldDefaultModelHelp')}>
@@ -707,7 +712,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
               </Field>
               <Field label={t('fieldModelMapping')} help={t('fieldModelMappingHelp')} className="hidden">
                 {(() => {
-                  const availableModels = modelsText.split('\n').map((l) => l.trim()).filter(Boolean);
+                  const availableModels = parseModels(modelsText);
                   // Friendly "from" suggestions: catch-all, family prefixes, common
                   // Anthropic/OpenAI model ids, plus this provider's own models.
                   const fromSuggest: SelectOption[] = [
@@ -818,7 +823,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
           <div className="mt-7 border-t border-white/[0.06] pt-5">
             <div className="flex flex-wrap items-center gap-2">
             <Btn dataId="provider-detail-save" variant="primary" size="md" icon={<Save size={14} />} busy={saving} disabled={saving || !canSave} onClick={() => void save()}>{isNew ? t('create') : t('save')}</Btn>
-            {!isNew && <Btn dataId="provider-detail-test-connection" variant="secondary" size="md" icon={<Zap size={14} />} disabled={modelsText.split('\n').map((l) => l.trim()).filter(Boolean).length === 0} onClick={() => { setModelTestResults({}); setTestModalOpen(true); }}>{t('test')}</Btn>}
+            {!isNew && <Btn dataId="provider-detail-test-connection" variant="secondary" size="md" icon={<Zap size={14} />} disabled={parseModels(modelsText).length === 0} onClick={() => { setModelTestResults({}); setTestModalOpen(true); }}>{t('test')}</Btn>}
             {isNew && <Btn dataId="provider-detail-cancel" variant="ghost" size="md" onClick={() => { void guardDirty(() => { setIsNew(false); setSelectedKey(items[0]?.key || null); }); }}>{t('cancel')}</Btn>}
             {!isNew && dirty && <Btn dataId="provider-detail-discard" variant="ghost" size="md" onClick={() => loadEditor(selectedProvider)}>{t('discardChanges')}</Btn>}
             </div>
@@ -834,7 +839,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
   /* ───────────── TEST MODAL ───────────── */
   let testModal: React.ReactNode = null;
   if (testModalOpen) {
-    const availableModels = modelsText.split('\n').map((l) => l.trim()).filter(Boolean);
+    const availableModels = parseModels(modelsText);
     const isDone = (r: TestResult | 'pending' | undefined): r is TestResult => !!r && r !== 'pending';
     const tested = availableModels.filter((m) => isDone(modelTestResults[m])).length;
     const passed = availableModels.filter((m) => { const r = modelTestResults[m]; return isDone(r) && r.ok; }).length;
