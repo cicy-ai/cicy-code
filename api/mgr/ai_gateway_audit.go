@@ -880,6 +880,21 @@ func (s *aiGatewayAuditSession) writeStartSnapshots() error {
 		"answer":          s.reply.Answer,
 		"thinking":        s.reply.Thinking,
 		"question":        aiGatewaySanitizeUserQuestion(aiGatewayFirstNonEmpty(s.question, aiGatewayCurrentQuestion(s.current))),
+		// Full reply payload on the push channel (additive; older clients ignore
+		// these). items carries the tool cards (name/args/result) that used to be
+		// poll-only — with them, plus complete + usage, a client needs NO periodic
+		// reply.json polling: text rides ai_chunk, structure rides this event at
+		// every round boundary, and finality/usage ride it at finalize.
+		"items":                       aiGatewayCloneItems(s.reply.Items),
+		"complete":                    isAIGatewayReplyTerminal(strings.ToLower(strings.TrimSpace(s.reply.Status))),
+		"reply_status":                s.reply.Status,
+		"model":                       aiGatewayReplyPrimaryModel(s.reply),
+		"input_tokens":                s.reply.InputTokens,
+		"output_tokens":               s.reply.OutputTokens,
+		"cache_read_input_tokens":     s.reply.CacheReadInputTokens,
+		"cache_creation_input_tokens": s.reply.CacheCreationInputTokens,
+		"total_tokens":                s.reply.TotalTokens,
+		"cost_credit":                 s.reply.CostCredit,
 	}
 	currentUpdatedEvent := ChatEvent{Type: "current_updated", Data: currentUpdatedData}
 	s.mu.Unlock()
@@ -1316,6 +1331,21 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 		"answer":          s.reply.Answer,
 		"thinking":        s.reply.Thinking,
 		"question":        aiGatewaySanitizeUserQuestion(aiGatewayFirstNonEmpty(s.question, aiGatewayCurrentQuestion(s.current))),
+		// Full reply payload on the push channel (additive; older clients ignore
+		// these). items carries the tool cards (name/args/result) that used to be
+		// poll-only — with them, plus complete + usage, a client needs NO periodic
+		// reply.json polling: text rides ai_chunk, structure rides this event at
+		// every round boundary, and finality/usage ride it at finalize.
+		"items":                       aiGatewayCloneItems(s.reply.Items),
+		"complete":                    isAIGatewayReplyTerminal(strings.ToLower(strings.TrimSpace(s.reply.Status))),
+		"reply_status":                s.reply.Status,
+		"model":                       aiGatewayReplyPrimaryModel(s.reply),
+		"input_tokens":                s.reply.InputTokens,
+		"output_tokens":               s.reply.OutputTokens,
+		"cache_read_input_tokens":     s.reply.CacheReadInputTokens,
+		"cache_creation_input_tokens": s.reply.CacheCreationInputTokens,
+		"total_tokens":                s.reply.TotalTokens,
+		"cost_credit":                 s.reply.CostCredit,
 	}
 	currentUpdatedEvent := ChatEvent{Type: "current_updated", Data: currentUpdatedData}
 	log.Printf("[ai-gateway] complete agent=%s status=%s status_code=%d answer_len=%d thinking_len=%d tools=%d reply_hooks=%d",
@@ -3182,6 +3212,19 @@ func aiGatewaySanitizeUserQuestion(question string) string {
 		question = openClawLeadingTimestampRe.ReplaceAllString(question, "")
 	}
 	return strings.TrimSpace(question)
+}
+
+// aiGatewayCloneItems deep-copies the reply items for publishing after the
+// session lock is released (the stream goroutine keeps mutating the originals).
+func aiGatewayCloneItems(items []map[string]interface{}) []map[string]interface{} {
+	if len(items) == 0 {
+		return []map[string]interface{}{}
+	}
+	out := make([]map[string]interface{}, 0, len(items))
+	for _, it := range items {
+		out = append(out, aiGatewayCloneAnyMap(it))
+	}
+	return out
 }
 
 func aiGatewayReplyPrimaryModel(reply aiGatewayReplySnapshot) string {

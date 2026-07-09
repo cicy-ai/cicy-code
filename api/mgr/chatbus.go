@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -475,10 +476,28 @@ func (h *chatHub) updateClientDeviceInfo(clientID, publicIp, ipRegion, systemLan
 	}
 }
 
+// Per-agent monotonically increasing event sequence, stamped on every event
+// published to an agent channel. Clients track the last seq they saw: a gap
+// (skipped number) means a dropped frame → pull ONE reply snapshot to repair —
+// the WeChat model (push + gap-triggered sync) instead of periodic polling.
+var agentEventSeq sync.Map // agentID -> *atomic.Int64
+
+func nextAgentEventSeq(agentID string) int64 {
+	v, _ := agentEventSeq.LoadOrStore(agentID, &atomic.Int64{})
+	return v.(*atomic.Int64).Add(1)
+}
+
 func (h *chatHub) publishAgent(agentID string, evt ChatEvent) {
 	agentID = normalizeChatAgentValue(agentID)
 	if agentID == "" {
 		return
+	}
+	// Stamp the channel sequence before fan-out so every client sees the same
+	// contiguous numbering. Data is always a fresh M per event on these paths.
+	if m, ok := evt.Data.(M); ok {
+		m["seq"] = nextAgentEventSeq(agentID)
+	} else if m, ok := evt.Data.(map[string]interface{}); ok {
+		m["seq"] = nextAgentEventSeq(agentID)
 	}
 	appendRuntimeEvent(agentID, evt.Type, evt.Data)
 	b, _ := json.Marshal(evt)
