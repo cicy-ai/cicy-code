@@ -5,20 +5,18 @@
 // local API over that reverse tunnel — no inbound port is ever opened here.
 //
 // The node authenticates to the gateway with a typ=node JWT (from --gateway-token,
-// CICY_GATEWAY_TOKEN, or ~/cicy-ai/db/gateway.json). The gateway verifies the
-// short-lived typ=access JWT that mobile/web clients carry, authorizes org+node,
-// then proxies over this tunnel. For each proxied request we inject the local
-// api_token so cicy-code's authM is satisfied WITHOUT the client ever holding it:
-// the phone carries only the revocable cloud access token; the node's static
-// api_token never leaves the node.
+// CICY_GATEWAY_TOKEN, or ~/cicy-ai/db/gateway.json). That dial is the ONLY thing
+// the gateway verifies — it is how the gateway learns which slug this node serves.
+// After that the gateway is a TRANSPARENT pipe: it forwards client requests to us
+// byte for byte, and cicy-code's authM authenticates each one with the api_token
+// the client carried (Authorization / ?token=), exactly as for localhost:8008.
+// Reaching <slug>.gw.cicy-ai.com is reachability, not a credential.
 //
 // This is the node half of ~/projects/cicy-gateway (P1/①/A). Transport is WSS +
 // yamux multiplexing (443-friendly, survives NAT/egress proxies).
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -49,18 +47,33 @@ type gatewayConfigFile struct {
 }
 
 // resolveGatewayConfig fills url/token/insecure from, in priority order:
-// explicit flags → env (CICY_GATEWAY_URL / CICY_GATEWAY_TOKEN) → gateway.json.
+// explicit flags → env → config file. The current names are CICY_TUNNEL_URL /
+// CICY_TUNNEL_TOKEN and ~/cicy-ai/db/tunnel.json; the older CICY_GATEWAY_* /
+// gateway.json are still accepted as deprecated aliases (the flag/product was
+// renamed gateway → tunnel; old deployments keep working).
 func resolveGatewayConfig() (url, token string, insecure bool) {
 	url, token, insecure = gatewayURL, gatewayToken, gatewayInsecure
+	firstEnv := func(keys ...string) string {
+		for _, k := range keys {
+			if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+				return v
+			}
+		}
+		return ""
+	}
 	if url == "" {
-		url = strings.TrimSpace(os.Getenv("CICY_GATEWAY_URL"))
+		url = firstEnv("CICY_TUNNEL_URL", "CICY_GATEWAY_URL")
 	}
 	if token == "" {
-		token = strings.TrimSpace(os.Getenv("CICY_GATEWAY_TOKEN"))
+		token = firstEnv("CICY_TUNNEL_TOKEN", "CICY_GATEWAY_TOKEN")
 	}
-	if url == "" || token == "" {
+	// tunnel.json (current) then gateway.json (deprecated alias).
+	for _, name := range []string{"tunnel.json", "gateway.json"} {
+		if url != "" && token != "" {
+			break
+		}
 		var cfg gatewayConfigFile
-		if b, err := os.ReadFile(filepath.Join(cicyRootDir, "db", "gateway.json")); err == nil {
+		if b, err := os.ReadFile(filepath.Join(cicyRootDir, "db", name)); err == nil {
 			if json.Unmarshal(b, &cfg) == nil {
 				if url == "" {
 					url = strings.TrimSpace(cfg.URL)
@@ -120,8 +133,12 @@ func gwServe(url, token, local string, insecure bool) error {
 }
 
 // gwForward pipes one gateway stream <-> a fresh local cicy-code connection,
-// injecting Authorization: Bearer <api_token> into the request head so authM
-// passes. Works for plain HTTP and the WS upgrade handshake alike.
+// byte for byte. TRANSPARENT: the gateway makes this node reachable at
+// <slug>.gw.cicy-ai.com; the request that arrives is exactly what the client
+// sent, and cicy-code's authM authenticates it with the api_token the client
+// carried (Authorization / ?token=) — identical to a request to localhost:8008.
+// The node does NOT inject its api_token: reaching the tunnel is not the same as
+// holding the credential, so the caller must present it, just like local.
 func gwForward(stream net.Conn, local string) {
 	defer stream.Close()
 	up, err := net.Dial("tcp", local)
@@ -131,81 +148,9 @@ func gwForward(stream net.Conn, local string) {
 	}
 	defer up.Close()
 
-	src := io.Reader(stream)
-	if tok := loadAPIToken(); tok != "" {
-		if r, err := gwInjectAuth(stream, up, tok); err == nil {
-			src = r
-		} else {
-			log.Printf("[gateway] inject skipped: %v", err)
-		}
-	}
 	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(up, src); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(up, stream); done <- struct{}{} }()
 	go func() { _, _ = io.Copy(stream, up); done <- struct{}{} }()
 	<-done
 }
 
-// gwInjectAuth reads the HTTP request head from stream, writes it to up with an
-// injected Authorization header (unless the request already carries one), and
-// returns a reader positioned at the remaining bytes (body / WS frames).
-// gwRewriteReqLineToken rewrites a token= query param in an HTTP request line to
-// the node's api_token. ttyd and the chat WebSocket authenticate via ?token= (not
-// the Authorization header), and the value the client sent there is the cloud
-// access token, which cicy-code's authM rejects. No-op when there is no token=.
-func gwRewriteReqLineToken(line, apiToken string) string {
-	trimmed := strings.TrimRight(line, "\r\n")
-	parts := strings.SplitN(trimmed, " ", 3)
-	if len(parts) < 2 {
-		return line
-	}
-	qi := strings.IndexByte(parts[1], '?')
-	if qi < 0 {
-		return line
-	}
-	path, query := parts[1][:qi], parts[1][qi+1:]
-	kvs := strings.Split(query, "&")
-	changed := false
-	for i, kv := range kvs {
-		if strings.HasPrefix(kv, "token=") {
-			kvs[i] = "token=" + apiToken
-			changed = true
-		}
-	}
-	if !changed {
-		return line
-	}
-	parts[1] = path + "?" + strings.Join(kvs, "&")
-	return strings.Join(parts, " ") + "\r\n"
-}
-
-func gwInjectAuth(stream, up net.Conn, apiToken string) (io.Reader, error) {
-	br := bufio.NewReader(stream)
-	var head bytes.Buffer
-	hasAuth := false
-	first := true
-	for {
-		line, err := br.ReadString('\n')
-		if err != nil {
-			return nil, err
-		}
-		if first {
-			line = gwRewriteReqLineToken(line, apiToken) // ttyd/WS auth via ?token=
-			first = false
-		}
-		if strings.HasPrefix(strings.ToLower(line), "authorization:") {
-			hasAuth = true
-		}
-		if line == "\r\n" || line == "\n" { // end of header block
-			if !hasAuth {
-				head.WriteString("Authorization: Bearer " + apiToken + "\r\n")
-			}
-			head.WriteString(line)
-			break
-		}
-		head.WriteString(line)
-	}
-	if _, err := up.Write(head.Bytes()); err != nil {
-		return nil, err
-	}
-	return br, nil
-}

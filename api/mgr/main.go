@@ -47,7 +47,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.203"
+const version = "2.3.206"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -151,16 +151,18 @@ Options:
                           e.g. cloudshell.cicy-ai.com — used only to report the URL
                           (the token doesn't reveal it). Also CICY_CFT_HOST /
                           cft.json {"host"}.
-  --gateway URL           Dial OUT to a cicy zero-trust gateway and serve this
-                          instance over a WSS reverse tunnel — NO inbound port is
-                          opened. Clients reach it via the gateway, which verifies
-                          their short-lived access token; this node injects its own
-                          api_token so the client never holds it. Also
-                          CICY_GATEWAY_URL / ~/cicy-ai/db/gateway.json {"url"}.
-  --gateway-token JWT     The node identity token (typ=node) for the gateway.
-                          Also CICY_GATEWAY_TOKEN / gateway.json {"token"}, or
-                          --gateway-token-file PATH.
-  --gateway-insecure      Skip gateway TLS verification (dev self-signed cert only).
+  Reverse tunnel (cicy-tunnel) — reach this node at <slug>.gw.<domain> with NO
+  inbound port opened. Normally you pass NOTHING here: 'enroll' on the relay
+  writes ~/cicy-ai/db/tunnel.json {url, token, insecure} and cicy-code dials it
+  automatically. The relay is a transparent pipe — it does not authenticate; this
+  node authenticates every request with its own api_token, same as localhost.
+  --tunnel URL            Dial the relay at URL (token/insecure come from
+                          tunnel.json or CICY_TUNNEL_TOKEN — never argv). Also
+                          CICY_TUNNEL_URL. With tunnel.json present, no flag needed.
+  --tunnel-insecure       Skip relay TLS verification (dev self-signed cert only).
+                          Deprecated aliases still accepted: --gateway,
+                          --gateway-token[-file], --gateway-insecure, CICY_GATEWAY_*,
+                          gateway.json.
   --audit                 Enable audit mode
   --helper=1              Team-Helper mode: ship a single headless cicy
                           "团队助手" on w-1001 that installs Docker + cicy-code
@@ -203,6 +205,23 @@ Options:
 			}
 		case strings.HasPrefix(arg, "--cft-host="):
 			cftHost = strings.TrimPrefix(arg, "--cft-host=")
+		// --tunnel* — current name for the cicy-tunnel reverse-tunnel relay.
+		// The token + insecure flag normally live in ~/cicy-ai/db/tunnel.json
+		// (written by `enroll`) or CICY_TUNNEL_* — NOT on the command line (a token
+		// on argv leaks via `ps`). So the whole tunnel surface is just: drop
+		// tunnel.json and run cicy-code (zero flags), or set two env vars. The
+		// --gateway* flags below remain as deprecated aliases for old deployments.
+		case arg == "--tunnel":
+			if i+1 < len(cliArgs) {
+				gatewayURL = cliArgs[i+1]
+				i++
+			}
+			gatewayMode = true
+		case strings.HasPrefix(arg, "--tunnel="):
+			gatewayURL = strings.TrimPrefix(arg, "--tunnel=")
+			gatewayMode = true
+		case arg == "--tunnel-insecure":
+			gatewayInsecure = true
 		case arg == "--gateway":
 			if i+1 < len(cliArgs) {
 				gatewayURL = cliArgs[i+1]
@@ -708,7 +727,9 @@ Options:
 	}
 	// --gateway (or CICY_GATEWAY_URL/db/gateway.json): dial OUT to a zero-trust
 	// gateway and serve over the reverse tunnel — no inbound port opened here.
-	if gatewayMode || strings.TrimSpace(os.Getenv("CICY_GATEWAY_URL")) != "" {
+	// Start the tunnel when a flag asked for it OR a url is resolvable from env /
+	// tunnel.json — so dropping ~/cicy-ai/db/tunnel.json is enough, no flag needed.
+	if tunnelURL, _, _ := resolveGatewayConfig(); gatewayMode || tunnelURL != "" {
 		gatewayMode = true
 		go startGatewayTunnel(port)
 	}

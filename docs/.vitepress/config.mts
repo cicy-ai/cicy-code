@@ -118,6 +118,7 @@ export default defineConfig({
       { text: '部署', collapsed: true, items: [
         { text: '单机 / 本地', link: '/deploy/single' },
         { text: 'Docker / runtime', link: '/deploy/docker' },
+        { text: '自托管隧道 (cicy-hub)', link: '/deploy/tunnel' },
         { text: '云端 (cicy-cloud)', link: '/deploy/cloud' },
       ]},
       { text: '参考', collapsed: true, items: [
