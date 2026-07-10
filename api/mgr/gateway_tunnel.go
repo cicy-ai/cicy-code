@@ -85,6 +85,16 @@ func resolveGatewayConfig() (url, token string, insecure bool) {
 			}
 		}
 	}
+	// With --id set and no explicit url, DERIVE it from the hub domain:
+	// wss://<id>.<hub>/_tunnel/connect. Hub domain: CICY_HUB env, else hub.cicy-ai.com.
+	// So a hub-mode node just needs `--id <team>` + its token (tunnel.json / env).
+	if url == "" && teamID != "" {
+		hub := strings.TrimSpace(os.Getenv("CICY_HUB"))
+		if hub == "" {
+			hub = "hub.cicy-ai.com"
+		}
+		url = "wss://" + teamID + "." + hub + "/_tunnel/connect"
+	}
 	return
 }
 
