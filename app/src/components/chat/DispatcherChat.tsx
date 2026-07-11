@@ -524,20 +524,29 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
             }}
             onKeyDown={(e) => {
               e.stopPropagation();
+              // IME 组词判定:优先用浏览器原生的 per-event 信号(isComposing / IME 的
+              // keyCode 229),onCompositionStart/End 的 ref 只作兜底。原来只靠 ref,
+              // 中文输入法「回车确认候选词」那一下的 keydown 时序不稳,常把确认 Enter
+              // 之后本该发送的 Enter 也一起吞掉 → 「回车不发送、要按两下」。原生 flag
+              // 在组词时为 true、组词一结束即 false,所以确认那下不发、下一个回车立即发。
+              const composing =
+                (e.nativeEvent as any)?.isComposing === true ||
+                (e.nativeEvent as any)?.keyCode === 229 ||
+                composingRef.current;
               // 斜杠菜单打开时,方向键/Enter/Tab/Esc 先归菜单(优先于发送/取消)。
-              if (slashOpen && !composingRef.current) {
+              if (slashOpen && !composing) {
                 if (e.key === 'ArrowDown') { e.preventDefault(); setSlashSel((s) => Math.min(s + 1, slashMatches.length - 1)); return; }
                 if (e.key === 'ArrowUp') { e.preventDefault(); setSlashSel((s) => Math.max(s - 1, 0)); return; }
                 if (e.key === 'Tab') { e.preventDefault(); setText(slashMatches[slashSelClamped].cmd + ' '); setSlashSel(0); return; }
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(slashMatches[slashSelClamped].cmd); setSlashSel(0); return; }
                 if (e.key === 'Escape') { e.preventDefault(); setText(''); setSlashSel(0); return; }
               }
-              if (e.key === 'Escape' && busy && !composingRef.current) {
+              if (e.key === 'Escape' && busy && !composing) {
                 e.preventDefault();
                 void cancel();
                 return;
               }
-              if (e.key === 'Enter' && !e.shiftKey && !composingRef.current) {
+              if (e.key === 'Enter' && !e.shiftKey && !composing) {
                 e.preventDefault();
                 void send();
               }

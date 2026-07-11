@@ -103,7 +103,7 @@ export function buildTurnsFromRawItems(rawItems: RawHistoryItem[]): HistoryTurn[
         // batches calls (Anthropic native, e.g. non-gateway) or serializes them
         // (one per turn, e.g. gateway-translated) is provider-dependent — folding
         // ALL results makes both render identically.
-        const resultById = new Map<string, string>();
+        const resultById = new Map<string, { text: string; isError: boolean }>();
         for (const p of nextContent) {
           const t = String(p?.type || '').trim();
           if (t !== 'tool_result' && t !== 'function_call_output') continue;
@@ -111,7 +111,9 @@ export function buildTurnsFromRawItems(rawItems: RawHistoryItem[]): HistoryTurn[
           if (!rid) continue;
           const raw = p?.content ?? p?.output;
           const result = typeof raw === 'string' ? raw : (raw != null ? JSON.stringify(raw) : '');
-          if (result) resultById.set(rid, result);
+          // Anthropic flags failed tool runs with is_error on the tool_result
+          // block — folded through so the card renders ✗ instead of ✓.
+          if (result) resultById.set(rid, { text: result, isError: p?.is_error === true });
         }
         const toolUseIds = currentContent
           .filter((p: any) => String(p?.type || '').trim() === 'tool_use')
@@ -122,8 +124,8 @@ export function buildTurnsFromRawItems(rawItems: RawHistoryItem[]): HistoryTurn[
           for (let j = 0; j < itemContent.length; j += 1) {
             if (String(itemContent[j]?.type || '').trim() !== 'tool_use') continue;
             const id = String(itemContent[j]?.id || '').trim();
-            const result = id ? resultById.get(id) : '';
-            if (result) itemContent[j] = { ...itemContent[j], _tool_result: result };
+            const result = id ? resultById.get(id) : undefined;
+            if (result) itemContent[j] = { ...itemContent[j], _tool_result: result.text, _tool_is_error: result.isError };
           }
           item.content = itemContent;
           item._has_tool_result = true;
@@ -261,7 +263,17 @@ export function replyItemsToSteps(items: any, thinking?: string, answer?: string
       if (tx) steps.push({ type: 'text', text: tx });
     } else if (ty === 'tool_use') {
       const inp = it?.input;
-      const tool = { name: String(it?.name || ''), arg: inp == null ? '' : (typeof inp === 'string' ? inp : JSON.stringify(inp)), tool_id: String(it?.tool_id || '') };
+      // The gateway folds each continuation's tool_result back onto its tool_use
+      // (output / output_is_error) — surface both, or the live tail shows every
+      // tool as still-running/blank until the turn commits.
+      const out = it?.output;
+      const tool = {
+        name: String(it?.name || ''),
+        arg: inp == null ? '' : (typeof inp === 'string' ? inp : JSON.stringify(inp)),
+        tool_id: String(it?.tool_id || ''),
+        result: out == null ? '' : (typeof out === 'string' ? out : JSON.stringify(out)),
+        isError: it?.output_is_error === true,
+      };
       const last = steps[steps.length - 1] as any;
       if (last && last.type === 'tool') last.tools.push(tool);
       else steps.push({ type: 'tool', tools: [tool] } as any);

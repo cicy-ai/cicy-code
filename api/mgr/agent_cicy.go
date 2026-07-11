@@ -922,6 +922,21 @@ func getCicySession(shortID, workspace string) *cicySession {
 	return s
 }
 
+// removeCicySession drops a pane's in-memory cicy session. Called on pane
+// delete: without it cicySessions grows one entry per agent for the life of the
+// daemon, each pinning that agent's (trimmed) message backlog. Also flips the
+// agent offline (cicySessionRegistered), which is correct for a deleted pane.
+// Safe no-op for a non-cicy pane (no entry to delete).
+func removeCicySession(shortID string) {
+	shortID = strings.TrimSpace(shortID)
+	if shortID == "" {
+		return
+	}
+	cicySessionsMu.Lock()
+	delete(cicySessions, shortID)
+	cicySessionsMu.Unlock()
+}
+
 // warmCicySessions pre-registers every local cicy agent's session at boot so a
 // headless cicy is alive the instant the server is up — no tmux pane required to
 // bring it online. For cicy, liveness == registry membership (see

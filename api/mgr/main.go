@@ -45,10 +45,9 @@ var (
 	helperMode    bool // --helper=1 → ships a single headless cicy 团队助手 on w-1001
 	desktopCmd    *exec.Cmd
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
-	teamID        string // --id <teamid> → this node's team identity in the cicy-hub (empty = single-machine, no team mode)
 )
 
-const version = "2.3.206"
+const version = "2.3.213"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -152,17 +151,6 @@ Options:
                           e.g. cloudshell.cicy-ai.com — used only to report the URL
                           (the token doesn't reveal it). Also CICY_CFT_HOST /
                           cft.json {"host"}.
-  cicy-hub (team mode) — join a cicy-hub so this node is reachable + its agents
-  appear in the hub directory, addressable as <id>.<agent>. NO inbound port.
-  --id <teamid>           This node's team identity in the hub. The dial URL is
-                          DERIVED: wss://<id>.<CICY_HUB|hub.cicy-ai.com>/_tunnel/
-                          connect. The node's token comes from ~/cicy-ai/db/
-                          tunnel.json (written by the hub's 'enroll') or
-                          CICY_TUNNEL_TOKEN — never on argv. So a hub node is just:
-                          cicy-code --id <team>.  Override the hub with CICY_HUB.
-                          Deprecated aliases still accepted: --gateway[=URL],
-                          --gateway-token[-file], --gateway-insecure, CICY_GATEWAY_*,
-                          gateway.json.
   --audit                 Enable audit mode
   --helper=1              Team-Helper mode: ship a single headless cicy
                           "团队助手" on w-1001 that installs Docker + cicy-code
@@ -205,48 +193,6 @@ Options:
 			}
 		case strings.HasPrefix(arg, "--cft-host="):
 			cftHost = strings.TrimPrefix(arg, "--cft-host=")
-		// --id <teamid> — this node's team identity in the cicy-hub. When set,
-		// "team mode" is on: the node registers to the hub under this id, its agents
-		// are addressed <id>.<agent> (e.g. teamA.1001), and cicy-agent stamps outgoing
-		// messages with the team-qualified sender [id.agent]. It IS the tunnel slug
-		// (the enroll node-token subject should equal it).
-		case arg == "--id":
-			if i+1 < len(cliArgs) {
-				teamID = strings.TrimSpace(cliArgs[i+1])
-				i++
-			}
-		case strings.HasPrefix(arg, "--id="):
-			teamID = strings.TrimSpace(strings.TrimPrefix(arg, "--id="))
-		// No --tunnel flag: with --id set, the dial URL is DERIVED as
-		// wss://<id>.<CICY_HUB|hub.cicy-ai.com>/_tunnel/connect (see resolveGatewayConfig).
-		// The token + insecure come from ~/cicy-ai/db/tunnel.json (written by `enroll`)
-		// or CICY_TUNNEL_TOKEN — never on argv. The --gateway* flags below remain as
-		// deprecated aliases for old deployments.
-		case arg == "--gateway":
-			if i+1 < len(cliArgs) {
-				gatewayURL = cliArgs[i+1]
-				i++
-			}
-			gatewayMode = true
-		case strings.HasPrefix(arg, "--gateway="):
-			gatewayURL = strings.TrimPrefix(arg, "--gateway=")
-			gatewayMode = true
-		case arg == "--gateway-token":
-			if i+1 < len(cliArgs) {
-				gatewayToken = cliArgs[i+1]
-				i++
-			}
-		case strings.HasPrefix(arg, "--gateway-token="):
-			gatewayToken = strings.TrimPrefix(arg, "--gateway-token=")
-		case arg == "--gateway-token-file":
-			if i+1 < len(cliArgs) {
-				if b, err := os.ReadFile(cliArgs[i+1]); err == nil {
-					gatewayToken = strings.TrimSpace(string(b))
-				}
-				i++
-			}
-		case arg == "--gateway-insecure":
-			gatewayInsecure = true
 		case arg == "--helper" || arg == "--helper=1":
 			helperMode = true
 			os.Setenv("CICY_HELPER", "1")
@@ -725,14 +671,6 @@ Options:
 	if cftMode {
 		go startCFT(port)
 	}
-	// --gateway (or CICY_GATEWAY_URL/db/gateway.json): dial OUT to a zero-trust
-	// gateway and serve over the reverse tunnel — no inbound port opened here.
-	// Start the tunnel when a flag asked for it OR a url is resolvable from env /
-	// tunnel.json — so dropping ~/cicy-ai/db/tunnel.json is enough, no flag needed.
-	if tunnelURL, _, _ := resolveGatewayConfig(); gatewayMode || tunnelURL != "" {
-		gatewayMode = true
-		go startGatewayTunnel(port)
-	}
 	openHost := bind
 	if openHost == "0.0.0.0" {
 		openHost = "127.0.0.1"
@@ -950,9 +888,6 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	if u := cftCurrentURL(); u != "" {
 		out["tunnel_url"] = u
-	}
-	if teamID != "" {
-		out["team_id"] = teamID // team mode: this node's cicy-hub identity (clients prefix messages [teamID.agent])
 	}
 	J(w, out)
 }

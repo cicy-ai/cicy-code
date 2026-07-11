@@ -132,6 +132,7 @@ export function HistoryList(props: HistoryListProps) {
               conversationId={conversationId}
               agentType={agentType}
               hideTools={hideTools}
+              isLatest={isLatestTurn}
             />
           );
         }

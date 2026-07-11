@@ -20,7 +20,25 @@ import {
   shortenToolPath,
 } from '../lib/toolFormat';
 
+// Remembers each tool card's expand/collapse state across remounts, keyed by a
+// unique per-card id. Module-scoped, so it outlives every unmount and grows one
+// entry per card the user ever toggles — unbounded over a long session. Cap it
+// LRU; an evicted (old) card just falls back to its default collapsed state when
+// it remounts, which is harmless.
 const toolCardOpenState = new Map<string, boolean>();
+const TOOL_CARD_OPEN_STATE_MAX = 500;
+
+function setToolCardOpen(toolId: string, open: boolean) {
+  toolCardOpenState.delete(toolId); // re-insert at the tail for LRU ordering
+  toolCardOpenState.set(toolId, open);
+  let excess = toolCardOpenState.size - TOOL_CARD_OPEN_STATE_MAX;
+  if (excess > 0) {
+    for (const k of toolCardOpenState.keys()) {
+      if (excess-- <= 0) break;
+      toolCardOpenState.delete(k);
+    }
+  }
+}
 
 export function renderPatchLine(line: string, index: number) {
   const commonClass = 'px-3 py-0.5 font-mono text-sm leading-relaxed whitespace-pre';
@@ -62,10 +80,11 @@ export function ShellCommandBlock({ text }: { text: string }) {
 // memo:WS 直推下 live 尾巴每个 delta 都重渲染一次,工具卡的 body 解析(input/diff/
 // result 格式化)不便宜;WS 追加路径只换最后一个生长中的 step 对象,其余 step 的
 // tool 引用不变 → memo 直接命中,只有真变的卡才重算。
-export const ToolCard = memo(function ToolCard({ tool, toolId }: { tool: any; toolId: string }) {
+export const ToolCard = memo(function ToolCard({ tool, toolId, running }: { tool: any; toolId: string; running?: boolean }) {
   const { t } = useTranslation('chat');
   const [open, setOpen] = useState(() => toolCardOpenState.get(toolId) ?? false);
   const toolName = String(tool?.name || '').trim();
+  const isError = tool?.isError === true;
   const effectiveTool = tool;
   const input = parseToolInput(effectiveTool);
   const editDiff = toolEditDiff(effectiveTool);
@@ -97,7 +116,7 @@ export const ToolCard = memo(function ToolCard({ tool, toolId }: { tool: any; to
   const toggleOpen = () => {
     setOpen((value) => {
       const next = !value;
-      toolCardOpenState.set(toolId, next);
+      setToolCardOpen(toolId, next);
       return next;
     });
   };
@@ -114,14 +133,21 @@ export const ToolCard = memo(function ToolCard({ tool, toolId }: { tool: any; to
       data-tool-index={String(toolIndex)}
       data-tool-name={toolName || 'tool'}
       data-open={open ? 'true' : 'false'}
-      className="overflow-hidden rounded-lg border border-emerald-300/[0.08] bg-emerald-950/[0.12]"
+      data-tool-state={isError ? 'error' : running ? 'running' : 'done'}
+      className={`overflow-hidden rounded-lg border ${isError ? 'border-red-400/[0.18] bg-red-950/[0.14]' : 'border-emerald-300/[0.08] bg-emerald-950/[0.12]'}`}
     >
       <div
         data-id="current-history-tool-toggle"
         className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-zinc-500 hover:bg-white/[0.025] hover:text-zinc-400"
         onClick={toggleOpen}
       >
-        <span data-id="current-history-tool-toggle-status" className="shrink-0 text-xs text-emerald-400/70">✓</span>
+        {isError ? (
+          <span data-id="current-history-tool-toggle-status" className="shrink-0 text-xs text-red-400/90">✗</span>
+        ) : running ? (
+          <span data-id="current-history-tool-toggle-status" className="shrink-0 text-xs text-amber-300/80 animate-pulse">●</span>
+        ) : (
+          <span data-id="current-history-tool-toggle-status" className="shrink-0 text-xs text-emerald-400/70">✓</span>
+        )}
         <span data-id="current-history-tool-toggle-name" className="shrink-0 rounded border border-white/[0.04] bg-white/[0.035] px-1.5 py-0.5 text-xs text-zinc-300">{toolName || 'tool'}</span>
         {headline ? (
           <span data-id="current-history-tool-toggle-arg-preview" className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-400/90" title={headline}>{headline}</span>
@@ -153,7 +179,7 @@ export const ToolCard = memo(function ToolCard({ tool, toolId }: { tool: any; to
               {editDiff.new ? editDiff.new.split('\n').map((line: string, index: number) => <div key={`new-${index}`} data-id={`current-history-tool-diff-new-${index}`} className="bg-emerald-500/[0.08] px-2 leading-relaxed whitespace-pre text-emerald-400/80">+ {line}</div>) : null}
             </div>
           ) : displayResult ? (
-            <pre data-id="current-history-tool-result" className={`${scrollBlock} bg-emerald-500/[0.04] text-emerald-300/70`}>{displayResult}</pre>
+            <pre data-id="current-history-tool-result" className={`${scrollBlock} ${isError ? 'bg-red-500/[0.06] text-red-300/80' : 'bg-emerald-500/[0.04] text-emerald-300/70'}`}>{displayResult}</pre>
           ) : null}
         </>
       ) : null}

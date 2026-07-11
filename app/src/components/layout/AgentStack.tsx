@@ -22,6 +22,7 @@ import apiService from '../../services/api'
 // as standard markdown (![name](abs) / [name](abs)) via the same /api/tmux/send
 // pipe, so the agent can Read the real host path. No staging, no text box.
 function AttachSendButton({ paneId }: { paneId: string }) {
+  const { t } = useTranslation('chat')
   const inputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const onFiles = useCallback(async (files: FileList | null) => {
@@ -62,7 +63,7 @@ function AttachSendButton({ paneId }: { paneId: string }) {
         data-id={`agent-stack-attach-button-${paneId}`}
         disabled={busy}
         onClick={() => inputRef.current?.click()}
-        title="上传附件并直接发送给 agent"
+        title={t('attachPasteHint', { defaultValue: '你可以直接 Ctrl / Cmd + V 复制图片和文档给 Agent' })}
         aria-label="Attach and send"
         className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/[0.08] hover:text-zinc-200 disabled:opacity-50"
       >
@@ -755,13 +756,12 @@ function AgentStackCard({
         <AgentInstallOverlay paneId={item.paneId} agentType={item.agentType} active={active} onReloadTerminal={() => setTermReloadNonce((n) => n + 1)} />
       </div>
       {(headerControls || !isCicyLiteAgent(item.agentType)) ? (
-        <div data-id={`agent-stack-card-header-controls-${item.paneId}`} className="flex h-10 shrink-0 items-center justify-between border-t border-white/[0.04] bg-black/[0.18] px-3">
-          <div data-id={`agent-stack-header-controls-left-${item.paneId}`} className="flex items-center">
-            {!isCicyLiteAgent(item.agentType) ? <AttachSendButton paneId={item.paneId} /> : null}
-          </div>
-          <div data-id={`agent-stack-header-controls-right-${item.paneId}`} className="flex items-center gap-3">
-            {headerControls}
-          </div>
+        <div data-id={`agent-stack-card-header-controls-${item.paneId}`} className="flex h-10 shrink-0 items-center gap-3 border-t border-white/[0.04] bg-black/[0.18] px-3">
+          {/* attach sits immediately left of the model picker (headerControls'
+              first item) as one group; the spacer inside headerControls pushes
+              the remaining controls to the right. */}
+          {!isCicyLiteAgent(item.agentType) ? <AttachSendButton paneId={item.paneId} /> : null}
+          {headerControls}
         </div>
       ) : null}
       {!item.isApiOnly && item.ttydSrc ? (

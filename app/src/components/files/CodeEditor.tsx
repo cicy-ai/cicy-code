@@ -62,12 +62,10 @@ import {
 // Display-mode thresholds.
 //   LARGE_TEXT — beyond this we still load but switch CodeMirror to a
 //   stripped-down read-only view so the syntax tree doesn't choke.
-//   IMAGE_INLINE_MAX — beyond this we don't base64-load the image; user
-//   gets a "download" affordance instead so the page doesn't lock up.
-//   The hard read cap (5MB) still lives on the backend; anything above
-//   short-circuits to the "too large" placeholder.
+//   HARD_READ_MAX — the backend /api/fs/read cap; a TEXT file above it
+//   short-circuits to the "too large" placeholder. Media (image/audio/video)
+//   is NOT bound by it — it streams from the inline preview URL, not /read.
 const LARGE_TEXT_THRESHOLD = 1024 * 1024;
-const IMAGE_INLINE_MAX = 2 * 1024 * 1024;
 const HARD_READ_MAX = 5 * 1024 * 1024;
 
 type EditorMode = 'text' | 'text_large' | 'image' | 'audio' | 'video' | 'binary' | 'too_large' | 'error';
@@ -85,19 +83,23 @@ function extOf(path: string): string {
 
 function classifyForRender(stat: FsStatResponse, path: string): EditorMode {
   const ext = extOf(path);
-  // Audio/video stream from the inline URL (no /api/fs/read body load), so they
-  // are NOT bound by the 5MB read cap — check them before too_large.
-  if (AUDIO_EXT.has(ext)) return 'audio';
-  if (VIDEO_EXT.has(ext)) return 'video';
   const mime = stat.mime || '';
+  // Image / audio / video all render straight from the inline preview URL
+  // (Range/seek, real media Content-Type from the backend), so they DON'T load
+  // a body through /api/fs/read and are NOT bound by its 5MB cap. Classify them
+  // BEFORE the size checks — otherwise a large media file falls through to
+  // too_large and can only be downloaded. Detect by extension OR mime so a
+  // stripped container (text/plain for .svg, octet-stream for .mp4) still
+  // previews, and a correct mime with an unknown extension previews too. SVG is
+  // served as image/svg+xml by the backend, so <img> renders it.
+  if (AUDIO_EXT.has(ext) || mime.startsWith('audio/')) return 'audio';
+  if (VIDEO_EXT.has(ext) || mime.startsWith('video/')) return 'video';
+  if (IMAGE_EXT.has(ext) || mime.startsWith('image/')) return 'image';
   const isText =
     mime.startsWith('text/') ||
     /\b(json|javascript|xml|yaml|toml)\b/.test(mime) ||
     mime === '';
-  const isImage = IMAGE_EXT.has(ext) || mime.startsWith('image/');
   if (stat.size > HARD_READ_MAX) return 'too_large';
-  // SVG is text-backed; it base64-loads fine and renders as an image below.
-  if (isImage) return stat.size > IMAGE_INLINE_MAX ? 'binary' : 'image';
   if (isText) return stat.size > LARGE_TEXT_THRESHOLD ? 'text_large' : 'text';
   return 'binary';
 }
@@ -355,10 +357,11 @@ export default function CodeEditor({
       setBuf(bufferFromRead(cachedRead, classifyForRender(fakeStat, path)));
     } else if (cachedStat) {
       const mode = classifyForRender(cachedStat, path);
-      if (mode === 'text' || mode === 'image') {
+      if (mode === 'text') {
         // Read in flight; show loading until body arrives.
         setBuf({ ...initialBuffer, loading: true, mode });
       } else {
+        // Media (image/audio/video) streams from the inline URL — no body load.
         setBuf(bufferFromStat(cachedStat, mode));
       }
     } else {
@@ -396,7 +399,7 @@ export default function CodeEditor({
       .then((stat) => {
         fsCacheSet('stat', statKey, stat);
         const mode = classifyForRender(stat, path);
-        if (mode === 'text' || mode === 'text_large' || mode === 'image') {
+        if (mode === 'text' || mode === 'text_large') {
           if (mode === 'text_large') {
             // Show a placeholder header even before the (potentially slow)
             // big text body arrives; loading is per-cm under it.
@@ -407,7 +410,9 @@ export default function CodeEditor({
           }
           fetchBody(mode);
         } else {
-          // 'binary' or 'too_large' — no body load.
+          // image / audio / video (inline-streamed), binary, too_large — no
+          // body load; the render branch points an <img>/<audio>/<video> at
+          // the inline URL, or shows the download card.
           setBuf(bufferFromStat(stat, mode));
         }
       })
@@ -680,8 +685,10 @@ export default function CodeEditor({
     );
   }
 
-  // Image preview branch — only when we have actual base64 body (small image).
-  if (buf.mode === 'image' && buf.base64) {
+  // Image preview branch — streamed from the inline URL (real media
+  // Content-Type incl. image/svg+xml from the backend), so ANY size previews
+  // and no base64 body is loaded into memory.
+  if (buf.mode === 'image') {
     return (
       <div
         data-id={active ? 'code-editor-image' : 'code-editor-inactive'}
@@ -692,9 +699,7 @@ export default function CodeEditor({
         <div className="flex-1 overflow-auto flex items-center justify-center bg-zinc-900">
           <img
             data-id="code-editor-image-preview"
-            /* SVG is text-backed; the backend mime may be text/xml, which a
-               data: URL won't render as an image — force image/svg+xml. */
-            src={`data:${/\.svg$/i.test(path) ? 'image/svg+xml' : (buf.mime || 'application/octet-stream')};base64,${buf.base64}`}
+            src={fsApi.inlineUrl(agentId, path, root)}
             alt={fsBasename(path)}
             className="max-w-full max-h-full"
           />
@@ -755,7 +760,7 @@ export default function CodeEditor({
   }
 
   // Binary / too-large placeholder. No body load: just size + mime + download.
-  if (buf.mode === 'binary' || buf.mode === 'too_large' || (buf.mode === 'image' && !buf.base64)) {
+  if (buf.mode === 'binary' || buf.mode === 'too_large') {
     const tooLarge = buf.mode === 'too_large';
     return (
       <div
@@ -774,11 +779,7 @@ export default function CodeEditor({
               {buf.mime && <> · <span className="font-mono">{buf.mime}</span></>}
             </div>
             <div className="mt-1 text-xs text-zinc-600">
-              {tooLarge
-                ? t('editorTooLarge')
-                : buf.mode === 'image'
-                  ? t('editorImageTooLarge')
-                  : t('editorBinary')}
+              {tooLarge ? t('editorTooLarge') : t('editorBinary')}
             </div>
             <button
               data-id="code-editor-binary-download"

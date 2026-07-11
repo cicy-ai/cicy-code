@@ -62,6 +62,20 @@ func appendRuntimeEvent(sessionID, eventType string, payload interface{}) runtim
 	return evt
 }
 
+// dropRuntimeEventsForSession removes a deleted pane's event bucket. Each bucket
+// is capped at 200 events, but the map keeps one bucket per distinct session
+// forever otherwise — so a long-lived daemon accumulates a bucket for every pane
+// that ever emitted an event. Called on pane delete.
+func dropRuntimeEventsForSession(sessionID string) {
+	sessionID = shortPaneID(normPaneID(sessionID))
+	if sessionID == "" {
+		return
+	}
+	rtEvents.mu.Lock()
+	delete(rtEvents.eventsBySess, sessionID)
+	rtEvents.mu.Unlock()
+}
+
 func listRuntimeEvents(sessionID string, since string) []runtimeEvent {
 	sessionID = shortPaneID(normPaneID(sessionID))
 	rtEvents.mu.RLock()

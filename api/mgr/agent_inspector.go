@@ -798,19 +798,50 @@ func agentInspectorGetCachedHistory(agentID string, key string) ([]aiGatewayMess
 	return agentInspectorCloneHistoryRecords(entry.records), entry.managed, entry.reason, true
 }
 
+// agentInspectorHistoryCacheTTL bounds how long a stale entry lingers. There is
+// one entry per agentID (re-store overwrites), so the cache doesn't grow per
+// request — but an agent that goes away (deleted pane, vanished worker) would
+// otherwise pin its cloned history records forever. agentInspectorDropCachedHistory
+// reclaims the common delete-pane path; this TTL sweep, run on store when the map
+// is large, backstops agents that vanish without a delete call.
+const agentInspectorHistoryCacheTTL = 15 * time.Minute
+const agentInspectorHistoryCacheSweepAt = 64
+
 func agentInspectorStoreCachedHistory(agentID string, key string, records []aiGatewayMessageRecord, managed bool, reason string) {
 	agentInspectorHistoryCache.mu.Lock()
 	defer agentInspectorHistoryCache.mu.Unlock()
 	if agentInspectorHistoryCache.items == nil {
 		agentInspectorHistoryCache.items = map[string]agentInspectorHistoryCacheEntry{}
 	}
+	now := time.Now()
+	if len(agentInspectorHistoryCache.items) >= agentInspectorHistoryCacheSweepAt {
+		for id, e := range agentInspectorHistoryCache.items {
+			if now.Sub(e.cachedAt) >= agentInspectorHistoryCacheTTL {
+				delete(agentInspectorHistoryCache.items, id)
+			}
+		}
+	}
 	agentInspectorHistoryCache.items[agentID] = agentInspectorHistoryCacheEntry{
 		key:      key,
 		records:  agentInspectorCloneHistoryRecords(records),
 		managed:  managed,
 		reason:   reason,
-		cachedAt: time.Now(),
+		cachedAt: now,
 	}
+}
+
+// agentInspectorDropCachedHistory removes a deleted agent's cached history so it
+// doesn't pin cloned records for the life of the daemon. Entries may be keyed by
+// either the short id or the full pane id depending on the call path, so drop
+// both forms.
+func agentInspectorDropCachedHistory(agentID string) {
+	full := normPaneID(agentID)
+	short := shortPaneID(full)
+	agentInspectorHistoryCache.mu.Lock()
+	delete(agentInspectorHistoryCache.items, agentID)
+	delete(agentInspectorHistoryCache.items, full)
+	delete(agentInspectorHistoryCache.items, short)
+	agentInspectorHistoryCache.mu.Unlock()
 }
 
 func agentInspectorSnapshotHistoryData(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot, runtimeManaged bool) ([]aiGatewayMessageRecord, bool, string) {
@@ -2649,7 +2680,17 @@ func codexRolloutForWorkspace(workspace string) string {
 			break
 		}
 	}
-	codexRolloutCache.m[workspace] = codexRolloutCacheEntry{path: found, at: time.Now()}
+	now := time.Now()
+	// Evict entries whose 30s freshness has long expired so the map doesn't keep
+	// one entry per distinct workspace forever on a long-running daemon.
+	if len(codexRolloutCache.m) >= 64 {
+		for ws, e := range codexRolloutCache.m {
+			if ws != workspace && now.Sub(e.at) >= 5*time.Minute {
+				delete(codexRolloutCache.m, ws)
+			}
+		}
+	}
+	codexRolloutCache.m[workspace] = codexRolloutCacheEntry{path: found, at: now}
 	return found
 }
 

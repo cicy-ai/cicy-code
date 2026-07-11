@@ -38,6 +38,40 @@ export function buildHistoryTurnCacheKey(paneId: string, conversationId: string,
   return `${paneId}:${conversationId}:${historyId}`;
 }
 
+// Per-pane row cap for the persisted turn store. The store is written on every
+// window/tail fetch and, with rotating conversation_ids (a new one per /clear),
+// grows without bound — permanently, since it survives reloads and nothing ever
+// evicted it. Cap the rows we keep per pane and trim the least-recently-cached
+// beyond it. Trimming is a full index scan for the pane, so amortize it: run it
+// once every TRIM_EVERY_N_WRITES writes rather than on each put.
+const HISTORY_TURN_ROWS_PER_PANE_MAX = 600;
+const TRIM_EVERY_N_WRITES = 20;
+let turnWritesSinceTrim = 0;
+
+function trimPaneTurnRows(db: IDBDatabase, paneId: string) {
+  if (!db.objectStoreNames.contains(CURRENT_HISTORY_TURN_STORE)) return;
+  try {
+    const tx = db.transaction(CURRENT_HISTORY_TURN_STORE, 'readwrite');
+    const store = tx.objectStore(CURRENT_HISTORY_TURN_STORE);
+    const index = store.index('by_pane');
+    const rows: { key: IDBValidKey; updatedAt: number }[] = [];
+    const cursorReq = index.openCursor(IDBKeyRange.only(paneId));
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result;
+      if (cursor) {
+        rows.push({ key: cursor.primaryKey, updatedAt: Number(cursor.value?.updatedAt || 0) });
+        cursor.continue();
+        return;
+      }
+      const excess = rows.length - HISTORY_TURN_ROWS_PER_PANE_MAX;
+      if (excess > 0) {
+        rows.sort((a, b) => a.updatedAt - b.updatedAt); // oldest-cached first
+        for (let i = 0; i < excess; i++) store.delete(rows[i].key);
+      }
+    };
+  } catch {}
+}
+
 export async function setCurrentHistoryTurnsToIndexedDB(paneId: string, conversationId: string, turns: RawHistoryItem[]) {
   const db = await openCurrentHistoryToolDB();
   if (!db || !db.objectStoreNames.contains(CURRENT_HISTORY_TURN_STORE)) return;
@@ -64,6 +98,10 @@ export async function setCurrentHistoryTurnsToIndexedDB(paneId: string, conversa
       tx.onerror = () => resolve();
       tx.onabort = () => resolve();
     });
+    if (++turnWritesSinceTrim >= TRIM_EVERY_N_WRITES) {
+      turnWritesSinceTrim = 0;
+      trimPaneTurnRows(db, paneId);
+    }
   } catch {}
 }
 
@@ -102,4 +140,24 @@ export function historyMemCache(): Map<string, HistoryMemSnapshot> {
   const w = window as unknown as { _cacheHistory?: Map<string, HistoryMemSnapshot> };
   if (!(w._cacheHistory instanceof Map)) w._cacheHistory = new Map();
   return w._cacheHistory;
+}
+
+// LRU cap for the in-memory snapshot cache on window._cacheHistory. Each entry
+// holds a FULL history window (+ liveTurn) and is keyed by paneId, so a plain
+// .set() accumulates one big snapshot per distinct agent ever opened, kept for
+// the life of the tab. Bound it to the most-recently-touched panes; the active
+// pane is re-written on every poll, so it always stays resident (never evicted).
+const HISTORY_MEM_CACHE_MAX = 24;
+
+export function setHistoryMemCache(paneId: string, snapshot: HistoryMemSnapshot) {
+  const cache = historyMemCache();
+  cache.delete(paneId); // re-insert at the tail so iteration order is LRU
+  cache.set(paneId, snapshot);
+  let excess = cache.size - HISTORY_MEM_CACHE_MAX;
+  if (excess > 0) {
+    for (const k of cache.keys()) {
+      if (excess-- <= 0) break;
+      cache.delete(k);
+    }
+  }
 }

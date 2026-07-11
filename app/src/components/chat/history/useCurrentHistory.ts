@@ -11,7 +11,7 @@ import {
   CURRENT_HISTORY_POLL_WAIT_MS,
   OPTIMISTIC_Q_TIMEOUT_MS,
 } from './constants';
-import { historyMemCache } from './lib/cache';
+import { historyMemCache, setHistoryMemCache } from './lib/cache';
 import { getHistoryIDs, loadWindowItems } from './lib/dataAccess';
 import { buildTurnsFromRawItems, normalizeHistoryTurns } from './lib/turns';
 import { splitLeadingHarnessBlocks, cicyCompactSummaryOf } from './lib/normalizeItem';
@@ -233,17 +233,20 @@ export function useCurrentHistory(opts: {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    // Position-based (authoritative) follow: the view sticks to the bottom ONLY
+    // while the user is within STICK_THRESHOLD_PX of it. Scrolling up past that
+    // detaches. Crucially the streaming auto-scroll below is gated on this flag,
+    // so once detached NO programmatic scroll runs — the user is never yanked back
+    // mid-output while reading earlier history; they re-attach by scrolling to the
+    // bottom themselves. Direction-sniffing (`top < last-2`) was replaced because
+    // it went stale under reflow / slow trackpad scrolls and let the yank through.
+    const STICK_THRESHOLD_PX = 48;
     const updateStickBottom = () => {
       const top = el.scrollTop;
       const distanceToBottom = el.scrollHeight - top - el.clientHeight;
-      if (top < lastScrollTopRef.current - 2) {
-        // 向上滚 → 放手(并取消开屏排队中的补滚),让用户安心读前文,流式期也不拽回。
-        shouldStickBottomRef.current = false;
-        clearScheduledScrolls();
-      } else if (distanceToBottom <= 8) {
-        // 自己滚回到底部 → 重新跟随。程序化的"落底"也走这条,方向是向下、不会被误判为上滚。
-        shouldStickBottomRef.current = true;
-      }
+      const atBottom = distanceToBottom <= STICK_THRESHOLD_PX;
+      shouldStickBottomRef.current = atBottom;
+      if (!atBottom) clearScheduledScrolls();
       lastScrollTopRef.current = top;
     };
     updateStickBottom();
@@ -375,7 +378,7 @@ export function useCurrentHistory(opts: {
   // 供下次打开同 pane 时秒出首屏。loading 中(骨架/空态)不写,避免把空页存成快照。
   useEffect(() => {
     if (!open || !paneId || loading || !items.length || !conversationId) return;
-    historyMemCache().set(paneId, {
+    setHistoryMemCache(paneId, {
       items,
       conversationId,
       model,

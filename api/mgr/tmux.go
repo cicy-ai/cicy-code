@@ -1294,6 +1294,14 @@ func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 	store.Exec("DELETE FROM pane_agents WHERE agent_name=?", shortID)
 	store.Exec("DELETE FROM group_windows WHERE win_id=?", paneID)
 	store.Exec("DELETE FROM agent_config WHERE pane_id=?", paneID)
+	// Reclaim the pane's in-memory resources so a deleted pane doesn't leak a
+	// parked send goroutine + its cicy session for the life of the daemon.
+	retirePaneSendWorker(paneID)
+	removeCicySession(shortID)
+	// Drop per-agent caches keyed by this pane so they don't outlive it.
+	agentInspectorDropCachedHistory(shortID)
+	dropRuntimeEventsForSession(shortID)
+	dropAgentEventSeq(shortID)
 	for _, parentPaneID := range affectedParents {
 		go broadcastPollData(parentPaneID)
 	}
@@ -4763,17 +4771,66 @@ func newTmuxSendError(message string, statusCode int, paneUpdated bool) *tmuxSen
 	}
 }
 
-func getPaneSendWorker(paneID string) *paneSendWorker {
+// paneSendWorkerIdleTimeout retires a pane's send goroutine after a stretch of
+// no sends. Without retirement every pane that ever received a keystroke would
+// keep a parked goroutine + map entry for the life of the daemon — a per-pane
+// leak on a long-running server. Explicit retirement on pane delete
+// (retirePaneSendWorker) covers the common case; this idle backstop reclaims
+// panes that vanish without a delete call (restart, agent swap, crash).
+const paneSendWorkerIdleTimeout = 10 * time.Minute
+
+// enqueuePaneSend hands a send request to the pane's worker, creating the worker
+// (and its goroutine) on first use. The fast-path channel send happens WHILE
+// HOLDING paneSendWorkersMu so it is serialized against retirement (which also
+// holds the lock): the fast path can therefore never send on a closed channel.
+// If the buffer is full the worker is busy draining, so we release the lock and
+// block outside it — this preserves the old behaviour of not stalling other
+// panes behind one slow tmux send.
+func enqueuePaneSend(paneID string, req paneSendRequest) {
 	paneID = normPaneID(paneID)
 	paneSendWorkersMu.Lock()
-	defer paneSendWorkersMu.Unlock()
-	if worker, ok := paneSendWorkers[paneID]; ok {
-		return worker
+	worker, ok := paneSendWorkers[paneID]
+	if !ok {
+		worker = &paneSendWorker{ch: make(chan paneSendRequest, 128)}
+		paneSendWorkers[paneID] = worker
+		go runPaneSendWorker(paneID, worker)
 	}
-	worker := &paneSendWorker{ch: make(chan paneSendRequest, 128)}
-	paneSendWorkers[paneID] = worker
-	go runPaneSendWorker(paneID, worker)
-	return worker
+	select {
+	case worker.ch <- req:
+		paneSendWorkersMu.Unlock()
+		return
+	default:
+	}
+	paneSendWorkersMu.Unlock()
+	// Slow path: buffer full. Block outside the lock. A concurrent retire+close
+	// is only reachable while this pane is being deleted; recover turns the lost
+	// send into a delivered error so the caller doesn't hang on <-req.result.
+	defer func() {
+		if recover() != nil {
+			select {
+			case req.result <- fmt.Errorf("pane send worker retired"):
+			default:
+			}
+		}
+	}()
+	worker.ch <- req
+}
+
+// retirePaneSendWorker stops and removes a pane's send worker (called on pane
+// delete). Deleting under the lock before closing guarantees no concurrent
+// enqueuePaneSend fast path still references this worker — the next send after
+// the delete mints a fresh one — so close() cannot race the fast-path send.
+func retirePaneSendWorker(paneID string) {
+	paneID = normPaneID(paneID)
+	paneSendWorkersMu.Lock()
+	worker, ok := paneSendWorkers[paneID]
+	if ok {
+		delete(paneSendWorkers, paneID)
+	}
+	paneSendWorkersMu.Unlock()
+	if ok {
+		close(worker.ch)
+	}
 }
 
 func mergePaneSendBatch(batch []paneSendRequest) string {
@@ -4788,26 +4845,73 @@ func mergePaneSendBatch(batch []paneSendRequest) string {
 }
 
 func runPaneSendWorker(paneID string, worker *paneSendWorker) {
-	for req := range worker.ch {
-		batch := []paneSendRequest{req}
-	collect:
-		for {
-			select {
-			case next := <-worker.ch:
-				batch = append(batch, next)
-			default:
-				break collect
+	idle := time.NewTimer(paneSendWorkerIdleTimeout)
+	defer idle.Stop()
+	for {
+		select {
+		case req, ok := <-worker.ch:
+			if !ok {
+				return // channel closed by retirePaneSendWorker
 			}
-		}
-		text := mergePaneSendBatch(batch)
-		if len(batch) > 1 {
-			log.Printf("[tmux-send-queue] pane=%s merged=%d line_count=%d rune_count=%d",
-				shortPaneID(paneID), len(batch), promptLineCount(text), utf8.RuneCountInString(text))
-		}
-		err := sendTextToPaneDirect(paneID, text)
-		for _, item := range batch {
-			item.result <- err
-			close(item.result)
+			if !idle.Stop() {
+				select {
+				case <-idle.C:
+				default:
+				}
+			}
+			batch := []paneSendRequest{req}
+			closed := false
+		collect:
+			for {
+				select {
+				case next, ok := <-worker.ch:
+					if !ok {
+						closed = true
+						break collect
+					}
+					batch = append(batch, next)
+				default:
+					break collect
+				}
+			}
+			text := mergePaneSendBatch(batch)
+			if len(batch) > 1 {
+				log.Printf("[tmux-send-queue] pane=%s merged=%d line_count=%d rune_count=%d",
+					shortPaneID(paneID), len(batch), promptLineCount(text), utf8.RuneCountInString(text))
+			}
+			err := sendTextToPaneDirect(paneID, text)
+			for _, item := range batch {
+				item.result <- err
+				close(item.result)
+			}
+			if closed {
+				return
+			}
+			idle.Reset(paneSendWorkerIdleTimeout)
+		case <-idle.C:
+			// Idle too long: retire if still the registered worker with no queued
+			// work. Under the lock so it can't race an enqueue fast path (which
+			// holds the lock and would leave len(ch) > 0).
+			paneSendWorkersMu.Lock()
+			if paneSendWorkers[paneID] == worker && len(worker.ch) == 0 {
+				delete(paneSendWorkers, paneID)
+				paneSendWorkersMu.Unlock()
+				// This goroutine is the reader, so unlike retirePaneSendWorker
+				// (where the still-running worker drains anything slipped in before
+				// close) WE must drain here: a slow-path sender that raced the
+				// retire may have buffered a request between the len check and
+				// close. Close, then drain the remnant and fail each request so no
+				// caller hangs on <-req.result. Senders arriving after close panic
+				// and are answered by enqueuePaneSend's recover.
+				close(worker.ch)
+				for req := range worker.ch {
+					req.result <- fmt.Errorf("pane send worker retired")
+					close(req.result)
+				}
+				return
+			}
+			paneSendWorkersMu.Unlock()
+			idle.Reset(paneSendWorkerIdleTimeout)
 		}
 	}
 }
@@ -4831,7 +4935,7 @@ func sendTextToPane(winID, text string, submit bool) error {
 		text:   text,
 		result: make(chan error, 1),
 	}
-	getPaneSendWorker(winID).ch <- req
+	enqueuePaneSend(winID, req)
 	return <-req.result
 }
 

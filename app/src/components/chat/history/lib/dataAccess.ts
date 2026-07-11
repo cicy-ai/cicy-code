@@ -10,6 +10,31 @@ import { getCurrentHistoryTurnsByIDsFromIndexedDB, setCurrentHistoryTurnsToIndex
 const currentHistoryPendingRequests = new Map<string, Promise<any>>();
 const currentHistoryRecentResponses = new Map<string, { at: number; data: any }>();
 
+// currentHistoryRecentResponses is a short-lived duplicate-request collapser: an
+// entry is only ever consulted within RECENT_RESPONSE_TTL_MS of being written.
+// Past that it is dead weight — and each entry pins a FULL history window
+// payload. Left unpruned it grows one entry per (pane, before, conversation)
+// forever (before advances every turn, conversation rotates on /clear), so a
+// long session leaks memory. Sweep expired entries on every write, with a hard
+// size backstop in case a burst keeps many entries simultaneously fresh.
+const RECENT_RESPONSE_TTL_MS = 800;
+const RECENT_RESPONSE_MAX = 64;
+
+function pruneRecentResponses(now: number) {
+  for (const [k, v] of currentHistoryRecentResponses) {
+    if (now - v.at >= RECENT_RESPONSE_TTL_MS) currentHistoryRecentResponses.delete(k);
+  }
+  // Map iterates in insertion order → keys() is oldest-first. Drop the oldest
+  // overflow if everything is still within the TTL window.
+  let excess = currentHistoryRecentResponses.size - RECENT_RESPONSE_MAX;
+  if (excess > 0) {
+    for (const k of currentHistoryRecentResponses.keys()) {
+      if (excess-- <= 0) break;
+      currentHistoryRecentResponses.delete(k);
+    }
+  }
+}
+
 // Atomically load one contiguous id window [lo..hi] (lo = max(1, hi-size+1)).
 //
 // Guarantees the three properties the history view needs:
@@ -87,16 +112,19 @@ export async function getCurrentHistory(paneId: string, params: { limit?: number
   const key = buildCurrentHistoryRequestKey(paneId, params);
   const now = Date.now();
   const recent = currentHistoryRecentResponses.get(key);
-  if (recent && now - recent.at < 800) {
+  if (recent && now - recent.at < RECENT_RESPONSE_TTL_MS) {
     return recent.data;
   }
+  if (recent) currentHistoryRecentResponses.delete(key);
   const pending = currentHistoryPendingRequests.get(key);
   if (pending) {
     return pending;
   }
   const request = apiService.getAgentCurrentHistory(paneId, params)
     .then(({ data }) => {
-      currentHistoryRecentResponses.set(key, { at: Date.now(), data });
+      const at = Date.now();
+      currentHistoryRecentResponses.set(key, { at, data });
+      pruneRecentResponses(at);
       return data;
     })
     .finally(() => {

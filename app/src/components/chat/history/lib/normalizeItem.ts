@@ -184,6 +184,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
               name,
               arg: '',
               result: typeof part.content === 'string' ? part.content.trim() : (part.content ? JSON.stringify(part.content).trim() : ''),
+              isError: part?.is_error === true,
             }],
           });
         }
@@ -341,6 +342,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
             name: String(part.name || 'tool'),
             arg: typeof part.input === 'string' ? part.input.trim() : (part.input ? JSON.stringify(part.input).trim() : ''),
             result: toolResult,
+            isError: part?._tool_is_error === true,
           }],
         });
       }
@@ -357,6 +359,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
             name,
             arg: '',
             result: typeof part.content === 'string' ? part.content.trim() : (part.content ? JSON.stringify(part.content).trim() : ''),
+            isError: part?.is_error === true,
           }],
         });
       }

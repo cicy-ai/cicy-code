@@ -12,6 +12,7 @@ import { isActiveAssistantStatus, formatPromptTimeAgo } from '../lib/misc';
 import { historyMemCache } from '../lib/cache';
 import { AssistantTurnView } from './AssistantTurnView';
 import { CollapsibleQ } from './CollapsibleQ';
+import { PendingThinkingPlaceholder } from './notices';
 
 // PromptRow is ONE question in prompts-only mode: the q text with a 小箭头 on its
 // RIGHT. Expand state + the answer live LOCALLY here (not in the parent list
@@ -19,9 +20,9 @@ import { CollapsibleQ } from './CollapsibleQ';
 // jank). The answer (turn id+1) is loaded LAZILY on first expand: reuse the
 // already-loaded window turn if present, else fetch via getCurrentHistory. The
 // answer renders through the shared AssistantTurnView.
-export const PromptRow = memo(function PromptRow({ turn, qid, nextQid, dataId, paneId, conversationId, agentType, hideTools }: {
+export const PromptRow = memo(function PromptRow({ turn, qid, nextQid, dataId, paneId, conversationId, agentType, hideTools, isLatest = false }: {
   turn: HistoryTurn; qid: number; nextQid?: number; dataId?: string;
-  paneId: string; conversationId: string; agentType: string; hideTools: boolean;
+  paneId: string; conversationId: string; agentType: string; hideTools: boolean; isLatest?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [answer, setAnswer] = useState<HistoryTurn[] | 'loading' | 'none' | undefined>(undefined);
@@ -188,7 +189,7 @@ export const PromptRow = memo(function PromptRow({ turn, qid, nextQid, dataId, p
           data-id={`current-history-q-caret-${qid}`}
           className={`mt-1 h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform group-hover:text-zinc-300 ${open ? 'rotate-90' : ''}`}
         />
-        <div className="min-w-0 flex-1"><CollapsibleQ text={turn.text || turn.q} bare /></div>
+        <div className="min-w-0 flex-1"><CollapsibleQ text={turn.text || turn.q} bare open={open} onSetOpen={setOpen} /></div>
         {ts ? (
           <span data-id={`current-history-q-time-${qid}`} className="mt-1 shrink-0 text-[11px] leading-none text-zinc-600 tabular-nums" title={ts}>
             {formatPromptTimeAgo(ts)}
@@ -200,7 +201,10 @@ export const PromptRow = memo(function PromptRow({ turn, qid, nextQid, dataId, p
           {answer === undefined ? null : answer === 'loading' ? (
             <span className="text-xs text-zinc-600">加载回复…</span>
           ) : answer === 'none' ? (
-            <span className="text-xs text-zinc-600">（无回复内容）</span>
+            // Latest turn with no answer yet = the agent is still working → show the
+            // Thinking animation instead of a dead "（无回复内容）". Older empty turns
+            // (rare) keep the plain label.
+            isLatest ? <PendingThinkingPlaceholder /> : <span className="text-xs text-zinc-600">（无回复内容）</span>
           ) : (() => {
             // Render only the LATEST ANSWER_RENDER_CAP turns by default (a reply can
             // be 40+ tool rounds → rendering all at once is the jank). The streaming

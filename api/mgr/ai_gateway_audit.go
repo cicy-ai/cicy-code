@@ -547,13 +547,20 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	// 只有当当前请求是 agent 内部的 tool 续传时才继承；用户主动发新 q 一律开新 turn 并清空 Items。
 	isContinuation := aiGatewayIsToolContinuation(payloadMap)
 	var prevItems []map[string]interface{}
-	if prevReply.TurnID != "" && isContinuation {
+	var failedTools []map[string]interface{}
+	// Conversation guard on inheritance: canonical reply.json tracks the LAST
+	// writer — if anything from another conversation ever lands there, a
+	// continuation must not adopt its turn id/items into this thread. Empty
+	// prevConv (pre-split legacy snapshots) keeps inheriting.
+	prevConvMatches := strings.TrimSpace(prevReply.ConversationID) == "" ||
+		strings.TrimSpace(prevReply.ConversationID) == strings.TrimSpace(conversationID)
+	if prevReply.TurnID != "" && isContinuation && prevConvMatches {
 		prevItems = prevReply.Items
 		turnID = prevReply.TurnID
 		// This continuation request carries the tool_result blocks for the
 		// tool_use items we just inherited; fold the outputs back onto them so
 		// reply.json shows each tool call's result.
-		prevItems = aiGatewayInjectToolResultsIntoItems(prevItems, payloadMap)
+		prevItems, failedTools = aiGatewayInjectToolResultsIntoItems(prevItems, payloadMap)
 	}
 	if prevItems == nil {
 		prevItems = []map[string]interface{}{}
@@ -621,13 +628,22 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	if auxKind == "" {
 		auxKind = aiGatewayAuxiliaryKind(question, payloadMap)
 	}
+	// 旁线线程（Claude Code 的 Task 子代理、WebFetch 摘要器等）：与主线共享同一个
+	// conversation id,但首条 user 消息是另一个线程的。当主线论外处理——否则它的
+	// writeStartSnapshots 会在主 turn 飞行中 resetReplyDir 掉 reply.json(观看者的
+	// live tail 瞬间被子代理输出顶掉),它的完成快照还可能被下一个主线续传继承。
+	// 归入 auxiliary 自动获得全部隔离;usage 记账在 gate 处单独放行(真实花费)。
+	if auxKind == "" && aiGatewayIsSidechainRequest(agentID, conversationID, requestHeaders, payloadMap) {
+		auxKind = "sidechain"
+		log.Printf("[ai-gateway] sidechain request agent=%s conv=%s (thread first-message mismatch)", agentID, conversationID)
+	}
 	// 缓存前缀指纹（用于缓存命中诊断）：在请求时对 system / tools / 首消息做轻量 hash。
 	compMessages, _ := payloadMap["messages"].([]interface{})
 	var firstMsg interface{}
 	if len(compMessages) > 0 {
 		firstMsg = compMessages[0]
 	}
-	return &aiGatewayAuditSession{
+	s := &aiGatewayAuditSession{
 		agentID:        agentID,
 		provider:       provider,
 		model:          model,
@@ -654,6 +670,18 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		compToolsEst:     estJSONTokens(payloadMap["tools"]),
 		compHistoryEst:   estJSONTokens(payloadMap["messages"]),
 	}
+	// 工具失败即时告警:续传请求带回的 tool_result 标了 is_error 时,给绑定的 IM
+	// (微信/TG)推一条 ❌。tool_use 推送时结果还没产生,错误只能在这里(下一轮
+	// 续传带回结果时)才知道。只发 IM hook——跨 agent callback hook 只关心最终
+	// 回复,合成的 tool_error item 不该进它的记录。
+	if len(failedTools) > 0 && !s.auxiliary {
+		for _, h := range s.replyHooks {
+			if im, ok := h.(*imReplyPushHook); ok {
+				go im.onItems(failedTools)
+			}
+		}
+	}
+	return s
 }
 
 func aiGatewayLen(v interface{}) int {
@@ -1078,6 +1106,30 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	responseBody = aiGatewayMaybeGunzip(headers, responseBody)
 	parsed := aiGatewayParseResponse(headers, responseBody)
 	failed := responseErr != nil || statusCode >= 400
+	// Dead-stream guard (found 2026-07-09, w-10036 history_id 1503): a 2xx whose
+	// stream delivered NOTHING — no live-flushed items, nothing parsable at rest,
+	// not even message_start usage — is an aborted round (client hung up during a
+	// long prefill, upstream stalled and the connection was torn down, …), NOT a
+	// completed one. Sealing it "completed" leaves a permanent phantom empty last
+	// round in reply.json that every client renders as a blank answer. Treat it
+	// as failed with an explicit marker so the UI shows why + offers 重试.
+	// The bar is "no terminal signal AT ALL": a legit completion always carries
+	// at least one of stop_reason (Anthropic/OpenAI) or usage (Responses emits no
+	// stop_reason — see the terminal-reason note in the Responses parse path), so
+	// requiring BOTH absent (plus zero content, zero live-flushed items and no
+	// unflushed pendingItem) can never reclassify a round an upstream actually
+	// finished.
+	deadStream := !failed &&
+		len(s.reply.Items) == 0 &&
+		s.pendingItem == nil &&
+		strings.TrimSpace(parsed.Thinking) == "" &&
+		strings.TrimSpace(parsed.Answer) == "" &&
+		len(parsed.ToolCalls) == 0 &&
+		len(parsed.Usage) == 0 &&
+		strings.TrimSpace(parsed.StopReason) == ""
+	if deadStream {
+		failed = true
+	}
 	status := "completed"
 	if failed {
 		status = "failed"
@@ -1205,8 +1257,10 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	_ = s.writeReplyEventLocked("request_complete", aiGatewayCloneJSONValue(requestSpan))
 
 	// Per-request usage log (backs the 分析 → 用量 UI tab). Skip auxiliary calls
-	// (suggestion / title) so the table maps 1:1 to real conversation requests.
-	if !s.auxiliary {
+	// (suggestion / title) so the table maps 1:1 to real conversation requests —
+	// EXCEPT sidechain (Task subagents 等): isolated like aux for snapshots/hooks,
+	// but it's real spend on this pane, so it must stay on the books (tagged).
+	if !s.auxiliary || s.auxKind == "sidechain" {
 		totalTokens := requestSpan.TotalTokens
 		if totalTokens == 0 {
 			totalTokens = requestSpan.InputTokens + requestSpan.OutputTokens
@@ -1237,6 +1291,7 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 			CacheCreationInputTokens: cacheCreate,
 			TotalTokens:              totalTokens,
 			CostCredit:               requestSpan.CostCredit,
+			AuxKind:                  s.auxKind,
 		})
 		// Cache-diagnosis fingerprint: request-time prefix hashes + this
 		// request's actual cache outcome (see agent_cache_diag.go).
@@ -1263,6 +1318,10 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 
 	if failed {
 		errorText := aiGatewayExtractErrorText(responseBody, responseErr)
+		if deadStream && strings.TrimSpace(errorText) == "" {
+			// No upstream error body to quote — the stream simply died empty.
+			errorText = "连接在返回任何内容前被关闭（0 字节 / 0 事件），这一轮没有产生回复。可能是请求被取消、会话被关闭或网络中断。"
+		}
 		// Cap so a huge raw error body doesn't bloat reply.json / the UI.
 		if r := []rune(errorText); len(r) > 1200 {
 			errorText = strings.TrimSpace(string(r[:1200])) + "…"
@@ -1276,6 +1335,10 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 		// Plain text (no cicy_outcome tag) → renders as normal markdown content.
 		if errorText != "" {
 			detail := fmt.Sprintf("⚠️ 生成失败（HTTP %d）\n\n%s", statusCode, errorText)
+			if deadStream {
+				// "HTTP 200" would be misleading for an aborted-empty stream.
+				detail = "⚠️ 生成中断\n\n" + errorText
+			}
 			s.reply.Items = append(s.reply.Items, map[string]interface{}{
 				"id":   len(s.reply.Items) + 1,
 				"type": "text",
@@ -1406,8 +1469,15 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 			h.onItems(pendingHookItems)
 		}
 	}
-	for _, h := range replyHooks {
-		h.finalize(replySnapshot)
+	// finalize 只对主线 turn 收尾。aux session（suggestion / title / recap /
+	// quota 探针 / sidechain 子代理）天然以「completed + 无 tool call」终结，
+	// 不挡的话会穿过 replyCallbackHook 的 tool 门，在主任务还在跑（甚至还没开始，
+	// 如 quota ping）时就把 msg done 发给发起方；IM push / 知识沉淀 hook 同理
+	// ——finalize 的语义就是"接收方真实 turn 的末尾"，aux 一律不是。
+	if !s.auxiliary {
+		for _, h := range replyHooks {
+			h.finalize(replySnapshot)
+		}
 	}
 	// 调试/数据收集：当 CICY_GATEWAY_REPLY_MIRROR=1 时把本次完整的请求+响应+解析结果
 	// 镜像写到 reply_mirror/ 目录，供后续分析。完全不影响主路径。
@@ -1618,12 +1688,44 @@ type aiGatewayTypedSetEntry struct {
 	path       string
 	lastOffset int64
 	set        map[string]bool
+	usedAt     time.Time
 }
 
 var (
 	aiGatewayTypedSetMu    sync.Mutex
 	aiGatewayTypedSetCache = map[string]*aiGatewayTypedSetEntry{}
 )
+
+// The cache is keyed by conversation id and each /clear mints a NEW cid → a new
+// entry, while the old cid's entry (its typed-prompt set) is never touched again
+// and never removed — an unbounded per-conversation leak on a long session. A
+// dead cid is, by definition, never accessed after its /clear, so evict by idle
+// time: when the map grows past a threshold, drop entries not used within the
+// TTL, with a hard size cap as backstop. Must be called under aiGatewayTypedSetMu.
+const aiGatewayTypedSetTTL = 30 * time.Minute
+const aiGatewayTypedSetSweepAt = 128
+const aiGatewayTypedSetMax = 512
+
+func aiGatewayTypedSetEvictLocked(now time.Time) {
+	if len(aiGatewayTypedSetCache) < aiGatewayTypedSetSweepAt {
+		return
+	}
+	for cid, e := range aiGatewayTypedSetCache {
+		if now.Sub(e.usedAt) >= aiGatewayTypedSetTTL {
+			delete(aiGatewayTypedSetCache, cid)
+		}
+	}
+	// Hard backstop if everything is still recent: drop the oldest by usedAt.
+	for len(aiGatewayTypedSetCache) > aiGatewayTypedSetMax {
+		oldestCID, oldest := "", now
+		for cid, e := range aiGatewayTypedSetCache {
+			if oldestCID == "" || e.usedAt.Before(oldest) {
+				oldestCID, oldest = cid, e.usedAt
+			}
+		}
+		delete(aiGatewayTypedSetCache, oldestCID)
+	}
+}
 
 // aiGatewayTranscriptTypedSet reads the Claude Code session transcript for a
 // conversation and returns the set of NORMALIZED prompts the human actually
@@ -1665,6 +1767,8 @@ func aiGatewayTranscriptTypedSet(conversationID string) map[string]bool {
 	aiGatewayTypedSetMu.Lock()
 	defer aiGatewayTypedSetMu.Unlock()
 
+	now := time.Now()
+	aiGatewayTypedSetEvictLocked(now)
 	entry := aiGatewayTypedSetCache[cid]
 	// Incremental only when the same file grew (or is unchanged); anything else
 	// (first sight, path changed, file shrank/rotated) → full rebuild from 0.
@@ -1672,6 +1776,7 @@ func aiGatewayTranscriptTypedSet(conversationID string) map[string]bool {
 		entry = &aiGatewayTypedSetEntry{path: path, set: map[string]bool{}}
 		aiGatewayTypedSetCache[cid] = entry
 	}
+	entry.usedAt = now
 	if size == entry.lastOffset {
 		return aiGatewayTypedSetResult(entry.set) // nothing new appended
 	}
@@ -2467,11 +2572,15 @@ func aiGatewayExtractToolResultsFromRequest(payload map[string]interface{}) []ma
 // Items are mutated in place (they come from a freshly-loaded prevReply). The
 // pass is idempotent: a tool_use that already has a non-empty output is left
 // alone, so repeated continuations don't clobber an earlier result.
-func aiGatewayInjectToolResultsIntoItems(items []map[string]interface{}, body map[string]interface{}) []map[string]interface{} {
+func aiGatewayInjectToolResultsIntoItems(items []map[string]interface{}, body map[string]interface{}) ([]map[string]interface{}, []map[string]interface{}) {
 	if len(items) == 0 || len(body) == 0 {
-		return items
+		return items, nil
 	}
-	results := map[string]interface{}{}
+	type toolOutcome struct {
+		output  interface{}
+		isError bool
+	}
+	results := map[string]toolOutcome{}
 	for _, step := range aiGatewayExtractToolResultsFromRequest(M{"body": body}) {
 		if aiGatewayString(step["kind"]) != "tool_result" {
 			continue
@@ -2481,12 +2590,16 @@ func aiGatewayInjectToolResultsIntoItems(items []map[string]interface{}, body ma
 			continue
 		}
 		if _, dup := results[id]; !dup {
-			results[id] = step["output"]
+			results[id] = toolOutcome{output: step["output"], isError: step["is_error"] == true}
 		}
 	}
 	if len(results) == 0 {
-		return items
+		return items, nil
 	}
+	// failed collects the NEWLY-injected error results (idempotence means a
+	// repeated continuation can't re-report the same failure) as synthetic
+	// {type:"tool_error"} items for the IM hook — never written to reply.json.
+	var failed []map[string]interface{}
 	for _, item := range items {
 		if aiGatewayString(item["type"]) != "tool_use" {
 			continue
@@ -2495,16 +2608,24 @@ func aiGatewayInjectToolResultsIntoItems(items []map[string]interface{}, body ma
 		if id == "" {
 			continue
 		}
-		output, ok := results[id]
+		outcome, ok := results[id]
 		if !ok {
 			continue
 		}
 		if existing := strings.TrimSpace(aiGatewayFlattenPromptValue(item["output"])); existing != "" {
 			continue
 		}
-		item["output"] = output
+		item["output"] = outcome.output
+		if outcome.isError {
+			item["output_is_error"] = true
+			failed = append(failed, M{
+				"type":  "tool_error",
+				"name":  aiGatewayString(item["name"]),
+				"error": aiGatewayCompactText(aiGatewayFlattenPromptValue(outcome.output), 600),
+			})
+		}
 	}
-	return items
+	return items, failed
 }
 
 func aiGatewayToolCallsFromMessage(item map[string]interface{}) []map[string]interface{} {
@@ -2578,6 +2699,10 @@ func aiGatewayToolResultsFromMessage(item map[string]interface{}) []map[string]i
 			"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(part["tool_use_id"]), aiGatewayString(part["tool_id"])),
 			"tool_name": aiGatewayFirstNonEmpty(aiGatewayString(part["name"]), aiGatewayString(part["tool_name"])),
 			"output":    aiGatewayCompactText(aiGatewayFlattenPromptValue(part["content"]), 12000),
+			// Anthropic marks failed tool runs with is_error on the tool_result
+			// block. Carried through so reply.json items (and every client) can
+			// render the call as failed instead of a green check.
+			"is_error": part["is_error"] == true,
 		})
 	}
 	return results
@@ -4788,13 +4913,91 @@ func aiGatewayExtractQuestion(body map[string]interface{}) string {
 //   - OpenAI Chat: 最后一条 role=tool → 续传
 //   - Codex Responses: 最后一条 input item type=function_call_output / tool_result / computer_call_output → 续传
 // 其余情况都视为用户新 q（包括最后一条 role=user 是纯文本、第一条请求等）。
+// aiGatewayFirstUserText 取 messages 里首条 role=user 消息的扁平文本(线程身份指纹)。
+func aiGatewayFirstUserText(messages []map[string]interface{}) string {
+	for _, m := range messages {
+		if strings.ToLower(strings.TrimSpace(aiGatewayString(m["role"]))) != "user" {
+			continue
+		}
+		return strings.TrimSpace(aiGatewayFlattenPromptValue(m["content"]))
+	}
+	return ""
+}
+
+// aiGatewayIsSidechainRequest reports whether this request belongs to a SIDE
+// thread riding the pane's conversation id — Claude Code Task subagents,
+// WebFetch summarizers and similar in-process helpers reuse the session header,
+// so their requests arrive under the SAME conversation id as the main thread.
+// The tell: the wire thread's first user message differs from the one in the
+// pane's current.json for that conversation. Exemptions keep mainline safe:
+//   - X-Cicy-Current-Owned: the cicy runtime owns current.json and the wire
+//     body may legitimately be a post-compact slice;
+//   - a first message matching the compaction preamble IS the mainline thread
+//     continuing after auto-compact;
+//   - a different conversation id is the normal new-thread lifecycle.
+func aiGatewayIsSidechainRequest(agentID, conversationID string, requestHeaders http.Header, body map[string]interface{}) bool {
+	if strings.TrimSpace(requestHeaders.Get("X-Cicy-Current-Owned")) == "1" {
+		return false
+	}
+	messages := aiGatewayExtractMessages(body)
+	if len(messages) == 0 {
+		return false // Responses/codex 形态没有子代理旁线
+	}
+	wireFirst := aiGatewayFirstUserText(messages)
+	if wireFirst == "" {
+		return false
+	}
+	// Strip harness-injected <system-reminder> blocks BEFORE any check. The
+	// harness re-renders them across requests (claudeMd/context attachments),
+	// and after auto-compact the new first message is a reminder block followed
+	// by the "This session is being continued…" preamble — with the block still
+	// attached the ^-anchored compaction regex never lands, the mainline turn
+	// gets tagged sidechain, current.json stops updating, and EVERY later
+	// mainline request keeps mismatching against the stale disk snapshot
+	// (frozen reply.json: cost/status stuck — observed on w-10036/10122/10144).
+	wireCore := strings.TrimSpace(systemReminderBlockRe.ReplaceAllString(wireFirst, ""))
+	if wireCore == "" || compactionPreambleRe.MatchString(wireCore) {
+		return false
+	}
+	disk := agentInspectorLoadCurrent(agentID)
+	if strings.TrimSpace(disk.ConversationID) != strings.TrimSpace(conversationID) {
+		return false
+	}
+	diskFirst := aiGatewayFirstUserText(aiGatewayExtractMessages(aiGatewayMap(disk.Body)))
+	diskCore := strings.TrimSpace(systemReminderBlockRe.ReplaceAllString(diskFirst, ""))
+	if diskCore == "" {
+		return false
+	}
+	return diskCore != wireCore
+}
+
 func aiGatewayIsToolContinuation(body map[string]interface{}) bool {
 	if body == nil {
 		return false
 	}
 	// messages 数组（Anthropic / OpenAI Chat 共用）
 	if messages := aiGatewayExtractMessages(body); len(messages) > 0 {
-		last := messages[len(messages)-1]
+		// Harness runtimes append injected notices (task-tool reminders, "the
+		// user sent a message while you were working" notes) as TRAILING
+		// role=system/developer messages on top of a tool continuation. They
+		// don't change what the request IS — judge by the last real
+		// conversation message. Without this skip, a mid-turn reminder misreads
+		// as a NEW turn: reply.Items wiped (live tail collapses), turn
+		// accounting fragments, and the IM reply binding is drained so the
+		// turn's real answer never reaches WeChat/TG.
+		idx := len(messages) - 1
+		for idx >= 0 {
+			r := strings.ToLower(strings.TrimSpace(aiGatewayString(messages[idx]["role"])))
+			if r == "system" || r == "developer" {
+				idx--
+				continue
+			}
+			break
+		}
+		if idx < 0 {
+			return false
+		}
+		last := messages[idx]
 		role := strings.ToLower(strings.TrimSpace(aiGatewayString(last["role"])))
 		switch role {
 		case "tool", "function":
@@ -4817,7 +5020,24 @@ func aiGatewayIsToolContinuation(body map[string]interface{}) bool {
 	}
 	// Codex Responses input 数组
 	if items := aiGatewayExtractInputItems(body); len(items) > 0 {
-		last := aiGatewayMap(items[len(items)-1])
+		// Same trailing-injection skip as the messages branch: codex appends
+		// harness notices as {type:"message", role:"developer"/"system"} items.
+		idx := len(items) - 1
+		for idx >= 0 {
+			it := aiGatewayMap(items[idx])
+			if aiGatewayString(it["type"]) == "message" {
+				r := strings.ToLower(strings.TrimSpace(aiGatewayString(it["role"])))
+				if r == "system" || r == "developer" {
+					idx--
+					continue
+				}
+			}
+			break
+		}
+		if idx < 0 {
+			return false
+		}
+		last := aiGatewayMap(items[idx])
 		if len(last) == 0 {
 			return false
 		}
@@ -4853,6 +5073,18 @@ func aiGatewayAuxiliaryKind(question string, body map[string]interface{}) string
 	if q := strings.TrimSpace(question); q != "" {
 		if strings.HasPrefix(strings.ToUpper(q), "[SUGGESTION MODE") {
 			return "suggestion"
+		}
+		// Step-away / /loop wakeup recap: an independent side question that rides
+		// the conversation context and is then DISCARDED from the thread (its
+		// prompt only ever appears as the last wire message, never mid-history —
+		// the CLI drops the q/a pair). Treated as mainline it would
+		// resetReplyDirLocked() away the real last round's reply.json, park
+		// itself (or a dead-stream empty shell) as the "current reply", notify IM
+		// reply hooks with the recap blurb, and bill as a conversation turn.
+		// Same matcher the prompts de-noiser already trusts; strip leading
+		// system-reminder blocks first so the ^ anchor still lands.
+		if recapScaffoldRe.MatchString(strings.TrimSpace(systemReminderBlockRe.ReplaceAllString(q, ""))) {
+			return "recap"
 		}
 	}
 	if body == nil {

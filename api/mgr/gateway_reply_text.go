@@ -176,6 +176,19 @@ func renderReplyItemForIM(item map[string]interface{}) string {
 			return "🔧 " + name
 		}
 		return "🔧 " + name + "\n" + summary
+	case "tool_error":
+		// 合成 item（aiGatewayInjectToolResultsIntoItems 发现 is_error 的
+		// tool_result 时造出来,只走 IM,不进 reply.json):工具跑失败,推一条
+		// ❌ 让用户不打开客户端也知道 agent 撞了错。
+		name, _ := item["name"].(string)
+		if strings.TrimSpace(name) == "" {
+			name = "tool"
+		}
+		errText := strings.TrimSpace(scalarToString(item["error"]))
+		if errText == "" {
+			return "❌ " + name + " 失败"
+		}
+		return "❌ " + name + " 失败\n" + imTruncateLongString(errText, 500)
 	}
 	return ""
 }

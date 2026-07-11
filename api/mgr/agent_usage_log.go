@@ -40,6 +40,9 @@ type agentUsageLogRecord struct {
 	CacheCreationInputTokens int    `json:"cache_creation_input_tokens"` // 输出缓存（写入）
 	TotalTokens              int    `json:"total_tokens"`
 	CostCredit               float64 `json:"cost_credit,omitempty"`
+	// AuxKind tags non-mainline spend that still bills to this pane (currently
+	// "sidechain" — Task subagents etc.). Empty for mainline conversation turns.
+	AuxKind                  string `json:"aux_kind,omitempty"`
 }
 
 var usageLogMu sync.Mutex

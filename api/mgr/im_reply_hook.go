@@ -17,10 +17,11 @@ import (
 
 const imReplyUpdateMinInterval = 1500 * time.Millisecond
 
-// imReplyPushHook streams an agent's reply (thinking + answer text — never tool
-// inputs/outputs) to a bound IM account. For editable transports (Telegram) it
-// edits a single live message as the reply grows; for non-editable transports
-// (WeChat) it sends one message on finalize.
+// imReplyPushHook pushes an agent's reply to a bound IM account, one message
+// per reply item: text goes verbatim (truncated), tool_use as a one-line
+// "🔧 <name> + key arg" summary, tool failures as a "❌ <name> 失败" notice
+// (see renderReplyItemForIM). Thinking is never pushed — it's model-facing
+// scratch and would flood the chat.
 type imReplyPushHook struct {
 	accID     int64
 	paneID    string

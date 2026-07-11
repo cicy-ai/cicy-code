@@ -21,11 +21,11 @@ func TestInjectToolResultsIntoItems(t *testing.T) {
 		"messages": []interface{}{
 			map[string]interface{}{"role": "user", "content": []interface{}{
 				map[string]interface{}{"type": "tool_result", "tool_use_id": "toolu_1", "content": "RESULT-X"},
-				map[string]interface{}{"type": "tool_result", "tool_use_id": "toolu_2", "content": "RESULT-Y"},
+				map[string]interface{}{"type": "tool_result", "tool_use_id": "toolu_2", "content": "RESULT-Y", "is_error": true},
 			}},
 		},
 	}
-	out := aiGatewayInjectToolResultsIntoItems(items, body)
+	out, failed := aiGatewayInjectToolResultsIntoItems(items, body)
 
 	got := map[string]string{}
 	for _, it := range out {
@@ -36,17 +36,34 @@ func TestInjectToolResultsIntoItems(t *testing.T) {
 	if got["toolu_1"] != "RESULT-X" || got["toolu_2"] != "RESULT-Y" {
 		t.Fatalf("tool outputs not injected: %#v", got)
 	}
+	// is_error rides along: the failed call is flagged on the item (for clients)
+	// and reported as a synthetic tool_error (for the IM hook). The successful
+	// call is NOT flagged.
+	if out[0]["output_is_error"] == true {
+		t.Fatalf("successful tool_use wrongly flagged as error: %#v", out[0])
+	}
+	if out[2]["output_is_error"] != true {
+		t.Fatalf("failed tool_use missing output_is_error: %#v", out[2])
+	}
+	if len(failed) != 1 || aiGatewayString(failed[0]["type"]) != "tool_error" || aiGatewayString(failed[0]["name"]) != "write" {
+		t.Fatalf("synthetic tool_error not reported: %#v", failed)
+	}
 
-	// Idempotent: a tool_use that already has an output is not clobbered.
+	// Idempotent: a tool_use that already has an output is not clobbered, and
+	// an already-injected failure is not re-reported.
 	items[0]["output"] = "ALREADY"
 	body2 := map[string]interface{}{"messages": []interface{}{
 		map[string]interface{}{"role": "user", "content": []interface{}{
 			map[string]interface{}{"type": "tool_result", "tool_use_id": "toolu_1", "content": "NEW"},
+			map[string]interface{}{"type": "tool_result", "tool_use_id": "toolu_2", "content": "RESULT-Y", "is_error": true},
 		}},
 	}}
-	out = aiGatewayInjectToolResultsIntoItems(items, body2)
+	out, failed = aiGatewayInjectToolResultsIntoItems(items, body2)
 	if aiGatewayFlattenPromptValue(out[0]["output"]) != "ALREADY" {
 		t.Fatalf("existing output was clobbered: %v", out[0]["output"])
+	}
+	if len(failed) != 0 {
+		t.Fatalf("already-injected failure re-reported: %#v", failed)
 	}
 }
 
@@ -62,7 +79,9 @@ func TestSessionContinuationCarriesToolResultIntoReply(t *testing.T) {
 	hdr := http.Header{"Content-Type": []string{"application/json"}}
 
 	// Turn 1: a plain user prompt → response with a tool_use block.
-	req1 := []byte(`{"model":"m","messages":[{"role":"user","content":"read the file"}]}`)
+	// metadata.session_id mirrors real Claude Code traffic — the
+	// conversation-guard on inheritance keys off it.
+	req1 := []byte(`{"model":"m","metadata":{"session_id":"sess-tr-1"},"messages":[{"role":"user","content":"read the file"}]}`)
 	s1 := newAIGatewayAuditSession("anthropic", agent, base, "/v1/messages", "POST", hdr, req1)
 	if err := s1.writeStartSnapshots(); err != nil {
 		t.Fatalf("turn1 start: %v", err)
@@ -72,7 +91,7 @@ func TestSessionContinuationCarriesToolResultIntoReply(t *testing.T) {
 	s1.completeFromResponse(200, hdr, []byte(resp1), nil)
 
 	// Turn 1 continuation: the CLI feeds the tool_result back.
-	req2 := []byte(`{"model":"m","messages":[
+	req2 := []byte(`{"model":"m","metadata":{"session_id":"sess-tr-1"},"messages":[
 		{"role":"user","content":"read the file"},
 		{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"read","input":{"path":"/x"}}]},
 		{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"FILE-BODY"}]}

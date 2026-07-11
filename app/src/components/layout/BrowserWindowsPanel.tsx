@@ -1035,8 +1035,8 @@ export default function BrowserWindowsPanel({
   // Icon-only segmented control (tooltips carry the names) — frees the horizontal
   // space the old icon+text tabs ate, so a 5th "桌面" tab fits without crowding.
   const TABS: { k: Backend; label: string; icon: React.ReactNode }[] = [
-    { k: 'electron', label: 'Electron', icon: <Atom className="w-4 h-4" /> },
     { k: 'chrome', label: 'Chrome', icon: <Chrome className="w-4 h-4" /> },
+    { k: 'electron', label: 'Electron', icon: <Atom className="w-4 h-4" /> },
     { k: 'android', label: 'Android', icon: <AndroidLogo className="w-4 h-4" /> },
     { k: 'ios', label: 'iOS', icon: <AppleLogo className="w-4 h-4" /> },
     { k: 'desktop', label: t('bwTabDesktop'), icon: <Monitor className="w-4 h-4" /> },

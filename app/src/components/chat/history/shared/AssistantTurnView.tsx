@@ -22,6 +22,10 @@ export const AssistantTurnView = memo(function AssistantTurnView({ turn, turnKey
   const allSteps = getVisibleHistorySteps(turn, isLatestTurn);
   const steps = hideTools ? (allSteps || []).filter((s: any) => s?.type !== 'tool') : allSteps;
   const showThinkingPlaceholder = isLatestTurn && String(turn?.status || '').trim() === 'thinking' && !String(turn?.a || '').trim() && !steps.length;
+  // A tool with no result in the LAST tool step of a still-active latest turn is
+  // running right now (the CLI is executing it) — render a spinner, not a ✓.
+  const turnActive = isLatestTurn && /^(thinking|streaming|pending|tool_use|running|in_progress|working)$/.test(String(turn?.status || '').trim());
+  const lastToolStepIndex = turnActive ? steps.reduce((acc: number, s: any, i: number) => (s?.type === 'tool' ? i : acc), -1) : -1;
   const hasRenderableAssistantStep = steps.some((step: any) => {
     if (step?.type === 'thinking' && String(step?.text || '').trim()) return true;
     if (step?.type === 'text' && String(step?.text || '').trim()) return true;
@@ -45,7 +49,8 @@ export const AssistantTurnView = memo(function AssistantTurnView({ turn, turnKey
           const tools = Array.isArray(step.tools) ? step.tools : [];
           return <div key={stepIndex} data-id={`current-history-turn-step-tools-${turnKey}-${stepIndex}`} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
             const toolId = buildToolCardId(turnKey, stepIndex, tool, toolIndex);
-            return <ToolCard key={toolId} tool={tool} toolId={toolId} />;
+            const running = stepIndex === lastToolStepIndex && !String(tool?.result || '').trim() && tool?.isError !== true;
+            return <ToolCard key={toolId} tool={tool} toolId={toolId} running={running} />;
           })}</div>;
         })}
         {!hasRenderableAssistantStep && fallbackAnswer ? (

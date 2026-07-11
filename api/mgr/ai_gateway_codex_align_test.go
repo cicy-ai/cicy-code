@@ -25,7 +25,9 @@ import (
 // items. provider/base let the same helper drive gateway and non-gateway.
 func runCodexStreamTurn(t *testing.T, provider, agent string, base *url.URL, suffix string, reqBody, sseBody string) []map[string]interface{} {
 	t.Helper()
-	hdr := http.Header{"Content-Type": []string{"application/json"}}
+	// Session-Id mirrors real codex CLI traffic (stable conversation id across a
+	// session's rounds) — the conversation guard on turn inheritance keys off it.
+	hdr := http.Header{"Content-Type": []string{"application/json"}, "Session-Id": []string{"sess-" + agent}}
 	s := newAIGatewayAuditSession(provider, agent, base, suffix, "POST", hdr, []byte(reqBody))
 	if err := s.writeStartSnapshots(); err != nil {
 		t.Fatalf("writeStartSnapshots: %v", err)
@@ -216,7 +218,7 @@ func TestCodexContinuationKeepsItemsAcrossCustomToolCallOutput(t *testing.T) {
 		{"type":"custom_tool_call","call_id":"call_1","name":"apply_patch","input":"...patch..."},
 		{"type":"custom_tool_call_output","call_id":"call_1","output":"Update succeeded"}
 	]}`
-	hdr := http.Header{"Content-Type": []string{"application/json"}}
+	hdr := http.Header{"Content-Type": []string{"application/json"}, "Session-Id": []string{"sess-" + agent}}
 	s2 := newAIGatewayAuditSession("openai", agent, base, suffix, "POST", hdr, []byte(req2))
 	if err := s2.writeStartSnapshots(); err != nil {
 		t.Fatalf("turn2 start: %v", err)
@@ -449,7 +451,9 @@ type codexStep struct{ reqBody, sseBody string }
 func runCodexAgenticTurn(t *testing.T, provider, agent string, base *url.URL, suffix, respCT string, steps []codexStep) codexTurnResult {
 	t.Helper()
 	for i, st := range steps {
-		hdr := http.Header{"Content-Type": []string{"application/json"}}
+		// Session-Id mirrors real codex CLI traffic (stable conversation id across
+		// a session's rounds) — the conversation guard on inheritance keys off it.
+		hdr := http.Header{"Content-Type": []string{"application/json"}, "Session-Id": []string{"sess-" + agent}}
 		s := newAIGatewayAuditSession(provider, agent, base, suffix, "POST", hdr, []byte(st.reqBody))
 		if err := s.writeStartSnapshots(); err != nil {
 			t.Fatalf("step %d writeStartSnapshots: %v", i, err)

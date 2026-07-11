@@ -924,13 +924,20 @@ body.cp-prompt-open { padding-bottom: 74px !important; }
 #cp-file-paste-preview.image-only {
   min-height: 0;
 }
+#cp-file-paste-preview {
+  justify-content: center;
+}
 #cp-file-paste-preview img {
   display: block;
   width: auto;
   height: auto;
   max-width: 100%;
-  max-height: 100%;
-  margin: 0;
+  /* Hard cap against the viewport so a huge pasted image can't blow out the modal.
+     max-height:100% was relative to a flex parent with no fixed height → no real
+     constraint, so the image rendered at natural size. */
+  max-height: min(56vh, 520px);
+  object-fit: contain;
+  margin: 0 auto;
   border-radius: 12px;
   background: rgba(255,255,255,0.03);
 }

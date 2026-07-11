@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useContext, useState } from 'react';
-import { User, Copy, Check } from 'lucide-react';
+import { User, Copy, Check, ChevronUp } from 'lucide-react';
 import { QAlignContext } from '../contexts';
 import { splitLeadingHarnessBlocks, parseEnvironmentContext } from '../lib/normalizeItem';
 import { MarkdownBlock } from './Markdown';
@@ -18,7 +18,7 @@ export function UserTurnAvatar() {
   );
 }
 
-export function CollapsibleQ({ text, bare = false }: { text: string; bare?: boolean }) {
+export function CollapsibleQ({ text, bare = false, open = false, onSetOpen }: { text: string; bare?: boolean; open?: boolean; onSetOpen?: (v: boolean) => void }) {
   const qAlign = useContext(QAlignContext);
   const qJustify = qAlign === 'left' ? 'justify-start' : 'justify-end';
   const qTail = qAlign === 'left' ? 'rounded-bl-sm' : 'rounded-br-sm';
@@ -76,6 +76,23 @@ export function CollapsibleQ({ text, bare = false }: { text: string; bare?: bool
       </div>
     );
   }
+  // Copy button + (only when the answer is expanded) a collapse chevron, grouped.
+  // Shown on hover beside the question bubble. Collapse lives here so the bubble
+  // itself is expand-only.
+  const qControls = (
+    <div className="mb-0.5 flex shrink-0 items-center gap-0.5">
+      <button type="button" data-id="current-history-view-q-copy" onClick={copyQ} title="复制" aria-label="复制"
+        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-sky-200/50 opacity-0 transition-opacity hover:text-sky-100 group-hover:opacity-100">
+        {qCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+      </button>
+      {open && onSetOpen ? (
+        <button type="button" data-id="current-history-view-q-collapse" onClick={(e) => { e.stopPropagation(); onSetOpen(false); }} title="收起回复" aria-label="收起回复"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-sky-200/50 opacity-0 transition-opacity hover:text-sky-100 group-hover:opacity-100">
+          <ChevronUp className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
+    </div>
+  );
   return (
     <div data-id="current-history-view-q" className={`group mb-2.5 flex items-end gap-1 ${qJustify}`}>
       {environmentContext ? (
@@ -84,29 +101,19 @@ export function CollapsibleQ({ text, bare = false }: { text: string; bare?: bool
         <>
           {/* Copy button OUTSIDE the bubble so it never overlaps the text. Sits on
               the bubble's left for right-aligned questions, right for left-aligned. */}
-          {qAlign !== 'left' && (
-            <button type="button" data-id="current-history-view-q-copy" onClick={copyQ} title="复制" aria-label="复制"
-              className="mb-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sky-200/50 opacity-0 transition-opacity hover:text-sky-100 group-hover:opacity-100">
-              {qCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-            </button>
-          )}
+          {qAlign !== 'left' && qControls}
           {/* Isolate pointer/click from the parent card so selecting text in the
               bubble never bubbles up to a parent handler (which was toggling history). */}
           <div
             data-id="current-history-view-q-body"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); if (!open && onSetOpen) onSetOpen(true); }}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
             className={`max-w-[95%] select-text overflow-hidden rounded-2xl ${qTail} border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]`}
           >
             <MarkdownBlock text={String(text || '').replace(/^\-\n/, '')} />
           </div>
-          {qAlign === 'left' && (
-            <button type="button" data-id="current-history-view-q-copy" onClick={copyQ} title="复制" aria-label="复制"
-              className="mb-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sky-200/50 opacity-0 transition-opacity hover:text-sky-100 group-hover:opacity-100">
-              {qCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-            </button>
-          )}
+          {qAlign === 'left' && qControls}
         </>
       )}
     </div>

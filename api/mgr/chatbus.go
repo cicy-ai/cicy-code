@@ -487,6 +487,15 @@ func nextAgentEventSeq(agentID string) int64 {
 	return v.(*atomic.Int64).Add(1)
 }
 
+// dropAgentEventSeq forgets a deleted pane's event-seq counter (keyed by the same
+// short id publishAgent uses). Tiny per entry, but on a long-running daemon the
+// map would otherwise keep one per agent ever seen.
+func dropAgentEventSeq(agentID string) {
+	if agentID = normalizeChatAgentValue(agentID); agentID != "" {
+		agentEventSeq.Delete(agentID)
+	}
+}
+
 func (h *chatHub) publishAgent(agentID string, evt ChatEvent) {
 	agentID = normalizeChatAgentValue(agentID)
 	if agentID == "" {

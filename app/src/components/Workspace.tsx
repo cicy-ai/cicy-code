@@ -1858,11 +1858,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         onUpdated={(patch) => applyPanePatch(activeCliPaneId, patch)}
         onOpen={() => refreshPaneDetail(activeCliPaneId)}
       />
-      {/* Dispatcher cards pin the model picker to the far LEFT of the bottom
-          bar; the spacer pushes the remaining controls right. */}
-      {isCicyLiteAgent((paneDetails[activeCliPaneId.split(':')[0]] || (activeCliPaneId.split(':')[0] === paneId.split(':')[0] ? agentDetail : null))?.agent_type || '') ? (
-        <div data-id="stack-controls-model-spacer" className="flex-1" />
-      ) : null}
+      {/* Model picker sits at the LEFT of the bottom bar (grouped with the
+          non-cicy attach button just before it); the spacer pushes the remaining
+          controls to the right. */}
+      <div data-id="stack-controls-model-spacer" className="flex-1" />
       {!globalVar?.helper_mode && (
         <button
           type="button"
