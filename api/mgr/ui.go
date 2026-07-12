@@ -24,11 +24,25 @@ var uiFS embed.FS
 // Tencent-COS active-version heartbeat (COS→R2 migration).
 var BuiltAppCDNPrefix string
 
-func appDistDir() string {
+// previewDistDir resolves the on-disk SPA build to serve, or "" to fall back to
+// the binary-embedded assets.
+//
+// CICY_PREVIEW_DIST is enough on its own — pointing it at a dist without also
+// passing --preview used to be a silent no-op (the env var was only read from
+// inside the previewMode branch), which reads as "the env var doesn't work".
+// Naming a directory to serve IS the intent to serve it.
+//
+// The bare --preview default stays a RELATIVE "app/dist", i.e. relative to the
+// process CWD — it only resolves when launched from the repo root. Set
+// CICY_PREVIEW_DIST to an absolute path to serve a dist from anywhere.
+func previewDistDir() string {
 	if d := strings.TrimSpace(os.Getenv("CICY_PREVIEW_DIST")); d != "" {
 		return d
 	}
-	return filepath.Join("app", "dist")
+	if previewMode {
+		return filepath.Join("app", "dist")
+	}
+	return ""
 }
 
 // cdnRewriteIndex rewrites the App SPA index.html so its root-absolute asset
@@ -62,9 +76,12 @@ func nonAppPath(p string) bool {
 
 // serveUI picks where the web UI comes from:
 //
-//	--hot      -> reverse-proxy to the vite dev server on :8022 (HMR)
-//	--preview  -> the on-disk app/dist (refresh with `npm run build`)
-//	(neither)  -> the binary-embedded assets (the production build baked in by build.sh)
+//	--hot                -> reverse-proxy to the vite dev server on :8022 (HMR)
+//	--preview            -> the on-disk app/dist (refresh with `npm run build`)
+//	CICY_PREVIEW_DIST=…  -> that directory, --preview implied
+//	(none of the above)  -> the binary-embedded assets (the production build baked in by build.sh)
+//
+// --hot still wins over both: an explicit "proxy to vite" beats "serve a dist".
 func serveUI() http.Handler {
 	sub, _ := fs.Sub(uiFS, "ui")
 	embedded := http.FileServer(http.FS(sub))
@@ -77,9 +94,11 @@ func serveUI() http.Handler {
 		if target, err := url.Parse("http://127.0.0.1:8022"); err == nil {
 			devProxy = httputil.NewSingleHostReverseProxy(target)
 		}
-	case previewMode:
-		diskFS = http.Dir(appDistDir())
-		diskSrv = http.FileServer(diskFS)
+	default:
+		if dir := previewDistDir(); dir != "" {
+			diskFS = http.Dir(dir)
+			diskSrv = http.FileServer(diskFS)
+		}
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

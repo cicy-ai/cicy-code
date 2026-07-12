@@ -47,7 +47,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.214"
+const version = "2.3.215"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -122,8 +122,13 @@ Options:
   --help, -h              Show this help
   --version, -v           Show version
   --dev                   Development mode
-  --preview               Serve app/dist from disk (run 'npm run build' to refresh)
-  --hot                   Proxy the UI to the vite dev server on :8022 (HMR)
+  --preview               Serve app/dist from disk (run 'npm run build' to refresh).
+                          The path is relative to the CWD, so this only resolves
+                          from the repo root. Set CICY_PREVIEW_DIST=/abs/path to
+                          serve a dist from anywhere — that alone implies
+                          --preview; you don't need to pass both.
+  --hot                   Proxy the UI to the vite dev server on :8022 (HMR).
+                          Outranks --preview / CICY_PREVIEW_DIST.
   --cdn                   Serve the App SPA + ttyd bundle from Cloudflare R2
                           (default: embedded local assets). The R2 version
                           prefixes are baked into every build; this flag only

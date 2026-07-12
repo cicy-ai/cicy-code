@@ -32,7 +32,9 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		result["home"] = home
 		result["lab_mode"] = labMode
 		result["dev"] = devMode
-		result["preview"] = previewMode
+		// Report the EFFECTIVE mode, not just the flag: CICY_PREVIEW_DIST alone
+		// puts us in preview (see previewDistDir), and --hot outranks both.
+		result["preview"] = !hotMode && previewDistDir() != ""
 		result["hot"] = hotMode
 		result["cdn"] = cdnMode
 		// Team-Helper mode: read by the SPA to hide left-sidebar entries
