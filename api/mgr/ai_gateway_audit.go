@@ -400,9 +400,13 @@ func aiGatewayMergeUsage(base map[string]interface{}, extra map[string]interface
 			}
 			continue
 		}
-		if value := aiGatewayInt(raw); value > 0 {
-			current := aiGatewayInt(out[key])
-			out[key] = current + value
+		// Take the MAX, never the sum. Streaming usage is a cumulative SNAPSHOT,
+		// not an increment: Anthropic repeats the full input/cache counts on
+		// `message_delta` after already reporting them on `message_start`, so
+		// summing double-counts every input bucket (and cost with it). Max is
+		// also correct for providers that report usage exactly once.
+		if value := aiGatewayInt(raw); value > aiGatewayInt(out[key]) {
+			out[key] = value
 		}
 	}
 	return out
