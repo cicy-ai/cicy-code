@@ -47,7 +47,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.216"
+const version = "2.3.218"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -692,6 +692,15 @@ Options:
 	// a glance whether this instance is public; the URL line below stays 127.0.0.1
 	// because that's the address you click locally even when bound to 0.0.0.0.
 	log.Printf("  Listen: %s:%s%s", bind, port, map[bool]string{true: "  (--public)", false: "  (loopback)"}[publicMode])
+	// Say it out loud when either bundle is being served off disk instead of
+	// from the binary — otherwise "why am I still seeing the old UI" (or the
+	// reverse: "why did my stale dist come back") has no visible cause.
+	if dir := previewDistDir(); dir != "" && !hotMode {
+		log.Printf("  App SPA: %s  (on-disk — `npm run build` to refresh)", dir)
+	}
+	if note := ttydserver.TtydDistNote(); note != "" {
+		log.Printf("  %s", note)
+	}
 	log.Printf("  URL:   %s", openURL)
 	// --cft: the tunnel is assigned asynchronously (and cloudflared may need a
 	// one-time download). We do NOT block the banner / listener waiting for it —

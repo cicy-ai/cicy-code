@@ -660,7 +660,7 @@ function AgentStackCard({
         {!isCicyLiteAgent(item.agentType) && (
           <div
             data-id={`agent-stack-card-view-tabs-${item.paneId}`}
-            className="absolute left-1/2 top-2 z-20 -translate-x-1/2"
+            className="hidden absolute left-1/2 top-2 z-20 -translate-x-1/2"
             onClick={(event) => event.stopPropagation()}
           >
             <button
@@ -679,9 +679,14 @@ function AgentStackCard({
           // prompt bar instead of the raw REPL terminal. The input feeds the
           // same /api/tmux/send pipe, so the terminal/TG channels stay in sync.
           <DispatcherChat paneId={item.paneId} active={active} agentType={item.agentType || 'cicy'} title={item.title} />
-        ) : !item.isApiOnly && item.ttydSrc ? (
-          // Keep the terminal mounted while History is showing so its ttyd
-          // WebSocket isn't torn down (and re-attached) on every toggle.
+        ) : !item.isApiOnly && item.ttydSrc && active ? (
+          // Visible-only streaming: only the ACTIVE card mounts its terminal.
+          // Hidden cards used to keep N live ttyd WebSockets + tmux attaches
+          // running behind display:none — pure cost plus the breeding ground
+          // for stale mouse/size state. Switching back re-attaches and the
+          // server backfills capture-pane history, so nothing is lost.
+          // History toggling keeps `active` true, so the terminal stays
+          // mounted underneath the history overlay (WS not torn down).
           <div
             data-id={`agent-stack-card-terminal-${item.paneId}`}
             className="h-full w-full"

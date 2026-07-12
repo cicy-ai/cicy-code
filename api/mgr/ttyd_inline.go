@@ -16,6 +16,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -246,6 +248,20 @@ func serveTTY(w http.ResponseWriter, r *http.Request, tmuxTarget, title, apiPane
 	}
 	factory = lf
 
+	// attach 回填:先把视口以上的 tmux 历史(≤history-limit 行,带色彩)灌进
+	// viewer 的本地回滚区,再让 attach 的整屏重画接管当前视口。`-E -1` 止于
+	// 视口上一行,避免与重画重复一屏;抓不到(pane 刚建、无历史)就静默跳过。
+	// 重连不会叠加:前端在 reconnect 的 onOpen 里先 term.reset()。
+	var backfill []byte
+	if out, err := exec.Command("tmux", "capture-pane", "-p", "-e", "-t", tmuxTarget,
+		"-S", "-5000", "-E", "-1").Output(); err == nil {
+		if trimmed := strings.TrimRight(string(out), "\n"); trimmed != "" {
+			// pty 语义是 \r\n;末尾补一个 SGR reset,防最后一行残留的颜色
+			// 渗染进 attach 重画。
+			backfill = []byte(strings.ReplaceAll(trimmed, "\n", "\r\n") + "\x1b[0m\r\n")
+		}
+	}
+
 	l := newLocalTTY()
 	defer l.Close()
 
@@ -263,6 +279,7 @@ func serveTTY(w http.ResponseWriter, r *http.Request, tmuxTarget, title, apiPane
 			Reconnect:     true,
 			ReconnectTime: 30,
 			Preferences:   ttydPreferences(),
+			InitialOutput: backfill,
 		})
 		if err != nil && err != context.Canceled {
 			log.Printf("[ttyd] webtty %s ended: %v", tmuxTarget, err)

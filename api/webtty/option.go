@@ -52,6 +52,16 @@ func WithReconnect(timeInSeconds int) Option {
 	}
 }
 
+// WithInitialOutput sets bytes written to the master as the very first Output
+// frame — the attach-time backfill that seeds the viewer's local scrollback
+// before live slave output starts.
+func WithInitialOutput(data []byte) Option {
+	return func(wt *WebTTY) error {
+		wt.initialOutput = data
+		return nil
+	}
+}
+
 // WithMasterPreferences sets an optional configuration of master.
 func WithMasterPreferences(preferences interface{}) Option {
 	return func(wt *WebTTY) error {

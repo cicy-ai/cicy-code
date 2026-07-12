@@ -1395,47 +1395,19 @@ function setupWinFloatAutoHide(bar: HTMLElement): void {
     bar.addEventListener("mouseleave", scheduleHide);
 }
 
-// Kill EVERY scroll path on the terminal: no scrollback buffer is set by the
-// caller (scrollback: 0), here we hide the (now useless) scrollbar and block
-// wheel / touch scrolling at capture phase so neither xterm's viewport nor the
-// page can pan the terminal. tmux owns history; the live screen is the view.
-function disableTerminalScroll(): void {
-    var style = document.createElement("style");
-    style.id = "cp-noscroll";
-    style.textContent = [
-        // xterm's VS Code-style scrollable element (current structure:
-        // #terminal .xterm-scrollable-element > .scrollbar.vertical > .slider)
-        ".xterm .xterm-scrollable-element > .scrollbar { display: none !important; }",
-        // legacy .xterm-viewport structure (DOM-renderer fallback)
-        ".xterm .xterm-viewport { overflow: hidden !important; scrollbar-width: none !important; }",
-        ".xterm .xterm-viewport::-webkit-scrollbar { display: none !important; }",
-    ].join("\n");
-    document.head.appendChild(style);
-    var host = document.getElementById("terminal");
-    if (!host) { return; }
-    var block = function(e: Event): void {
-        e.preventDefault();
-        e.stopPropagation();
-    };
-    // capture-phase + non-passive so we beat xterm's own listeners and are
-    // allowed to preventDefault. Blocks mouse wheel, trackpad and touch pans.
-    host.addEventListener("wheel", block, { passive: false, capture: true });
-    host.addEventListener("touchmove", block, { passive: false, capture: true });
-}
-
 function configureTerminal(term: Terminal): void {
-    // Scroll is FULLY disabled unless the URL carries ?bottom=1 (host-side
-    // bottom panel keeps normal scrollback). Regular agent terminals live in
-    // tmux, which keeps its own history — xterm-side scrollback only ever
-    // desyncs the view from the live tmux screen (stuck half-scrolled panes).
+    // Scroll is PURELY client-side now. The server (webtty) strips alt-screen
+    // and mouse-tracking DECSET from the viewer stream, so:
+    //   - xterm stays on the normal buffer → its local scrollback is live;
+    //   - wheel events never reach tmux → no copy-mode, no stuck panes (the
+    //     failure mode that previously got scroll disabled here entirely).
+    // History depth = attach-time backfill (server capture-pane, ≤5000 lines)
+    // + whatever scrolls past while attached. tmux itself is never scrolled.
     var isBottomPanel = /[?&]bottom=1(?:&|$)/.test(location.search);
     term.configure({
-        scrollback: isBottomPanel ? 500 : 0,
+        scrollback: isBottomPanel ? 500 : 5000,
         fontFamily: monoFontStack(),
     });
-    if (!isBottomPanel) {
-        disableTerminalScroll();
-    }
 
     setTimeout(function(): void {
         term.fit();

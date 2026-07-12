@@ -42,7 +42,7 @@ type Server struct {
 // New creates a new instance of Server.
 // Server will use the New() of the factory provided to handle each request.
 func New(factory Factory, options *Options) (*Server, error) {
-	indexData, err := Asset("static/index.html")
+	indexData, err := AssetOrDisk("static/index.html")
 	if err != nil {
 		panic("index not found") // must be in bindata
 	}
@@ -66,7 +66,7 @@ func New(factory Factory, options *Options) (*Server, error) {
 	// Cache-bust the embedded gotty bundle: a content hash appended as ?v=…
 	// changes whenever the bundle does, so browsers don't serve a stale copy.
 	assetVersion := "dev"
-	if bundle, e := Asset("static/js/gotty-bundle.js"); e == nil {
+	if bundle, e := AssetOrDisk("static/js/gotty-bundle.js"); e == nil {
 		sum := sha256.Sum256(bundle)
 		assetVersion = hex.EncodeToString(sum[:])[:12]
 	}
@@ -197,7 +197,7 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 
 func (server *Server) setupHandlers(ctx context.Context, cancel context.CancelFunc, pathPrefix string, counter *counter) http.Handler {
 	staticFileHandler := http.FileServer(
-		&assetfs.AssetFS{Asset: Asset, AssetDir: AssetDir, Prefix: "static"},
+		&assetfs.AssetFS{Asset: AssetOrDisk, AssetDir: AssetDirOrDisk, Prefix: "static"},
 	)
 
 	var siteMux = http.NewServeMux()

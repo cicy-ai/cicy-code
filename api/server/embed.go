@@ -41,6 +41,10 @@ type WSConfig struct {
 	Reconnect     bool
 	ReconnectTime int
 	Preferences   *HtermPrefernces
+	// InitialOutput is sent as the first Output frame before live slave
+	// output — the attach-time backfill (tmux capture-pane history) that
+	// seeds the viewer's local scrollback.
+	InitialOutput []byte
 }
 
 // ttydUpgrader upgrades to the "webtty" subprotocol with a permissive origin
@@ -81,6 +85,9 @@ func RunWebTTY(ctx context.Context, master io.ReadWriter, factory Factory, cfg *
 	if cfg.Preferences != nil {
 		opts = append(opts, webtty.WithMasterPreferences(cfg.Preferences))
 	}
+	if len(cfg.InitialOutput) > 0 {
+		opts = append(opts, webtty.WithInitialOutput(cfg.InitialOutput))
+	}
 
 	tty, err := webtty.New(master, slave, opts...)
 	if err != nil {
@@ -106,41 +113,65 @@ var (
 // to strip the "/ttyd/<pane>" prefix so paths resolve as "js/...", "css/...".
 func StaticHandler() http.Handler {
 	staticHandlerOnce.Do(func() {
+		// assetfs builds each file straight from the Asset() bytes
+		// (NewAssetFile), so Size() follows whatever we return and ModTime()
+		// stays zero — no Last-Modified, hence no mtime-driven stale cache.
+		// That's why there's no AssetInfo hook to wire up here.
 		staticHandler = http.FileServer(
-			&assetfs.AssetFS{Asset: Asset, AssetDir: AssetDir, Prefix: "static"},
+			&assetfs.AssetFS{Asset: AssetOrDisk, AssetDir: AssetDirOrDisk, Prefix: "static"},
 		)
 	})
 	return staticHandler
 }
 
-func initIndex() {
-	indexTmplOnce.Do(func() {
-		data, err := Asset("static/index.html")
-		if err != nil {
-			panic("index not found") // must be in bindata
-		}
-		t, err := template.New("index").Parse(string(data))
-		if err != nil {
-			panic("index template parse failed") // must be valid
-		}
-		indexTmpl = t
-		indexAssetVer = "dev"
-		if bundle, e := Asset("static/js/gotty-bundle.js"); e == nil {
-			sum := sha256.Sum256(bundle)
-			indexAssetVer = hex.EncodeToString(sum[:])[:12]
-		}
-	})
+// buildIndex parses the index template and derives the ?v= cache-buster from
+// the CURRENT bundle bytes.
+func buildIndex() (*template.Template, string) {
+	data, err := AssetOrDisk("static/index.html")
+	if err != nil {
+		panic("index not found") // must be in bindata
+	}
+	t, err := template.New("index").Parse(string(data))
+	if err != nil {
+		panic("index template parse failed") // must be valid
+	}
+	ver := "dev"
+	if bundle, e := AssetOrDisk("static/js/gotty-bundle.js"); e == nil {
+		sum := sha256.Sum256(bundle)
+		ver = hex.EncodeToString(sum[:])[:12]
+	}
+	return t, ver
+}
+
+// currentIndex returns the parsed index + its cache-buster, caching them —
+// EXCEPT under CICY_TTYD_DIST, where it rebuilds on every call.
+//
+// The sync.Once is what makes the embedded build fast, but it would also make
+// the disk override useless: assetfs would serve the freshly-edited bundle
+// while the index still carried the OLD ?v= hash, so the browser would just
+// re-serve its cached copy and the edit would appear to do nothing. The whole
+// point of the override is edit → refresh, so under it we pay the re-read.
+//
+// The globals are only ever written inside the Once (single writer, published
+// before any reader); the override path returns locals instead of racing them
+// across concurrent requests.
+func currentIndex() (*template.Template, string) {
+	if ttydDistDir() != "" {
+		return buildIndex()
+	}
+	indexTmplOnce.Do(func() { indexTmpl, indexAssetVer = buildIndex() })
+	return indexTmpl, indexAssetVer
 }
 
 // WriteIndex renders the ttyd index.html with the given per-pane title. It is
 // the standalone equivalent of (*Server).handleIndex.
 func WriteIndex(w http.ResponseWriter, title string) error {
-	initIndex()
+	tmpl, assetVer := currentIndex()
 	buf := new(bytes.Buffer)
-	if err := indexTmpl.Execute(buf, map[string]interface{}{
+	if err := tmpl.Execute(buf, map[string]interface{}{
 		"title":         title,
 		"static_prefix": ttydStaticPrefix(),
-		"asset_v":       indexAssetVer,
+		"asset_v":       assetVer,
 	}); err != nil {
 		return err
 	}
