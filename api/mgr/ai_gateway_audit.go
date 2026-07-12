@@ -5124,12 +5124,53 @@ func aiGatewayAuxiliaryKind(question string, body map[string]interface{}) string
 // 正常对话只要文本里**提到**"you are a title generator"（比如在讨论这个功能本身），
 // 就会被误判成标题请求，导致它的主 reply.json / current.json 被跳过——这正是之前
 // 把网关下的 current.json/reply.json"改坏"的根因。
+//
+// 锚定按 **单个 system block** 做，不能对 flatten 后的整段做：Claude Code 2.1.x
+// 把标题指令放在独立 block 里，前面垫着 billing header 和 CLI 自述块——整段
+// 前缀匹配永远落空，标题请求就会以主线身份抢写 current.json，之后真正的主线
+// 因首条消息对不上被全部误判 sidechain，快照永远冻结在标题请求上。
 func aiGatewayLooksLikeTitleRequest(body map[string]interface{}) bool {
 	if body == nil {
 		return false
 	}
-	sys := strings.ToLower(strings.TrimSpace(aiGatewayTitleSystemInstruction(body)))
-	return strings.HasPrefix(sys, "you are a title generator")
+	for _, block := range aiGatewaySystemInstructionBlocks(body) {
+		b := strings.ToLower(block)
+		if strings.HasPrefix(b, "you are a title generator") ||
+			strings.HasPrefix(b, "generate a concise, sentence-case title") {
+			return true
+		}
+	}
+	return false
+}
+
+// aiGatewaySystemInstructionBlocks 按 block 逐条取出 system 指令文本（仅 system，
+// 不含对话内容），供前缀锚定使用。兼容 Anthropic 顶层 system（string 或 block
+// 数组）与 OpenAI chat 的首条 system 消息。
+func aiGatewaySystemInstructionBlocks(body map[string]interface{}) []string {
+	var out []string
+	appendText := func(v interface{}) {
+		if t := strings.TrimSpace(aiGatewayFlattenPromptValue(v)); t != "" {
+			out = append(out, t)
+		}
+	}
+	if v, ok := body["system"]; ok && v != nil {
+		if arr, ok := v.([]interface{}); ok {
+			for _, item := range arr {
+				appendText(item)
+			}
+		} else {
+			appendText(v)
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	for _, m := range aiGatewayExtractMessages(body) {
+		if strings.EqualFold(strings.TrimSpace(aiGatewayString(m["role"])), "system") {
+			appendText(m["content"])
+		}
+	}
+	return out
 }
 
 // aiGatewayTitleSystemInstruction 取出请求的 system 指令文本（仅 system，不含对话内容）。
