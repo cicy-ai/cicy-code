@@ -26,8 +26,13 @@ import (
 //
 // Status state machine: todo → test → done, with dropped as a terminal "abandoned" state.
 type Todo struct {
-	ID        string    `yaml:"id" json:"id"`
-	Title     string    `yaml:"title" json:"title"`
+	ID    string `yaml:"id" json:"id"`
+	Title string `yaml:"title" json:"title"`
+	// Body is the full task brief — goal, acceptance criteria, relevant files.
+	// The dispatch convention is that `cicy-agent msg` carries only a todo id
+	// plus a one-line title, and ALL the detail lives here; without a body the
+	// convention has nowhere to put the detail and it gets lost in chat.
+	Body      string    `yaml:"body,omitempty" json:"body,omitempty"`
 	Status    string    `yaml:"status" json:"status"`
 	PaneID    string    `yaml:"pane_id,omitempty" json:"pane_id,omitempty"`
 	CreatorID string    `yaml:"creator_id,omitempty" json:"creator_id,omitempty"`
@@ -341,7 +346,11 @@ func handleTodoList(w http.ResponseWriter, r *http.Request) {
 		if status != "" && status != "all" && t.Status != status {
 			continue
 		}
-		if kw != "" && !strings.Contains(strings.ToLower(t.Title), kw) {
+		// Search the brief too, not just the title — the detail lives in Body,
+		// so a title-only search can't find the todo that actually describes
+		// what you're looking for.
+		if kw != "" && !strings.Contains(strings.ToLower(t.Title), kw) &&
+			!strings.Contains(strings.ToLower(t.Body), kw) {
 			continue
 		}
 		out = append(out, t)
@@ -409,6 +418,7 @@ func handleTodoAdd(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		PaneID    string `json:"pane_id"`
 		Title     string `json:"title"`
+		Body      string `json:"body"`
 		CreatorID string `json:"creator_id"`
 	}
 	if err := readBody(r, &req); err != nil {
@@ -420,6 +430,7 @@ func handleTodoAdd(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "title required")
 		return
 	}
+	req.Body = strings.TrimSpace(req.Body)
 	requester := requesterPaneID(r)
 	if requester == "" {
 		httpErr(w, 400, "X-Agent-Show-Id header required")
@@ -452,6 +463,7 @@ func handleTodoAdd(w http.ResponseWriter, r *http.Request) {
 	t := Todo{
 		ID:        nextTodoID(todos),
 		Title:     req.Title,
+		Body:      req.Body,
 		Status:    "todo",
 		PaneID:    target,
 		CreatorID: strings.TrimSpace(req.CreatorID),
@@ -493,13 +505,14 @@ func handleTodoPatch(w http.ResponseWriter, r *http.Request, idOrPrefix string) 
 		PaneID   string  `json:"pane_id"`
 		Status   *string `json:"status"`
 		Title    *string `json:"title"`
+		Body     *string `json:"body"` // "" clears the brief; omit to leave it alone
 		Assignee *string `json:"assignee"` // reassign ownership (master only)
 	}
 	if err := readBody(r, &req); err != nil {
 		httpErr(w, 400, "invalid json")
 		return
 	}
-	if req.Status == nil && req.Title == nil && req.Assignee == nil {
+	if req.Status == nil && req.Title == nil && req.Body == nil && req.Assignee == nil {
 		httpErr(w, 400, "no fields to update")
 		return
 	}
@@ -566,6 +579,9 @@ func handleTodoPatch(w http.ResponseWriter, r *http.Request, idOrPrefix string) 
 	}
 	if req.Title != nil {
 		todos[idx].Title = *req.Title
+	}
+	if req.Body != nil {
+		todos[idx].Body = strings.TrimSpace(*req.Body)
 	}
 	todos[idx].UpdatedAt = time.Now().UTC().Truncate(time.Second)
 	if err := saveTodos(ws, todos); err != nil {
