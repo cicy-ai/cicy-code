@@ -63,4 +63,5 @@ reseed 是「按当前模板整份重生成」。如果你手改过某个 agent 
 ## 延伸
 
 - 网关**不注入记忆**,agent 原生读 guidance —— 见 [本地 AI 网关](/advanced/gateway);
-- 记忆是 per-agent 的私有 guidance;全团队共享的可召回事实在 [团队知识库](/guides/knowledge)。
+- 记忆是 per-agent 的私有 guidance;全团队共享的可召回事实在 [团队知识库](/guides/knowledge);
+- 本页说的是**创建时组装的静态模板**。cicy agent 还有一套**运行时自动沉淀的长期记忆**(记忆养成),见 [cicy Agent](/concepts/cicy-agent#记忆养成)。

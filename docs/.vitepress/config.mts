@@ -82,6 +82,7 @@ export default defineConfig({
       ]},
       { text: '核心概念', collapsed: false, items: [
         { text: 'Agent 与 Pane', link: '/concepts/agent-pane' },
+        { text: 'cicy Agent', link: '/concepts/cicy-agent' },
         { text: '记忆与模板', link: '/concepts/memory' },
         { text: '团队与协作', link: '/concepts/teams' },
         { text: 'Fork 分身', link: '/concepts/fork' },

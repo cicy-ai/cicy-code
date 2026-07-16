@@ -45,4 +45,5 @@ w-1001:main.0   # 完整 pane ID(session:window.pane)
 ## 相关
 
 - 它的记忆从哪来 → [记忆与模板](/concepts/memory)
+- headless 的 `cicy` 类型完整机制(人格/工具/记忆养成) → [cicy Agent](/concepts/cicy-agent)
 - 多个 agent 怎么组队协作 → [团队与协作](/concepts/teams)
