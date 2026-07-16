@@ -137,7 +137,7 @@ var (
 // unavailable — so it sits well above cicyCompactThreshold to give compaction
 // room to act first. (Was 60 with per-turn front-trim, which busted the prompt
 // cache every turn at the cap; see cicyCompactMessages.)
-const cicyMaxHistoryMessages = 160
+const cicyMaxHistoryMessages = 600
 
 // cicyDefaultMaxToolRounds bounds the model→tool→model rounds in ONE cicy turn,
 // applied only to the cicy IN-PROCESS agent (we drive its loop); claude/codex/
@@ -185,8 +185,8 @@ const cicyMaxTurnAutoRetries = 2
 // and prompt-cache stability (the summary+tail prefix stays byte-stable between
 // the infrequent compactions, so the cache builds up normally in between).
 const (
-	cicyCompactThreshold  = 80 // compact once the window exceeds this many messages
-	cicyCompactKeepRecent = 40 // messages kept verbatim after the summary
+	cicyCompactThreshold  = 300 // compact once the window exceeds this many messages
+	cicyCompactKeepRecent = 160 // messages kept verbatim after the summary
 )
 
 // cicyTrimMessages keeps history within the cap, trimming from the front,
@@ -2804,8 +2804,12 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 			// system+tools), so Anthropic-protocol providers hit explicit
 			// caching and DeepSeek hits its implicit prefix cache; the gateway's
 			// DeepSeek adapter flattens/drops cache_control harmlessly.
-			"system":   cicySystemBlocks(cicyMaybeWrapUp(cfg.systemPrompt, final)),
-			"messages": cicyInjectRoleContext(cicyRequestMessages(session.messages), cfg.roleContext),
+			"system": cicySystemBlocks(cicyMaybeWrapUp(cfg.systemPrompt, final)),
+			// 长期记忆注入在最后一条 user 消息(尾部,wire-only):深前缀不因
+			// 记忆更新而变,缓存照常命中;<role> 仍在第一条 user 消息(byte-stable)。
+			"messages": cicyInjectMemoryContext(
+				cicyInjectRoleContext(cicyRequestMessages(session.messages), cfg.roleContext),
+				cicyMemoryInjectText(workspace)),
 		}
 		// Pure-chat roles (assistant/support/sales) enable no tools — omit the
 		// field entirely (an empty tools array is rejected by some upstreams). On
@@ -2926,6 +2930,8 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 
 		if len(toolResults) == 0 || stopReason != "tool_use" {
 			session.persistLocked(workspace)
+			// 记忆养成:成功收尾的轮次入队做记忆识别(去抖批处理,fire-and-forget)。
+			cicyMemoryHarvestEnqueue(shortID, workspace, session.messages)
 			return true
 		}
 		session.messages = append(session.messages, M{"role": "user", "content": toolResults})
