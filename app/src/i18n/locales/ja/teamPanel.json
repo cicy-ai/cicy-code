@@ -48,5 +48,12 @@
   "forkPromptLabel": "継承プロンプト（編集可）",
   "forkSendPrompt": "送信して分身を作成",
   "forkSending": "分身を作成中…",
-  "forkCancel": "キャンセル"
+  "forkCancel": "キャンセル",
+  "update": "更新",
+  "tipUpdate": "このエージェントの CLI を最新版へ更新します(npm・ライブログ、失敗時はレジストリ切替で再試行)。実行中のセッションは中断されません。再起動で反映されます。",
+  "updateTitle": "{{title}} を更新",
+  "updateRunning": "CLI を更新中…(実行中のセッションは中断されません)",
+  "updateDone": "更新完了。再起動で反映されます。",
+  "updateRetrySwitchSource": "ソースを切替えて再試行",
+  "updateRestartNow": "エージェントを再起動"
 }

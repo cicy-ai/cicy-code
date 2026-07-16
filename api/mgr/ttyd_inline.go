@@ -176,6 +176,15 @@ func serveTtydHTTP(w http.ResponseWriter, r *http.Request, tmuxTarget, subPath, 
 	}
 }
 
+// handleTtydMaskModel exposes codexGatewayMaskModel to the in-app terminal
+// component (TerminalView), which can't get the token injected via config.js
+// the way the gotty page does. GET /api/tmux/ttyd/mask/<pane> → {"model": "…"}
+// ("" for non-codex / non-gateway panes).
+func handleTtydMaskModel(w http.ResponseWriter, r *http.Request) {
+	paneID := normPaneID(strings.TrimPrefix(r.URL.Path, "/api/tmux/ttyd/mask/"))
+	J(w, M{"model": codexGatewayMaskModel(paneID)})
+}
+
 // codexGatewayMaskModel returns the model string codex launches with (its `-m`
 // value) for codex-on-gateway panes — the token the terminal client masks out of
 // the PTY stream so the leaked model name never renders. "" for any other pane.
@@ -260,6 +269,16 @@ func serveTTY(w http.ResponseWriter, r *http.Request, tmuxTarget, title, apiPane
 			// 渗染进 attach 重画。
 			backfill = []byte(strings.ReplaceAll(trimmed, "\n", "\r\n") + "\x1b[0m\r\n")
 		}
+	}
+	// 首帧体积上限:历史攒厚后整段回填可达数 MB(5000 行 × 宽行 × 色彩转义),
+	// base64 再 +33%,首帧解析拖慢切换。超限截尾、按行对齐,顶部标注。
+	const backfillMaxBytes = 512 * 1024
+	if len(backfill) > backfillMaxBytes {
+		cut := backfill[len(backfill)-backfillMaxBytes:]
+		if i := strings.IndexByte(string(cut), '\n'); i >= 0 && i+1 < len(cut) {
+			cut = cut[i+1:]
+		}
+		backfill = append([]byte("\x1b[0m\x1b[2m…(更早的历史已截断)\x1b[0m\r\n"), cut...)
 	}
 
 	l := newLocalTTY()

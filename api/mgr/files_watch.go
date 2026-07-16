@@ -108,7 +108,7 @@ func handleFsWatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *fsWatchClient) subscribe(rel string) {
-	abs, err := resolveSafePath(c.workspace, rel)
+	abs, err := resolveReadPath(c.workspace, rel)
 	if err != nil {
 		c.sendError("subscribe_invalid_path:" + err.Error())
 		return
@@ -125,7 +125,7 @@ func (c *fsWatchClient) subscribe(rel string) {
 }
 
 func (c *fsWatchClient) unsubscribe(rel string) {
-	abs, err := resolveSafePath(c.workspace, rel)
+	abs, err := resolveReadPath(c.workspace, rel)
 	if err != nil {
 		return
 	}

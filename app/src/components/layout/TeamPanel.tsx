@@ -5,12 +5,13 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trans } from 'react-i18next';
 import i18n from '../../i18n';
-import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, UserPlus, GitBranch, ChevronRight, ChevronDown, ClipboardList } from 'lucide-react';
+import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, ArrowUpCircle, UserPlus, GitBranch, ChevronRight, ChevronDown, ClipboardList } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
 import { normalizeAgentType } from '../../lib/agentType';
+import UpdateAgentModal from './UpdateAgentModal';
 import { metricsFromCurrentReply, type AgentLiveMetrics } from '../../lib/agentMetrics';
 import { useApp } from '../../contexts/AppContext';
 import { ModelTag } from '../../lib/modelTag';
@@ -31,6 +32,7 @@ interface Agent {
   source_kind?: string;
   source_ref?: string;
   use_custom_gateway?: boolean;
+  is_kefu?: boolean;
 }
 
 interface StatusInfo { status?: string; isThinking?: boolean; title?: string; }
@@ -167,6 +169,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   const [forkPreviewSrc, setForkPreviewSrc] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  // 「更新」弹窗的目标 agent(null = 关闭)。菜单项只负责设值,流式更新逻辑
+  // 全在 UpdateAgentModal 里。
+  const [updateTarget, setUpdateTarget] = useState<{ wid: string; title: string } | null>(null);
   // bottom-most cards: not enough room below the … button → flip dropdown upward
   const [menuDropUp, setMenuDropUp] = useState(false);
   // hover tooltip for menu items — portal-rendered to the RIGHT of the dropdown
@@ -190,6 +195,11 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         return {
           title: i18n.t('restart', { ns: 'teamPanel' }),
           desc: i18n.t('tipRestart', { ns: 'teamPanel', defaultValue: '结束该 agent 的 CLI 进程,并在同一个 tmux 窗口重新拉起,工作目录和会话保留。适合 agent 卡死或升级后生效。' }),
+        };
+      case 'update':
+        return {
+          title: i18n.t('update', { ns: 'teamPanel', defaultValue: '更新' }),
+          desc: i18n.t('tipUpdate', { ns: 'teamPanel', defaultValue: '升级该 agent 的 CLI 到最新版(npm 安装,流式日志,失败可换源重试)。更新过程不打断正在运行的会话,完成后一键重启生效。' }),
         };
       case 'compact':
         return {
@@ -231,9 +241,12 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     return () => document.removeEventListener('pointerdown', closeMenu);
   }, []);
   const boundIds = new Set(bindings.map(b => shortId(b.name)));
+  // 客服主管(is_kefu)只能绑客服 agent;非客服 master 只能绑非客服 agent。
+  const masterIsKefu = !!panes.find(a => shortId(a.pane_id) === paneId)?.is_kefu;
   const available = panes.filter(a => {
     const sid = shortId(a.pane_id);
-    return sid !== paneId && !boundIds.has(sid);
+    if (sid === paneId || boundIds.has(sid)) return false;
+    return !!a.is_kefu === masterIsKefu;
   });
 
   const bind = async (agentPaneId: string) => {
@@ -733,6 +746,23 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                 <span data-id="team-panel-worker-menu-restart-label">{i18n.t('restart', { ns: 'teamPanel' })}</span>
               </button>
             ) : null}
+            {normalizeAgentType(agentType) !== 'cicy' ? (
+              <button
+                type="button"
+                data-id="team-panel-worker-menu-update"
+                onMouseEnter={showMenuTip('update')}
+                onMouseLeave={hideMenuTip}
+                onClick={() => {
+                  setOpenMenuId(null);
+                  setMenuTip(null);
+                  setUpdateTarget({ wid, title });
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-white/[0.06]"
+              >
+                <ArrowUpCircle className="w-3.5 h-3.5 shrink-0" />
+                <span data-id="team-panel-worker-menu-update-label">{i18n.t('update', { ns: 'teamPanel', defaultValue: '更新' })}</span>
+              </button>
+            ) : null}
             {/* /compact、/clear 已从此菜单移除 —— 这两个命令改由对话输入框的斜杠命令菜单
                 (输入 `/` 弹出)触发,菜单里不再重复。 */}
             {/* Fork(分身):coding-CLI agent 走 agent-summary + 新 tmux pane 拉起
@@ -955,6 +985,14 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           <div data-id="team-panel-menu-tooltip-title" className="mb-1 text-xs font-semibold text-zinc-200">{menuTipFor(menuTip.key).title}</div>
           <div data-id="team-panel-menu-tooltip-desc" className="text-xs leading-5 text-zinc-400 whitespace-normal">{menuTipFor(menuTip.key).desc}</div>
         </div>,
+        document.body
+      ) : null}
+      {updateTarget ? createPortal(
+        <UpdateAgentModal
+          paneId={updateTarget.wid}
+          title={updateTarget.title}
+          onClose={() => { setUpdateTarget(null); onRefreshPanes(); }}
+        />,
         document.body
       ) : null}
       {!hideMaster && <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 flex-shrink-0" data-id="team-panel-toolbar">

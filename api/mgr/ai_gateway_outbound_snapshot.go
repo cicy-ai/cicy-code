@@ -24,6 +24,9 @@ type aiGatewayOutboundRequestSnap struct {
 	Timestamp string      `json:"ts"`
 	NewTurn   bool        `json:"new_turn"` // last message is a user prompt (q), not a tool_result → starts a new turn
 	Body      interface{} `json:"body"`
+
+	// bytes is the retained size of Body — the trim budget's unit. Not persisted.
+	bytes int
 }
 
 type aiGatewayOutboundSnapshot struct {
@@ -44,6 +47,15 @@ var aiGatewayOutboundSnapshots = struct {
 // conversations. The most recent rounds are the useful diagnostic; older ones
 // are trimmed and freed.
 const aiGatewayOutboundMaxRounds = 10
+
+// aiGatewayOutboundMaxBytes bounds the retained bodies by SIZE, not just count.
+// Rounds is the wrong dimension: each body is the whole conversation sent that
+// round, so on a large context one body is tens of megabytes and "10 rounds"
+// meant 587 MB — held in memory AND rewritten to disk in full on EVERY gateway
+// round-trip. Trim oldest-first until the retained bodies fit. The newest round
+// is always kept verbatim (a truncated body is not a diagnostic), so a single
+// huge body still costs its own size — but never 10× it.
+const aiGatewayOutboundMaxBytes = 32 << 20 // 32 MB per agent
 
 func aiGatewayOutboundSnapshotPath(agentID string) string {
 	return filepath.Join(aiGatewayHistoryDir(agentID), "outbound.json")
@@ -86,22 +98,59 @@ func aiGatewayAppendOutbound(agentID, conversationID, turnID, requestID string, 
 		Timestamp: ts.UTC().Format(time.RFC3339Nano),
 		NewTurn:   newTurn,
 		Body:      bodyVal,
+		bytes:     len(body),
 	})
-	// MEMORY LEAK FIX: each entry's Body is the FULL outbound request (the entire
-	// growing message history sent to the model that round). Accumulating EVERY
-	// round of a long conversation kept O(N) full-history copies resident per
-	// agent (≈2GB/hr under load). Cap to the most recent rounds and copy into a
-	// fresh slice so the trimmed-off bodies are actually released (reslicing alone
-	// keeps them alive in the backing array).
-	if len(snap.Requests) > aiGatewayOutboundMaxRounds {
-		snap.Requests = append([]aiGatewayOutboundRequestSnap(nil),
-			snap.Requests[len(snap.Requests)-aiGatewayOutboundMaxRounds:]...)
-	}
+	snap.Requests = aiGatewayOutboundTrim(snap.Requests)
 	snap.UpdatedAt = ts.UTC().Format(time.RFC3339Nano)
 	out := *snap // copy for writing outside the lock
 	aiGatewayOutboundSnapshots.mu.Unlock()
 
-	_ = aiGatewayWriteJSONAtomic(aiGatewayOutboundSnapshotPath(agentID), out)
+	// Compact, not MarshalIndent: this file is rewritten IN FULL on every gateway
+	// round-trip, so pretty-printing it is pure CPU and allocation on the hot path.
+	// It is machine-read (jq / the inspector), not eyeballed raw.
+	_ = aiGatewayWriteJSONAtomicCompact(aiGatewayOutboundSnapshotPath(agentID), out)
+}
+
+// aiGatewayOutboundTrim drops the oldest rounds until the retained set fits BOTH
+// budgets (count and bytes). Each entry's Body is the entire conversation as sent
+// that round, so an unbounded — or count-only-bounded — slice pinned O(N) copies
+// of a multi-megabyte history per agent, and rewrote every one of them to disk on
+// each request. The newest round always survives, whatever its size: an empty or
+// truncated outbound.json would be worse than a large one.
+//
+// Copies into a fresh slice so the trimmed-off bodies are actually released —
+// reslicing alone keeps them alive in the backing array.
+func aiGatewayOutboundTrim(reqs []aiGatewayOutboundRequestSnap) []aiGatewayOutboundRequestSnap {
+	if len(reqs) == 0 {
+		return reqs
+	}
+	start := 0
+	if n := len(reqs) - aiGatewayOutboundMaxRounds; n > 0 {
+		start = n
+	}
+	total := 0
+	for _, r := range reqs[start:] {
+		total += r.bytes
+	}
+	// Always keep the last entry, so never trim past len-1.
+	for total > aiGatewayOutboundMaxBytes && start < len(reqs)-1 {
+		total -= reqs[start].bytes
+		start++
+	}
+	if start == 0 {
+		return reqs
+	}
+	return append([]aiGatewayOutboundRequestSnap(nil), reqs[start:]...)
+}
+
+// dropOutboundSnapshot releases an agent's retained outbound bodies. The map is
+// keyed by agentID and is otherwise never pruned, so without this a torn-down
+// pane kept pinning up to aiGatewayOutboundMaxBytes for the life of the process.
+func dropOutboundSnapshot(agentID string) {
+	aiGatewayOutboundSnapshots.mu.Lock()
+	delete(aiGatewayOutboundSnapshots.items, agentID)
+	delete(aiGatewayOutboundSnapshots.items, shortPaneID(agentID))
+	aiGatewayOutboundSnapshots.mu.Unlock()
 }
 
 // aiGatewayOutboundIsNewTurn reports whether this outbound request STARTS a new

@@ -47,7 +47,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.218"
+const version = "2.3.234"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -86,6 +86,13 @@ func main() {
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "reseed-memory" {
 		os.Exit(runReseedMemory(os.Args[2:]))
+	}
+	// `line` — the headless entry point: run a production line from its Line
+	// Spec. A thin client over the daemon's engine. The engine has to live in
+	// the daemon because a station runs through the LOCAL GATEWAY, and that is
+	// what buys per-station cost accounting and the audit trail.
+	if len(os.Args) >= 2 && os.Args[1] == "line" {
+		os.Exit(runLineCLI(os.Args[2:]))
 	}
 
 	// The SERVER must never route its own outbound HTTP through the per-agent
@@ -376,6 +383,7 @@ Options:
 	http.HandleFunc("/api/tmux/mouse/status", authM(handleMouseStatus))
 	http.HandleFunc("/api/tmux/ttyd/status", authM(handleTtydStatus))
 	http.HandleFunc("/api/tmux/ttyd/status/", authM(handleTtydStatus))
+	http.HandleFunc("/api/tmux/ttyd/mask/", authM(handleTtydMaskModel))
 	http.HandleFunc("/api/tmux/list", authM(handleTmuxList))
 	http.HandleFunc("/api/tmux/clear", authM(handleClear))
 	http.HandleFunc("/api/tmux/capture_pane", authM(handleCapture))
@@ -583,6 +591,14 @@ Options:
 	http.HandleFunc("/api/cicy/chat", handleCicyChat)       // loopback-only, like the AI gateway
 	http.HandleFunc("/api/dispatcher/chat", handleCicyChat) // legacy alias (kept for in-flight REPLs)
 	http.HandleFunc("/api/cicy/history", handleCicyHistory) // loopback-only, read conversation.json (replaces tmux capture)
+
+	// The Line engine. Loopback-only, like the gateway above: a line run spends
+	// real money and can drive a real browser, so it is not something a LAN peer
+	// gets to start.
+	http.HandleFunc("/api/line/run", handleLineRun)
+	http.HandleFunc("/api/line/approve", handleLineApprove)
+	http.HandleFunc("/api/line/runs", handleLineRuns)
+	http.HandleFunc("/api/line/validate", handleLineValidate)
 	http.HandleFunc("/mitm/", handleMitmproxyAuth)
 	http.HandleFunc("/mitm", handleMitmproxyAuth)
 	http.HandleFunc("/openclaw/", handleOpenClawAuth)

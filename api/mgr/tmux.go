@@ -471,10 +471,10 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if gid != "" {
-		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.use_mitm, 1), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, '')
+		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.use_mitm, 1), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, ''), COALESCE(json_extract(t.config,'$.is_kefu'), 0)
 				FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
 	} else {
-		rows, err = store.Query(`SELECT t.pane_id, t.title, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.use_mitm, 1), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, '')
+		rows, err = store.Query(`SELECT t.pane_id, t.title, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.use_mitm, 1), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, ''), COALESCE(json_extract(t.config,'$.is_kefu'), 0)
 				FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
 	}
 	if err != nil {
@@ -497,7 +497,8 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 		var useMitm sql.NullBool
 		var useProxy sql.NullBool
 		var roleTemplate sql.NullString
-		rows.Scan(&paneID, &title, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm, &useProxy, &roleTemplate)
+		var isKefu sql.NullInt64
+		rows.Scan(&paneID, &title, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm, &useProxy, &roleTemplate, &isKefu)
 		// Hide the dedicated audit-policy admin pane (w-6001) from the
 		// general agent listing — surfaced only inside the Audit Dashboard
 		// Assistant tab. Bypass with ?include_hidden=1.
@@ -516,6 +517,7 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 			"use_mitm":           useMitm.Bool,
 			"use_proxy":          useProxy.Bool,
 			"role_template":      roleTemplate.String,
+			"is_kefu":            isKefu.Int64 != 0,
 		}
 		if createdAt.Valid {
 			p["created_at"] = createdAt.String
@@ -1300,6 +1302,8 @@ func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 	removeCicySession(shortID)
 	// Drop per-agent caches keyed by this pane so they don't outlive it.
 	agentInspectorDropCachedHistory(shortID)
+	dropCurrentSnapshotCache(shortID)
+	dropOutboundSnapshot(shortID)
 	dropRuntimeEventsForSession(shortID)
 	dropAgentEventSeq(shortID)
 	for _, parentPaneID := range affectedParents {

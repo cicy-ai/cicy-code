@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { BookOpen, Braces, Brain, Check, Copy, Folder, History, LineChart, ListTodo, Loader2, Paperclip, Pencil, Settings, ShieldCheck, X } from 'lucide-react'
+import { BookOpen, Braces, Brain, Check, Columns2, Copy, Folder, History, LineChart, ListTodo, Loader2, MoreHorizontal, Paperclip, Pencil, Settings, ShieldCheck, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -10,17 +10,26 @@ import AgentAvatar from '../AgentAvatar'
 import { WebFrame } from '../WebFrame'
 import { AgentInstallOverlay } from './AgentInstallOverlay'
 import { ShellPanel } from '../terminal/ShellPanel'
+import TerminalView, { shouldUseTerminalView } from '../terminal/TerminalView'
 import CurrentHistoryView from '../chat/CurrentHistoryView'
 import DispatcherChat from '../chat/DispatcherChat'
-import TipBelow from '../ui/TipBelow'
 import { isCicyLiteAgent } from '../../lib/agentType'
+import { replAttachmentMarkdown } from '../../lib/attachmentMarkdown'
 import apiService from '../../services/api'
 
 // Header attach button for NON-cicy agents (claude/codex/opencode run in tmux).
 // Like dispatcher-chat-attach but "upload → send immediately": pick file(s) →
 // upload to the pane's asset store → send them straight into the agent's REPL
-// as standard markdown (![name](abs) / [name](abs)) via the same /api/tmux/send
-// pipe, so the agent can Read the real host path. No staging, no text box.
+// as a markdown LINK — [name](abs) — via the same /api/tmux/send pipe, so the
+// agent can Read the real host path. No staging, no text box.
+//
+// NOT the image form `![name](abs)`, even for images. This goes into a CLI
+// agent's REPL, and in Claude Code a line that STARTS with `!` is the run-a-shell
+// -command prefix. Each attachment is its own line, so `![x.png](/path)` was
+// being executed as the shell command `[x.png](/path)` — zsh reads `[...]` as a
+// glob and answers `bad pattern: [x.png](…)`. The image never reached the agent.
+// The `!` only ever bought an inline thumbnail in the web history; it cost the
+// send. The agent Reads the path either way.
 function AttachSendButton({ paneId }: { paneId: string }) {
   const { t } = useTranslation('chat')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -38,7 +47,7 @@ function AttachSendButton({ paneId }: { paneId: string }) {
         const url = String(f.url || f.URL || '')
         const abs = ref ? '/' + ref.replace(/^file:\/\//, '').replace(/^\/+/, '') : url
         if (!abs) continue
-        parts.push(file.type.startsWith('image/') ? `![${file.name}](${abs})` : `[${file.name}](${abs})`)
+        parts.push(replAttachmentMarkdown(file.name, abs))
       }
       if (parts.length) await apiService.sendCommand(paneId, parts.join('\n\n'), true)
     } catch {
@@ -72,6 +81,185 @@ function AttachSendButton({ paneId }: { paneId: string }) {
     </div>
   )
 }
+// One entry in the card's ⋯ menu.
+interface CardMenuItem {
+  id: string
+  label: string
+  icon: React.ReactNode
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void
+  badge?: number
+  active?: boolean
+}
+
+// CardMoreMenu collapses the card header's action row into a single ⋯ button.
+//
+// The badges are the reason this isn't a pure visual change: todo and audit
+// carry unread counts, and hiding a button hides its badge. So the counts are
+// SUMMED onto the trigger — otherwise "collapse the header" would quietly mean
+// "stop telling me there's something to look at".
+function CardMoreMenu({ paneId, items }: { paneId: string; items: CardMenuItem[] }) {
+  const { t } = useTranslation('workspace')
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const totalBadge = items.reduce((sum, it) => sum + (it.badge || 0), 0)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div data-id={`agent-stack-card-more-${paneId}`} ref={rootRef} className="relative">
+      <button
+        data-id={`agent-stack-card-more-button-${paneId}`}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={t('more', { defaultValue: '更多' })}
+        onClick={(event) => { event.stopPropagation(); setOpen((v) => !v) }}
+        className={`relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${open ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100'}`}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+        {totalBadge > 0 && (
+          <span
+            data-id={`agent-stack-card-more-badge-${paneId}`}
+            className="absolute -right-0.5 -top-0.5 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
+          >
+            {totalBadge > 99 ? '99+' : totalBadge}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div
+          data-id={`agent-stack-card-more-menu-${paneId}`}
+          role="menu"
+          onClick={(event) => event.stopPropagation()}
+          className="absolute right-0 top-full z-30 mt-1 min-w-[168px] overflow-hidden rounded-lg border border-white/[0.08] bg-[#141417] py-1 shadow-[0_8px_28px_rgba(0,0,0,0.6)]"
+        >
+          {items.map((it) => (
+            <button
+              key={it.id}
+              data-id={it.id}
+              type="button"
+              role="menuitem"
+              onClick={(event) => { setOpen(false); it.onClick(event) }}
+              className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] leading-none transition-colors ${it.active ? 'bg-white/[0.06] text-zinc-100' : 'text-zinc-300 hover:bg-white/[0.06] hover:text-zinc-100'}`}
+            >
+              <span className="text-zinc-500">{it.icon}</span>
+              <span className="flex-1">{it.label}</span>
+              {(it.badge || 0) > 0 && (
+                <span
+                  data-id={`${it.id}-badge`}
+                  className="inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
+                >
+                  {(it.badge as number) > 99 ? '99+' : it.badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 分屏持久化(localStorage):钉住的右侧 pane、左侧 pane、宽度比例。
+// 刷新页面后据此还原分屏。
+const SPLIT_PANE_KEY = 'agent-stack-split-pane'
+const SPLIT_LEFT_KEY = 'agent-stack-split-left'
+const SPLIT_RATIO_KEY = 'agent-stack-split-ratio'
+
+// SplitMenuButton opens the side-by-side (分屏) view: pick another agent to pin
+// on the right half, swap it, or close the split. Rendered in the card header
+// next to the ⋯ menu on every visible card, so either half can drive the split.
+function SplitMenuButton({ paneId, candidates, isSplit, onPick, onClose }: {
+  paneId: string
+  candidates: { paneId: string; title: string }[]
+  isSplit: boolean
+  onPick: (paneId: string) => void
+  onClose: () => void
+}) {
+  const { t } = useTranslation('layout')
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+  return (
+    <div data-id={`agent-stack-card-split-${paneId}`} ref={rootRef} className="relative">
+      <button
+        data-id={`agent-stack-card-split-button-${paneId}`}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={t('agentStackSplit', { defaultValue: '分屏' })}
+        aria-label={t('agentStackSplit', { defaultValue: '分屏' })}
+        onClick={(event) => { event.stopPropagation(); setOpen((v) => !v) }}
+        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${isSplit || open ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100'}`}
+      >
+        <Columns2 className="h-4 w-4" />
+      </button>
+      {open && (
+        <div
+          data-id={`agent-stack-card-split-menu-${paneId}`}
+          role="menu"
+          onClick={(event) => event.stopPropagation()}
+          className="absolute right-0 top-full z-30 mt-1 max-h-72 min-w-[190px] overflow-y-auto rounded-lg border border-white/[0.08] bg-[#141417] py-1 shadow-[0_8px_28px_rgba(0,0,0,0.6)]"
+        >
+          {isSplit ? (
+            <button
+              data-id={`agent-stack-card-split-close-${paneId}`}
+              type="button"
+              role="menuitem"
+              onClick={() => { setOpen(false); onClose() }}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] leading-none text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+            >
+              <span className="text-zinc-500"><X className="h-4 w-4" /></span>
+              <span className="flex-1">{t('agentStackSplitClose', { defaultValue: '关闭分屏' })}</span>
+            </button>
+          ) : null}
+          {candidates.length > 0 ? (
+            <div data-id={`agent-stack-card-split-menu-hint-${paneId}`} className="px-3 pb-1 pt-1.5 text-[11px] text-zinc-600">
+              {t('agentStackSplitPick', { defaultValue: '右侧显示…' })}
+            </div>
+          ) : null}
+          {candidates.map((c) => (
+            <button
+              key={c.paneId}
+              data-id={`agent-stack-card-split-pick-${c.paneId}`}
+              type="button"
+              role="menuitem"
+              onClick={() => { setOpen(false); onPick(c.paneId) }}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] leading-none text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+            >
+              <span className="min-w-0 flex-1 truncate">{c.title || c.paneId}</span>
+              <span className="shrink-0 font-mono text-[10px] text-zinc-600">{c.paneId}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // AgentCanvasItem outlived its namesake: the draggable-canvas component was
 // dead code (never rendered, tree-shaken) and was deleted 2026-06-05; the
 // item shape lives on as the stack's card model.
@@ -138,6 +326,112 @@ function AgentStack({
     setHistoryPaneId((cur) => (cur === paneId ? null : paneId))
   }, [])
 
+  // 分屏:右半固定钉住 splitPaneId,左半跟随 active agent(团队里点别的
+  // agent 只换左边)。宽度比例 + 左右两个坑位都持久化,刷新后分屏还原。
+  const [splitPaneId, setSplitPaneId] = useState<string | null>(() => {
+    try { return localStorage.getItem(SPLIT_PANE_KEY) } catch { return null }
+  })
+  const [splitRatio, setSplitRatio] = useState(() => {
+    const v = Number(localStorage.getItem(SPLIT_RATIO_KEY))
+    return Number.isFinite(v) && v >= 0.2 && v <= 0.8 ? v : 0.5
+  })
+  const [resizingSplit, setResizingSplit] = useState(false)
+  // The LEFT slot: last active pane that isn't the pinned right pane. Focusing
+  // (clicking) the right card makes it active without stealing the left slot.
+  const [leftPaneId, setLeftPaneId] = useState<string>(() => {
+    try { return localStorage.getItem(SPLIT_LEFT_KEY) || activePaneId } catch { return activePaneId }
+  })
+  useEffect(() => {
+    if (activePaneId && activePaneId !== splitPaneId) setLeftPaneId(activePaneId)
+  }, [activePaneId, splitPaneId])
+  // Persist both slots while a split is pinned. There is deliberately NO
+  // "close when the pane disappears" effect: right after a refresh the items
+  // list starts without the async-loaded bound agents, and such an effect
+  // would kill the restored split in that window. Rendering guards via
+  // splitOn instead — the split simply lies dormant until its pane exists.
+  useEffect(() => {
+    if (!splitPaneId) return
+    try { localStorage.setItem(SPLIT_PANE_KEY, splitPaneId) } catch {}
+  }, [splitPaneId])
+  useEffect(() => {
+    if (!splitPaneId || !leftPaneId) return
+    try { localStorage.setItem(SPLIT_LEFT_KEY, leftPaneId) } catch {}
+  }, [leftPaneId, splitPaneId])
+  const openSplit = useCallback((target: string) => { setSplitPaneId(target) }, [])
+  const closeSplit = useCallback(() => {
+    setSplitPaneId(null)
+    try {
+      localStorage.removeItem(SPLIT_PANE_KEY)
+      localStorage.removeItem(SPLIT_LEFT_KEY)
+    } catch {}
+  }, [])
+  const startSplitResize = useCallback((event: React.PointerEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const el = containerRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const clamp = (x: number) => Math.min(0.8, Math.max(0.2, (x - rect.left) / rect.width))
+    setResizingSplit(true)
+    const onMove = (ev: PointerEvent) => { setSplitRatio(clamp(ev.clientX)) }
+    const onUp = (ev: PointerEvent) => {
+      setResizingSplit(false)
+      try { localStorage.setItem(SPLIT_RATIO_KEY, String(clamp(ev.clientX))) } catch {}
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [])
+  // Keep the pinned pane in the terminal warm pool so closing the split
+  // doesn't cold-drop it.
+  useEffect(() => {
+    if (!splitPaneId) return
+    setWarmPanes((prev) => {
+      const next = new Map(prev)
+      next.set(splitPaneId, Date.now())
+      return next
+    })
+  }, [splitPaneId])
+
+  // 终端热池:最近激活过的 pane 在切走后保留终端挂载(WS + tmux attach 不断),
+  // 90 秒内切回 = 瞬时(旧 iframe 全常驻的速度),久不碰或超过 3 个才真正断流。
+  // 这是"全常驻(N 条流白烧)"和"切走即断(每次冷启动 ~0.5s)"之间的折中。
+  const WARM_MAX = 3
+  const WARM_TTL_MS = 90_000
+  const [warmPanes, setWarmPanes] = useState<Map<string, number>>(() => new Map())
+  useEffect(() => {
+    if (!activePaneId) return
+    setWarmPanes((prev) => {
+      const next = new Map(prev)
+      next.set(activePaneId, Date.now())
+      while (next.size > WARM_MAX) {
+        let oldestKey = ''
+        let oldestTs = Infinity
+        for (const [k, ts] of next) {
+          if (k !== activePaneId && ts < oldestTs) { oldestTs = ts; oldestKey = k }
+        }
+        if (!oldestKey) break
+        next.delete(oldestKey)
+      }
+      return next
+    })
+  }, [activePaneId])
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setWarmPanes((prev) => {
+        const now = Date.now()
+        let changed = false
+        const next = new Map(prev)
+        for (const [k, ts] of prev) {
+          if (k !== activePaneId && now - ts > WARM_TTL_MS) { next.delete(k); changed = true }
+        }
+        return changed ? next : prev
+      })
+    }, 15_000)
+    return () => window.clearInterval(id)
+  }, [activePaneId])
+
   useEffect(() => {
     const container = containerRef.current
     if (!container || !activePaneId) return
@@ -160,30 +454,74 @@ function AgentStack({
     return () => window.removeEventListener('keydown', onKey)
   }, [historyPaneId])
 
+  // Effective slots. Falling back to activePaneId covers the first render
+  // (leftPaneId not tracked yet) and a left pane that got deleted.
+  const effLeft = leftPaneId && items.some((it) => it.paneId === leftPaneId) ? leftPaneId : activePaneId
+  const splitOn = !!splitPaneId && splitPaneId !== effLeft && items.some((it) => it.paneId === splitPaneId)
+  // Both shown panes are excluded from the picker; picking always (re)pins the
+  // right half, from whichever card's menu.
+  const splitCandidates = items
+    .filter((o) => o.paneId !== effLeft && o.paneId !== splitPaneId)
+    .map((o) => ({ paneId: o.paneId, title: o.title }))
+
   return (
     <div data-id="agent-stack" ref={containerRef} className="relative h-full overflow-hidden bg-[#09090b]">
-      {items.map((item) => (
-        <AgentStackCard
-          key={item.paneId}
-          item={item}
-          active={activePaneId === item.paneId}
-          settingsShortcutActive={settingsShortcutActive}
-          headerControls={renderHeaderControls?.(item.paneId)}
-          showHeaderButtons={showHeaderButtons}
-          onOpenPaneSettings={onOpenPaneSettings}
-          onOpenPaneFiles={onOpenPaneFiles}
-          onOpenPaneSession={onOpenPaneSession}
-          onOpenPaneTodo={onOpenPaneTodo}
-          onOpenPaneMemory={onOpenPaneMemory}
-          onOpenPaneContent={onOpenPaneContent}
-          onRenamePaneTitle={onRenamePaneTitle}
-          todoCount={activePaneId === item.paneId ? todoCount : 0}
-          auditAlertCount={auditAlertCount}
-          onClick={() => onActivePaneIdChange(item.paneId)}
-          onToggleHistory={() => toggleHistory(item.paneId)}
-          historyActive={historyPaneId === item.paneId}
-        />
-      ))}
+      {items.map((item) => {
+        const isLeft = item.paneId === effLeft
+        const isRight = splitOn && item.paneId === splitPaneId
+        const visible = splitOn ? isLeft || isRight : item.paneId === activePaneId
+        const layoutStyle: React.CSSProperties = !visible
+          ? { display: 'none' }
+          : !splitOn
+            ? { display: 'flex', left: 0, right: 0, top: 0, bottom: 0 }
+            : isLeft
+              ? { display: 'flex', left: 0, top: 0, bottom: 0, width: `${splitRatio * 100}%` }
+              : { display: 'flex', left: `${splitRatio * 100}%`, right: 0, top: 0, bottom: 0, borderLeft: '1px solid rgba(255,255,255,0.08)' }
+        return (
+          <AgentStackCard
+            key={item.paneId}
+            item={item}
+            active={visible}
+            layoutStyle={layoutStyle}
+            // 分屏时只有右半保留分屏按钮(换人/关闭);左半不出现,避免两个
+            // 入口迷惑。非分屏时每张卡都有,用来开分屏。
+            splitControl={{ isSplit: splitOn, show: !splitOn || isRight, candidates: splitCandidates, onPick: openSplit, onClose: closeSplit }}
+            settingsShortcutActive={settingsShortcutActive}
+            headerControls={renderHeaderControls?.(item.paneId)}
+            showHeaderButtons={showHeaderButtons}
+            onOpenPaneSettings={onOpenPaneSettings}
+            onOpenPaneFiles={onOpenPaneFiles}
+            onOpenPaneSession={onOpenPaneSession}
+            onOpenPaneTodo={onOpenPaneTodo}
+            onOpenPaneMemory={onOpenPaneMemory}
+            onOpenPaneContent={onOpenPaneContent}
+            onRenamePaneTitle={onRenamePaneTitle}
+            todoCount={activePaneId === item.paneId ? todoCount : 0}
+            auditAlertCount={auditAlertCount}
+            onClick={() => onActivePaneIdChange(item.paneId)}
+            onToggleHistory={() => toggleHistory(item.paneId)}
+            historyActive={historyPaneId === item.paneId}
+            termWarm={warmPanes.has(item.paneId)}
+          />
+        )
+      })}
+      {splitOn ? (
+        <div
+          data-id="agent-stack-split-divider"
+          onPointerDown={startSplitResize}
+          className="group absolute bottom-0 top-0 z-20 w-2 -translate-x-1/2 cursor-col-resize"
+          style={{ left: `${splitRatio * 100}%` }}
+          aria-label="拖拽调整分屏宽度"
+        >
+          <div className="mx-auto h-full w-[2px] bg-white/10 transition-colors group-hover:bg-blue-500/60" />
+        </div>
+      ) : null}
+      {/* Drag mask over BOTH halves while resizing — without it the pointer
+          dies the moment it crosses into a terminal iframe/webview. Same trick
+          as the history-height drag inside the card. */}
+      {splitOn && resizingSplit ? (
+        <div data-id="agent-stack-split-resize-mask" className="absolute inset-0 z-40 cursor-col-resize" />
+      ) : null}
     </div>
   )
 }
@@ -199,6 +537,8 @@ export default memo(AgentStack)
 function AgentStackCard({
   item,
   active,
+  layoutStyle,
+  splitControl,
   settingsShortcutActive,
   headerControls,
   showHeaderButtons,
@@ -214,9 +554,17 @@ function AgentStackCard({
   onClick,
   onToggleHistory,
   historyActive,
+  termWarm = false,
 }: {
   item: AgentCanvasItem;
   active: boolean;
+  // Position/size within the stack container (full / left half / right half /
+  // hidden) — owned by AgentStack so the split layout lives in one place.
+  layoutStyle: React.CSSProperties;
+  // 分屏控制:候选列表 + 钉住/关闭回调。show=false 时不渲染按钮(分屏中的左半)。
+  splitControl: { isSplit: boolean; show: boolean; candidates: { paneId: string; title: string }[]; onPick: (paneId: string) => void; onClose: () => void };
+  // 热池:切走后的保活窗口内保持终端挂载(WS 不断),切回瞬时。
+  termWarm?: boolean;
   settingsShortcutActive: boolean;
   headerControls?: React.ReactNode;
   showHeaderButtons: boolean;
@@ -407,12 +755,14 @@ function AgentStackCard({
     <div
       data-id={`agent-stack-card-${item.paneId}`}
       onClick={onClick}
-      // No role="button"/tabIndex/keyboard activation: only the ACTIVE card is
-      // ever visible (display:none switching), so key-activating it was a
-      // no-op — and its Space/Enter preventDefault swallowed keystrokes from
-      // inputs inside the card (e.g. the dispatcher prompt).
-      className={`absolute inset-0 overflow-hidden text-left transition-colors ${active ? 'flex flex-col bg-[#0c0d10]' : 'hidden'}`}
-      style={{ display: active ? 'flex' : 'none' }}
+      // No role="button"/tabIndex/keyboard activation: only visible cards
+      // matter (display:none switching), so key-activating was a no-op — and
+      // its Space/Enter preventDefault swallowed keystrokes from inputs inside
+      // the card (e.g. the dispatcher prompt).
+      // Position + visibility come from layoutStyle (full width, or one half
+      // of the split) — owned by AgentStack.
+      className={`absolute overflow-hidden text-left transition-colors ${active ? 'flex-col bg-[#0c0d10]' : ''}`}
+      style={layoutStyle}
     >
       <div data-id={`agent-stack-card-header-${item.paneId}`} className="flex h-12 shrink-0 items-center border-b border-[var(--vsc-border)] px-3">
         <div data-id={`agent-stack-card-header-main-${item.paneId}`} className="flex items-center gap-3 min-w-0 flex-1">
@@ -532,124 +882,74 @@ function AgentStackCard({
             the card body now (see agent-stack-card-view-tabs below). */}
         {!globalVar?.helper_mode && (
         <div data-id={`agent-stack-card-header-right-${item.paneId}`} className="ml-2 flex items-center gap-1">
+          {showHeaderButtons && splitControl.show && (splitControl.candidates.length > 0 || splitControl.isSplit) ? (
+            <SplitMenuButton
+              paneId={item.paneId}
+              candidates={splitControl.candidates}
+              isSplit={splitControl.isSplit}
+              onPick={splitControl.onPick}
+              onClose={splitControl.onClose}
+            />
+          ) : null}
           {showHeaderButtons ? (
-          <div data-id="agent-stack-card-header-buttons" className="flex items-center gap-1">
-            {onOpenPaneTodo && (
-              <TipBelow label={t('tabTodo', { ns: 'workspace' })}>
-              <button
-                data-id="agent-stack-card-todo"
-                type="button"
-                onClick={handleOpenTodo}
-                className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                aria-label={t('tabTodo', { ns: 'workspace' })}
-              >
-                <ListTodo className="h-4 w-4" />
-                {todoCount > 0 && (
-                  <span
-                    data-id="agent-stack-card-todo-badge"
-                    className="absolute -right-0.5 -top-0.5 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
-                  >
-                    {todoCount > 99 ? '99+' : todoCount}
-                  </span>
-                )}
-              </button>
-              </TipBelow>
-            )}
-            <TipBelow label={t('tabFiles', { ns: 'workspace' })}>
-            <button
-              data-id="agent-stack-card-files"
-              type="button"
-              onClick={handleOpenFiles}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-              aria-label={t('tabFiles', { ns: 'workspace' })}
-            >
-              <Folder className="h-4 w-4" />
-            </button>
-            </TipBelow>
-            <TipBelow label={t('tabSession', { ns: 'workspace' })}>
-            <button
-              data-id="agent-stack-card-session"
-              type="button"
-              onClick={handleOpenSession}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-              aria-label={t('tabSession', { ns: 'workspace' })}
-            >
-              <LineChart className="h-4 w-4" />
-            </button>
-            </TipBelow>
-            {onOpenPaneContent && (
-              <TipBelow label={t('tabRequest', { ns: 'workspace' })}>
-              <button
-                data-id="agent-stack-card-request"
-                type="button"
-                onClick={handleOpenRequest}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                aria-label={t('tabRequest', { ns: 'workspace' })}
-              >
-                <Braces className="h-4 w-4" />
-              </button>
-              </TipBelow>
-            )}
-            {onOpenPaneContent && (
-              <TipBelow label={t('tabKnowledge', { ns: 'workspace' })}>
-              <button
-                data-id="agent-stack-card-knowledge"
-                type="button"
-                onClick={handleOpenKnowledge}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                aria-label={t('tabKnowledge', { ns: 'workspace' })}
-              >
-                <BookOpen className="h-4 w-4" />
-              </button>
-              </TipBelow>
-            )}
-            {onOpenPaneMemory && (
-              <TipBelow label={t('tabMemory', { ns: 'workspace' })}>
-              <button
-                data-id="agent-stack-card-memory"
-                type="button"
-                onClick={handleOpenMemory}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                aria-label={t('tabMemory', { ns: 'workspace' })}
-              >
-                <Brain className="h-4 w-4" />
-              </button>
-              </TipBelow>
-            )}
-            {onOpenPaneContent && (
-              <TipBelow label={t('tabAudit', { ns: 'audit', defaultValue: '审计' })}>
-              <button
-                data-id="agent-stack-card-audit"
-                type="button"
-                onClick={handleOpenAudit}
-                className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                aria-label={t('tabAudit', { ns: 'audit', defaultValue: '审计' })}
-              >
-                <ShieldCheck className="h-4 w-4" />
-                {auditAlertCount > 0 && (
-                  <span
-                    data-id="agent-stack-card-audit-badge"
-                    className="absolute -right-0.5 -top-0.5 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
-                  >
-                    {auditAlertCount > 99 ? '99+' : auditAlertCount}
-                  </span>
-                )}
-              </button>
-              </TipBelow>
-            )}
-            <TipBelow label={t('tabSettings', { ns: 'workspace' })}>
-            <button
-              data-id="agent-stack-card-settings"
-              type="button"
-              onClick={handleOpenSettings}
-              aria-pressed={settingsShortcutActive}
-              className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${settingsShortcutActive ? 'bg-white/[0.08] text-zinc-100 ring-1 ring-white/[0.12]' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100'}`}
-              aria-label={t('tabSettings', { ns: 'workspace' })}
-            >
-              <Settings className="h-4 w-4" />
-            </button>
-            </TipBelow>
-          </div>
+            // The eight icon buttons that used to sit here inline now live in a
+            // single ⋯ menu. Every data-id is preserved, so anything that
+            // addressed a button by id still finds it.
+            <CardMoreMenu
+              paneId={item.paneId}
+              items={[
+                ...(onOpenPaneTodo ? [{
+                  id: 'agent-stack-card-todo',
+                  label: t('tabTodo', { ns: 'workspace' }),
+                  icon: <ListTodo className="h-4 w-4" />,
+                  onClick: handleOpenTodo,
+                  badge: todoCount,
+                }] : []),
+                {
+                  id: 'agent-stack-card-files',
+                  label: t('tabFiles', { ns: 'workspace' }),
+                  icon: <Folder className="h-4 w-4" />,
+                  onClick: handleOpenFiles,
+                },
+                {
+                  id: 'agent-stack-card-session',
+                  label: t('tabSession', { ns: 'workspace' }),
+                  icon: <LineChart className="h-4 w-4" />,
+                  onClick: handleOpenSession,
+                },
+                ...(onOpenPaneContent ? [{
+                  id: 'agent-stack-card-request',
+                  label: t('tabRequest', { ns: 'workspace' }),
+                  icon: <Braces className="h-4 w-4" />,
+                  onClick: handleOpenRequest,
+                }, {
+                  id: 'agent-stack-card-knowledge',
+                  label: t('tabKnowledge', { ns: 'workspace' }),
+                  icon: <BookOpen className="h-4 w-4" />,
+                  onClick: handleOpenKnowledge,
+                }] : []),
+                ...(onOpenPaneMemory ? [{
+                  id: 'agent-stack-card-memory',
+                  label: t('tabMemory', { ns: 'workspace' }),
+                  icon: <Brain className="h-4 w-4" />,
+                  onClick: handleOpenMemory,
+                }] : []),
+                ...(onOpenPaneContent ? [{
+                  id: 'agent-stack-card-audit',
+                  label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }),
+                  icon: <ShieldCheck className="h-4 w-4" />,
+                  onClick: handleOpenAudit,
+                  badge: auditAlertCount,
+                }] : []),
+                {
+                  id: 'agent-stack-card-settings',
+                  label: t('tabSettings', { ns: 'workspace' }),
+                  icon: <Settings className="h-4 w-4" />,
+                  onClick: handleOpenSettings,
+                  active: settingsShortcutActive,
+                },
+              ]}
+            />
           ) : null}
         </div>
         )}
@@ -679,7 +979,7 @@ function AgentStackCard({
           // prompt bar instead of the raw REPL terminal. The input feeds the
           // same /api/tmux/send pipe, so the terminal/TG channels stay in sync.
           <DispatcherChat paneId={item.paneId} active={active} agentType={item.agentType || 'cicy'} title={item.title} />
-        ) : !item.isApiOnly && item.ttydSrc && active ? (
+        ) : !item.isApiOnly && item.ttydSrc && (active || termWarm) ? (
           // Visible-only streaming: only the ACTIVE card mounts its terminal.
           // Hidden cards used to keep N live ttyd WebSockets + tmux attaches
           // running behind display:none — pure cost plus the breeding ground
@@ -687,11 +987,19 @@ function AgentStackCard({
           // server backfills capture-pane history, so nothing is lost.
           // History toggling keeps `active` true, so the terminal stays
           // mounted underneath the history overlay (WS not torn down).
+          //
+          // TerminalView = iframe-free xterm speaking the webtty WS directly.
+          // codex agents / the `cicy.term.iframe` escape hatch keep the legacy
+          // gotty-page iframe (see shouldUseTerminalView).
           <div
             data-id={`agent-stack-card-terminal-${item.paneId}`}
             className="h-full w-full"
           >
-            <WebFrame key={`${item.paneId}-${termReloadNonce}`} src={item.ttydSrc} className="h-full w-full border-0 bg-black" title={`stack-${item.paneId}`} />
+            {shouldUseTerminalView(item.agentType) ? (
+              <TerminalView key={`${item.paneId}-${termReloadNonce}`} ttydSrc={item.ttydSrc} />
+            ) : (
+              <WebFrame key={`${item.paneId}-${termReloadNonce}`} src={item.ttydSrc} className="h-full w-full border-0 bg-black" title={`stack-${item.paneId}`} />
+            )}
           </div>
         ) : (
           <div data-id={`agent-stack-card-empty-${item.paneId}`} className="absolute inset-0 flex flex-col justify-between bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.12),transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-4">

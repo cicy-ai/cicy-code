@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import apiService from '../../services/api'
 import { useApp } from '../../contexts/AppContext'
 import { WebFrame } from '../WebFrame'
+import TerminalView, { shouldUseTerminalView } from './TerminalView'
 
 interface Win { index: string; name: string; active: boolean }
 
@@ -33,7 +34,6 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
   // bottom=1 flag tells the gotty page to hide its own floating tab bar
   // (#cp-win-float) — this panel supplies its own tabs.
   const shellSrc = `${ttydSrc.replace('/ttyd/', '/ttyd-shell/')}&bottom=1`
-  const [mounted, setMounted] = useState(false) // lazily mount WebFrame on first open, keep alive after
   const [wins, setWins] = useState<Win[]>([])
   const [height, setHeight] = useState(256) // terminal height (px), drag the bottom-left grip
   const [resizing, setResizing] = useState(false)
@@ -62,9 +62,6 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
       }
     }).catch(() => {})
   }
-  useEffect(() => {
-    if (open) setMounted(true)
-  }, [open])
   useEffect(() => {
     if (!open) { correctedRef.current = false; return }
     load()
@@ -112,12 +109,10 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
   }
 
   // Render nothing (no live grouped ttyd session) for agents whose shell was
-  // never opened. But once an agent's shell IS open, keep its dock mounted even
-  // when its card isn't active — the outer div below just hides it with
-  // display:none (same trick the main terminal uses). That preserves the ttyd
-  // WebSocket across agent switches, so flipping back shows the shell instantly
-  // instead of tearing it down and reconnecting — which was the "loading" you
-  // saw on every switch-out-and-back.
+  // never opened. Visible-only streaming: the terminal below mounts only while
+  // `open` — closing/switching away tears the WS down (clean tmux detach), and
+  // reopening reconnects with the server-side capture-pane backfill, so the
+  // old keep-alive-behind-display:none trick (and its idle streams) is gone.
   if (!isShellOpen(agentId)) return null
 
   return (
@@ -186,9 +181,13 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
-      {mounted ? (
+      {open ? (
         <div data-id={`agent-stack-shell-terminal-${agentId}`} className="relative w-full" style={{ height }}>
-          <WebFrame src={shellSrc} className="h-full w-full border-0 bg-black" title={`shell-${agentId}`} />
+          {shouldUseTerminalView() ? (
+            <TerminalView ttydSrc={shellSrc} />
+          ) : (
+            <WebFrame src={shellSrc} className="h-full w-full border-0 bg-black" title={`shell-${agentId}`} />
+          )}
         </div>
       ) : null}
       {/* Full-screen overlay during drag so the ttyd iframe doesn't swallow the

@@ -426,22 +426,30 @@ func agentHistoryCurrentMaxID(agentID string, conversationID string) (string, in
 		}
 		return "", 0, err
 	}
+	resolved, maxID := agentHistoryCurrentMaxIDFrom(current, conversationID)
+	return resolved, maxID, nil
+}
+
+// agentHistoryCurrentMaxIDFrom is agentHistoryCurrentMaxID over a snapshot the
+// caller ALREADY has. current.json is megabytes; a caller that has just parsed it
+// must not pay to read and parse it a second time (the /current-reply poll did
+// exactly that — the same file, twice, every 500 ms).
+func agentHistoryCurrentMaxIDFrom(current aiGatewayCurrentSnapshot, conversationID string) (string, int64) {
 	resolvedConversationID := strings.TrimSpace(current.ConversationID)
 	if candidate := strings.TrimSpace(conversationID); candidate != "" && candidate != resolvedConversationID {
-		return candidate, 0, nil
+		return candidate, 0
 	}
 	if current.MaxHistoryID > 0 {
-		return resolvedConversationID, int64(current.MaxHistoryID), nil
+		return resolvedConversationID, int64(current.MaxHistoryID)
 	}
-	items := agentHistoryCurrentBodyItems(current)
 	maxID := int64(0)
-	for _, item := range items {
+	for _, item := range agentHistoryCurrentBodyItems(current) {
 		itemID := int64(aiGatewayInt(item["id"]))
 		if itemID > maxID {
 			maxID = itemID
 		}
 	}
-	return resolvedConversationID, maxID, nil
+	return resolvedConversationID, maxID
 }
 
 func agentHistoryLoadCurrentItemByID(agentID string, conversationID string, historyID int64) (string, M, bool, error) {

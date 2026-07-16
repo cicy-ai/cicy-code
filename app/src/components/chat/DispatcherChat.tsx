@@ -9,6 +9,8 @@ import { isCicyLiteAgent } from '../../lib/agentType';
 import apiService from '../../services/api';
 import { MAX_ATTACHMENT_MB } from '../../config';
 import { useApp } from '../../contexts/AppContext';
+import LineStrip from '../line/LineStrip';
+import { chatAttachmentMarkdown } from '../../lib/attachmentMarkdown';
 
 /*
  * DispatcherChat — dispatcher(PM) agent 的专属卡片主体(data-id="dispatcher-chat")。
@@ -331,7 +333,11 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
       const md = done
         .map((a) => {
           const abs = a.fileRef ? '/' + a.fileRef.replace(/^file:\/\//, '').replace(/^\/+/, '') : (a.url || '');
-          return a.isImage ? `![${a.name}](${abs})` : `[${a.name}](${abs})`;
+          // cicy chat only — a headless in-process agent, no shell, no REPL, so
+          // the `!` image form is safe here (and it renders inline in the web
+          // history). The REPL-bound paths must NOT use it; see
+          // replAttachmentMarkdown.
+          return chatAttachmentMarkdown(a.name, abs, a.isImage);
         })
         .join('\n\n');
       body = (value ? value + '\n\n' : '') + md;
@@ -414,6 +420,11 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
 
   return (
     <div data-id="dispatcher-chat" className="flex h-full w-full flex-col bg-[#0c0d10]">
+      {/* The factory board sits ABOVE the chat: a station is one turn of this
+          agent, so the stations stream into the history below — the strip is what
+          turns that stream back into a line you can read (and a gate you can
+          approve). Renders nothing when this agent has never run one. */}
+      <LineStrip paneId={paneId} />
       <div data-id="dispatcher-chat-history" className="min-h-0 flex-1 overflow-hidden">
         <CurrentHistoryView key={paneId} paneId={paneId} open={active} agentType={agentType} fullWidth leftAlignQuestions />
       </div>

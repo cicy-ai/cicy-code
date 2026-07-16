@@ -152,7 +152,26 @@ func agentWorkspace(agentID string) (string, error) {
 //
 // For non-existent paths (typical on write of a new file), the parent
 // directory's real path is verified instead.
+// resolveSafePath resolves a WRITE/mutate path and confines it to the agent's
+// workspace or the user's home. Used by rename / mkdir / touch / upload / write.
+// Symlink escapes are rejected here — a mutating op must not reach outside the
+// boundary even through an in-workspace symlink.
 func resolveSafePath(workspace, requested string) (string, error) {
+	return resolveFsPath(workspace, requested, true)
+}
+
+// resolveReadPath resolves a READ / list / open path with NO workspace
+// confinement: the operator's file explorer may open anything the OS grants it
+// read access to. The gate is OS read permission alone — the file API is behind
+// the operator's auth token, and any agent living in a pane already has a shell,
+// so a read boundary here contains nothing and only breaks the explorer (e.g. a
+// symlink or an absolute path that points outside ~). Writes still go through
+// resolveSafePath and stay confined.
+func resolveReadPath(workspace, requested string) (string, error) {
+	return resolveFsPath(workspace, requested, false)
+}
+
+func resolveFsPath(workspace, requested string, confine bool) (string, error) {
 	clean := strings.TrimSpace(requested)
 	if clean == "" || clean == "." || clean == "./" {
 		return workspace, nil
@@ -171,8 +190,8 @@ func resolveSafePath(workspace, requested string) (string, error) {
 	} else {
 		joined = filepath.Clean(filepath.Join(workspace, clean))
 	}
-	// Confinement: allow anything inside the agent's own workspace OR anywhere
-	// under the user's home dir. The home allowance is what lifts the
+	// Confinement (writes only): allow anything inside the agent's own workspace
+	// OR anywhere under the user's home dir. The home allowance lifts the
 	// per-workspace editor limit (cross-agent files, projects, fork summaries);
 	// keeping the workspace allowance covers workspaces mounted outside home.
 	escapes := func(base, target string) bool {
@@ -185,7 +204,7 @@ func resolveSafePath(workspace, requested string) (string, error) {
 	outside := func(target string) bool {
 		return escapes(workspace, target) && escapes(home, target)
 	}
-	if outside(joined) {
+	if confine && outside(joined) {
 		return "", errPathOutsideWorkspace
 	}
 	real, err := filepath.EvalSymlinks(joined)
@@ -193,12 +212,14 @@ func resolveSafePath(workspace, requested string) (string, error) {
 		if !os.IsNotExist(err) {
 			return "", err
 		}
-		if realParent, perr := filepath.EvalSymlinks(filepath.Dir(joined)); perr == nil && outside(realParent) {
-			return "", errPathSymlinkEscape
+		if confine {
+			if realParent, perr := filepath.EvalSymlinks(filepath.Dir(joined)); perr == nil && outside(realParent) {
+				return "", errPathSymlinkEscape
+			}
 		}
 		return joined, nil
 	}
-	if outside(real) {
+	if confine && outside(real) {
 		return "", errPathSymlinkEscape
 	}
 	return real, nil
@@ -299,13 +320,14 @@ func fsErr(w http.ResponseWriter, err error) {
 }
 
 // fsResolve pulls agent_id from the query, looks up the agent's workspace,
-// and resolves the requested path under it.
+// and resolves the requested path under it. This is a READ resolver (search /
+// list / open) — no workspace confinement; OS read permission is the gate.
 func fsResolve(r *http.Request, requested string) (abs, workspace string, err error) {
 	workspace, err = agentWorkspace(r.URL.Query().Get("agent_id"))
 	if err != nil {
 		return "", "", err
 	}
-	abs, err = resolveSafePath(workspace, requested)
+	abs, err = resolveReadPath(workspace, requested)
 	return abs, workspace, err
 }
 
@@ -368,6 +390,17 @@ func fsRoots(agentID string) ([]fsRootInfo, error) {
 // query param selects which base path the request is anchored against.
 // Defaults to "workspace" for backward compatibility.
 func fsResolveRoot(r *http.Request, requested string) (abs, base string, err error) {
+	return fsResolveRootMode(r, requested, true)
+}
+
+// fsResolveRootRead is fsResolveRoot for READ handlers (list / read / stat /
+// download): it skips workspace confinement so the explorer can open any
+// OS-readable path. Writes must keep using fsResolveRoot.
+func fsResolveRootRead(r *http.Request, requested string) (abs, base string, err error) {
+	return fsResolveRootMode(r, requested, false)
+}
+
+func fsResolveRootMode(r *http.Request, requested string, confine bool) (abs, base string, err error) {
 	q := r.URL.Query()
 	rootID := q.Get("root")
 	if rootID == "" {
@@ -379,7 +412,7 @@ func fsResolveRoot(r *http.Request, requested string) (abs, base string, err err
 	}
 	for _, root := range roots {
 		if root.ID == rootID {
-			abs, err = resolveSafePath(root.Path, requested)
+			abs, err = resolveFsPath(root.Path, requested, confine)
 			return abs, root.Path, err
 		}
 	}
@@ -447,7 +480,7 @@ func handleFsList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	showHidden := q.Get("hidden") == "1"
 
-	abs, base, err := fsResolveRoot(r, q.Get("path"))
+	abs, base, err := fsResolveRootRead(r, q.Get("path"))
 	if err != nil {
 		fsErr(w, err)
 		return
@@ -533,7 +566,7 @@ func handleFsRead(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	abs, _, err := fsResolveRoot(r, r.URL.Query().Get("path"))
+	abs, _, err := fsResolveRootRead(r, r.URL.Query().Get("path"))
 	if err != nil {
 		fsErr(w, err)
 		return
@@ -679,7 +712,7 @@ func handleFsStat(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	abs, base, err := fsResolveRoot(r, r.URL.Query().Get("path"))
+	abs, base, err := fsResolveRootRead(r, r.URL.Query().Get("path"))
 	if err != nil {
 		fsErr(w, err)
 		return
@@ -756,7 +789,7 @@ func handleFsDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	// Root-aware: honor ?root= so downloads work for any allowed root, matching
 	// the explorer's full context menu. Defaults to the workspace root.
-	abs, _, err := fsResolveRoot(r, r.URL.Query().Get("path"))
+	abs, _, err := fsResolveRootRead(r, r.URL.Query().Get("path"))
 	if err != nil {
 		fsErr(w, err)
 		return

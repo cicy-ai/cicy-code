@@ -2453,13 +2453,18 @@ func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
-	current := agentInspectorLoadCurrent(paneID)
-	reply := agentInspectorLoadReply(paneID)
-	resolvedConversationID, maxID, err := agentHistoryCurrentMaxID(paneID, conversationID)
-	if err != nil {
+	// The web UI polls this every 500 ms per open chat. current.json is the whole
+	// outbound body — megabytes — so read and parse it ONCE, from the (mtime,size)
+	// cache. It used to be read and parsed twice per call (here, and again inside
+	// agentHistoryCurrentMaxID): 79.7% of the daemon's entire heap churn.
+	// `current` is cache-shared — READ-ONLY below.
+	current, err := aiGatewayReadCurrentSnapshotCached(paneID)
+	if err != nil && !os.IsNotExist(err) {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	reply := agentInspectorLoadReply(paneID)
+	resolvedConversationID, maxID := agentHistoryCurrentMaxIDFrom(current, conversationID)
 	if resolvedConversationID == "" {
 		resolvedConversationID = aiGatewayFirstNonEmpty(strings.TrimSpace(current.ConversationID), conversationID)
 	}

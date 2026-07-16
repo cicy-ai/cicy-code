@@ -48,5 +48,12 @@
   "forkPromptLabel": "Inherit prompt (editable)",
   "forkSendPrompt": "Send & create fork",
   "forkSending": "Creating fork…",
-  "forkCancel": "Cancel"
+  "forkCancel": "Cancel",
+  "update": "Update",
+  "tipUpdate": "Upgrade this agent's CLI to the latest version (npm install with a live log; retry switches registry). Running sessions are not interrupted; restart once to take effect.",
+  "updateTitle": "Update {{title}}",
+  "updateRunning": "Updating CLI… (running sessions are untouched)",
+  "updateDone": "Update complete. Restart to take effect.",
+  "updateRetrySwitchSource": "Retry with other registry",
+  "updateRestartNow": "Restart agent now"
 }

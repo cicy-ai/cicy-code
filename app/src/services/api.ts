@@ -294,6 +294,9 @@ const api = {
   updateQueueItem: (id: number, data: any) => http.patch(`/api/workers/queue/${id}`, data),
   deleteQueueItem: (id: number) => http.delete(`/api/workers/queue/${id}`),
 
+  // codex-on-gateway panes: the model token the terminal must mask out of the
+  // PTY stream ("" for everything else). Consumed by TerminalView.
+  getTtydMaskModel: (paneId: string) => http.get(`/api/tmux/ttyd/mask/${paneId}`),
   listWindows: (session: string) => http.get(`/api/tmux/windows?session=${session}`),
   createWindow: (session: string, name?: string) => http.post('/api/tmux/windows', { session, name }),
   renameWindow: (session: string, index: string, name: string) => http.patch('/api/tmux/windows', { session, index, name }),

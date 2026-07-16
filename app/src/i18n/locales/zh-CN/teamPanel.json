@@ -48,5 +48,12 @@
   "forkPromptLabel": "继承提示词（可编辑）",
   "forkSendPrompt": "发送并创建分身",
   "forkSending": "正在创建分身…",
-  "forkCancel": "取消"
+  "forkCancel": "取消",
+  "update": "更新",
+  "tipUpdate": "升级该 agent 的 CLI 到最新版(npm 安装,流式日志,失败可换源重试)。更新过程不打断正在运行的会话,完成后一键重启生效。",
+  "updateTitle": "更新 {{title}}",
+  "updateRunning": "正在更新 CLI…(不打断正在运行的会话)",
+  "updateDone": "更新完成。重启后新版本生效。",
+  "updateRetrySwitchSource": "换源重试",
+  "updateRestartNow": "重启 Agent 生效"
 }

@@ -48,5 +48,12 @@
   "forkPromptLabel": "Invite d'héritage (modifiable)",
   "forkSendPrompt": "Envoyer et créer le clone",
   "forkSending": "Création du clone…",
-  "forkCancel": "Annuler"
+  "forkCancel": "Annuler",
+  "update": "Mettre à jour",
+  "tipUpdate": "Met à niveau le CLI de cet agent (npm, journal en direct ; en cas d'échec, réessai avec un autre registre). Les sessions en cours ne sont pas interrompues ; redémarrez pour appliquer.",
+  "updateTitle": "Mettre à jour {{title}}",
+  "updateRunning": "Mise à jour du CLI… (sessions en cours intactes)",
+  "updateDone": "Mise à jour terminée. Redémarrez pour appliquer.",
+  "updateRetrySwitchSource": "Réessayer avec un autre registre",
+  "updateRestartNow": "Redémarrer l'agent"
 }

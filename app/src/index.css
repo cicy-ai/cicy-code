@@ -94,6 +94,27 @@
 }
 
 @layer utilities {
+  /* TerminalView(无 iframe 终端):切换/重连期间旧画面压暗保留,新连接首帧
+     到达才 reset+写入 —— 无空窗防闪。xterm 容器撑满宿主。 */
+  .cicy-term-switching {
+    filter: brightness(0.45) saturate(0.6);
+    transition: filter 0.12s;
+  }
+  .cicy-term-host .xterm {
+    height: 100%;
+  }
+  /* 与 gotty 页一致的细滚动条(VS Code 式 scrollable-element 与旧 viewport 两种结构都盖住) */
+  .cicy-term-host .xterm .xterm-scrollable-element > .scrollbar.vertical,
+  .cicy-term-host .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
+    width: 5px !important;
+  }
+  .cicy-term-host .xterm-viewport::-webkit-scrollbar {
+    width: 5px;
+  }
+  .cicy-term-host .xterm-viewport::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 3px;
+  }
   .hide-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;

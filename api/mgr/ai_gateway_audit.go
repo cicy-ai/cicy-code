@@ -1542,11 +1542,27 @@ func aiGatewayHistoryDir(agentID string) string {
 }
 
 func aiGatewayWriteJSONAtomic(path string, value interface{}) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
 	body, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
+		return err
+	}
+	return aiGatewayWriteBytesAtomic(path, body)
+}
+
+// aiGatewayWriteJSONAtomicCompact is aiGatewayWriteJSONAtomic without the
+// pretty-printing. For a snapshot that is rewritten in full on every gateway
+// round-trip and is only ever machine-read, the indentation is pure CPU and
+// allocation on the hot path.
+func aiGatewayWriteJSONAtomicCompact(path string, value interface{}) error {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return aiGatewayWriteBytesAtomic(path, body)
+}
+
+func aiGatewayWriteBytesAtomic(path string, body []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 	body = append(body, '\n')

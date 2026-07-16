@@ -121,21 +121,58 @@ func TestResolveSafePath_NewFileUnderExistingParent(t *testing.T) {
 	}
 }
 
-func TestResolveSafePath_RejectsSymlinkEscape(t *testing.T) {
+// The read resolver opens anything the OS grants read access to — no workspace
+// confinement. Both a literal absolute path outside ~ and a symlink pointing
+// out resolve successfully. The gate is OS permission, not a path boundary:
+// the file API is behind the operator's token and any pane agent has a shell,
+// so a read boundary contains nothing and only breaks the explorer.
+func TestResolveReadPath_OpensOutsideBoundary(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on windows")
 	}
-	outside := t.TempDir()
+	outside := evalTempDir(t)
 	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("s"), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	ws := evalTempDir(t)
+
+	// (a) a literal absolute path outside the workspace/home opens for read.
+	direct := filepath.Join(outside, "secret.txt")
+	if got, err := resolveReadPath(ws, direct); err != nil || got != direct {
+		t.Fatalf("resolveReadPath(%q) = (%q, %v), want (%q, nil)", direct, got, err, direct)
+	}
+
+	// (b) an in-workspace symlink pointing outside is followed for read.
+	link := filepath.Join(ws, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if got, err := resolveReadPath(ws, "escape/secret.txt"); err != nil || got != direct {
+		t.Fatalf("symlink read = (%q, %v), want (%q, nil)", got, err, direct)
+	}
+}
+
+// Writes stay confined. The SAME outside paths that reads open are rejected by
+// the write resolver — a literal outside path AND an in-workspace symlink that
+// resolves out. This is the read/write split: read follows, write does not.
+func TestResolveSafePath_WritesStayConfined(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on windows")
+	}
+	outside := evalTempDir(t)
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("s"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	ws := evalTempDir(t)
+	if _, err := resolveSafePath(ws, filepath.Join(outside, "secret.txt")); err == nil {
+		t.Fatalf("write to literal outside path should be rejected")
+	}
 	link := filepath.Join(ws, "escape")
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
 	if _, err := resolveSafePath(ws, "escape/secret.txt"); err == nil {
-		t.Fatalf("expected symlink escape rejection")
+		t.Fatalf("write through in-workspace symlink to outside should be rejected")
 	}
 }
 
