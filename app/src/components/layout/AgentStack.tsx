@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { BookOpen, Braces, Brain, Check, Columns2, Copy, Folder, History, LineChart, ListTodo, Loader2, MoreHorizontal, Paperclip, Pencil, Settings, ShieldCheck, X } from 'lucide-react'
+import { BookOpen, Braces, Brain, Check, Columns2, Copy, CornerDownLeft, Folder, History, Keyboard, LineChart, ListTodo, Loader2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -130,9 +130,12 @@ function CardMoreMenu({ paneId, items }: { paneId: string; items: CardMenuItem[]
       >
         <MoreHorizontal className="h-4 w-4" />
         {totalBadge > 0 && (
+          // Stays INSIDE the trigger and ignores the pointer: a 2-3 digit count
+          // used to spill left over the neighboring icon button (split) and
+          // swallow its clicks.
           <span
             data-id={`agent-stack-card-more-badge-${paneId}`}
-            className="absolute -right-0.5 -top-0.5 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
+            className="pointer-events-none absolute right-0 top-0 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
           >
             {totalBadge > 99 ? '99+' : totalBadge}
           </span>
@@ -169,6 +172,132 @@ function CardMoreMenu({ paneId, items }: { paneId: string; items: CardMenuItem[]
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// TermPromptArea — the composing bar the old gotty page had (its #cp-prompt,
+// opened by the #cp-kbd keyboard button). TerminalView dropped the iframe and
+// lost it; this is the React replacement, docked above the card's bottom
+// controls. Same behavior contract as the gotty bar:
+//   - Enter sends / Shift+Enter newline, toggleable — the preference is stored
+//     under the SAME localStorage key the gotty page used ("cicy_enter_to_send"),
+//     so an existing user's choice carries over.
+//   - Enter on an EMPTY input sends a literal Enter key to the pane — that is
+//     how you confirm a TUI prompt (claude's y/n, pagers) without touching the
+//     terminal itself.
+//   - IME-safe: composing Enter never sends (same just-composed window trick as
+//     the title editor above).
+//   - Draft persists per pane, so switching cards doesn't eat a half-typed prompt.
+function TermPromptArea({ paneId }: { paneId: string }) {
+  const { t } = useTranslation('layout')
+  const draftKey = `cicy_prompt_draft_${paneId}`
+  const [value, setValue] = useState<string>(() => {
+    try { return localStorage.getItem(draftKey) || '' } catch { return '' }
+  })
+  const [enterToSend, setEnterToSend] = useState<boolean>(() => {
+    try { return localStorage.getItem('cicy_enter_to_send') !== 'false' } catch { return true }
+  })
+  const [sending, setSending] = useState(false)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const composingRef = useRef(false)
+  const justComposedRef = useRef(false)
+  const justComposedTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+    return () => {
+      if (justComposedTimerRef.current !== null) window.clearTimeout(justComposedTimerRef.current)
+    }
+  }, [])
+
+  const setDraft = useCallback((next: string) => {
+    setValue(next)
+    try { localStorage.setItem(draftKey, next) } catch {}
+  }, [draftKey])
+
+  const toggleEnterMode = useCallback(() => {
+    setEnterToSend((prev) => {
+      try { localStorage.setItem('cicy_enter_to_send', String(!prev)) } catch {}
+      return !prev
+    })
+  }, [])
+
+  const doSend = useCallback(async () => {
+    const text = value
+    if (!text.trim()) return
+    setSending(true)
+    setDraft('')
+    try {
+      await apiService.sendCommand(paneId, text, true)
+    } catch {
+      // Network failure: put the prompt back instead of eating it.
+      setDraft(text)
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('promptSendFailed', { defaultValue: '发送失败' }) }))
+    } finally {
+      setSending(false)
+      inputRef.current?.focus()
+    }
+  }, [value, paneId, setDraft, t])
+
+  const onKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.ctrlKey || event.metaKey) return
+    if ((event.nativeEvent as any).isComposing || composingRef.current || justComposedRef.current) return
+    const shouldSend = enterToSend ? !event.shiftKey : event.shiftKey
+    if (!shouldSend) return
+    event.preventDefault()
+    if (value.trim()) {
+      void doSend()
+    } else {
+      // Empty input + Enter = press Enter IN the terminal (confirm a TUI prompt).
+      apiService.sendKeys(paneId, 'Enter').catch(() => {})
+    }
+  }, [enterToSend, value, doSend, paneId])
+
+  return (
+    <div
+      data-id={`agent-stack-card-prompt-${paneId}`}
+      onClick={(event) => event.stopPropagation()}
+      className="flex shrink-0 items-end gap-2 border-t border-white/[0.06] bg-[#0e0f12] px-3 py-2"
+    >
+      <textarea
+        ref={inputRef}
+        data-id={`agent-stack-card-prompt-input-${paneId}`}
+        value={value}
+        rows={Math.min(6, Math.max(1, value.split('\n').length))}
+        placeholder={t('promptAreaPlaceholder', { defaultValue: '输入发给终端的内容,回车发送;空输入回车 = 按一次 Enter' })}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={onKeyDown}
+        onCompositionStart={() => { composingRef.current = true }}
+        onCompositionEnd={() => {
+          composingRef.current = false
+          justComposedRef.current = true
+          if (justComposedTimerRef.current !== null) window.clearTimeout(justComposedTimerRef.current)
+          justComposedTimerRef.current = window.setTimeout(() => { justComposedRef.current = false }, 80)
+        }}
+        className="min-h-[32px] flex-1 resize-none rounded-lg border border-white/[0.08] bg-black/40 px-3 py-1.5 text-[13px] leading-5 text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500/40 focus:outline-none"
+      />
+      <button
+        type="button"
+        data-id={`agent-stack-card-prompt-enter-mode-${paneId}`}
+        onClick={toggleEnterMode}
+        title={enterToSend ? t('promptEnterSends', { defaultValue: '回车=发送(点击改为换行)' }) : t('promptEnterNewline', { defaultValue: '回车=换行(点击改为发送)' })}
+        className={`inline-flex h-8 items-center gap-1 rounded-md px-2 text-[11px] leading-none transition-colors ${enterToSend ? 'bg-white/[0.08] text-zinc-200' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200'}`}
+      >
+        <CornerDownLeft className="h-3.5 w-3.5" />
+        {enterToSend ? t('promptModeSend', { defaultValue: '发送' }) : t('promptModeNewline', { defaultValue: '换行' })}
+      </button>
+      <button
+        type="button"
+        data-id={`agent-stack-card-prompt-send-${paneId}`}
+        disabled={sending}
+        onClick={() => void doSend()}
+        aria-label={t('promptSend', { defaultValue: '发送' })}
+        title={t('promptSend', { defaultValue: '发送' })}
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-indigo-500/80 text-white transition-colors hover:bg-indigo-500 disabled:opacity-50"
+      >
+        {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-4 w-4" />}
+      </button>
     </div>
   )
 }
@@ -316,14 +445,19 @@ function AgentStack({
   const containerRef = useRef<HTMLDivElement>(null)
   useTranslation('layout')
 
-  // History is OWNED here (not per-card) so it follows the active agent:
-  // switching agents switches the history shown. `historyPaneId` = the agent
-  // whose history is open (null = closed). It renders INLINE inside that card's
-  // body, layered over the WebFrame (no modal/portal) — see AgentStackCard.
-  const [historyPaneId, setHistoryPaneId] = useState<string | null>(null)
+  // History is OWNED here (not per-card) so it can follow the active agent.
+  // A SET, not a single id: in split view both halves may have their history
+  // open at once, independently. Each renders INLINE inside its card's body,
+  // layered over the WebFrame (no modal/portal) — see AgentStackCard.
+  const [historyPaneIds, setHistoryPaneIds] = useState<Set<string>>(() => new Set())
 
   const toggleHistory = useCallback((paneId: string) => {
-    setHistoryPaneId((cur) => (cur === paneId ? null : paneId))
+    setHistoryPaneIds((cur) => {
+      const next = new Set(cur)
+      if (next.has(paneId)) next.delete(paneId)
+      else next.add(paneId)
+      return next
+    })
   }, [])
 
   // 分屏:右半固定钉住 splitPaneId,左半跟随 active agent(团队里点别的
@@ -357,6 +491,10 @@ function AgentStack({
     if (!splitPaneId || !leftPaneId) return
     try { localStorage.setItem(SPLIT_LEFT_KEY, leftPaneId) } catch {}
   }, [leftPaneId, splitPaneId])
+  // Effective slots. Falling back to activePaneId covers the first render
+  // (leftPaneId not tracked yet) and a left pane that got deleted.
+  const effLeft = leftPaneId && items.some((it) => it.paneId === leftPaneId) ? leftPaneId : activePaneId
+  const splitOn = !!splitPaneId && splitPaneId !== effLeft && items.some((it) => it.paneId === splitPaneId)
   const openSplit = useCallback((target: string) => { setSplitPaneId(target) }, [])
   const closeSplit = useCallback(() => {
     setSplitPaneId(null)
@@ -440,24 +578,32 @@ function AgentStack({
     target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
   }, [activePaneId])
 
-  // Switching the active agent switches the open history to follow that agent.
+  // Keep open histories tied to what's on screen. Panes that scrolled out of
+  // view drop out of the set; in SINGLE mode an open-but-now-hidden history
+  // moves to the newly active card (the classic "history follows the agent").
+  // In split view both halves are visible, so each half's history stays put —
+  // the old "always follow active" snapped it to the focused half the moment
+  // it opened, and dragged it across when you clicked the other half.
   useEffect(() => {
-    if (!historyPaneId || !activePaneId || historyPaneId === activePaneId) return
-    setHistoryPaneId(activePaneId)
-  }, [activePaneId, historyPaneId])
+    if (!activePaneId) return
+    setHistoryPaneIds((prev) => {
+      if (prev.size === 0) return prev
+      const visible = splitOn ? [effLeft, splitPaneId] : [activePaneId]
+      const kept = new Set([...prev].filter((p) => p && visible.includes(p)))
+      if (kept.size === prev.size) return prev
+      if (!splitOn && kept.size === 0) kept.add(activePaneId)
+      return kept
+    })
+  }, [activePaneId, splitOn, effLeft, splitPaneId])
 
-  // Esc closes the history.
+  // Esc closes every open history (predictable over guessing which half).
   useEffect(() => {
-    if (!historyPaneId) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setHistoryPaneId(null) }
+    if (historyPaneIds.size === 0) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setHistoryPaneIds(new Set()) }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [historyPaneId])
+  }, [historyPaneIds])
 
-  // Effective slots. Falling back to activePaneId covers the first render
-  // (leftPaneId not tracked yet) and a left pane that got deleted.
-  const effLeft = leftPaneId && items.some((it) => it.paneId === leftPaneId) ? leftPaneId : activePaneId
-  const splitOn = !!splitPaneId && splitPaneId !== effLeft && items.some((it) => it.paneId === splitPaneId)
   // Both shown panes are excluded from the picker; picking always (re)pins the
   // right half, from whichever card's menu.
   const splitCandidates = items
@@ -500,7 +646,7 @@ function AgentStack({
             auditAlertCount={auditAlertCount}
             onClick={() => onActivePaneIdChange(item.paneId)}
             onToggleHistory={() => toggleHistory(item.paneId)}
-            historyActive={historyPaneId === item.paneId}
+            historyActive={historyPaneIds.has(item.paneId)}
             termWarm={warmPanes.has(item.paneId)}
           />
         )
@@ -602,6 +748,20 @@ function AgentStackCard({
   const composingRef = useRef(false)
   const justComposedRef = useRef(false)
   const justComposedTimerRef = useRef<number | null>(null)
+
+  // The gotty-style prompt bar (see TermPromptArea). Docked, never an overlay —
+  // it takes its own flex row so the terminal shrinks instead of being covered.
+  // Open state persists per pane, like the gotty page's bar effectively did.
+  const [promptOpen, setPromptOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem(`cicy_prompt_open_${item.paneId}`) === 'true' } catch { return false }
+  })
+  const togglePrompt = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    setPromptOpen((prev) => {
+      try { localStorage.setItem(`cicy_prompt_open_${item.paneId}`, String(!prev)) } catch {}
+      return !prev
+    })
+  }, [item.paneId])
 
   // Inline history height as a fraction of the card body (default 2/3 → bottom
   // 1/3 keeps the live tmux visible). Draggable via the bottom-edge handle.
@@ -882,6 +1042,21 @@ function AgentStackCard({
             the card body now (see agent-stack-card-view-tabs below). */}
         {!globalVar?.helper_mode && (
         <div data-id={`agent-stack-card-header-right-${item.paneId}`} className="ml-2 flex items-center gap-1">
+          {/* 历史入口:与分屏 ib 同排。沿用原悬浮按钮的 data-id。仅非 cicy
+              (cicy 卡本身就是 chat/历史优先,没有终端⇄历史切换)。 */}
+          {showHeaderButtons && !isCicyLiteAgent(item.agentType) ? (
+            <button
+              type="button"
+              data-id={`agent-stack-card-view-tab-history-${item.paneId}`}
+              onClick={(event) => { event.stopPropagation(); onToggleHistory() }}
+              title={t('agentStackViewSession', { defaultValue: '历史' })}
+              aria-label={t('agentStackViewSession', { defaultValue: '历史' })}
+              aria-pressed={historyActive}
+              className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${historyActive ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100'}`}
+            >
+              <History className="h-4 w-4" />
+            </button>
+          ) : null}
           {showHeaderButtons && splitControl.show && (splitControl.candidates.length > 0 || splitControl.isSplit) ? (
             <SplitMenuButton
               paneId={item.paneId}
@@ -955,25 +1130,9 @@ function AgentStackCard({
         )}
       </div>
       <div data-id={`agent-stack-card-body-${item.paneId}`} className="relative min-h-0 flex-1 bg-black">
-        {/* Terminal ⇄ History view switch — floats at the top-center of the body
-            for every non-cicy card (cicy/dispatcher cards are chat-first already). */}
-        {!isCicyLiteAgent(item.agentType) && (
-          <div
-            data-id={`agent-stack-card-view-tabs-${item.paneId}`}
-            className="hidden absolute left-1/2 top-2 z-20 -translate-x-1/2"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              data-id={`agent-stack-card-view-tab-history-${item.paneId}`}
-              type="button"
-              onClick={(event) => { event.stopPropagation(); onToggleHistory() }}
-              className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-black/70 px-3 py-1 text-[11px] font-semibold leading-none tracking-[0.02em] text-zinc-300 shadow-[0_2px_8px_rgba(0,0,0,0.45)] backdrop-blur transition-colors hover:bg-white/[0.08] hover:text-zinc-100"
-            >
-              <History className="h-3 w-3" />
-              {t('agentStackViewSession', { defaultValue: '历史' })}
-            </button>
-          </div>
-        )}
+        {/* The Terminal ⇄ History switch used to float at the body's top-center;
+            it was hidden on request and later MOVED to the header-right icon row
+            (next to the split button), keeping its data-id. */}
         {isCicyLiteAgent(item.agentType) ? (
           // Dispatcher (PM) agents are chat-first on the web: history view +
           // prompt bar instead of the raw REPL terminal. The input feeds the
@@ -1068,12 +1227,32 @@ function AgentStackCard({
             agent's body, self-hides when the CLI is present. */}
         <AgentInstallOverlay paneId={item.paneId} agentType={item.agentType} active={active} onReloadTerminal={() => setTermReloadNonce((n) => n + 1)} />
       </div>
+      {/* gotty 小键盘的替代:停靠在底部控制条上方的一行,不覆盖终端
+          (flex 布局里 body 自动收缩,xterm 自适应重排)。 */}
+      {promptOpen && !isCicyLiteAgent(item.agentType) ? (
+        <TermPromptArea paneId={item.paneId} />
+      ) : null}
       {(headerControls || !isCicyLiteAgent(item.agentType)) ? (
         <div data-id={`agent-stack-card-header-controls-${item.paneId}`} className="flex h-10 shrink-0 items-center gap-3 border-t border-white/[0.04] bg-black/[0.18] px-3">
           {/* attach sits immediately left of the model picker (headerControls'
               first item) as one group; the spacer inside headerControls pushes
               the remaining controls to the right. */}
-          {!isCicyLiteAgent(item.agentType) ? <AttachSendButton paneId={item.paneId} /> : null}
+          {!isCicyLiteAgent(item.agentType) ? (
+            <>
+              <AttachSendButton paneId={item.paneId} />
+              <button
+                type="button"
+                data-id={`agent-stack-card-kbd-button-${item.paneId}`}
+                onClick={togglePrompt}
+                title={t('agentStackPromptArea', { defaultValue: '提示词输入区' })}
+                aria-label={t('agentStackPromptArea', { defaultValue: '提示词输入区' })}
+                aria-pressed={promptOpen}
+                className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors ${promptOpen ? 'bg-white/[0.1] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.08] hover:text-zinc-200'}`}
+              >
+                <Keyboard className="h-4 w-4" />
+              </button>
+            </>
+          ) : null}
           {headerControls}
         </div>
       ) : null}
