@@ -4,6 +4,8 @@
 
 ![cicy-code](assets/home.png)
 
+[📸 更多截图 →](https://docs.cicy-ai.com/guide/screenshots)
+
 ## 快速开始
 
 ```bash

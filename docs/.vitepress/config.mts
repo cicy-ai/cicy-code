@@ -79,6 +79,7 @@ export default defineConfig({
         { text: '介绍', link: '/guide/introduction' },
         { text: '下载与安装', link: '/guide/download' },
         { text: '快速开始', link: '/guide/getting-started' },
+        { text: '界面截图', link: '/guide/screenshots' },
       ]},
       { text: '核心概念', collapsed: false, items: [
         { text: 'Agent 与 Pane', link: '/concepts/agent-pane' },
