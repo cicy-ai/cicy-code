@@ -169,8 +169,58 @@ func claudeInstallCmd() string {
 	return npmGlobalInstallCmd("@anthropic-ai/claude-code@latest")
 }
 
+// codexPinnedVersion is the Codex CLI version cicy installs. Bump DELIBERATELY
+// after verifying a release — we do NOT track "latest", so a bad upstream
+// release can't silently roll out to every new box.
+const codexPinnedVersion = "0.144.5"
+
+// codexInstallCmd installs the Codex CLI from its GitHub Release native binary
+// (pinned), bypassing npm entirely.
+//
+// Why not npm: `@openai/codex` is only a thin JS launcher; the real (~50MB) rust
+// binary ships as a platform-specific OPTIONAL dep (`@openai/codex-<os>-<arch>`)
+// that OpenAI repeatedly fails to publish to the npm registry (the tarball 404s —
+// a recurring upstream bug across versions and platforms). A plain
+// `npm install -g @openai/codex` then lands ONLY the launcher, and codex dies at
+// startup with "Missing optional dependency @openai/codex-<os>-<arch>". The
+// GitHub Release always carries the full per-platform standalone binary, so we
+// fetch that directly and drop it at ~/.npm-global/bin/codex (a dir detectCli and
+// boot.sh already scan). GitHub-unreachable (CN) hosts fall back to the same gh
+// mirrors the ffmpeg/hermes installers use (ghproxy.net, gh-proxy.com).
+//
+// POSIX-sh clean (no bashisms): runs under both `sh -c` (boot install, dash) and
+// `bash -lc` (the on-demand install overlay in cli_install.go).
 func codexInstallCmd() string {
-	return npmGlobalInstallCmd("@openai/codex@latest")
+	return `set -e
+VER=` + codexPinnedVersion + `
+dest="$HOME/.npm-global/bin"
+mkdir -p "$dest"
+os=$(uname -s); arch=$(uname -m)
+case "$os" in
+  Linux)  plat="unknown-linux-musl" ;;
+  Darwin) plat="apple-darwin" ;;
+  *) echo "codex: unsupported OS $os"; exit 1 ;;
+esac
+case "$arch" in
+  x86_64|amd64)  cpu="x86_64" ;;
+  aarch64|arm64) cpu="aarch64" ;;
+  *) echo "codex: unsupported arch $arch"; exit 1 ;;
+esac
+asset="codex-${cpu}-${plat}.tar.gz"
+direct="https://github.com/openai/codex/releases/download/rust-v${VER}/${asset}"
+tmp=$(mktemp -d)
+ok=""
+for url in "$direct" "https://ghproxy.net/${direct}" "https://gh-proxy.com/${direct}"; do
+  echo "codex: downloading ${url}"
+  if curl -fL --connect-timeout 8 --max-time 600 -o "$tmp/codex.tgz" "$url"; then ok=1; break; fi
+  echo "codex: source failed, trying next mirror"
+done
+if [ -z "$ok" ]; then echo "codex: all download sources failed"; rm -rf "$tmp"; exit 1; fi
+tar xzf "$tmp/codex.tgz" -C "$tmp"
+mv -f "$tmp/codex-${cpu}-${plat}" "$dest/codex"
+chmod +x "$dest/codex"
+rm -rf "$tmp"
+"$dest/codex" --version`
 }
 
 // geminiInstallCmd installs Google's gemini-cli. Gemini is no longer PRESET as a
@@ -1077,6 +1127,8 @@ func checkEnv() {
 	ensureDefaultProviders()
 	applyGatewayEnvToDefaultProviders()
 	ensureClientProviders()
+	ensureVisionProvider()
+	ensureVoiceProvider()
 	setupAIConfigs()
 
 	var count int

@@ -2009,15 +2009,28 @@ out = sys.argv[1]
 wanted = json.loads(sys.argv[2]) if len(sys.argv) > 2 else []
 try:
     pats = [
+        # cicy installs codex as a standalone GitHub-release binary here (see
+        # codexInstallCmd); the rust binary embeds the same models.json.
+        os.path.expanduser("~/.npm-global/bin/codex"),
+        os.path.expanduser("~/.local/bin/codex"),
+        # legacy npm layouts (launcher + platform optional-dep vendor binary).
         os.path.expanduser("~/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-*/vendor/*/bin/codex"),
+        os.path.expanduser("~/.npm-global/lib/node_modules/@openai/codex/vendor/*/bin/codex"),
     ]
-    bins = []
+    cands = []
     for p in pats:
-        bins = glob.glob(p)
-        if bins:
-            break
-    data = open(bins[0], "rb").read()
-    m = data.find(b'"models": [')
+        cands.extend(glob.glob(p))
+    data = None; m = -1
+    for b in cands:
+        try:
+            d = open(b, "rb").read()
+        except Exception:
+            continue
+        j = d.find(b'"models": [')
+        if j != -1:
+            data = d; m = j; break
+    if data is None:
+        raise Exception("no codex binary with embedded models.json")
     start = data.rfind(b"{", 0, m)
     depth = 0; i = start; instr = False; esc = False; end = None
     while i < len(data):

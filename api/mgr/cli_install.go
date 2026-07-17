@@ -53,7 +53,9 @@ func cliInstallSpecFor(agentType string) (cliInstallSpec, bool) {
 	case "claude":
 		return cliInstallSpec{"claude", "claude", "Claude Code", "@anthropic-ai/claude-code@latest", ""}, true
 	case "codex":
-		return cliInstallSpec{"codex", "codex", "Codex", "@openai/codex@latest", ""}, true
+		// Codex installs from its GitHub Release native binary, NOT npm — see
+		// codexInstallCmd (the npm platform pkg is unreliably published / 404s).
+		return cliInstallSpec{"codex", "codex", "Codex", "", codexInstallCmd()}, true
 	case "gemini":
 		return cliInstallSpec{"gemini", "gemini", "Gemini CLI", "@google/gemini-cli@latest", ""}, true
 	case "opencode":

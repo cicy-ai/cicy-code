@@ -57,7 +57,21 @@ curl -fsSL https://cli.kiro.dev/install | bash
 # ── AI CLI 工具 ──
 sudo npm install -g @anthropic-ai/claude-cli || true    # claude
 sudo npm install -g opencode-ai || true                  # opencode
-sudo npm install -g @openai/codex || true                # codex
+# codex: install the GitHub-release native binary, NOT npm — @openai/codex's
+# platform binary is an optional npm dep OpenAI keeps failing to publish (404),
+# so `npm i -g @openai/codex` lands only the broken JS launcher. Pin + mirror
+# fallback (keep CODEX_VER in sync with codexPinnedVersion in api/mgr/setup.go).
+CODEX_VER=0.144.5
+CODEX_DIRECT="https://github.com/openai/codex/releases/download/rust-v${CODEX_VER}/codex-x86_64-unknown-linux-musl.tar.gz"
+for u in "$CODEX_DIRECT" "https://ghproxy.net/${CODEX_DIRECT}" "https://gh-proxy.com/${CODEX_DIRECT}"; do
+  if curl -fL --connect-timeout 8 --max-time 600 -o /tmp/codex.tgz "$u"; then
+    tar xzf /tmp/codex.tgz -C /tmp \
+      && sudo mv -f /tmp/codex-x86_64-unknown-linux-musl /usr/local/bin/codex \
+      && sudo chmod +x /usr/local/bin/codex
+    break
+  fi
+done
+rm -f /tmp/codex.tgz || true             # codex
 # sudo npm install -g @google/gemini-cli || true         # gemini (待稳定)
 # sudo npm install -g @githubnext/github-copilot-cli || true  # copilot (待稳定)
 
