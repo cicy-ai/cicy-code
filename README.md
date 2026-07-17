@@ -4,6 +4,18 @@
 
 ![cicy-code](assets/home.png)
 
+## 快速开始
+
+```bash
+npx cicy-code
+```
+
+首次运行会拉取匹配当前平台的单二进制(~30 MB),然后在本机起服务 —— 浏览器打开 <http://127.0.0.1:8008> 即可进入工作区。从零到指挥一支 agent 团队,大约 5 分钟。
+
+- 🚀 [快速开始](https://docs.cicy-ai.com/guide/getting-started) — 5 分钟从安装到第一支 agent 团队
+- 📥 [下载与安装](https://docs.cicy-ai.com/guide/download) — 各平台安装包与 Docker 方式
+- 🌐 [cicy-ai.com](https://cicy-ai.com) — 官网与云端版
+
 ## 仓库结构
 
 ```text
