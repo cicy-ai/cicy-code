@@ -118,28 +118,101 @@ function paneIdFromTtydSrc(ttydSrc: string): string {
   return m ? decodeURIComponent(m[1]) : ''
 }
 
-// Replaces every full occurrence of the mask token with spaces, holding back a
-// trailing partial (suffix of the chunk that is a prefix of the token) so a
+// Replaces every full occurrence of each mask token with spaces, holding back a
+// trailing partial (suffix of the chunk that is a prefix of a token) so a
 // token split across two WS frames still gets masked. Port of the gotty page's
 // applyModelMask (api/js/src/xterm.ts).
-function makeModelMasker(): { setToken: (t: string) => void; apply: (chunk: string) => string } {
-  let token = ''
+// Besides the model name itself, the startup banner's "model:" label and
+// "/model to change" hint are masked too — with just the name blanked the line
+// showed a bare label and an ugly gap; blanking all three renders it as an
+// empty line (the opacity-0 look) without shifting the TUI layout.
+// Matching must tolerate ANSI escapes BETWEEN the token's characters: codex
+// prints "/model" cyan and " to change" dim (SGR), and the bottom status row
+// interleaves cursor/erase CSI sequences between its styled segments — so a
+// phrase never occurs contiguously in the raw stream. Only visible characters
+// become spaces; every escape sequence is kept in place so styling state and
+// cursor positioning are unchanged (zero-width, so the layout doesn't shift).
+const ANSI_BETWEEN = '(?:\\x1b\\[[0-9;:?]*[ -/]?[@-~])*'
+const ANSI_OR_CHAR = /(\x1b\[[0-9;:?]*[ -/]?[@-~])|[\s\S]/g
+function maskPhraseRe(token: string): RegExp {
+  // A space in the token is flexible: the TUI may render a gap as literal
+  // spaces, more than one of them, or a cursor-forward escape (which
+  // ANSI_BETWEEN already tolerates) — so match zero or more literal spaces.
+  const escaped = token.split('').map((c) => (c === ' ' ? '[ ]*' : c.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')))
+  return new RegExp(escaped.join(ANSI_BETWEEN), 'g')
+}
+function makeModelMasker(): { setToken: (t: string, paneId?: string) => void; apply: (chunk: string) => string } {
+  let tokens: string[] = []
+  let res: RegExp[] = []
   let carry = ''
   return {
-    setToken(t: string) { token = (t || '').trim(); carry = '' },
+    setToken(t: string, paneId?: string) {
+      const model = (t || '').trim()
+      tokens = model ? [model, 'model:', '/model to change'] : []
+      // The bottom status row ("default · ~/cicy-ai/workers/<pane>") is blanked
+      // as ONE phrase: the banner's legitimate "directory: ~/…" line shares the
+      // path string, so a standalone path token would blank it there too. The
+      // cwd is the default worker-workspace convention; a custom-workspace pane
+      // won't match and simply keeps its row.
+      if (model && paneId) tokens.push(`default · ~/cicy-ai/workers/${paneId}`)
+      res = tokens.map(maskPhraseRe)
+      carry = ''
+    },
     apply(chunk: string): string {
-      if (!token) return chunk
+      if (!tokens.length) return chunk
+      // debug tap (masked panes only — unmasked panes would flood the ring):
+      // localStorage `cicy.maskdebug`=1 keeps the last raw chunks on
+      // window.__maskChunks so a real stream can be replayed against the regex
+      // offline (the ONLY way to diagnose a mask miss — tmux capture-pane
+      // reconstructs different bytes than the live PTY stream).
+      try {
+        if (window.localStorage.getItem('cicy.maskdebug') === '1') {
+          const w = window as any
+          w.__maskChunks = w.__maskChunks || []
+          w.__maskChunks.push(chunk)
+          if (w.__maskChunks.length > 400) w.__maskChunks.shift()
+        }
+      } catch { /* storage blocked */ }
       let s = carry + chunk
       carry = ''
-      if (s.indexOf(token) !== -1) s = s.split(token).join(' '.repeat(token.length))
-      const max = Math.min(token.length - 1, s.length)
-      for (let k = max; k > 0; k--) {
-        if (token.startsWith(s.slice(s.length - k))) {
-          carry = s.slice(s.length - k)
-          s = s.slice(0, s.length - k)
-          break
+      for (const re of res) {
+        re.lastIndex = 0
+        s = s.replace(re, (m) => m.replace(ANSI_OR_CHAR, (ch, esc) => (esc ? esc : ' ')))
+      }
+      // Escape-aware cross-chunk carry: a phrase split over two WS frames must
+      // still mask, and the frame boundary can fall between styled segments or
+      // even MID-escape — so (1) a trailing incomplete escape sequence is
+      // withheld outright, and (2) the held-back tail is judged by its VISIBLE
+      // characters (escapes skipped) but carried as raw bytes, escapes
+      // included. Fuzzed against every split point of the real codex status
+      // row — all masked.
+      const pe = /\x1b(?:\[[0-9;:?]*[ -/]?)?$/.exec(s)
+      let pending = ''
+      if (pe) {
+        pending = s.slice(pe.index)
+        s = s.slice(0, pe.index)
+      }
+      const maxV = Math.max(...tokens.map((tok) => tok.length)) - 1
+      const it = /(\x1b\[[0-9;:?]*[ -/]?[@-~])|[\s\S]/g
+      const vis: Array<{ ch: string; idx: number }> = []
+      let m: RegExpExecArray | null
+      while ((m = it.exec(s))) {
+        if (m[1]) continue
+        vis.push({ ch: m[0], idx: m.index })
+        if (vis.length > maxV) vis.shift()
+      }
+      outer: for (let k = vis.length; k > 0; k--) {
+        const tailArr = vis.slice(vis.length - k)
+        const visSuffix = tailArr.map((v) => v.ch).join('')
+        for (const tok of tokens) {
+          if (tok.length > k && tok.startsWith(visSuffix)) {
+            carry = s.slice(tailArr[0].idx)
+            s = s.slice(0, tailArr[0].idx)
+            break outer
+          }
         }
       }
+      carry += pending
       return s
     },
   }
@@ -232,9 +305,36 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
     // forget — non-codex panes get "" and the masker stays a no-op.
     const masker = makeModelMasker()
     const paneId = paneIdFromTtydSrc(ttydSrc)
+    // Belt-and-braces DOM layer on top of the stream masker: the DOM renderer
+    // is in use here, so any row that still shows a leaked fragment (a stream
+    // repaint the masker's chunk heuristics missed) gets `visibility:hidden`.
+    // Row divs are recycled on scroll, so visibility is recomputed on every
+    // mutation — a row un-hides itself the moment its content stops matching.
+    let rowHideObserver: MutationObserver | null = null
+    const startRowHider = (model: string) => {
+      const rowsEl = host.querySelector('.xterm-rows')
+      if (!rowsEl) return
+      const applyRowHide = () => {
+        for (const r of rowsEl.children) {
+          const t = r.textContent || ''
+          const leak = (model !== '' && t.includes(model))
+            || /^\s*default\s*·/.test(t)
+            || t.includes('/model to change')
+            || /^\s*│?\s*model:/.test(t)
+          ;(r as HTMLElement).style.visibility = leak ? 'hidden' : ''
+        }
+      }
+      rowHideObserver = new MutationObserver(applyRowHide)
+      rowHideObserver.observe(rowsEl, { subtree: true, childList: true, characterData: true })
+      applyRowHide()
+    }
     if (paneId) {
       apiService.getTtydMaskModel(paneId)
-        .then((resp: any) => masker.setToken(String(resp?.data?.model || '')))
+        .then((resp: any) => {
+          const model = String(resp?.data?.model || '')
+          masker.setToken(model, paneId)
+          if (model) startRowHider(model)
+        })
         .catch(() => { /* no mask */ })
     }
 
@@ -398,6 +498,7 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
 
     return () => {
       disposed = true
+      if (rowHideObserver) rowHideObserver.disconnect()
       window.clearInterval(pingTimer)
       window.clearTimeout(reconnectTimer)
       window.clearTimeout(selTimer)

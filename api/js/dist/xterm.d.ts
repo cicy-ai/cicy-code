@@ -9,7 +9,8 @@ export declare class Xterm {
     term: XtermTerminal;
     fitAddon: FitAddon;
     decoder: lib.UTF8Decoder;
-    private modelMask;
+    private maskTokens;
+    private maskRes;
     private maskCarry;
     message: HTMLElement;
     messageTimeout: number;

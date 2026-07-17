@@ -47,7 +47,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.238"
+const version = "2.3.260"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -563,6 +563,10 @@ Options:
 	// AI providers (global.json)
 	http.HandleFunc("/api/providers", wa(handleProviders))
 	http.HandleFunc("/api/providers/", wa(handleProvidersSub))
+	// 豆包语音 (protocol:"voice") test surface — TTS synth/stream + the ASR
+	// websocket bridge (the browser cannot set X-Api-* headers itself).
+	http.HandleFunc("/api/voice/tts", wa(handleVoiceTTS))
+	http.HandleFunc("/api/voice/asr", handleVoiceASR)
 
 	// IM platforms (Telegram / WeChat)
 	http.HandleFunc("/api/im/", wa(handleIMRoute))

@@ -66,7 +66,9 @@ const defaultProvidersBlockJSON = `{
     "cicy": "opencodeZen",
     "codex": "opencodeZen",
     "opencode": "opencodeZen",
-    "stt": "groqStt"
+    "stt": "groqStt",
+    "vision": "zhipuVision",
+    "voice": "doubaoVoice"
   },
   "items": [
     {
@@ -113,9 +115,133 @@ const defaultProvidersBlockJSON = `{
       "models": ["whisper-large-v3", "whisper-large-v3-turbo"],
       "protocol": "openai",
       "url": "https://api.groq.com/openai/v1"
+    },
+    {
+      "key": "zhipuVision",
+      "name": "智谱 GLM Vision",
+      "apiKey": "",
+      "defaultModel": "glm-4v-flash",
+      "models": ["glm-4v-flash", "glm-4.6v-flash", "glm-4.1v-thinking-flash"],
+      "protocol": "openai",
+      "url": "https://open.bigmodel.cn/api/paas/v4"
+    },
+    {
+      "key": "doubaoVoice",
+      "name": "豆包语音",
+      "apiKey": "",
+      "defaultModel": "zh_female_shuangkuaisisi_uranus_bigtts",
+      "models": ["zh_female_shuangkuaisisi_uranus_bigtts", "zh_female_tianmeixiaoyuan_uranus_bigtts", "zh_female_cancan_uranus_bigtts", "zh_female_xiaohe_uranus_bigtts", "zh_female_vv_uranus_bigtts", "zh_male_taocheng_uranus_bigtts"],
+      "protocol": "voice",
+      "url": "https://openspeech.bytedance.com"
     }
   ]
 }`
+
+// zhipuVisionProviderJSON is the seeded 智谱 vision provider — the vision
+// counterpart of groqStt: a keyless dedicated-capability provider, routed via
+// providers.default["vision"], flagged by the sidebar's red needs-key badge
+// until the operator fills the key. Vision-only model list on purpose; these
+// VLM ids are excluded from the chat model pickers the same way whisper is
+// (app/src/lib/modelTag.tsx isChatModel/isVisionModel).
+const zhipuVisionProviderJSON = `{
+  "key": "zhipuVision",
+  "name": "智谱 GLM Vision",
+  "apiKey": "",
+  "defaultModel": "glm-4v-flash",
+  "models": ["glm-4v-flash", "glm-4.6v-flash", "glm-4.1v-thinking-flash"],
+  "protocol": "openai",
+  "url": "https://open.bigmodel.cn/api/paas/v4"
+}`
+
+// doubaoVoiceProviderJSON is the seeded 豆包语音 (volcengine speech) provider —
+// protocol "voice": NOT chat-completions. TTS is POST
+// /api/v3/tts/unidirectional and ASR a binary websocket, both under this base
+// with X-Api-Key auth (the UUID key from console.volcengine.com 语音技术 — a
+// different key family from 方舟 Ark's "ark-*"). "models" holds the SPEAKER
+// (音色) ids, not model ids — that is what an operator picks between. The
+// runtime speech client is a separate concern; this entry gives the config
+// surface: key storage, the voice route, the needs-key badge and the console
+// link in the dashboard.
+const doubaoVoiceProviderJSON = `{
+  "key": "doubaoVoice",
+  "name": "豆包语音",
+  "apiKey": "",
+  "defaultModel": "zh_female_shuangkuaisisi_uranus_bigtts",
+  "models": ["zh_female_shuangkuaisisi_uranus_bigtts", "zh_female_tianmeixiaoyuan_uranus_bigtts", "zh_female_cancan_uranus_bigtts", "zh_female_xiaohe_uranus_bigtts", "zh_female_vv_uranus_bigtts", "zh_male_taocheng_uranus_bigtts"],
+  "protocol": "voice",
+  "url": "https://openspeech.bytedance.com"
+}`
+
+// ensureVoiceProvider backfills the 豆包语音 provider + "voice" route on
+// EXISTING installs — same shape as ensureVisionProvider below. An operator
+// with an openspeech.bytedance.com provider under any key keeps theirs as the
+// route target; an operator-set voice route is never touched.
+func ensureVoiceProvider() {
+	ensureCapabilityProvider("voice", "openspeech.bytedance.com", "doubaoVoice", doubaoVoiceProviderJSON)
+}
+
+// ensureVisionProvider backfills the vision provider + route on EXISTING
+// installs — ensureDefaultProviders never touches a config that already has
+// providers, so without this only fresh installs would get it.
+func ensureVisionProvider() {
+	ensureCapabilityProvider("vision", "bigmodel.cn", "zhipuVision", zhipuVisionProviderJSON)
+}
+
+// ensureCapabilityProvider backfills a capability provider (vision / voice) +
+// its providers.default[route] on existing installs. If the operator already
+// has a provider whose url contains hostMarker (under any key), that provider
+// becomes the route target instead of seeding a keyless duplicate next to it;
+// an operator-set route is authoritative and never touched. Idempotent; runs
+// on every boot after ensureClientProviders.
+func ensureCapabilityProvider(route, hostMarker, seedKey, seedJSON string) {
+	providersFileMu.Lock()
+	defer providersFileMu.Unlock()
+
+	cfg := readGlobalJSONConfig()
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	block := providersBlock(cfg)
+	defaults, _ := block["default"].(map[string]any)
+	if defaults == nil {
+		defaults = map[string]any{}
+	}
+	if s, _ := defaults[route].(string); strings.TrimSpace(s) != "" {
+		return
+	}
+
+	items := providersItemsSlice(block)
+	target := ""
+	for _, it := range items {
+		m, _ := it.(map[string]any)
+		if m == nil {
+			continue
+		}
+		url, _ := m["url"].(string)
+		if strings.EqualFold(providerItemKey(it), seedKey) || strings.Contains(strings.ToLower(url), hostMarker) {
+			target = providerItemKey(it)
+			break
+		}
+	}
+	if target == "" {
+		var def map[string]any
+		if err := json.Unmarshal([]byte(seedJSON), &def); err != nil {
+			log.Printf("[setup] %s provider seed parse failed: %v", route, err)
+			return
+		}
+		items = append(items, def)
+		block["items"] = items
+		target = seedKey
+	}
+	defaults[route] = target
+	block["default"] = defaults
+	cfg["providers"] = block
+	if err := writeGlobalJSONConfig(cfg); err != nil {
+		log.Printf("[setup] %s provider write failed: %v", route, err)
+		return
+	}
+	log.Printf("[setup] ensured %s provider (route %s → %s)", route, route, target)
+}
 
 // ensureDefaultProviders seeds the CiCyAi default providers into global.json on
 // the first boot of an instance that has no providers.items yet. Idempotent and
@@ -484,8 +610,12 @@ func sanitizeProviderDraft(raw map[string]any, existing map[string]any) (map[str
 	}
 	protocol, _ := out["protocol"].(string)
 	protocol = strings.ToLower(strings.TrimSpace(protocol))
-	if protocol != "openai" && protocol != "anthropic" {
-		return nil, fmt.Errorf("provider protocol must be openai or anthropic")
+	// "voice" marks a speech provider (TTS/ASR, e.g. 豆包语音/volcengine) whose
+	// endpoints speak a vendor protocol, not chat completions — it is never a
+	// chat routing target, but it must remain editable through this API (key
+	// fill, voice list) like any other provider.
+	if protocol != "openai" && protocol != "anthropic" && protocol != "voice" {
+		return nil, fmt.Errorf("provider protocol must be openai, anthropic or voice")
 	}
 	out["protocol"] = protocol
 
@@ -914,8 +1044,15 @@ func handleProviderTest(w http.ResponseWriter, r *http.Request) {
 		J(w, providerTestResult{OK: false, Detail: "provider url is empty"})
 		return
 	}
+	if protocol == "voice" {
+		// A voice provider's connection test is a real minimal TTS synth (one
+		// character) with the selected speaker — the vendor's error (wrong key,
+		// resource not enabled) comes back verbatim.
+		J(w, doubaoTTSProbe(url, apiKey, model))
+		return
+	}
 	if protocol != "openai" && protocol != "anthropic" {
-		J(w, providerTestResult{OK: false, Detail: "provider protocol must be openai or anthropic"})
+		J(w, providerTestResult{OK: false, Detail: "provider protocol must be openai, anthropic or voice"})
 		return
 	}
 

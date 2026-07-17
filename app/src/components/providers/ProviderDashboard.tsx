@@ -14,6 +14,7 @@ import AgentAvatar from '../AgentAvatar';
 import { useDialogs } from '../ui/Modal';
 import { Spinner } from '../ui/Spinner';
 import Select, { type SelectOption } from '../ui/Select';
+import VoiceTestPanel from './VoiceTestPanel';
 
 /* ───────────────────────── types ───────────────────────── */
 
@@ -50,7 +51,9 @@ type Tab = 'routing' | 'providers';
 
 /* ───────────────────────── constants ───────────────────────── */
 
-const PROTOCOLS = ['openai', 'anthropic'] as const;
+// "voice" = speech provider (TTS/ASR, vendor protocol — e.g. 豆包语音/volcengine);
+// never a chat routing target, but editable here like any provider.
+const PROTOCOLS = ['openai', 'anthropic', 'voice'] as const;
 const KNOWN_SLOTS = ['claude', 'cicy', 'codex', 'opencode'];
 const PROTECTED_PROVIDER_KEYS = new Set(['defaultAnthropic', 'defaultOpenAi']);
 const SLOT_LABELS: Record<string, string> = { claude: 'Claude', cicy: 'CiCy', codex: 'Codex', opencode: 'OpenCode' };
@@ -359,6 +362,13 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
         setSelectedKey(null);
         loadEditor(null);
       }
+      else if (!isNew && !selectedKey && payload.items.length) {
+        // Never open onto an empty right pane: auto-select the provider that
+        // needs attention (keyless — the one the sidebar's red badge is
+        // about), falling back to the first in the list.
+        const attention = payload.items.find((p) => !String(p.apiKey || '').trim());
+        setSelectedKey((attention || payload.items[0]).key);
+      }
       return payload;
     } catch (err) {
       toast(i18n.t('loadProvidersFailed', { ns: 'provider', err: errText(err) }));
@@ -379,7 +389,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
   /* ---- dirty ---- */
   const snapshot = useMemo(() => editorSnapshot(draft, modelsText, mappingRows), [draft, modelsText, mappingRows]);
   const dirty = snapshot !== baseline;
-  const canSave = (isNew || dirty) && !!draft.key.trim() && !!(draft.url || '').trim() && (proto(draft) === 'openai' || proto(draft) === 'anthropic');
+  const canSave = (isNew || dirty) && !!draft.key.trim() && !!(draft.url || '').trim() && (PROTOCOLS as readonly string[]).includes(proto(draft));
 
   const patchDraft = (patch: Partial<ProviderRecord>) => setDraft((prev) => ({ ...prev, ...patch }));
 
@@ -407,7 +417,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
     const payload = buildPayload();
     if (!payload.key) { toast(i18n.t('errorKeyRequired', { ns: 'provider' })); return; }
     if (!payload.url) { toast(i18n.t('errorUrlRequired', { ns: 'provider' })); return; }
-    if (payload.protocol !== 'openai' && payload.protocol !== 'anthropic') { toast(i18n.t('errorProtocolRequired', { ns: 'provider' })); return; }
+    if (!(PROTOCOLS as readonly string[]).includes(payload.protocol)) { toast(i18n.t('errorProtocolRequired', { ns: 'provider' })); return; }
     setSaving(true);
     try {
       if (isNew) { await apiService.createProvider(payload); toast(i18n.t('providerCreated', { ns: 'provider', key: payload.key })); setIsNew(false); }
@@ -654,11 +664,16 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
   /* ───────────── RIGHT PANEL DETAIL ───────────── */
   const providerHost = (draft.url || '').toLowerCase();
   const isGroq = providerHost.includes('groq.com');
+  const isZhipu = providerHost.includes('bigmodel.cn');
   const apiKeyConsole = providerHost.includes('deepseek.com')
     ? { href: 'https://platform.deepseek.com/api_keys', label: t('getDeepSeekApiKey', { defaultValue: '前往 DeepSeek 开放平台获取 API Key' }) }
     : isGroq
       ? { href: 'https://console.groq.com/keys', label: t('getGroqApiKey', { defaultValue: '前往 Groq Console 获取 API Key' }) }
-      : null;
+      : providerHost.includes('bigmodel.cn')
+        ? { href: 'https://open.bigmodel.cn/usercenter/apikeys', label: t('getZhipuApiKey', { defaultValue: '前往智谱开放平台获取 API Key' }) }
+        : providerHost.includes('openspeech.bytedance.com') || providerHost.includes('volcengine.com')
+          ? { href: 'https://console.volcengine.com/speech/new/setting/apikeys?projectName=default', label: t('getVolcVoiceApiKey', { defaultValue: '前往火山引擎「语音技术」获取 API Key(UUID 格式,非方舟 ark- key)' }) }
+          : null;
   const detailUI = (
     <div data-id="providers-detail-root" className="absolute inset-0 z-30 flex flex-col bg-[#0A0A0A] text-zinc-300 overflow-hidden">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-white/[0.06] px-4">
@@ -674,6 +689,16 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
               <Mic size={15} className="mt-0.5 shrink-0 text-sky-300" />
               <span>{t('groqSttBanner', { defaultValue: 'Groq 提供 Whisper 模型,可用于语音转文字(STT)。把 whisper 模型加入下方「可用模型」,并在路由里把 STT 指向本供应商即可。' })}</span>
             </div>
+          )}
+          {isZhipu && (
+            <div data-id="provider-detail-zhipu-vision-banner" className="mb-5 flex items-start gap-2.5 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.07] px-3.5 py-3 text-[12px] leading-relaxed text-cyan-200">
+              <Eye size={15} className="mt-0.5 shrink-0 text-cyan-300" />
+              <span>{t('zhipuVisionBanner', { defaultValue: '智谱提供免费的视觉模型(glm-4v-flash),用于图像理解。把视觉模型加入下方「可用模型」,并在路由里把 vision 指向本供应商即可;视觉模型不会出现在聊天模型选择器里。' })}</span>
+            </div>
+          )}
+          {/* 语音 provider 的每块能力(合成/流式/识别/克隆)都在这里可测。 */}
+          {proto(draft) === 'voice' && !isNew && (
+            <VoiceTestPanel providerKey={draft.key} models={parseModels(modelsText)} defaultModel={draft.defaultModel || ''} />
           )}
           <div className="space-y-7">
             {/* Basic info */}
@@ -789,7 +814,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
                     {/* type="text" so Chrome's password manager never prompts to save */}
                     <input
                       data-id="provider-detail-apikey-input" type="text" name="cicy-provider-api-key" value={draft.apiKey || ''} onChange={(e) => patchDraft({ apiKey: e.target.value })}
-                      className={cn(INPUT, 'pr-9 font-mono')} placeholder="sk-…" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                      className={cn(INPUT, 'pr-9 font-mono')} placeholder={proto(draft) === 'voice' ? 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' : 'sk-…'} autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
                       data-1p-ignore data-lpignore="true"
                       style={showApiKey ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)}
                     />

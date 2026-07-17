@@ -30,17 +30,34 @@ function normalize(raw: string): string {
     .replace(/[-@:](\d{6,8}|latest|preview|exp|beta)$/, '');
 }
 
+// isVisionModel reports whether a model id is a DEDICATED vision (VLM) variant —
+// glm-4v*, qwen-vl, *vision* ids that exist for image understanding and ride the
+// "vision" provider route (providers.default.vision, seeded → 智谱 GLM Vision).
+// General chat models that merely ACCEPT images (claude, gpt-4o) carry no vision
+// marker in their id and are not matched.
+export function isVisionModel(raw?: string): boolean {
+  const m = String(raw || '').toLowerCase();
+  if (!m) return false;
+  if (/^(?:[a-z0-9.+-]+\/)?glm-[\d.]+v(-|$)/.test(m)) return true; // glm-4v-flash, glm-4.6v-flash, glm-4.1v-thinking-flash
+  if (m.includes('vision')) return true;                           // llama-3.2-90b-vision-*, qwen-vision
+  if (/(^|[/_-])vl([/_-]|$)/.test(m)) return true;                 // qwen2-vl-72b, deepseek-vl
+  return false;
+}
+
 // isChatModel reports whether a model id can drive a chat completion — i.e.
-// whether it belongs in a chat model picker. Speech-to-text (whisper) and
-// text-to-speech (orpheus / *-tts) models can't chat, so they're excluded.
-// Used to filter provider model lists in the chat model pickers (NOT in the
-// provider dashboard or stt routing, which must still see every model).
+// whether it belongs in a chat model picker. Speech-to-text (whisper),
+// text-to-speech (orpheus / *-tts) and dedicated vision (VLM) models are
+// excluded — the latter belong to the vision route, same treatment as whisper
+// for stt. Used to filter provider model lists in the chat model pickers (NOT
+// in the provider dashboard or stt/vision routing, which must see every model).
 export function isChatModel(raw?: string): boolean {
   const m = String(raw || '').toLowerCase();
   if (!m) return false;
   if (m.includes('whisper')) return false;            // STT (Groq whisper-large-v3*, openai whisper-1)
   if (m.includes('orpheus')) return false;            // TTS (canopylabs/orpheus-*)
   if (/(^|[/_-])tts([/_-]|$)/.test(m)) return false;  // generic text-to-speech ids
+  if (m.includes('bigtts')) return false;             // 豆包语音音色 ids (zh_female_*_uranus_bigtts)
+  if (isVisionModel(m)) return false;                 // dedicated VLMs → vision route
   return true;
 }
 

@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { SlidersHorizontal, Globe, MessageCircle, Route, Boxes, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle, Paperclip } from 'lucide-react';
+import { SlidersHorizontal, Globe, MessageCircle, Route, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle, Paperclip } from 'lucide-react';
 import { useApp } from '../../contexts/AppContext';
 import ProviderDashboard from '../providers/ProviderDashboard';
 import IMDashboard from '../im/IMDashboard';
@@ -305,7 +305,9 @@ export default function SettingsModal({
     { id: 'language', label: t('settingsNavLanguage', { defaultValue: '语言' }), icon: <Globe className="h-4 w-4" /> },
     { id: 'im', label: t('settingsNavIM', { defaultValue: 'IM 通知' }), icon: <MessageCircle className="h-4 w-4" /> },
     { id: 'routing', label: t('settingsNavRouting', { defaultValue: 'Agent 路由' }), icon: <Route className="h-4 w-4" /> },
-    { id: 'providers', label: t('settingsNavProviders', { defaultValue: 'LLM 供应商' }), icon: <Boxes className="h-4 w-4" /> },
+    // 'providers' nav removed — LLM 供应商 has its own full-screen entry from the
+    // sidebar (btn-providers → ProvidersModal). The section itself still exists
+    // for deep-links; it's just no longer a tab here.
   ];
   const isProviderSection = section === 'routing' || section === 'providers';
 

@@ -162,6 +162,30 @@ func imSafeAttachmentFilename(name, kind string) string {
 }
 
 
+// imAESEncryptECB AES-128-ECB + PKCS7 加密— the inverse of imAESDecryptECB,
+// for the SEND direction (upload a local file to the WeChat CDN encrypted).
+func imAESEncryptECB(plain, key []byte) ([]byte, error) {
+	if len(key) != 16 {
+		return nil, fmt.Errorf("AES-128 key must be 16 bytes, got %d", len(key))
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	// PKCS7 pad to a full block (a full extra block when already aligned).
+	pad := 16 - (len(plain) % 16)
+	padded := make([]byte, len(plain)+pad)
+	copy(padded, plain)
+	for i := len(plain); i < len(padded); i++ {
+		padded[i] = byte(pad)
+	}
+	out := make([]byte, len(padded))
+	for i := 0; i < len(padded); i += 16 {
+		block.Encrypt(out[i:i+16], padded[i:i+16])
+	}
+	return out, nil
+}
+
 // imAESDecryptECB AES-128-ECB + PKCS7 解密。给 transport agnostic — 任何 IM bot
 // 协议（WeChat ilink-bot 等）下载下来的加密媒体只要传入 16-byte raw key 都能解密。
 func imAESDecryptECB(ciphertext, key []byte) ([]byte, error) {

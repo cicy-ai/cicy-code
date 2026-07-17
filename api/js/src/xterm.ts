@@ -11,6 +11,16 @@ import { openExternalLinkWithConfirm, openFileReferencePopup } from "./link_conf
 import { normalizeTerminalText } from "./webtty";
 import { scanLinksOnText, type LinkKind } from "./link_detect";
 
+// Model-mask helpers: a token's characters may be separated by SGR color
+// escapes in the stream, so the match regex tolerates them between chars; the
+// replace callback blanks visible chars only and keeps every escape in place.
+const SGR_BETWEEN = "(?:\\x1b\\[[0-9;:?]*m)*";
+const SGR_OR_CHAR = /(\x1b\[[0-9;:?]*m)|[\s\S]/g;
+function maskPhraseRe(token: string): RegExp {
+    const escaped = token.split("").map((c) => c.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"));
+    return new RegExp(escaped.join(SGR_BETWEEN), "g");
+}
+
 const deviceAttributesRe = /\x1b\[\??[\d;]*c/g;
 const mouseClickRe = /\x1b\[<(?:0|1|2|3|32|33|34|35);\d+;\d+[Mm]|\x1b\[M[\s\S]{3}/g;
 
@@ -108,10 +118,13 @@ export class Xterm {
     // Model-name masking: codex (on the local gateway) prints its model in a
     // bottom status row that leaks the gateway's upstream model. The old hide was
     // CSS over the DOM rows, which the WebGL renderer broke (canvas → no rows).
-    // Instead we mask the model string in the data stream before it reaches xterm
+    // Instead we mask the strings in the data stream before they reach xterm
     // — renderer-agnostic. Set via setModelMask(); maskCarry holds a trailing
-    // partial that may complete into the token across a chunk boundary.
-    private modelMask: string = "";
+    // partial that may complete into a token across a chunk boundary. Alongside
+    // the model name, the banner's "model:" label and "/model to change" hint
+    // are masked so the whole line renders empty instead of leaving a gap.
+    private maskTokens: string[] = [];
+    private maskRes: RegExp[] = [];
     private maskCarry: string = "";
 
     message: HTMLElement;
@@ -503,30 +516,42 @@ export class Xterm {
         return { columns: this.term.cols, rows: this.term.rows };
     }
 
-    // setModelMask sets the model-name token to blank out of the stream (equal-
-    // length spaces, so codex's status-row layout doesn't shift). "" disables it.
+    // setModelMask sets the tokens to blank out of the stream (equal-length
+    // spaces, so codex's status-row layout doesn't shift). "" disables it.
     setModelMask(model: string): void {
-        this.modelMask = (model || "").trim();
+        const t = (model || "").trim();
+        this.maskTokens = t ? [t, "model:", "/model to change"] : [];
+        this.maskRes = this.maskTokens.map(maskPhraseRe);
         this.maskCarry = "";
     }
 
-    // applyModelMask replaces every full occurrence of the token with spaces, and
-    // holds back a trailing partial (a suffix of the chunk that is a prefix of the
-    // token) so a token split across two WS frames still gets masked.
+    // applyModelMask blanks every full occurrence of each token, and holds back
+    // a trailing partial (a suffix of the chunk that is a prefix of a token) so
+    // a token split across two WS frames still gets masked. Matching tolerates
+    // SGR color escapes BETWEEN a token's characters (codex prints "/model"
+    // cyan and " to change" dim, so the phrase is never contiguous in the raw
+    // stream); only visible characters become spaces — the escapes stay in
+    // place, zero-width, so neither layout nor later styling state shifts.
     private applyModelMask(chunk: string): string {
-        const t = this.modelMask;
-        if (!t) return chunk;
+        const tokens = this.maskTokens;
+        if (!tokens.length) return chunk;
         let s = this.maskCarry + chunk;
         this.maskCarry = "";
-        if (s.indexOf(t) !== -1) {
-            s = s.split(t).join(" ".repeat(t.length));
+        for (const re of this.maskRes) {
+            re.lastIndex = 0;
+            s = s.replace(re, (m) => m.replace(SGR_OR_CHAR, (ch, esc) => (esc ? esc : " ")));
         }
-        const max = Math.min(t.length - 1, s.length);
-        for (let k = max; k > 0; k--) {
-            if (t.startsWith(s.slice(s.length - k))) {
-                this.maskCarry = s.slice(s.length - k);
-                s = s.slice(0, s.length - k);
-                break;
+        let maxTok = 0;
+        for (const t of tokens) maxTok = Math.max(maxTok, t.length);
+        const max = Math.min(maxTok - 1, s.length);
+        outer: for (let k = max; k > 0; k--) {
+            const tail = s.slice(s.length - k);
+            for (const t of tokens) {
+                if (t.length > k && t.startsWith(tail)) {
+                    this.maskCarry = tail;
+                    s = s.slice(0, s.length - k);
+                    break outer;
+                }
             }
         }
         return s;

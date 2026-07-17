@@ -100,7 +100,7 @@ function BindPicker({ panes, busyPanes, value, onPick, onClose, z = 10010 }: {
       onClick={onClose}
     >
       <div
-        className="flex max-h-[72vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#161618] shadow-2xl shadow-black/70"
+        className="flex h-[72vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#161618] shadow-2xl shadow-black/70"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
@@ -145,11 +145,12 @@ function BindPicker({ panes, busyPanes, value, onPick, onClose, z = 10010 }: {
                 <span className="grid w-4 shrink-0 place-items-center">{isSel && <Check size={13} className="text-blue-400" />}</span>
                 <AgentAvatar agentType={p.agent_type} title={p.title || p.pane_id} variant="option" />
                 <span className="min-w-0 flex-1">
+                  {/* Title on top (what you recognize), id + type below. */}
                   <span className="flex items-center gap-1.5">
-                    <span className="truncate font-mono text-zinc-100">{p.pane_id}</span>
-                    {p.agent_type && <span className="rounded bg-white/[0.06] px-1 py-px text-[10px] font-medium text-zinc-400">{p.agent_type}</span>}
+                    <span className="truncate text-zinc-100">{p.title || p.pane_id}</span>
+                    {p.agent_type && <span className="shrink-0 rounded bg-white/[0.06] px-1 py-px text-[10px] font-medium text-zinc-400">{p.agent_type}</span>}
                   </span>
-                  {p.title && <span className="block truncate text-[11px] text-zinc-500">{p.title}</span>}
+                  <span className="block truncate font-mono text-[11px] text-zinc-500">{p.pane_id}</span>
                 </span>
               </button>
             );
