@@ -12,6 +12,9 @@ export default defineConfig({
   metaChunk: true,
   sitemap: { hostname: 'https://docs.cicy-ai.com' },
   head: [
+    // Google Analytics 4 (gtag.js) — injected into every docs page's <head>
+    ['script', { async: '', src: 'https://www.googletagmanager.com/gtag/js?id=G-DQJNV4PGMQ' }],
+    ['script', {}, "window.dataLayer = window.dataLayer || [];\nfunction gtag(){dataLayer.push(arguments);}\ngtag('js', new Date());\ngtag('config', 'G-DQJNV4PGMQ');"],
     ['meta', { name: 'theme-color', content: '#0a0a0f' }],
     ['meta', { name: 'author', content: 'CiCy AI' }],
     ['meta', { property: 'og:type', content: 'website' }],
