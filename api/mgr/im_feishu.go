@@ -434,15 +434,16 @@ func feishuHandleTest(w http.ResponseWriter, acc *imAccount) {
 		}
 	}
 
-	// 4. 事件订阅(经验判断:收到过消息没有)
+	// 4. 事件订阅(经验判断:收到过消息没有)。收不到消息=端到端没通,
+	// 必须算失败——不能让「凭据/权限都对」把总结果刷成绿色误导用户。
 	if acc.configString("chat_id") != "" || !imLastInboundTimeGet(acc.ID).IsZero() {
 		pass("收过入站消息(事件订阅 im.message.receive_v1 正常)")
 	} else {
-		warn("从未收到过消息 —— 若你在飞书里发了消息但这里没反应,依次检查:\n" +
+		fail("从未收到过消息 —— 机器人还听不见你说话,依次检查:\n" +
 			"   1) 事件与回调:订阅方式=**使用长连接接收事件**,并添加事件 **im.message.receive_v1**\n      " + eventURL + "\n" +
 			"   2) 权限:开通「读取用户发给机器人的单聊消息」\n      " + authURL + "\n" +
 			"   3) **创建版本并发布**(不发版全部配置不生效)\n      " + versionURL + "\n" +
-			"   然后在飞书私聊机器人发一条 /help")
+			"   修完后在飞书私聊机器人发一条 /help,再回来点一次测试")
 	}
 
 	// 5. 真实测试发送(有捕获的 chat 才发)
