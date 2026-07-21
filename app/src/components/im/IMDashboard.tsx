@@ -932,6 +932,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className={cn('truncate text-[13px]', active ? 'text-white' : 'text-zinc-200')}>{acc.name || acc.platform}</span>
+                      {acc.platform === 'feishu' && (acc as any).config?.app_id ? <span className="shrink-0 font-mono text-[10px] text-zinc-600">…{String((acc as any).config.app_id).slice(-6)}</span> : null}
                       <StatusPill state={acc.state} />
                     </div>
                     {acc.bound_pane_title && (

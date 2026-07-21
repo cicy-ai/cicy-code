@@ -1332,6 +1332,8 @@ func handleIMAccounts(w http.ResponseWriter, r *http.Request) {
 			if name == "" {
 				if appName != "" {
 					name = appName
+				} else if len(appID) > 6 {
+					name = "飞书应用 …" + appID[len(appID)-6:]   // 多应用时可区分
 				} else {
 					name = "飞书应用"
 				}

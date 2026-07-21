@@ -23,6 +23,7 @@ interface IMAccountRow {
   enabled: boolean;
   bound_pane_id: string;
   bound_pane_title: string;
+  config?: { app_id?: string };
 }
 
 const t = (key: string, defaultValue: string, opts: Record<string, unknown> = {}) =>
@@ -162,7 +163,10 @@ export default function WechatBindModal({ paneId, title, onClose, platform = 'we
                   className="mb-1 flex items-center gap-3 rounded-xl border border-white/[0.05] bg-white/[0.02] px-3 py-2.5"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] text-zinc-200">{a.name || `${platform} #${a.id}`}</div>
+                    <div className="truncate text-[13px] text-zinc-200">
+                      {a.name || `${platform} #${a.id}`}
+                      {a.config?.app_id ? <span className="ml-1.5 font-mono text-[10.5px] text-zinc-600">…{String(a.config.app_id).slice(-6)}</span> : null}
+                    </div>
                     <div className="truncate text-[11px] text-zinc-600">
                       {isHere
                         ? t('wechatBoundHere', '已绑定本 agent')
