@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trans } from 'react-i18next';
 import i18n from '../../i18n';
-import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, ArrowUpCircle, UserPlus, GitBranch, ChevronRight, ChevronDown, ClipboardList, MessageCircle } from 'lucide-react';
+import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, ArrowUpCircle, UserPlus, GitBranch, ChevronRight, ChevronDown, ClipboardList, MessageCircle, Zap } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
@@ -175,6 +175,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   const [updateTarget, setUpdateTarget] = useState<{ wid: string; title: string } | null>(null);
   // 绑定微信:目标 worker;modal 内部走 /api/im/accounts 的 bind/unbind。
   const [wechatTarget, setWechatTarget] = useState<{ wid: string; title: string } | null>(null);
+  const [feishuTarget, setFeishuTarget] = useState<{ wid: string; title: string } | null>(null);
   // bottom-most cards: not enough room below the … button → flip dropdown upward
   const [menuDropUp, setMenuDropUp] = useState(false);
   // hover tooltip for menu items — portal-rendered to the RIGHT of the dropdown
@@ -208,6 +209,11 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         return {
           title: i18n.t('wechatBindTitle', { ns: 'teamPanel', defaultValue: '绑定微信' }),
           desc: i18n.t('tipWechatBind', { ns: 'teamPanel', defaultValue: '把一个已登录的微信账号绑定到这个 agent:微信收到的消息会转给它处理,它的回复发回微信。每个 agent 限一个微信;扫码登录新账号在 IM 设置里。' }),
+        };
+      case 'feishu':
+        return {
+          title: i18n.t('feishuBindTitle', { ns: 'teamPanel', defaultValue: '绑定飞书' }),
+          desc: i18n.t('tipFeishuBind', { ns: 'teamPanel', defaultValue: '把一个飞书应用(机器人)绑定到这个 agent:飞书收到的消息转给它处理,回复推回飞书。也可以不占账号——在飞书会话里对机器人发 /bind 按会话绑定。添加应用在 IM 设置里(带配置向导)。' }),
         };
       case 'compact':
         return {
@@ -786,6 +792,21 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               <MessageCircle className="w-3.5 h-3.5 shrink-0" />
               <span data-id="team-panel-worker-menu-wechat-label">{i18n.t('wechatBindTitle', { ns: 'teamPanel', defaultValue: '绑定微信' })}</span>
             </button>
+            <button
+              type="button"
+              data-id="team-panel-worker-menu-feishu"
+              onMouseEnter={showMenuTip('feishu')}
+              onMouseLeave={hideMenuTip}
+              onClick={() => {
+                setOpenMenuId(null);
+                setMenuTip(null);
+                setFeishuTarget({ wid, title });
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-white/[0.06]"
+            >
+              <Zap className="w-3.5 h-3.5 shrink-0" />
+              <span data-id="team-panel-worker-menu-feishu-label">{i18n.t('feishuBindTitle', { ns: 'teamPanel', defaultValue: '绑定飞书' })}</span>
+            </button>
             {/* /compact、/clear 已从此菜单移除 —— 这两个命令改由对话输入框的斜杠命令菜单
                 (输入 `/` 弹出)触发,菜单里不再重复。 */}
             {/* Fork(分身):coding-CLI agent 走 agent-summary + 新 tmux pane 拉起
@@ -1023,6 +1044,15 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           paneId={wechatTarget.wid}
           title={wechatTarget.title}
           onClose={() => setWechatTarget(null)}
+        />,
+        document.body
+      ) : null}
+      {feishuTarget ? createPortal(
+        <WechatBindModal
+          platform="feishu"
+          paneId={feishuTarget.wid}
+          title={feishuTarget.title}
+          onClose={() => setFeishuTarget(null)}
         />,
         document.body
       ) : null}

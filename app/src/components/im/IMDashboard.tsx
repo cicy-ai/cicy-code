@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import {
-  Plus, Save, Trash2, Zap, Eye, EyeOff, Check, X,
+  Plus, Save, Trash2, Zap, Eye, EyeOff, Check, X, ArrowLeft,
   Send, MessageCircle, QrCode, RefreshCw, Search, ExternalLink, ChevronDown, Loader2,
 } from 'lucide-react';
 import apiService from '../../services/api';
@@ -960,7 +960,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
     <div data-id="im-detail-root" className="absolute inset-0 z-30 flex flex-col bg-[#0A0A0A] text-zinc-300 overflow-hidden">
       <header data-id="im-detail-header" className="flex h-12 shrink-0 items-center gap-2 border-b border-white/[0.06] px-4">
         <button data-id="im-detail-back" onClick={closeDetail} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200" title={t('back')}>
-          <X size={16} />
+          <ArrowLeft size={16} />
         </button>
         <PlatformIcon platform={selected.platform} size={14} />
         <h1 className="truncate text-[14px] font-semibold text-white">{selected.name || selected.platform}</h1>
