@@ -192,15 +192,48 @@ func (t *feishuTransport) runWS() {
 
 	handler := dispatcher.NewEventDispatcher("", "").
 		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
-			msg := feishuExtractMessage(event)
-			if msg.Text == "" || msg.Peer.ChatID == "" {
+			msg, msgID, refs := feishuExtractMessage(event)
+			if msg.Peer.ChatID == "" {
 				return nil
 			}
-			select {
-			case t.inbox <- msg:
-			default:
-				log.Printf("[feishu] account=%d inbox full, dropping message", t.accID)
+			if msg.Text == "" && len(refs) == 0 {
+				return nil
 			}
+			// 媒体下载可能要几秒,放 goroutine 别堵事件回调
+			go func() {
+				for _, ref := range refs {
+					data, err := t.downloadResource(msgID, ref.Key, ref.Type)
+					if err != nil {
+						log.Printf("[feishu] account=%d 媒体下载失败 key=%s: %v", t.accID, ref.Key, err)
+						if strings.Contains(strings.ToLower(err.Error()), "permission") || strings.Contains(err.Error(), "权限") {
+							// 缺 im:resource 权限:直接在会话里教用户开
+							_, _ = t.Send(msg.Peer, "⚠️ 收到媒体消息,但缺「获取与上传图片或文件资源」权限(im:resource)。\n去开通并发版: https://open.feishu.cn/app/"+t.appID+"/auth")
+						}
+						continue
+					}
+					if ref.Audio {
+						msg.VoiceData = data
+						msg.VoiceFormat = "opus"
+					} else {
+						name := ref.Name
+						if name == "" {
+							name = ref.Key
+							if ref.Kind == "image" {
+								name += ".png"
+							}
+						}
+						msg.Attachments = append(msg.Attachments, botAttachment{Kind: ref.Kind, Filename: name, Bytes: data})
+					}
+				}
+				if msg.Text == "" && len(msg.VoiceData) == 0 && len(msg.Attachments) == 0 {
+					return
+				}
+				select {
+				case t.inbox <- msg:
+				default:
+					log.Printf("[feishu] account=%d inbox full, dropping message", t.accID)
+				}
+			}()
 			return nil
 		}).
 		// 用户点开和机器人的单聊(控制台常见默认订阅)——不需要处理,但注册个
@@ -247,13 +280,25 @@ func isSameCloser(a, b func()) bool {
 	return fmt.Sprintf("%p", a) == fmt.Sprintf("%p", b)
 }
 
-// feishuExtractMessage 把长连接事件解析成 botMsg(只处理 text 消息)。
-func feishuExtractMessage(event *larkim.P2MessageReceiveV1) botMsg {
-	var out botMsg
+// feishuMediaRef 指向消息里的一个媒体资源,下载走 messages/{id}/resources/{key}。
+type feishuMediaRef struct {
+	Key   string // image_key / file_key
+	Type  string // 资源接口的 type 参数:"image" | "file"
+	Kind  string // 附件分类:"image" | "file" | "video"
+	Name  string // 原始文件名(可空)
+	Audio bool   // 语音消息(下载后走转写,不当附件)
+}
+
+// feishuExtractMessage 把长连接事件解析成 botMsg + 媒体引用。
+// 支持:text、post(富文本取文字+图)、image、audio(语音)、media(视频)、file。
+func feishuExtractMessage(event *larkim.P2MessageReceiveV1) (out botMsg, msgID string, refs []feishuMediaRef) {
 	if event == nil || event.Event == nil || event.Event.Message == nil {
-		return out
+		return out, "", nil
 	}
 	m := event.Event.Message
+	if m.MessageId != nil {
+		msgID = strings.TrimSpace(*m.MessageId)
+	}
 	if m.ChatId != nil {
 		out.Peer = botPeer{ChatID: strings.TrimSpace(*m.ChatId)}
 	}
@@ -276,11 +321,104 @@ func feishuExtractMessage(event *larkim.P2MessageReceiveV1) botMsg {
 		if json.Unmarshal([]byte(content), &parsed) == nil {
 			out.Text = strings.TrimSpace(feishuMentionRe.ReplaceAllString(parsed.Text, ""))
 		}
-	default:
-		// 非文本(图片/富文本/语音)暂不支持,给出可见的占位让用户知道没收到
-		out.Text = ""
+	case "post":
+		// 富文本:{"title":"..","content":[[{tag:text|a|at|img,...}]]}
+		var parsed struct {
+			Title   string                       `json:"title"`
+			Content [][]map[string]interface{}   `json:"content"`
+		}
+		if json.Unmarshal([]byte(content), &parsed) == nil {
+			var sb strings.Builder
+			if parsed.Title != "" {
+				sb.WriteString(parsed.Title + "\n")
+			}
+			for _, line := range parsed.Content {
+				for _, run := range line {
+					switch run["tag"] {
+					case "text":
+						if s, _ := run["text"].(string); s != "" {
+							sb.WriteString(s)
+						}
+					case "a":
+						if s, _ := run["href"].(string); s != "" {
+							sb.WriteString(" " + s + " ")
+						}
+					case "img":
+						if k, _ := run["image_key"].(string); k != "" && len(refs) < 4 {
+							refs = append(refs, feishuMediaRef{Key: k, Type: "image", Kind: "image"})
+						}
+					}
+				}
+				sb.WriteString("\n")
+			}
+			out.Text = strings.TrimSpace(feishuMentionRe.ReplaceAllString(sb.String(), ""))
+		}
+	case "image":
+		var parsed struct {
+			ImageKey string `json:"image_key"`
+		}
+		if json.Unmarshal([]byte(content), &parsed) == nil && parsed.ImageKey != "" {
+			refs = append(refs, feishuMediaRef{Key: parsed.ImageKey, Type: "image", Kind: "image"})
+		}
+	case "audio":
+		var parsed struct {
+			FileKey string `json:"file_key"`
+		}
+		if json.Unmarshal([]byte(content), &parsed) == nil && parsed.FileKey != "" {
+			refs = append(refs, feishuMediaRef{Key: parsed.FileKey, Type: "file", Audio: true})
+		}
+	case "media": // 视频
+		var parsed struct {
+			FileKey  string `json:"file_key"`
+			FileName string `json:"file_name"`
+		}
+		if json.Unmarshal([]byte(content), &parsed) == nil && parsed.FileKey != "" {
+			refs = append(refs, feishuMediaRef{Key: parsed.FileKey, Type: "file", Kind: "video", Name: parsed.FileName})
+		}
+	case "file":
+		var parsed struct {
+			FileKey  string `json:"file_key"`
+			FileName string `json:"file_name"`
+		}
+		if json.Unmarshal([]byte(content), &parsed) == nil && parsed.FileKey != "" {
+			refs = append(refs, feishuMediaRef{Key: parsed.FileKey, Type: "file", Kind: "file", Name: parsed.FileName})
+		}
 	}
-	return out
+	return out, msgID, refs
+}
+
+// downloadResource 下载消息里的媒体(需要 im:resource 权限)。50MB 上限。
+func (t *feishuTransport) downloadResource(msgID, key, typ string) ([]byte, error) {
+	token, err := t.tenantToken()
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("%s/open-apis/im/v1/messages/%s/resources/%s?type=%s", feishuBaseURL, msgID, key, typ)
+	req, _ := http.NewRequest(http.MethodGet, u, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		var out struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+		}
+		_ = json.Unmarshal(raw, &out)
+		return nil, fmt.Errorf("feishu resource failed code=%d: %s", out.Code, out.Msg)
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("feishu resource HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 /* ───────────────────────── outbound (HTTP) ───────────────────────── */
