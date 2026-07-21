@@ -379,24 +379,38 @@ func (t *feishuTransport) probeSendPermission() (ok bool, detail string) {
 	return true, "" // 走到了业务校验(假目标被拒)= 权限已开通
 }
 
-func feishuHandleTest(w http.ResponseWriter, acc *imAccount) {
-	start := time.Now()
-	var lines []string
-	allOK := true
-	pass := func(s string) { lines = append(lines, "✅ "+s) }
-	warn := func(s string) { lines = append(lines, "⚠️ "+s) }
-	fail := func(s string) { lines = append(lines, "❌ "+s); allOK = false }
+// feishuCheckItem 是体检单里的一项:配置向导按它逐项亮灯,每项可带直达链接。
+type feishuCheckItem struct {
+	Key    string `json:"key"`
+	Name   string `json:"name"`
+	Status string `json:"status"` // ok | warn | fail
+	Detail string `json:"detail,omitempty"`
+	Link   string `json:"link,omitempty"`
+}
+
+func feishuRunChecks(acc *imAccount) (checks []feishuCheckItem, allOK bool) {
+	allOK = true
+	add := func(key, name, status, detail, link string) {
+		if status == "fail" {
+			allOK = false
+		}
+		checks = append(checks, feishuCheckItem{Key: key, Name: name, Status: status, Detail: detail, Link: link})
+	}
+
+	appID := strings.TrimSpace(acc.configString("app_id"))
+	authURL := "https://open.feishu.cn/app/" + appID + "/auth"           // 权限管理
+	eventURL := "https://open.feishu.cn/app/" + appID + "/event"         // 事件与回调
+	versionURL := "https://open.feishu.cn/app/" + appID + "/app_version" // 版本管理与发布
 
 	// 1. 凭据
-	appID := strings.TrimSpace(acc.configString("app_id"))
 	_, reachable, verr := feishuValidateCredentials(appID, strings.TrimSpace(acc.Secret))
 	switch {
 	case verr == nil:
-		pass("凭据有效(App ID/Secret 换取 tenant token 成功)")
+		add("creds", "应用凭据", "ok", "App ID/Secret 有效", "")
 	case !reachable:
-		fail("网络不通,无法访问 open.feishu.cn(检查网络/代理): " + verr.Error())
+		add("creds", "应用凭据", "fail", "网络不通,无法访问 open.feishu.cn(检查网络/代理): "+verr.Error(), "")
 	default:
-		fail("凭据无效: " + verr.Error() + "(检查 App ID/App Secret)")
+		add("creds", "应用凭据", "fail", "凭据无效,检查 App ID/App Secret: "+verr.Error(), "https://open.feishu.cn/app/"+appID+"/baseinfo")
 	}
 
 	// 2. 长连接
@@ -409,51 +423,64 @@ func feishuHandleTest(w http.ResponseWriter, acc *imAccount) {
 		running := ft.wsRunning
 		ft.mu.Unlock()
 		if running {
-			pass("长连接在线(事件通道就绪)")
+			add("ws", "长连接", "ok", "事件通道在线", "")
 		} else {
-			warn("长连接未运行(worker 正在重连或刚启动,稍等几秒再测)")
+			add("ws", "长连接", "warn", "正在重连或刚启动,稍等几秒", "")
 		}
 	} else {
-		warn("账号 worker 未连接(账号可能被停用)")
+		add("ws", "长连接", "warn", "账号 worker 未连接(账号可能被停用)", "")
 		if built, err := imBuildTransport(acc); err == nil {
 			ft, _ = built.(*feishuTransport)
 		}
 	}
 
-	// 应用后台直达链接(按 app_id 拼)
-	authURL := "https://open.feishu.cn/app/" + appID + "/auth"        // 权限管理
-	eventURL := "https://open.feishu.cn/app/" + appID + "/event"      // 事件与回调
-	versionURL := "https://open.feishu.cn/app/" + appID + "/app_version" // 版本管理与发布
-
-	// 3. 发消息权限
+	// 3. 发消息权限(假目标探针)
 	if verr == nil && ft != nil {
 		if ok, detail := ft.probeSendPermission(); ok {
-			pass("发消息权限 im:message 已开通")
+			add("send_perm", "发消息权限", "ok", "im:message 已开通", "")
 		} else {
-			fail("缺发消息权限: " + detail + "\n   → 到权限管理开通 im:message(获取与发送单聊、群组消息): " + authURL + "\n   → 然后创建版本并发布: " + versionURL)
+			add("send_perm", "发消息权限", "fail",
+				"在「权限管理」搜 im:message,开通「获取与发送单聊、群组消息」,然后到版本管理**创建版本并发布**。"+detail, authURL)
 		}
 	}
 
-	// 4. 事件订阅(经验判断:收到过消息没有)。收不到消息=端到端没通,
-	// 必须算失败——不能让「凭据/权限都对」把总结果刷成绿色误导用户。
+	// 4. 收消息(事件订阅,经验判断)。收不到=端到端没通,判失败。
 	if acc.configString("chat_id") != "" || !imLastInboundTimeGet(acc.ID).IsZero() {
-		pass("收过入站消息(事件订阅 im.message.receive_v1 正常)")
+		add("inbound", "接收消息", "ok", "已收到过消息,事件订阅正常", "")
 	} else {
-		fail("从未收到过消息 —— 机器人还听不见你说话,依次检查:\n" +
-			"   1) 事件与回调:订阅方式=**使用长连接接收事件**,并添加事件 **im.message.receive_v1**\n      " + eventURL + "\n" +
-			"   2) 权限:开通「读取用户发给机器人的单聊消息」\n      " + authURL + "\n" +
-			"   3) **创建版本并发布**(不发版全部配置不生效)\n      " + versionURL + "\n" +
-			"   修完后在飞书私聊机器人发一条 /help,再回来点一次测试")
+		add("inbound", "接收消息", "fail",
+			"机器人还听不见你说话。到「事件与回调」:订阅方式选「使用长连接接收事件」,添加事件「接收消息 im.message.receive_v1」(会提示顺带申请单聊消息读取权限,一起开通);再到版本管理**创建版本并发布**。发布后在飞书搜索你的应用名,私聊发一条 /help——这一项会自动变绿。", eventURL)
 	}
 
-	// 5. 真实测试发送(有捕获的 chat 才发)
+	// 5. 发布提示:凡有失败项,都补一条发版检查(飞书所有配置不发版不生效)
+	if !allOK {
+		add("publish", "发布版本", "warn",
+			"改完任何权限/事件后,必须到「版本管理与发布」创建版本并发布,配置才会生效(企业自建应用自己就是审核人,秒过)。", versionURL)
+	}
+
+	// 6. 真实测试发送(已捕获会话才发)
 	if peer := imPeerForAccount(acc); !peer.empty() && ft != nil && verr == nil {
 		if _, err := imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: ft, Peer: peer, Text: "✅ cicy 测试消息", Purpose: imOutboundPurposeTest}); err != nil {
-			fail("测试发送失败: " + err.Error())
+			add("send", "测试发送", "fail", err.Error(), "")
 		} else {
-			pass("测试消息已发出,去飞书看一眼")
+			add("send", "测试发送", "ok", "已发出,去飞书看一眼", "")
 		}
 	}
+	return checks, allOK
+}
 
-	J(w, M{"ok": allOK, "detail": strings.Join(lines, "\n"), "duration_ms": time.Since(start).Milliseconds()})
+func feishuHandleTest(w http.ResponseWriter, acc *imAccount) {
+	start := time.Now()
+	checks, allOK := feishuRunChecks(acc)
+	// 兼容纯文本展示(账号详情页的测试结果框)
+	icon := map[string]string{"ok": "✅", "warn": "⚠️", "fail": "❌"}
+	var lines []string
+	for _, c := range checks {
+		line := icon[c.Status] + " " + c.Name + ":" + c.Detail
+		if c.Link != "" && c.Status != "ok" {
+			line += "\n   → " + c.Link
+		}
+		lines = append(lines, line)
+	}
+	J(w, M{"ok": allOK, "detail": strings.Join(lines, "\n"), "checks": checks, "duration_ms": time.Since(start).Milliseconds()})
 }

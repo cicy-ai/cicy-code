@@ -292,8 +292,13 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const [tgPendingAccount, setTgPendingAccount] = useState<IMAccount | null>(null);
 
   // 飞书添加 modal — 输入 App ID + App Secret(飞书开放平台企业自建应用),
-  // 后端验证 tenant token 后创建账号;绑定按会话在飞书里 /bind 完成,也可账号级绑定。
+  // 后端验证 tenant token 后创建账号;随后进入「配置向导」:每 5 秒自动体检,
+  // 逐项亮灯 + 直达链接,小白照着红灯修,修好灯自动变绿。
   const [fsModalOpen, setFsModalOpen] = useState(false);
+  const [fsStep, setFsStep] = useState<'creds' | 'guide'>('creds');
+  const [fsAccountId, setFsAccountId] = useState<number | null>(null);
+  const [fsChecks, setFsChecks] = useState<any[]>([]);
+  const [fsAllOk, setFsAllOk] = useState(false);
   const [fsAppId, setFsAppId] = useState('');
   const [fsSecret, setFsSecret] = useState('');
   const [fsSubmitting, setFsSubmitting] = useState(false);
@@ -475,8 +480,22 @@ export default function IMDashboard({ leftMount, rightMount }: {
     setFsError('');
     setFsAppId('');
     setFsSecret('');
+    setFsStep('creds');
+    setFsAccountId(null);
+    setFsChecks([]);
+    setFsAllOk(false);
     setAddBind('w-1001');
     setAddBindOpen(false);
+    setFsModalOpen(true);
+  };
+
+  // 已有飞书账号也能随时重进向导(详情页「配置向导」按钮)
+  const openFeishuGuide = (accId: number) => {
+    setFsError('');
+    setFsStep('guide');
+    setFsAccountId(accId);
+    setFsChecks([]);
+    setFsAllOk(false);
     setFsModalOpen(true);
   };
 
@@ -495,15 +514,39 @@ export default function IMDashboard({ leftMount, rightMount }: {
       if (!a?.id) throw new Error('create account: missing id');
       if (addBind) { try { await apiService.bindIMAccount(a.id, addBind); } catch (e) { console.warn('feishu bind failed', e); } }
       toast(t('accountAdded', { platform: '飞书' }));
-      setFsModalOpen(false);
       await load(a.id);
       setSelectedId(a.id);
+      // 不关 modal,直接进配置向导:亮灯清单 + 自动重测
+      setFsAccountId(a.id);
+      setFsStep('guide');
     } catch (e) {
       setFsError(errText(e));
     } finally {
       setFsSubmitting(false);
     }
   };
+
+  // 配置向导:每 5 秒跑一次后端体检,checks 逐项亮灯;全绿停止轮询。
+  useEffect(() => {
+    if (!fsModalOpen || fsStep !== 'guide' || !fsAccountId) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        const r = await apiService.testIMAccount(fsAccountId);
+        const d = r?.data ?? {};
+        if (!stopped) {
+          setFsChecks(Array.isArray(d.checks) ? d.checks : []);
+          setFsAllOk(!!d.ok);
+          if (d.ok) return;   // 全绿,停
+        }
+      } catch {}
+      if (!stopped) timer = setTimeout(tick, 5000);
+    };
+    void tick();
+    return () => { stopped = true; if (timer) clearTimeout(timer); };
+  }, [fsModalOpen, fsStep, fsAccountId]);
 
   /* ---- mutations ---- */
   // Telegram 添加流程：弹 modal → 输入 bot token → 提交后台校验 → 让用户发条消息给 bot
@@ -909,6 +952,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
   /* ───────── RIGHT PANEL ───────── */
   const isTelegram = selected?.platform === 'telegram';
   const isWeChat = selected?.platform === 'wechat';
+  const isFeishu = selected?.platform === 'feishu';
   const testOk = !!(testRes && (testRes.ok || testRes.success));
   const testFail = !!(testRes && !testOk);
 
@@ -1075,6 +1119,11 @@ export default function IMDashboard({ leftMount, rightMount }: {
             <Btn data-id="im-detail-test" variant="secondary" size="md" icon={<Zap size={14} />} busy={testing} disabled={testing || selected.state !== 'connected'} onClick={() => void testSend()}>
               {isWeChat ? t('testSendWeChat') : t('testSend')}
             </Btn>
+            {isFeishu && (
+              <Btn data-id="im-detail-fs-guide" variant="secondary" size="md" onClick={() => openFeishuGuide(selected.id)}>
+                {t('feishuGuide', '配置向导')}
+              </Btn>
+            )}
             <div className="flex-1" />
           </div>
         </div>
@@ -1182,12 +1231,13 @@ export default function IMDashboard({ leftMount, rightMount }: {
           <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
             <div className="flex items-center gap-2">
               <PlatformIcon platform="feishu" size={16} />
-              <h2 className="text-[15px] font-semibold text-white">{t('addFeishuTitle', '添加飞书机器人')}</h2>
+              <h2 className="text-[15px] font-semibold text-white">{fsStep === 'guide' ? t('feishuGuideTitle', '飞书配置向导') : t('addFeishuTitle', '添加飞书机器人')}</h2>
             </div>
             <button data-id="im-fs-modal-close" onClick={closeFsModal} className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors">
               <X className="w-4 h-4" />
             </button>
           </div>
+          {fsStep === 'creds' && (
           <div className="px-5 py-5 space-y-4">
             <Field label="App ID">
               <input
@@ -1232,6 +1282,45 @@ export default function IMDashboard({ leftMount, rightMount }: {
               </Btn>
             </div>
           </div>
+          )}
+          {fsStep === 'guide' && (
+          <div className="px-5 py-5 space-y-2.5 max-h-[70vh] overflow-y-auto">
+            <div className="text-[12.5px] leading-relaxed text-zinc-400">
+              {t('feishuGuideIntro', '照着')}<b className="text-red-300">{t('feishuGuideRed', '红灯项')}</b>{t('feishuGuideIntro2', '点「去配置」到飞书后台改好,这里每 5 秒自动重测,配好会自动变绿——不用手动刷新。')}
+            </div>
+            {fsChecks.length === 0 && (
+              <div className="py-8 grid place-items-center"><Spinner size="md" /></div>
+            )}
+            {fsChecks.map((c: any) => (
+              <div key={c.key} className={cn('rounded-xl border px-3.5 py-2.5',
+                c.status === 'ok' ? 'border-emerald-500/25 bg-emerald-500/[0.06]'
+                  : c.status === 'fail' ? 'border-red-500/30 bg-red-500/[0.06]'
+                    : 'border-amber-500/25 bg-amber-500/[0.05]')}>
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px]">{c.status === 'ok' ? '✅' : c.status === 'fail' ? '❌' : '⚠️'}</span>
+                  <span className="text-[13px] font-semibold text-zinc-100">{c.name}</span>
+                  {c.link && c.status !== 'ok' && (
+                    <a href={c.link} target="_blank" rel="noreferrer"
+                      className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/[0.08] px-2.5 py-1 text-[11px] text-sky-300 hover:bg-sky-500/[0.15] transition-colors">
+                      <ExternalLink size={10} /> {t('goConfigure', '去配置')}
+                    </a>
+                  )}
+                </div>
+                {c.detail && c.status !== 'ok' && (
+                  <div className="mt-1 pl-6 text-[11.5px] leading-relaxed text-zinc-400 whitespace-pre-wrap">{c.detail}</div>
+                )}
+              </div>
+            ))}
+            {fsAllOk && (
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.08] px-4 py-3 text-[13px] leading-relaxed text-emerald-200">
+                🎉 {t('feishuAllReady', '全部就绪!去飞书搜你的应用名,私聊发 /agents 挑一个 agent,再 /bind 绑定——每个会话可以绑不同的 agent。')}
+              </div>
+            )}
+            <div className="flex justify-end pt-1">
+              <Btn data-id="im-fs-guide-close" variant="ghost" size="md" onClick={closeFsModal}>{fsAllOk ? t('done', '完成') : t('configureLater', '稍后再配')}</Btn>
+            </div>
+          </div>
+          )}
         </div>
       </div>
     );
