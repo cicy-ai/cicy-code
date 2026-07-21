@@ -585,6 +585,11 @@ func telegramHandleCommand(acc *imAccount, tr botTransport, msg botMsg, text str
 	if i := strings.Index(cmd, "@"); i > 0 {
 		cmd = cmd[:i]
 	}
+	// 会话级绑定优先(和入站路由同一优先级):/admin /model /status 都看当前会话。
+	boundPane := imChatBoundPane(acc.ID, msg.Peer.ChatID)
+	if boundPane == "" {
+		boundPane = strings.TrimSpace(acc.BoundPaneID)
+	}
 	switch cmd {
 	case "/start":
 		imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: msg.Peer, Text: tgT(lang, "cmdHello"), Purpose: imOutboundPurposeProgrammatic})
@@ -596,7 +601,7 @@ func telegramHandleCommand(acc *imAccount, tr botTransport, msg botMsg, text str
 		telegramSendAgentsPage(acc.Secret, msg.Peer.ChatID, 0, lang)
 		return true
 	case "/model":
-		pane := shortPaneID(strings.TrimSpace(acc.BoundPaneID))
+		pane := shortPaneID(boundPane)
 		if pane == "" {
 			imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: msg.Peer, Text: tgT(lang, "noAgentBound"), Purpose: imOutboundPurposeProgrammatic})
 			return true
@@ -604,7 +609,7 @@ func telegramHandleCommand(acc *imAccount, tr botTransport, msg botMsg, text str
 		telegramSendModelProviders(acc.Secret, msg.Peer.ChatID, 0, pane, lang)
 		return true
 	case "/admin":
-		pane := shortPaneID(strings.TrimSpace(acc.BoundPaneID))
+		pane := shortPaneID(boundPane)
 		if pane == "" {
 			imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: msg.Peer, Text: tgT(lang, "noAgentBound"), Purpose: imOutboundPurposeProgrammatic})
 			return true
@@ -621,7 +626,7 @@ func telegramHandleCommand(acc *imAccount, tr botTransport, msg botMsg, text str
 		}
 		return true
 	case "/status":
-		pane := normPaneID(strings.TrimSpace(acc.BoundPaneID))
+		pane := normPaneID(boundPane)
 		status := tgT(lang, "statusUnbound")
 		if pane != "" {
 			status = fmt.Sprintf(tgT(lang, "statusBound"), shortPaneID(pane))
@@ -963,7 +968,6 @@ func (t *telegramTransport) handleCallback(cb *tgCallbackQuery) {
 }
 
 func telegramBindAgent(token, chatID string, msgID int64, paneID string, fromPage int, lang string) {
-	// Find IM account by chat_id
 	if store == nil {
 		return
 	}
@@ -971,8 +975,18 @@ func telegramBindAgent(token, chatID string, msgID int64, paneID string, fromPag
 	if !strings.Contains(fullPaneID, ":") {
 		fullPaneID += ":main.0"
 	}
-	// Update all telegram accounts with this chat_id to bind to the new pane
-	_, _ = store.Exec("UPDATE im_accounts SET bound_pane_id=?, updated_at="+store.Now()+" WHERE platform='telegram' AND id IN (SELECT id FROM im_accounts WHERE platform='telegram' AND config LIKE ?)", fullPaneID, fmt.Sprintf("%%\"chat_id\":\"%s\"%%", chatID))
+	// 按会话绑定:只绑「点按钮的这个 chat」,不动账号级绑定——一个 bot 的不同
+	// 会话(私聊/群)可以各自绑不同的 agent。账号按 token 定位。
+	var accID int64
+	_ = store.QueryRow("SELECT id FROM im_accounts WHERE platform='telegram' AND secret=?", strings.TrimSpace(token)).Scan(&accID)
+	if accID != 0 {
+		if err := imBindChatToPane(accID, chatID, fullPaneID); err != nil {
+			log.Printf("[tg] chat bind failed account=%d chat=%s pane=%s: %v", accID, chatID, paneID, err)
+		}
+	} else {
+		// 兜底(找不到账号行时保持旧行为):账号级绑定
+		_, _ = store.Exec("UPDATE im_accounts SET bound_pane_id=?, updated_at="+store.Now()+" WHERE platform='telegram' AND id IN (SELECT id FROM im_accounts WHERE platform='telegram' AND config LIKE ?)", fullPaneID, fmt.Sprintf("%%\"chat_id\":\"%s\"%%", chatID))
+	}
 
 	text := fmt.Sprintf(tgT(lang, "switchOK"), paneID)
 	telegramEditMessage(token, chatID, msgID, text, [][]map[string]string{

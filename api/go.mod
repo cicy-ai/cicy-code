@@ -31,6 +31,7 @@ require (
 	github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e // indirect
 	github.com/hashicorp/go-multierror v0.0.0-20150608033521-56912fb08d85 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
+	github.com/larksuite/oapi-sdk-go/v3 v3.9.9 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

@@ -16,7 +16,7 @@ import AgentAvatar from '../AgentAvatar';
 
 /* ───────────── types ───────────── */
 
-type Platform = 'telegram' | 'wechat';
+type Platform = 'telegram' | 'wechat' | 'feishu';
 
 interface IMAccount {
   id: number;
@@ -171,6 +171,7 @@ const INPUT = 'h-9 w-full rounded-lg border border-white/[0.09] bg-white/[0.025]
 function PlatformIcon({ platform, size = 14 }: { platform: string; size?: number }) {
   if (platform === 'telegram') return <Send size={size} className="text-sky-400" />;
   if (platform === 'wechat') return <MessageCircle size={size} className="text-emerald-400" />;
+  if (platform === 'feishu') return <Zap size={size} className="text-indigo-400" />;
   return <MessageCircle size={size} className="text-zinc-400" />;
 }
 
@@ -289,6 +290,14 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const [tgError, setTgError] = useState('');
   const [tgStep, setTgStep] = useState<'token' | 'wait_message'>('token');
   const [tgPendingAccount, setTgPendingAccount] = useState<IMAccount | null>(null);
+
+  // 飞书添加 modal — 输入 App ID + App Secret(飞书开放平台企业自建应用),
+  // 后端验证 tenant token 后创建账号;绑定按会话在飞书里 /bind 完成,也可账号级绑定。
+  const [fsModalOpen, setFsModalOpen] = useState(false);
+  const [fsAppId, setFsAppId] = useState('');
+  const [fsSecret, setFsSecret] = useState('');
+  const [fsSubmitting, setFsSubmitting] = useState(false);
+  const [fsError, setFsError] = useState('');
 
   const selected = useMemo(() => accounts.find((a) => a.id === selectedId) || null, [accounts, selectedId]);
 
@@ -459,6 +468,41 @@ export default function IMDashboard({ leftMount, rightMount }: {
     setAddMenuOpen(false);
     if (platform === 'telegram') return void addTelegram();
     if (platform === 'wechat') return void addWeChat();
+    if (platform === 'feishu') return void addFeishu();
+  };
+
+  const addFeishu = () => {
+    setFsError('');
+    setFsAppId('');
+    setFsSecret('');
+    setAddBind('w-1001');
+    setAddBindOpen(false);
+    setFsModalOpen(true);
+  };
+
+  const submitFeishu = async () => {
+    const appId = fsAppId.trim();
+    const secret = fsSecret.trim();
+    if (!appId || !secret) {
+      setFsError(t('feishuCredsRequired', '请填写 App ID 和 App Secret'));
+      return;
+    }
+    setFsSubmitting(true);
+    setFsError('');
+    try {
+      const res = await apiService.createIMAccount({ platform: 'feishu', app_id: appId, secret });
+      const a = res?.data?.account as IMAccount | undefined;
+      if (!a?.id) throw new Error('create account: missing id');
+      if (addBind) { try { await apiService.bindIMAccount(a.id, addBind); } catch (e) { console.warn('feishu bind failed', e); } }
+      toast(t('accountAdded', { platform: '飞书' }));
+      setFsModalOpen(false);
+      await load(a.id);
+      setSelectedId(a.id);
+    } catch (e) {
+      setFsError(errText(e));
+    } finally {
+      setFsSubmitting(false);
+    }
   };
 
   /* ---- mutations ---- */
@@ -742,7 +786,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
             <div data-id="im-add-dropdown" className="absolute right-0 top-[calc(100%+4px)] min-w-[160px] z-50 rounded-xl border border-white/[0.09] bg-[#141416] p-1 shadow-2xl shadow-black/60">
               {platforms.length === 0 && <div className="px-2.5 py-2 text-[11px] text-zinc-600">{t('loadingText')}</div>}
               {platforms.map((p) => {
-                const addable = p.kind === 'telegram' || p.kind === 'wechat';
+                const addable = p.kind === 'telegram' || p.kind === 'wechat' || p.kind === 'feishu';
                 return (
                   <button
                     key={p.kind}
@@ -1122,6 +1166,77 @@ export default function IMDashboard({ leftMount, rightMount }: {
     );
   }
 
+  // 飞书添加 modal — 输入 App ID + App Secret,后端验证后创建账号并绑定所选 agent。
+  let fsModal: React.ReactNode = null;
+  if (fsModalOpen) {
+    const closeFsModal = () => {
+      if (fsSubmitting) return;
+      setFsModalOpen(false);
+      setFsError('');
+    };
+    fsModal = (
+      <div data-id="im-fs-modal" className="fixed inset-0 z-[10000] cursor-pointer" onClick={closeFsModal}>
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+        <div className="absolute left-1/2 top-1/2 w-[440px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 cursor-default rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60"
+          onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+            <div className="flex items-center gap-2">
+              <PlatformIcon platform="feishu" size={16} />
+              <h2 className="text-[15px] font-semibold text-white">{t('addFeishuTitle', '添加飞书机器人')}</h2>
+            </div>
+            <button data-id="im-fs-modal-close" onClick={closeFsModal} className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="px-5 py-5 space-y-4">
+            <Field label="App ID">
+              <input
+                data-id="im-fs-modal-appid"
+                autoFocus
+                type="text"
+                value={fsAppId}
+                onChange={(e) => { setFsAppId(e.target.value); if (fsError) setFsError(''); }}
+                placeholder="cli_a1b2c3d4e5f6g7h8"
+                className={cn(INPUT, 'h-10 text-[13px] font-mono')}
+                disabled={fsSubmitting}
+              />
+            </Field>
+            <Field label="App Secret">
+              <input
+                data-id="im-fs-modal-secret"
+                type="password"
+                value={fsSecret}
+                onChange={(e) => { setFsSecret(e.target.value); if (fsError) setFsError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !fsSubmitting) void submitFeishu(); }}
+                placeholder="••••••••••••••••"
+                className={cn(INPUT, 'h-10 text-[13px] font-mono')}
+                disabled={fsSubmitting}
+              />
+            </Field>
+            {fsError && (
+              <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[12px] text-red-300 whitespace-pre-wrap">{fsError}</div>
+            )}
+            <div className="rounded-lg border border-white/[0.06] bg-white/[0.015] p-3 text-[12px] leading-relaxed text-zinc-400 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-zinc-300">
+                <a href="https://open.feishu.cn/app" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-300 hover:underline">
+                  <ExternalLink size={11} /> {t('openFeishuConsole', '打开飞书开放平台')}
+                </a>
+              </div>
+              <div className="text-zinc-500">{t('feishuSteps', '创建企业自建应用 → 添加机器人能力 → 开通 im:message 权限 → 事件订阅选「长连接」并订阅 im.message.receive_v1 → 发布。绑定后在飞书里对机器人发 /help,每个会话可用 /bind 绑不同的 agent。')}</div>
+            </div>
+            {addBindField}
+            <div className="flex justify-end gap-2 pt-1">
+              <Btn data-id="im-fs-modal-cancel" variant="ghost" size="md" onClick={closeFsModal} disabled={fsSubmitting}>{t('cancel')}</Btn>
+              <Btn data-id="im-fs-modal-submit" variant="primary" size="md" onClick={() => void submitFeishu()} disabled={fsSubmitting || !fsAppId.trim() || !fsSecret.trim()}>
+                {fsSubmitting ? <Spinner size="xs" /> : t('confirm')}
+              </Btn>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Telegram 添加 modal — 两步：1) 输入 bot token  2) 引导用户给 bot 发条消息绑定 chat_id。
   let tgModal: React.ReactNode = null;
   if (tgModalOpen) {
@@ -1217,6 +1332,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
       {rightMount && detailOpen && createPortal(detailUI, rightMount)}
       {wxModal && createPortal(wxModal, document.body)}
       {tgModal && createPortal(tgModal, document.body)}
+      {fsModal && createPortal(fsModal, document.body)}
       {addBindOpen && (
         <BindPicker
           panes={panes}

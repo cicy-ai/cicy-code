@@ -155,32 +155,33 @@ func newReplyHooksForPane(agentID string, isContinuation bool) []aiGatewayReplyH
 	//   imRegisterReplyPushForInbound (IM 进来时) → imPeek/Drain (这里) → attach hook
 	// 这样保证只有真正从 IM 发起的对话才 push 回 IM；
 	// 任何非 IM 来源（web UI / CLI / 其他 agent）即便 pane 绑了 IM 也不会"乱回复"。
-	var imAccs map[int64]bool
+	var imAccs map[int64]botPeer
 	if isContinuation {
 		imAccs = imPeekReplyPushAccountsForPane(agentID)
 	} else {
 		imAccs = imDrainReplyPushAccountsForPane(agentID)
 		// drain 之后立刻把这些 acc 重新 register 回去，确保本 turn 内后续 tool 续传 HTTP
 		// 仍能 attach 到同一组 hook。下一个新 q 来时再 drain 一次清掉。
-		for accID := range imAccs {
-			imRegisterReplyPushForInbound(agentID, accID)
+		for accID, peer := range imAccs {
+			imRegisterReplyPushForInbound(agentID, accID, peer)
 		}
 	}
-	for accID := range imAccs {
+	for accID, peer := range imAccs {
 		acc, _ := imGetAccount(accID)
 		if acc == nil {
-			continue
-		}
-		if strings.TrimSpace(acc.BoundPaneID) == "" {
 			continue
 		}
 		tr := imTransportFor(accID)
 		if tr == nil {
 			continue
 		}
-		// Per-item 推送模式：TG 和 WeChat 都用同一种 hook，
+		// Per-item 推送模式：TG / WeChat / 飞书都用同一种 hook，
 		// 每个 reply item flush 时立即发送一条新消息，不做 streaming edit。
-		peer := imPeerForAccount(acc)
+		// peer 用注册时记下的「发起会话」——多会话共用一个账号时回复各回各家；
+		// 老数据没带 peer 时退回账号级 last peer。
+		if peer.empty() {
+			peer = imPeerForAccount(acc)
+		}
 		hooks = append(hooks, &imReplyPushHook{
 			accID:     accID,
 			paneID:    normPaneID(agentID),
@@ -188,8 +189,8 @@ func newReplyHooksForPane(agentID string, isContinuation bool) []aiGatewayReplyH
 			peer:      peer,
 			canEdit:   tr.CanEdit(),
 		})
-		log.Printf("[im] reply hook attached account=%d pane=%s transport=%s continuation=%t",
-			accID, shortPaneID(agentID), tr.Kind(), isContinuation)
+		log.Printf("[im] reply hook attached account=%d pane=%s chat=%s transport=%s continuation=%t",
+			accID, shortPaneID(agentID), peer.ChatID, tr.Kind(), isContinuation)
 	}
 	return hooks
 }
@@ -210,11 +211,15 @@ func (h *imReplyPushHook) onItems(items []map[string]interface{}) {
 			continue
 		}
 		text = imClampMessage(text)
-		acc, _ := imGetAccount(h.accID)
-		if acc == nil {
-			continue
+		// 回到发起这轮对话的会话(h.peer);兜底才用账号级 last peer。
+		peer := h.peer
+		if peer.empty() {
+			acc, _ := imGetAccount(h.accID)
+			if acc == nil {
+				continue
+			}
+			peer = imPeerForAccount(acc)
 		}
-		peer := imPeerForAccount(acc)
 		if peer.empty() {
 			continue
 		}
@@ -320,10 +325,11 @@ func (h *imReplyPushHook) flush() {
 	h.lastPushAt = time.Now()
 	h.mu.Unlock()
 
-	acc, _ := imGetAccount(h.accID)
-	var peer botPeer
-	if acc != nil {
-		peer = imPeerForAccount(acc)
+	peer := h.peer
+	if peer.empty() {
+		if acc, _ := imGetAccount(h.accID); acc != nil {
+			peer = imPeerForAccount(acc)
+		}
 	}
 	if peer.empty() {
 		log.Printf("[im] reply flush skipped account=%d (no peer)", h.accID)

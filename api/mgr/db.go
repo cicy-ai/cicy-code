@@ -217,6 +217,17 @@ func (d *DB) Migrate() {
 			updated_at TEXT DEFAULT (datetime('now'))
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_im_accounts_bound ON im_accounts(bound_pane_id)`,
+		// im_chat_bindings: per-conversation agent binding. One bot (telegram /
+		// feishu) can serve many chats, each chat routed to its own agent pane.
+		// Falls back to im_accounts.bound_pane_id when a chat has no row here.
+		`CREATE TABLE IF NOT EXISTS im_chat_bindings (
+			account_id INTEGER NOT NULL,
+			chat_id TEXT NOT NULL,
+			pane_id TEXT NOT NULL,
+			updated_at TEXT DEFAULT (datetime('now')),
+			PRIMARY KEY (account_id, chat_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_im_chat_bindings_pane ON im_chat_bindings(pane_id)`,
 		// agent_messages: cross-agent message store (status sent→done/failed) +
 		// a pointer (conversation_id/turn_id) into the receiver's history_turns.
 		// Reply content is NOT copied here — it is JOINed from history_turns. See

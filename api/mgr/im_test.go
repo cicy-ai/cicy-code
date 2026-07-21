@@ -175,3 +175,58 @@ func TestIMBindOnePerPlatformPerAgent(t *testing.T) {
 		t.Fatalf("expected no IM reply hooks without a live transport, got %d", imHooks)
 	}
 }
+
+func TestIMChatBindings(t *testing.T) {
+	withTempCicyRoot(t)
+	withTestStore(t)
+	imWorkersDisabled = true
+	t.Cleanup(func() { imWorkersDisabled = false })
+
+	// seed an account + two agents
+	res, err := store.Exec("INSERT INTO im_accounts (platform, name, secret, config, enabled, state) VALUES ('feishu','测试飞书','sec','{\"app_id\":\"cli_x\"}',1,'connected')")
+	if err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	accID, _ := res.LastInsertId()
+	for _, p := range []string{"w-201:main.0", "w-202:main.0"} {
+		if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, agent_type, active) VALUES (?,?,?,1)", p, "t-"+p, "claude"); err != nil {
+			t.Fatalf("seed agent: %v", err)
+		}
+	}
+
+	// 未绑定 → 空
+	if got := imChatBoundPane(accID, "oc_chat_1"); got != "" {
+		t.Fatalf("expected empty, got %q", got)
+	}
+	// 两个会话各绑一个 agent
+	if err := imBindChatToPane(accID, "oc_chat_1", "w-201"); err != nil {
+		t.Fatalf("bind1: %v", err)
+	}
+	if err := imBindChatToPane(accID, "oc_chat_2", "w-202:main.0"); err != nil {
+		t.Fatalf("bind2: %v", err)
+	}
+	if got := imChatBoundPane(accID, "oc_chat_1"); got != normPaneID("w-201") {
+		t.Fatalf("chat1 pane = %q", got)
+	}
+	if got := imChatBoundPane(accID, "oc_chat_2"); got != normPaneID("w-202:main.0") {
+		t.Fatalf("chat2 pane = %q", got)
+	}
+	// upsert 覆盖:chat1 换绑到 w-202
+	if err := imBindChatToPane(accID, "oc_chat_1", "w-202"); err != nil {
+		t.Fatalf("rebind: %v", err)
+	}
+	if got := imChatBoundPane(accID, "oc_chat_1"); got != normPaneID("w-202") {
+		t.Fatalf("rebound pane = %q", got)
+	}
+	// 反查:绑到 w-202 的会话应有两个
+	if got := imChatBindingsForPane("w-202:main.0"); len(got) != 2 {
+		t.Fatalf("bindings for w-202 = %v", got)
+	}
+	// 解绑
+	if err := imBindChatToPane(accID, "oc_chat_1", ""); err != nil {
+		t.Fatalf("unbind: %v", err)
+	}
+	if got := imChatBoundPane(accID, "oc_chat_1"); got != "" {
+		t.Fatalf("after unbind pane = %q", got)
+	}
+}

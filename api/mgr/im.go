@@ -31,6 +31,7 @@ var errWeChatNoActiveSession = errors.New("wechat: no active session window (ili
 const (
 	imPlatformTelegram = "telegram"
 	imPlatformWeChat   = "wechat"
+	imPlatformFeishu   = "feishu"
 )
 
 // botPeer identifies who/where to send a message. Telegram only uses ChatID;
@@ -337,6 +338,8 @@ func normalizeIMPlatform(p string) string {
 		return imPlatformTelegram
 	case "wechat", "weixin", "wx", "ilink":
 		return imPlatformWeChat
+	case "feishu", "lark":
+		return imPlatformFeishu
 	default:
 		return strings.ToLower(strings.TrimSpace(p))
 	}
@@ -450,6 +453,8 @@ func imBuildTransport(acc *imAccount) (botTransport, error) {
 		return newTelegramTransport(acc)
 	case imPlatformWeChat:
 		return newWeChatTransport(acc)
+	case imPlatformFeishu:
+		return newFeishuTransport(acc)
 	default:
 		return nil, fmt.Errorf("unsupported IM platform %q", acc.Platform)
 	}
@@ -494,7 +499,10 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	// Attachments (image / file / video): 下载到 workspace 的 .cicy/inbox/，
 	// 并把相对路径拼到 msg.Text 让 agent 用 Read 工具读。
 	if len(msg.Attachments) > 0 {
-		paneID := strings.TrimSpace(acc.BoundPaneID)
+		paneID := imChatBoundPane(acc.ID, msg.Peer.ChatID)
+		if paneID == "" {
+			paneID = strings.TrimSpace(acc.BoundPaneID)
+		}
 		if paneID == "" {
 			log.Printf("[im] account=%d got %d attachment(s) but no bound pane", acc.ID, len(msg.Attachments))
 		} else {
@@ -522,13 +530,20 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 			return
 		}
 	}
+	// 飞书没有 inline keyboard,走纯文本命令:/agents /bind /unbind /status /help。
+	if acc.Platform == imPlatformFeishu && strings.HasPrefix(text, "/") {
+		if imHandleGenericCommand(acc, tr, msg, text) {
+			imRememberPeer(acc.ID, msg.Peer)
+			return
+		}
+	}
 	imRememberPeer(acc.ID, msg.Peer)
 	imLastInboundTime.mu.Lock()
 	imLastInboundTime.m[acc.ID] = time.Now()
 	imLastInboundTime.mu.Unlock()
 
-	// auto-capture chat_id for telegram so /api/im/send and the reply hook know the target
-	if acc.Platform == imPlatformTelegram && acc.configString("chat_id") == "" && strings.TrimSpace(msg.Peer.ChatID) != "" {
+	// auto-capture chat_id for telegram/feishu so /api/im/send and the reply hook know the target
+	if (acc.Platform == imPlatformTelegram || acc.Platform == imPlatformFeishu) && acc.configString("chat_id") == "" && strings.TrimSpace(msg.Peer.ChatID) != "" {
 		acc.setConfig("chat_id", strings.TrimSpace(msg.Peer.ChatID))
 		imSaveAccountConfig(acc)
 		log.Printf("[im] account=%d telegram captured chat_id=%s", acc.ID, msg.Peer.ChatID)
@@ -551,9 +566,13 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 		}
 	}
 
-	pane := normPaneID(strings.TrimSpace(acc.BoundPaneID))
+	// 会话级绑定优先(一个 bot 多会话,各会话各自的 agent),没绑再退回账号级绑定。
+	pane := imChatBoundPane(acc.ID, msg.Peer.ChatID)
+	if pane == "" {
+		pane = normPaneID(strings.TrimSpace(acc.BoundPaneID))
+	}
 	if pane == "" || !acc.InboundToAgent {
-		log.Printf("[im] account=%d inbound dropped (bound=%q inbound=%t): %q", acc.ID, acc.BoundPaneID, acc.InboundToAgent, text)
+		log.Printf("[im] account=%d inbound dropped (chat=%s bound=%q inbound=%t): %q", acc.ID, msg.Peer.ChatID, acc.BoundPaneID, acc.InboundToAgent, text)
 		return
 	}
 	// If the bound agent's tmux session isn't running (offline), fall back to the
@@ -571,7 +590,7 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	// 直接调用 Typing() 让对端显示 "正在输入" 状态即可。
 	_ = tr.Typing(msg.Peer)
 
-	imRegisterReplyPushForInbound(pane, acc.ID)
+	imRegisterReplyPushForInbound(pane, acc.ID, msg.Peer)
 	// Headless cicy: no tmux pane — feed the inbound text to the server-side
 	// runtime in-process. The reply still streams back to the IM peer via the
 	// gateway reply-push hook registered just above (cicyCallGateway runs the same
@@ -605,6 +624,7 @@ func imSendForPaneWithPurpose(paneID, platform, text string, purpose imOutboundP
 	accounts := imAccountsForPane(paneID)
 	sent := 0
 	var lastErr error
+	delivered := map[string]bool{} // "accID|chatID" 去重:账号级 + 会话级都命中时只发一次
 	for _, acc := range accounts {
 		if platform != "" && acc.Platform != platform {
 			continue
@@ -623,6 +643,29 @@ func imSendForPaneWithPurpose(paneID, platform, text string, purpose imOutboundP
 			lastErr = err
 			continue
 		}
+		delivered[fmt.Sprintf("%d|%s", acc.ID, peer.ChatID)] = true
+		sent++
+	}
+	// 会话级绑定的目标:每个绑到这个 agent 的 (账号, 会话) 也各发一份。
+	for _, b := range imChatBindingsForPane(paneID) {
+		acc, _ := imGetAccount(b.AccountID)
+		if acc == nil || (platform != "" && acc.Platform != platform) {
+			continue
+		}
+		key := fmt.Sprintf("%d|%s", b.AccountID, b.ChatID)
+		if delivered[key] {
+			continue
+		}
+		tr := imTransportFor(b.AccountID)
+		if tr == nil {
+			lastErr = fmt.Errorf("account %d not connected", b.AccountID)
+			continue
+		}
+		if _, err := imSendOutbound(imOutboundMessage{AccountID: b.AccountID, Transport: tr, Peer: botPeer{ChatID: b.ChatID}, Text: text, Purpose: purpose}); err != nil {
+			lastErr = err
+			continue
+		}
+		delivered[key] = true
 		sent++
 	}
 	if sent == 0 && lastErr != nil {
@@ -637,29 +680,172 @@ func imSendForPane(paneID, platform, text string) (int, error) {
 	return imSendForPaneWithPurpose(paneID, platform, text, imOutboundPurposeProgrammatic)
 }
 
+/* ───────────────────────── per-chat agent binding ─────────────────────────
+   一个 bot(telegram/feishu)服务多个会话:每个会话可以各绑一个 agent。
+   路由优先级:im_chat_bindings(account_id, chat_id) → im_accounts.bound_pane_id。 */
+
+func imChatBoundPane(accID int64, chatID string) string {
+	chatID = strings.TrimSpace(chatID)
+	if store == nil || accID == 0 || chatID == "" {
+		return ""
+	}
+	var pane string
+	_ = store.QueryRow("SELECT COALESCE(pane_id,'') FROM im_chat_bindings WHERE account_id=? AND chat_id=?", accID, chatID).Scan(&pane)
+	return normPaneID(strings.TrimSpace(pane))
+}
+
+// imBindChatToPane 把某个会话绑到 agent;paneID 为空 = 解绑该会话。
+func imBindChatToPane(accID int64, chatID, paneID string) error {
+	chatID = strings.TrimSpace(chatID)
+	paneID = normPaneID(strings.TrimSpace(paneID))
+	if store == nil || accID == 0 || chatID == "" {
+		return fmt.Errorf("account/chat required")
+	}
+	if paneID == "" {
+		_, err := store.Exec("DELETE FROM im_chat_bindings WHERE account_id=? AND chat_id=?", accID, chatID)
+		return err
+	}
+	_, err := store.Exec(`INSERT INTO im_chat_bindings (account_id, chat_id, pane_id, updated_at)
+		VALUES (?,?,?,datetime('now'))
+		ON CONFLICT(account_id, chat_id) DO UPDATE SET pane_id=excluded.pane_id, updated_at=excluded.updated_at`,
+		accID, chatID, paneID)
+	return err
+}
+
+type imChatBinding struct {
+	AccountID int64
+	ChatID    string
+}
+
+// imChatBindingsForPane 反查:哪些 (账号, 会话) 绑到了这个 agent。
+// /api/im/send(agent 主动推送)用它把消息送到按会话绑定的目标。
+func imChatBindingsForPane(paneID string) []imChatBinding {
+	paneID = normPaneID(strings.TrimSpace(paneID))
+	if store == nil || paneID == "" {
+		return nil
+	}
+	rows, err := store.Query("SELECT account_id, chat_id FROM im_chat_bindings WHERE pane_id=?", paneID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []imChatBinding
+	for rows.Next() {
+		var b imChatBinding
+		if rows.Scan(&b.AccountID, &b.ChatID) == nil && b.ChatID != "" {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// imHandleGenericCommand 纯文本命令(飞书等没有 inline keyboard 的平台):
+// /agents 列出可绑 agent;/bind <pane> 把**当前会话**绑到 agent;/unbind 解绑;
+// /status 看当前会话绑定;/help 用法。返回 true = 已处理,不再转发给 agent。
+func imHandleGenericCommand(acc *imAccount, tr botTransport, msg botMsg, text string) bool {
+	fields := strings.Fields(strings.TrimSpace(text))
+	if len(fields) == 0 {
+		return false
+	}
+	cmd := strings.ToLower(fields[0])
+	reply := func(s string) {
+		imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: msg.Peer, Text: s, Purpose: imOutboundPurposeProgrammatic})
+	}
+	switch cmd {
+	case "/help", "/start":
+		reply("📖 命令\n/agents — 列出所有 agent\n/bind <编号> — 把本会话绑定到 agent(如 /bind w-10242)\n/unbind — 解绑本会话\n/status — 查看本会话绑定\n\n绑定后直接发消息即可与该 agent 对话;每个会话可以绑不同的 agent。")
+		return true
+	case "/agents":
+		agents := telegramQueryAgents()
+		if len(agents) == 0 {
+			reply("(暂无在线 agent)")
+			return true
+		}
+		var b strings.Builder
+		b.WriteString("🤖 可绑定的 agent(用 /bind <编号> 绑定本会话):\n")
+		for _, a := range agents {
+			title := a.Title
+			if title == "" {
+				title = a.PaneID
+			}
+			fmt.Fprintf(&b, "· %s — %s (%s)\n", a.PaneID, title, a.AgentType)
+		}
+		reply(strings.TrimSpace(b.String()))
+		return true
+	case "/bind":
+		if len(fields) < 2 {
+			reply("用法:/bind <编号>,先用 /agents 看列表。")
+			return true
+		}
+		pane := normPaneID(strings.TrimSpace(fields[1]))
+		var exists int
+		if store != nil {
+			_ = store.QueryRow("SELECT COUNT(1) FROM agent_config WHERE pane_id=? AND active=1", pane).Scan(&exists)
+		}
+		if exists == 0 {
+			reply(fmt.Sprintf("⚠️ 找不到 agent %s,用 /agents 看可用列表。", fields[1]))
+			return true
+		}
+		if err := imBindChatToPane(acc.ID, msg.Peer.ChatID, pane); err != nil {
+			reply("⚠️ 绑定失败: " + err.Error())
+			return true
+		}
+		var title string
+		_ = store.QueryRow("SELECT COALESCE(title,'') FROM agent_config WHERE pane_id=?", pane).Scan(&title)
+		if title == "" {
+			title = shortPaneID(pane)
+		}
+		reply(fmt.Sprintf("✅ 本会话已绑定 %s(%s),直接发消息开聊。", title, shortPaneID(pane)))
+		return true
+	case "/unbind":
+		_ = imBindChatToPane(acc.ID, msg.Peer.ChatID, "")
+		reply("✅ 本会话已解绑。用 /agents 重新选择。")
+		return true
+	case "/status":
+		pane := imChatBoundPane(acc.ID, msg.Peer.ChatID)
+		src := "会话绑定"
+		if pane == "" {
+			pane = normPaneID(strings.TrimSpace(acc.BoundPaneID))
+			src = "账号默认绑定"
+		}
+		if pane == "" {
+			reply("当前会话未绑定 agent。用 /agents 选一个,再 /bind <编号>。")
+			return true
+		}
+		var title string
+		if store != nil {
+			_ = store.QueryRow("SELECT COALESCE(title,'') FROM agent_config WHERE pane_id=?", pane).Scan(&title)
+		}
+		reply(fmt.Sprintf("✅ 本会话 → %s(%s,来源:%s)", title, shortPaneID(pane), src))
+		return true
+	}
+	return false
+}
+
 /* ───────────────────────── IM-origin reply routing ───────────────────────── */
 
 // imPendingReplyPush records which IM account(s) initiated the next turn for a
-// pane. The AI gateway drains this at turn start and only attaches IM reply
-// hooks for those accounts. This prevents normal web/CLI/API sends to an
-// IM-bound agent from leaking replies to the IM user side.
+// pane — including WHICH chat it came from (peer), so multi-chat accounts reply
+// to the right conversation. The AI gateway drains this at turn start and only
+// attaches IM reply hooks for those accounts. This prevents normal web/CLI/API
+// sends to an IM-bound agent from leaking replies to the IM user side.
 var imPendingReplyPush = struct {
 	mu sync.Mutex
-	m  map[string]map[int64]bool
-}{m: map[string]map[int64]bool{}}
+	m  map[string]map[int64]botPeer
+}{m: map[string]map[int64]botPeer{}}
 
-func imRegisterReplyPushForInbound(paneID string, accID int64) {
+func imRegisterReplyPushForInbound(paneID string, accID int64, peer botPeer) {
 	paneID = normPaneID(paneID)
 	if paneID == "" || accID == 0 {
 		return
 	}
 	imPendingReplyPush.mu.Lock()
 	if imPendingReplyPush.m[paneID] == nil {
-		imPendingReplyPush.m[paneID] = map[int64]bool{}
+		imPendingReplyPush.m[paneID] = map[int64]botPeer{}
 	}
-	imPendingReplyPush.m[paneID][accID] = true
+	imPendingReplyPush.m[paneID][accID] = peer
 	imPendingReplyPush.mu.Unlock()
-	log.Printf("[im] reply push registered pane=%s account=%d", shortPaneID(paneID), accID)
+	log.Printf("[im] reply push registered pane=%s account=%d chat=%s", shortPaneID(paneID), accID, peer.ChatID)
 }
 
 func imCancelReplyPushForInbound(paneID string, accID int64) {
@@ -677,7 +863,7 @@ func imCancelReplyPushForInbound(paneID string, accID int64) {
 	imPendingReplyPush.mu.Unlock()
 }
 
-func imPeekReplyPushAccountsForPane(paneID string) map[int64]bool {
+func imPeekReplyPushAccountsForPane(paneID string) map[int64]botPeer {
 	paneID = normPaneID(paneID)
 	if paneID == "" {
 		return nil
@@ -688,14 +874,14 @@ func imPeekReplyPushAccountsForPane(paneID string) map[int64]bool {
 	if len(set) == 0 {
 		return nil
 	}
-	out := make(map[int64]bool, len(set))
-	for id := range set {
-		out[id] = true
+	out := make(map[int64]botPeer, len(set))
+	for id, peer := range set {
+		out[id] = peer
 	}
 	return out
 }
 
-func imDrainReplyPushAccountsForPane(paneID string) map[int64]bool {
+func imDrainReplyPushAccountsForPane(paneID string) map[int64]botPeer {
 	paneID = normPaneID(paneID)
 	if paneID == "" {
 		return nil
@@ -707,9 +893,9 @@ func imDrainReplyPushAccountsForPane(paneID string) map[int64]bool {
 	if len(set) == 0 {
 		return nil
 	}
-	out := make(map[int64]bool, len(set))
-	for id := range set {
-		out[id] = true
+	out := make(map[int64]botPeer, len(set))
+	for id, peer := range set {
+		out[id] = peer
 	}
 	return out
 }
@@ -960,6 +1146,14 @@ func imPlatforms() []imPlatformInfo {
 				"steps": "保存后会生成二维码，用微信扫码登录即可；登录态保存在 ~/cicy-ai/db/ 下，后端重启会自动续上，会话失效需重新扫码。",
 			},
 		},
+		{
+			Kind: imPlatformFeishu, Label: "飞书", NeedsToken: true, NeedsQR: false, CanEdit: false,
+			Help: map[string]string{
+				"title": "创建飞书企业自建应用",
+				"steps": "飞书开放平台 → 创建企业自建应用 → 添加「机器人」能力 → 权限里开通 im:message(发消息)→「事件与回调」选择**使用长连接接收事件**并订阅 im.message.receive_v1 → 发布应用。然后把凭证页的 App ID / App Secret 填到上面。绑定后在飞书里给机器人发 /help 查看会话绑定命令(每个会话可绑不同 agent)。",
+				"link":  "https://open.feishu.cn/app",
+			},
+		},
 	}
 }
 
@@ -1067,14 +1261,15 @@ func handleIMAccounts(w http.ResponseWriter, r *http.Request) {
 			Platform string `json:"platform"`
 			Name     string `json:"name"`
 			Secret   string `json:"secret"`
+			AppID    string `json:"app_id"` // feishu only: 应用 App ID(secret 存 App Secret)
 		}
 		if err := readBody(r, &body); err != nil {
 			httpErr(w, 400, "invalid request body")
 			return
 		}
 		platform := normalizeIMPlatform(body.Platform)
-		if platform != imPlatformTelegram && platform != imPlatformWeChat {
-			httpErr(w, 400, "platform must be telegram or wechat")
+		if platform != imPlatformTelegram && platform != imPlatformWeChat && platform != imPlatformFeishu {
+			httpErr(w, 400, "platform must be telegram, wechat or feishu")
 			return
 		}
 		name := strings.TrimSpace(body.Name)
@@ -1114,6 +1309,32 @@ func handleIMAccounts(w http.ResponseWriter, r *http.Request) {
 			// wechat accounts are created only after a successful QR scan, via /api/im/wechat/login
 			httpErr(w, 400, "请用『添加微信』(扫码登录) 来添加微信账号")
 			return
+		}
+		if platform == imPlatformFeishu {
+			appID := strings.TrimSpace(body.AppID)
+			if appID == "" || secret == "" {
+				httpErr(w, 400, "feishu 需要 app_id 和 app_secret(飞书开放平台 → 企业自建应用)")
+				return
+			}
+			cfg["app_id"] = appID
+			appName, reachable, verr := feishuValidateCredentials(appID, secret)
+			if verr != nil && reachable {
+				httpErr(w, 400, "invalid feishu credentials: "+verr.Error())
+				return
+			}
+			if verr != nil { // 网络不通:先存,worker 会重试
+				state = "error"
+				detail = "无法连接飞书验证凭据(检查网络/代理),已保存: " + verr.Error()
+			} else if appName != "" {
+				detail = appName
+			}
+			if name == "" {
+				if appName != "" {
+					name = appName
+				} else {
+					name = "飞书应用"
+				}
+			}
 		}
 		res, err := store.Exec(
 			"INSERT INTO im_accounts (platform, name, secret, config, enabled, state, state_detail, inbound_to_agent) VALUES (?,?,?,?,?,?,?,1)",
@@ -1242,6 +1463,27 @@ func handleIMAccountPatch(w http.ResponseWriter, r *http.Request, acc *imAccount
 		if s, _ := v.(string); strings.TrimSpace(s) != "" {
 			sets = append(sets, "name=?")
 			vals = append(vals, strings.TrimSpace(s))
+		}
+	}
+	if v, ok := body["secret"]; ok && acc.Platform == imPlatformFeishu {
+		s := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if s == "" {
+			httpErr(w, 400, "feishu app_secret cannot be empty")
+			return
+		}
+		appName, reachable, verr := feishuValidateCredentials(acc.configString("app_id"), s)
+		if verr != nil && reachable {
+			httpErr(w, 400, "invalid feishu credentials: "+verr.Error())
+			return
+		}
+		sets = append(sets, "secret=?")
+		vals = append(vals, s)
+		if verr != nil { // 网络不通:先存,worker 重试
+			sets = append(sets, "state=?", "state_detail=?")
+			vals = append(vals, "error", "无法连接飞书验证凭据(检查网络/代理): "+verr.Error())
+		} else {
+			sets = append(sets, "state=?", "state_detail=?")
+			vals = append(vals, "pending", appName)
 		}
 	}
 	if v, ok := body["secret"]; ok && acc.Platform == imPlatformTelegram {
