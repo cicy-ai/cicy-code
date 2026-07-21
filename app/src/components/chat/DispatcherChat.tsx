@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUp, Loader2, Square, Paperclip, X, FileText, FileSpreadsheet, FileCode, FileArchive, Brain } from 'lucide-react';
+import { ArrowUp, Loader2, Square, Paperclip, X, FileText, FileSpreadsheet, FileCode, FileArchive, Brain, Maximize2, Minimize2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import CurrentHistoryView from './CurrentHistoryView';
 import { isCicyLiteAgent } from '../../lib/agentType';
@@ -144,6 +144,33 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
   const [dragOver, setDragOver] = useState(false);
   const composingRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  // 输入框展开态(issue #29):一键放大到约半屏,展开后顶部手柄可拖拽调高。
+  // expandedH=0 表示未手动调过,用默认 45vh;拖拽后记住本次会话的高度。
+  const [inputExpanded, setInputExpanded] = useState(false);
+  const [inputExpandedH, setInputExpandedH] = useState(0);
+  const resizeDragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const expandedHeight = () => {
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+    const h = inputExpandedH || Math.round(vh * 0.45);
+    return Math.min(Math.max(h, 160), Math.round(vh * 0.7));
+  };
+  const onResizeHandleDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    resizeDragRef.current = { startY: e.clientY, startH: expandedHeight() };
+    const onMove = (ev: PointerEvent) => {
+      const d = resizeDragRef.current;
+      if (!d) return;
+      // 手柄在输入卡顶部:往上拖 = 变高
+      setInputExpandedH(d.startH + (d.startY - ev.clientY));
+    };
+    const onUp = () => {
+      resizeDragRef.current = null;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const attachmentsRef = useRef<Attachment[]>([]);
   attachmentsRef.current = attachments;
@@ -511,6 +538,16 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
             a bottom toolbar (left: attach + thinking; right: round send).
             Full width (matches the full-width history). */}
         <div data-id="dispatcher-chat-input-inner" className={`flex w-full flex-col gap-2.5 rounded-[26px] border bg-white/[0.04] px-3 pb-2.5 pt-2.5 shadow-lg shadow-black/20 transition-colors ${busy ? 'border-white/[0.06] opacity-80' : 'border-white/[0.10] focus-within:border-blue-500/40'}`}>
+          {inputExpanded ? (
+            <div
+              data-id="dispatcher-chat-resize-handle"
+              onPointerDown={onResizeHandleDown}
+              className="group -mt-1 flex w-full cursor-ns-resize items-center justify-center py-0.5 touch-none"
+              title={t('composerResizeHint', { defaultValue: '拖拽调整高度' })}
+            >
+              <div className="h-1 w-10 rounded-full bg-white/[0.12] transition-colors group-hover:bg-white/[0.25]" />
+            </div>
+          ) : null}
           <input
             ref={fileInputRef}
             data-id="dispatcher-chat-file-input"
@@ -524,7 +561,8 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
             ref={inputRef}
             data-id="dispatcher-chat-input"
             value={text}
-            rows={Math.min(8, Math.max(1, text.split('\n').length))}
+            rows={inputExpanded ? undefined : Math.min(8, Math.max(1, text.split('\n').length))}
+            style={inputExpanded ? { height: `${expandedHeight()}px` } : undefined}
             placeholder={busy ? t('composerBusyPlaceholder') : idlePlaceholder}
             onChange={(e) => { setText(e.target.value); setSlashSel(0); }}
             onCompositionStart={() => { composingRef.current = true; }}
@@ -562,7 +600,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
                 void send();
               }
             }}
-            className="max-h-44 w-full resize-none bg-transparent px-2 pt-1.5 text-[15px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-600"
+            className={`w-full resize-none bg-transparent px-2 pt-1.5 text-[15px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-600 ${inputExpanded ? '' : 'max-h-44'}`}
           />
           {/* bottom toolbar */}
           <div data-id="dispatcher-chat-toolbar" className="flex items-center justify-between gap-2">
@@ -576,6 +614,21 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
                 aria-label="Attach"
               >
                 <Paperclip className="h-[15px] w-[15px]" />
+              </button>
+              <button
+                type="button"
+                data-id="dispatcher-chat-expand-toggle"
+                onClick={() => { setInputExpanded((v) => !v); inputRef.current?.focus(); }}
+                aria-pressed={inputExpanded}
+                className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                  inputExpanded
+                    ? 'border-blue-500/40 bg-blue-500/15 text-blue-300 hover:bg-blue-500/25'
+                    : 'border-white/[0.10] text-zinc-300 hover:bg-white/[0.08] hover:text-zinc-100'
+                }`}
+                title={inputExpanded ? t('composerCollapse', { defaultValue: '收起输入框' }) : t('composerExpand', { defaultValue: '展开输入框(输入长内容)' })}
+                aria-label={inputExpanded ? 'Collapse input' : 'Expand input'}
+              >
+                {inputExpanded ? <Minimize2 className="h-[15px] w-[15px]" /> : <Maximize2 className="h-[15px] w-[15px]" />}
               </button>
               {showThinking ? (
                 <button
