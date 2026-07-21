@@ -151,6 +151,14 @@ func (t *feishuTransport) ensureWSLocked() {
 	go t.runWS()
 }
 
+// feishuWSRegistry:同一个 app_id 全局只允许一条长连接。飞书是 cluster 模式,
+// 同 app 多条连接时事件**随机投递**到其中一条——账号 bounce/worker 重建留下的
+// 旧连接会变成吞消息的僵尸(实测踩坑)。新连接上位前必须先掐死旧的。
+var feishuWSRegistry = struct {
+	mu sync.Mutex
+	m  map[string]func()
+}{m: map[string]func(){}}
+
 func (t *feishuTransport) runWS() {
 	defer func() {
 		t.mu.Lock()
@@ -194,12 +202,37 @@ func (t *feishuTransport) runWS() {
 				log.Printf("[feishu] account=%d inbox full, dropping message", t.accID)
 			}
 			return nil
+		}).
+		// 用户点开和机器人的单聊(控制台常见默认订阅)——不需要处理,但注册个
+		// 空 handler,免得 SDK 对没 handler 的事件刷 error 日志。
+		OnP2ChatAccessEventBotP2pChatEnteredV1(func(ctx context.Context, event *larkim.P2ChatAccessEventBotP2pChatEnteredV1) error {
+			return nil
 		})
 
 	cli := larkws.NewClient(t.appID, t.appSecret,
 		larkws.WithEventHandler(handler),
 		larkws.WithAutoReconnect(true),
 	)
+
+	// 上位:掐死同 app 的旧连接(cancel 不够,必须 cli.Close() 真关底层 conn,
+	// 否则旧连接变僵尸,和新连接抢事件),再把自己的关闭函数登记进去。
+	closeSelf := func() { cancel(); cli.Close() }
+	feishuWSRegistry.mu.Lock()
+	if old := feishuWSRegistry.m[t.appID]; old != nil {
+		old()
+	}
+	feishuWSRegistry.m[t.appID] = closeSelf
+	feishuWSRegistry.mu.Unlock()
+	defer func() {
+		// 只清掉还是自己的登记(可能已被更新的连接顶掉)
+		feishuWSRegistry.mu.Lock()
+		if fn, ok := feishuWSRegistry.m[t.appID]; ok && isSameCloser(fn, closeSelf) {
+			delete(feishuWSRegistry.m, t.appID)
+		}
+		feishuWSRegistry.mu.Unlock()
+		cli.Close()   // 兜底:无论怎么退出,底层连接必须关死
+	}()
+
 	log.Printf("[feishu] account=%d 长连接启动 (app=%s)", t.accID, t.appID)
 	if err := cli.Start(ctx); err != nil && ctx.Err() == nil {
 		log.Printf("[feishu] account=%d 长连接退出: %v", t.accID, err)
@@ -207,6 +240,11 @@ func (t *feishuTransport) runWS() {
 		t.wsErr = err
 		t.mu.Unlock()
 	}
+}
+
+// isSameCloser 比较两个闭包是否同一个(func 不能直接 ==,用指针比较)。
+func isSameCloser(a, b func()) bool {
+	return fmt.Sprintf("%p", a) == fmt.Sprintf("%p", b)
 }
 
 // feishuExtractMessage 把长连接事件解析成 botMsg(只处理 text 消息)。
