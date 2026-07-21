@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { BookOpen, Braces, Brain, Check, Columns2, Copy, CornerDownLeft, Folder, History, Keyboard, LineChart, ListTodo, Loader2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, X } from 'lucide-react'
+import { BookOpen, Braces, Brain, Check, Columns2, Copy, CornerDownLeft, Folder, History, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -203,6 +203,33 @@ function TermPromptArea({ paneId }: { paneId: string }) {
   const composingRef = useRef(false)
   const justComposedRef = useRef(false)
   const justComposedTimerRef = useRef<number | null>(null)
+  // 展开态(issue #29):一键放大到约 40vh,展开后顶部手柄可拖拽调高。
+  // expandedH=0 表示未手动调过用默认;拖拽后的高度记在本次会话。
+  const [expanded, setExpanded] = useState(false)
+  const [expandedH, setExpandedH] = useState(0)
+  const resizeDragRef = useRef<{ startY: number; startH: number } | null>(null)
+  const expandedHeight = () => {
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+    const h = expandedH || Math.round(vh * 0.4)
+    return Math.min(Math.max(h, 120), Math.round(vh * 0.7))
+  }
+  const onResizeHandleDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    resizeDragRef.current = { startY: e.clientY, startH: expandedHeight() }
+    const onMove = (ev: PointerEvent) => {
+      const d = resizeDragRef.current
+      if (!d) return
+      // 手柄在输入区顶部:往上拖 = 变高
+      setExpandedH(d.startH + (d.startY - ev.clientY))
+    }
+    const onUp = () => {
+      resizeDragRef.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -258,13 +285,25 @@ function TermPromptArea({ paneId }: { paneId: string }) {
     <div
       data-id={`agent-stack-card-prompt-${paneId}`}
       onClick={(event) => event.stopPropagation()}
-      className="flex shrink-0 items-end gap-2 border-t border-white/[0.06] bg-[#0e0f12] px-3 py-2"
+      className="flex shrink-0 flex-col border-t border-white/[0.06] bg-[#0e0f12] px-3 py-2"
     >
+      {expanded ? (
+        <div
+          data-id={`agent-stack-card-prompt-resize-handle-${paneId}`}
+          onPointerDown={onResizeHandleDown}
+          className="group -mt-1 flex w-full cursor-ns-resize touch-none items-center justify-center pb-1 pt-0.5"
+          title={t('promptResizeHint', { defaultValue: '拖拽调整高度' })}
+        >
+          <div className="h-1 w-10 rounded-full bg-white/[0.12] transition-colors group-hover:bg-white/[0.25]" />
+        </div>
+      ) : null}
+      <div className="flex w-full items-end gap-2">
       <textarea
         ref={inputRef}
         data-id={`agent-stack-card-prompt-input-${paneId}`}
         value={value}
-        rows={Math.min(6, Math.max(1, value.split('\n').length))}
+        rows={expanded ? undefined : Math.min(6, Math.max(1, value.split('\n').length))}
+        style={expanded ? { height: `${expandedHeight()}px` } : undefined}
         placeholder={t('promptAreaPlaceholder', { defaultValue: '输入发给终端的内容,回车发送;空输入回车 = 按一次 Enter' })}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={onKeyDown}
@@ -277,6 +316,16 @@ function TermPromptArea({ paneId }: { paneId: string }) {
         }}
         className="min-h-[32px] flex-1 resize-none rounded-lg border border-white/[0.08] bg-black/40 px-3 py-1.5 text-[13px] leading-5 text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500/40 focus:outline-none"
       />
+      <button
+        type="button"
+        data-id={`agent-stack-card-prompt-expand-${paneId}`}
+        onClick={() => { setExpanded((v) => !v); inputRef.current?.focus() }}
+        aria-pressed={expanded}
+        title={expanded ? t('promptCollapse', { defaultValue: '收起输入框' }) : t('promptExpand', { defaultValue: '展开输入框(输入长内容)' })}
+        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${expanded ? 'bg-blue-500/15 text-blue-300 hover:bg-blue-500/25' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200'}`}
+      >
+        {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+      </button>
       <button
         type="button"
         data-id={`agent-stack-card-prompt-enter-mode-${paneId}`}
@@ -298,6 +347,7 @@ function TermPromptArea({ paneId }: { paneId: string }) {
       >
         {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-4 w-4" />}
       </button>
+      </div>
     </div>
   )
 }
