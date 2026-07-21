@@ -1510,6 +1510,20 @@ func handleIMAccountPatch(w http.ResponseWriter, r *http.Request, acc *imAccount
 			vals = append(vals, "pending", "@"+username)
 		}
 	}
+	// feishu:App ID 也可改(换应用)。改了就清掉旧应用的 chat_id 并让 worker 重建。
+	if v, ok := body["app_id"]; ok && acc.Platform == imPlatformFeishu {
+		s := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if s == "" {
+			httpErr(w, 400, "feishu app_id cannot be empty")
+			return
+		}
+		if s != acc.configString("app_id") {
+			acc.setConfig("app_id", s)
+			acc.setConfig("chat_id", "") // 换应用 = 旧会话作废,重新捕获
+			sets = append(sets, "state=?", "state_detail=?")
+			vals = append(vals, "pending", "")
+		}
+	}
 	if v, ok := body["enabled"]; ok {
 		b, _ := v.(bool)
 		sets = append(sets, "enabled=?")

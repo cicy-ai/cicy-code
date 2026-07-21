@@ -265,7 +265,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
   // via the same BindPicker, layered above the add modals.
   const [addBind, setAddBind] = useState('w-1001');
   const [addBindOpen, setAddBindOpen] = useState(false);
-  const [draft, setDraft] = useState<{ name: string; secret: string; boundPaneId: string }>({ name: '', secret: '', boundPaneId: '' });
+  const [draft, setDraft] = useState<{ name: string; secret: string; boundPaneId: string; appId: string }>({ name: '', secret: '', boundPaneId: '', appId: '' });
   const [baseline, setBaseline] = useState('');
   const [panes, setPanes] = useState<PaneOpt[]>([]);
   const [showSecret, setShowSecret] = useState(false);
@@ -314,15 +314,16 @@ export default function IMDashboard({ leftMount, rightMount }: {
     setTestRes(null);
     setShowSecret(false);
     if (!acc) {
-      const empty = { name: '', secret: '', boundPaneId: '' };
+      const empty = { name: '', secret: '', boundPaneId: '', appId: '' };
       setDraft(empty);
       setBaseline(JSON.stringify(empty));
       return;
     }
     const serverBind = acc.bound_pane_id || '';
     const defaultBind = serverBind || 'w-1001';
-    setDraft({ name: acc.name || '', secret: '', boundPaneId: defaultBind });
-    setBaseline(JSON.stringify({ name: acc.name || '', secret: '', boundPaneId: serverBind }));
+    const appId = String((acc as any).config?.app_id ?? '');
+    setDraft({ name: acc.name || '', secret: '', boundPaneId: defaultBind, appId });
+    setBaseline(JSON.stringify({ name: acc.name || '', secret: '', boundPaneId: serverBind, appId }));
   }, []);
 
   useEffect(() => { loadEditor(selected); }, [selected, loadEditor]);
@@ -720,6 +721,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
     const patch: any = {};
     if (draft.name.trim() !== (selected.name || '')) patch.name = draft.name.trim();
     if (draft.secret.trim() !== '') patch.secret = draft.secret.trim();
+    if (selected.platform === 'feishu' && draft.appId.trim() !== String((selected as any).config?.app_id ?? '')) patch.app_id = draft.appId.trim();
     const wantBind = draft.boundPaneId.trim();
     const curBind = selected.bound_pane_id || '';
     const bindChanged = wantBind !== curBind;
@@ -979,6 +981,37 @@ export default function IMDashboard({ leftMount, rightMount }: {
               <Field label={t('fieldName')}>
                 <input data-id="im-detail-name-input" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} className={INPUT} placeholder={selected.platform} />
               </Field>
+
+              {isFeishu && (
+                <>
+                  <Field label="App ID" help={t('feishuAppIdHelp', '飞书开放平台 → 凭证与基础信息。改了会清掉旧会话,重新捕获。')}>
+                    <input
+                      data-id="im-detail-appid-input"
+                      value={draft.appId} onChange={(e) => setDraft((d) => ({ ...d, appId: e.target.value }))}
+                      className={cn(INPUT, 'font-mono')} placeholder="cli_a1b2c3d4e5f6g7h8"
+                      autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                    />
+                  </Field>
+                  <Field
+                    label="App Secret"
+                    help={selected.has_secret ? t('botTokenSet', { tail: selected.secret_tail || '' }) : t('feishuSecretHelp', '飞书开放平台 → 凭证与基础信息 → App Secret')}
+                  >
+                    <div className="relative">
+                      <input
+                        data-id="im-detail-fs-secret-input"
+                        type="text" name="cicy-im-fs-secret" value={draft.secret} onChange={(e) => setDraft((d) => ({ ...d, secret: e.target.value }))}
+                        className={cn(INPUT, 'pr-9 font-mono')} placeholder={selected.has_secret ? '••• ' + (selected.secret_tail || '') : ''}
+                        autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                        data-1p-ignore data-lpignore="true"
+                        style={showSecret ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)}
+                      />
+                      <button data-id="im-detail-fs-secret-toggle" type="button" disabled={secretLoading} onClick={toggleSecret} className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300 disabled:opacity-50" title={showSecret ? t('hide') : t('show')}>
+                        {secretLoading ? <Loader2 size={13} className="animate-spin" /> : showSecret ? <EyeOff size={13} /> : <Eye size={13} />}
+                      </button>
+                    </div>
+                  </Field>
+                </>
+              )}
 
               {isTelegram && (
                 <>
