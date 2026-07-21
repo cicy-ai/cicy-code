@@ -1176,7 +1176,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
     wxModal = (
       <div data-id="im-wx-modal" className="fixed inset-0 z-[10000] cursor-pointer" onClick={() => void closeWxModal()}>
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-        <div className="absolute left-1/2 top-1/2 w-[400px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 cursor-default rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60"
+        <div className="absolute left-1/2 top-1/2 w-[400px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 cursor-default select-text rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60"
           onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
             <div className="flex items-center gap-2">
@@ -1226,7 +1226,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
     fsModal = (
       <div data-id="im-fs-modal" className="fixed inset-0 z-[10000] cursor-pointer" onClick={closeFsModal}>
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-        <div className="absolute left-1/2 top-1/2 w-[440px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 cursor-default rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60"
+        <div className="absolute left-1/2 top-1/2 w-[440px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 cursor-default select-text rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60"
           onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
             <div className="flex items-center gap-2">
@@ -1300,10 +1300,17 @@ export default function IMDashboard({ leftMount, rightMount }: {
                   <span className="text-[13px]">{c.status === 'ok' ? '✅' : c.status === 'fail' ? '❌' : '⚠️'}</span>
                   <span className="text-[13px] font-semibold text-zinc-100">{c.name}</span>
                   {c.link && c.status !== 'ok' && (
-                    <a href={c.link} target="_blank" rel="noreferrer"
-                      className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/[0.08] px-2.5 py-1 text-[11px] text-sky-300 hover:bg-sky-500/[0.15] transition-colors">
-                      <ExternalLink size={10} /> {t('goConfigure', '去配置')}
-                    </a>
+                    <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
+                      <a href={c.link} target="_blank" rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/[0.08] px-2.5 py-1 text-[11px] text-sky-300 hover:bg-sky-500/[0.15] transition-colors">
+                        <ExternalLink size={10} /> {t('goConfigure', '去配置')}
+                      </a>
+                      <button type="button" title={t('copyLink', '复制链接')}
+                        onClick={() => { try { void navigator.clipboard.writeText(c.link); toast(t('linkCopied', '链接已复制')); } catch {} }}
+                        className="inline-flex items-center rounded-lg border border-white/[0.12] bg-white/[0.03] px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.08] transition-colors">
+                        ⧉
+                      </button>
+                    </span>
                   )}
                 </div>
                 {c.detail && c.status !== 'ok' && (
@@ -1339,7 +1346,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
     tgModal = (
       <div data-id="im-tg-modal" className="fixed inset-0 z-[10000] cursor-pointer" onClick={closeTgModal}>
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-        <div className="absolute left-1/2 top-1/2 w-[440px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 cursor-default rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60"
+        <div className="absolute left-1/2 top-1/2 w-[440px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 cursor-default select-text rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60"
           onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
             <div className="flex items-center gap-2">
