@@ -523,20 +523,8 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	if text == "" {
 		return
 	}
-	// Handle bot commands (/help, /start, etc.) locally without forwarding to agent.
-	if acc.Platform == imPlatformTelegram && strings.HasPrefix(text, "/") {
-		if telegramHandleCommand(acc, tr, msg, text) {
-			imRememberPeer(acc.ID, msg.Peer)
-			return
-		}
-	}
-	// 飞书没有 inline keyboard,走纯文本命令:/agents /bind /unbind /status /help。
-	if acc.Platform == imPlatformFeishu && strings.HasPrefix(text, "/") {
-		if imHandleGenericCommand(acc, tr, msg, text) {
-			imRememberPeer(acc.ID, msg.Peer)
-			return
-		}
-	}
+	// 先记录来源,再处理命令。以前捕获在命令处理**后面**:只发过 /help 的账号
+	// 提前 return,chat_id 永远不落盘,重启后体检误报「从未收到过消息」(实测踩坑)。
 	imRememberPeer(acc.ID, msg.Peer)
 	imLastInboundTime.mu.Lock()
 	imLastInboundTime.m[acc.ID] = time.Now()
@@ -546,7 +534,20 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	if (acc.Platform == imPlatformTelegram || acc.Platform == imPlatformFeishu) && acc.configString("chat_id") == "" && strings.TrimSpace(msg.Peer.ChatID) != "" {
 		acc.setConfig("chat_id", strings.TrimSpace(msg.Peer.ChatID))
 		imSaveAccountConfig(acc)
-		log.Printf("[im] account=%d telegram captured chat_id=%s", acc.ID, msg.Peer.ChatID)
+		log.Printf("[im] account=%d %s captured chat_id=%s", acc.ID, acc.Platform, msg.Peer.ChatID)
+	}
+
+	// Handle bot commands (/help, /start, etc.) locally without forwarding to agent.
+	if acc.Platform == imPlatformTelegram && strings.HasPrefix(text, "/") {
+		if telegramHandleCommand(acc, tr, msg, text) {
+			return
+		}
+	}
+	// 飞书没有 inline keyboard,走纯文本命令:/agents /bind /unbind /status /help。
+	if acc.Platform == imPlatformFeishu && strings.HasPrefix(text, "/") {
+		if imHandleGenericCommand(acc, tr, msg, text) {
+			return
+		}
 	}
 
 	// persist last-seen wechat peer (chat_id + context_token) so it survives
