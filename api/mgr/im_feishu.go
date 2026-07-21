@@ -334,3 +334,125 @@ func maxInt(a, b int) int {
 	}
 	return b
 }
+
+/* ───────────────────────── 权限体检(测试按钮)─────────────────────────
+   飞书没有公开的「查我开通了哪些权限」接口,用探针推断:
+   1. 凭据:tenant_access_token 换取成功与否
+   2. 长连接:worker 里的 transport WS 是否在跑
+   3. 发消息权限(im:message):向一个不存在的 chat 试发,错误码是「无权限」
+      还是「目标非法」——后者说明权限已就绪,报错只是因为假目标(预期)
+   4. 事件订阅(im.message.receive_v1 + 长连接模式 + 发版):无法直接查,
+      用「是否收到过任何入站消息」经验判断
+   5. 若已捕获真实 chat_id,追加一次真实测试发送 */
+
+// feishuPermErrCodes:调用 API 时因缺权限/未授权返回的错误码。
+// 99991679=无该 scope;99991672=应用未启用相关能力;99991668=token 无权限。
+var feishuPermErrCodes = map[int]bool{99991679: true, 99991672: true, 99991668: true}
+
+func feishuLooksLikePermError(code int, msg string) bool {
+	if feishuPermErrCodes[code] {
+		return true
+	}
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "permission") || strings.Contains(m, "scope") ||
+		strings.Contains(m, "无权限") || strings.Contains(m, "权限")
+}
+
+// probeSendPermission 用假 chat_id 探测 im:message 发送权限。
+// ok=true 表示权限就绪(错误来自假目标,预期);ok=false 表示确认缺权限。
+func (t *feishuTransport) probeSendPermission() (ok bool, detail string) {
+	_, err := t.Send(botPeer{ChatID: "oc_cicycode_permission_probe"}, "probe")
+	if err == nil { // 理论上不可能;当作就绪
+		return true, "发送权限就绪"
+	}
+	es := err.Error()
+	var code int
+	if _, serr := fmt.Sscanf(es, "feishu send failed code=%d", &code); serr == nil && feishuLooksLikePermError(code, es) {
+		return false, es
+	}
+	if strings.Contains(es, "feishu token failed") {
+		return false, es // 凭据层的问题,让上一条检查兜住语义
+	}
+	if feishuLooksLikePermError(0, es) {
+		return false, es
+	}
+	return true, "" // 走到了业务校验(假目标被拒)= 权限已开通
+}
+
+func feishuHandleTest(w http.ResponseWriter, acc *imAccount) {
+	start := time.Now()
+	var lines []string
+	allOK := true
+	pass := func(s string) { lines = append(lines, "✅ "+s) }
+	warn := func(s string) { lines = append(lines, "⚠️ "+s) }
+	fail := func(s string) { lines = append(lines, "❌ "+s); allOK = false }
+
+	// 1. 凭据
+	appID := strings.TrimSpace(acc.configString("app_id"))
+	_, reachable, verr := feishuValidateCredentials(appID, strings.TrimSpace(acc.Secret))
+	switch {
+	case verr == nil:
+		pass("凭据有效(App ID/Secret 换取 tenant token 成功)")
+	case !reachable:
+		fail("网络不通,无法访问 open.feishu.cn(检查网络/代理): " + verr.Error())
+	default:
+		fail("凭据无效: " + verr.Error() + "(检查 App ID/App Secret)")
+	}
+
+	// 2. 长连接
+	var ft *feishuTransport
+	if tr := imTransportFor(acc.ID); tr != nil {
+		ft, _ = tr.(*feishuTransport)
+	}
+	if ft != nil {
+		ft.mu.Lock()
+		running := ft.wsRunning
+		ft.mu.Unlock()
+		if running {
+			pass("长连接在线(事件通道就绪)")
+		} else {
+			warn("长连接未运行(worker 正在重连或刚启动,稍等几秒再测)")
+		}
+	} else {
+		warn("账号 worker 未连接(账号可能被停用)")
+		if built, err := imBuildTransport(acc); err == nil {
+			ft, _ = built.(*feishuTransport)
+		}
+	}
+
+	// 应用后台直达链接(按 app_id 拼)
+	authURL := "https://open.feishu.cn/app/" + appID + "/auth"        // 权限管理
+	eventURL := "https://open.feishu.cn/app/" + appID + "/event"      // 事件与回调
+	versionURL := "https://open.feishu.cn/app/" + appID + "/app_version" // 版本管理与发布
+
+	// 3. 发消息权限
+	if verr == nil && ft != nil {
+		if ok, detail := ft.probeSendPermission(); ok {
+			pass("发消息权限 im:message 已开通")
+		} else {
+			fail("缺发消息权限: " + detail + "\n   → 到权限管理开通 im:message(获取与发送单聊、群组消息): " + authURL + "\n   → 然后创建版本并发布: " + versionURL)
+		}
+	}
+
+	// 4. 事件订阅(经验判断:收到过消息没有)
+	if acc.configString("chat_id") != "" || !imLastInboundTimeGet(acc.ID).IsZero() {
+		pass("收过入站消息(事件订阅 im.message.receive_v1 正常)")
+	} else {
+		warn("从未收到过消息 —— 若你在飞书里发了消息但这里没反应,依次检查:\n" +
+			"   1) 事件与回调:订阅方式=**使用长连接接收事件**,并添加事件 **im.message.receive_v1**\n      " + eventURL + "\n" +
+			"   2) 权限:开通「读取用户发给机器人的单聊消息」\n      " + authURL + "\n" +
+			"   3) **创建版本并发布**(不发版全部配置不生效)\n      " + versionURL + "\n" +
+			"   然后在飞书私聊机器人发一条 /help")
+	}
+
+	// 5. 真实测试发送(有捕获的 chat 才发)
+	if peer := imPeerForAccount(acc); !peer.empty() && ft != nil && verr == nil {
+		if _, err := imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: ft, Peer: peer, Text: "✅ cicy 测试消息", Purpose: imOutboundPurposeTest}); err != nil {
+			fail("测试发送失败: " + err.Error())
+		} else {
+			pass("测试消息已发出,去飞书看一眼")
+		}
+	}
+
+	J(w, M{"ok": allOK, "detail": strings.Join(lines, "\n"), "duration_ms": time.Since(start).Milliseconds()})
+}

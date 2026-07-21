@@ -1572,6 +1572,11 @@ func handleIMAccountBind(w http.ResponseWriter, r *http.Request, acc *imAccount)
 }
 
 func handleIMAccountTest(w http.ResponseWriter, acc *imAccount) {
+	// 飞书走专用体检:凭据/长连接/发消息权限/事件订阅逐项检查(权限探针见 im_feishu.go)。
+	if acc.Platform == imPlatformFeishu {
+		feishuHandleTest(w, acc)
+		return
+	}
 	start := time.Now()
 	tr := imTransportFor(acc.ID)
 	if tr == nil && acc.Platform == imPlatformTelegram {
