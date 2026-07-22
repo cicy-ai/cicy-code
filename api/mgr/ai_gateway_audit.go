@@ -1422,8 +1422,12 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 		hub.publishAgent(s.agentID, *statusEvent)
 	}
 	hub.publishAgent(s.agentID, currentUpdatedEvent)
-	finalQuestion, _ := currentUpdatedData["question"].(string)
-	notifyWorkerReplyFinished(s.agentID, replySnapshot.Status, finalQuestion, len(replySnapshot.ToolCalls))
+	if !s.auxiliary {
+		// aux calls (title/suggestion generation) complete without tool_calls but
+		// are not user turns — never notify for them.
+		finalQuestion, _ := currentUpdatedData["question"].(string)
+		notifyWorkerReplyFinished(s.agentID, replySnapshot.Status, finalQuestion, len(replySnapshot.ToolCalls))
+	}
 	// Audit at the interception point: scan the REAL traffic that passed through
 	// the gateway this turn — the agent's full OUTBOUND request (what it sent to
 	// the model: prompt, context, file contents it read, pasted secrets) and the

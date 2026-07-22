@@ -7,6 +7,8 @@ import (
 	"database/sql"
 	"log"
 	"strings"
+	"sync"
+	"time"
 )
 
 func listActiveMasterPanesForWorker(workerPaneID string) ([]string, string, error) {
@@ -51,6 +53,26 @@ func notifyActiveMastersForWorker(workerPaneID string, evt ChatEvent, logLabel s
 // notification body — the OS banner shows ~2-4 lines, anything longer is noise.
 const desktopNotifyPromptLimit = 120
 
+// desktopNotifyDebounce rate-limits notifications to one per agent per window —
+// a safety net against any finalize path that fires more than once per turn.
+const desktopNotifyDebounceWindow = 30 * time.Second
+
+var (
+	desktopNotifyLastMu sync.Mutex
+	desktopNotifyLast   = map[string]time.Time{}
+)
+
+func desktopNotifyDebounce(shortPane string) bool {
+	desktopNotifyLastMu.Lock()
+	defer desktopNotifyLastMu.Unlock()
+	now := time.Now()
+	if last, ok := desktopNotifyLast[shortPane]; ok && now.Sub(last) < desktopNotifyDebounceWindow {
+		return false
+	}
+	desktopNotifyLast[shortPane] = now
+	return true
+}
+
 // notifyWorkerReplyFinished (issue #27): when a worker with desktop_notify=1
 // finishes a USER-prompted turn, push an OS desktop notification to every
 // connected cicy-desktop (via its `notify` electronRPC tool). Agent-originated
@@ -66,10 +88,16 @@ func notifyWorkerReplyFinished(workerPaneID string, replyStatus string, question
 		return
 	}
 	status := strings.ToLower(strings.TrimSpace(aiGatewayFirstNonEmpty(replyStatus, "completed")))
-	if status == "completed" && toolCalls > 0 {
-		return // mid-turn tool round, not the user-visible end
+	// Completed-only, and only the turn's final round (no tool_calls in flight).
+	// `failed` deliberately does NOT notify: an interrupted turn finalizes every
+	// aborted in-flight request as failed — 2026-07-22 this fired a "reply
+	// failed!" banner every ~7s until the CLI settled. Failure is visible in the
+	// UI; the notification contract is "your prompt is done".
+	if status != "completed" || toolCalls > 0 {
+		return
 	}
-	if status != "completed" && status != "failed" {
+	if !desktopNotifyDebounce(shortPane) {
+		log.Printf("[hook] desktop-notify debounced worker=%s", shortPane)
 		return
 	}
 	var enabled sql.NullBool
@@ -87,9 +115,6 @@ func notifyWorkerReplyFinished(workerPaneID string, replyStatus string, question
 		q = string(runes[:desktopNotifyPromptLimit]) + "…"
 	}
 	title := shortPane + " reply completed!"
-	if status == "failed" {
-		title = shortPane + " reply failed!"
-	}
 	evt := ChatEvent{Type: "desktop_event", Data: M{
 		"type":      "rpc_call",
 		"tool":      "notify",
