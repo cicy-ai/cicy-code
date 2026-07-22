@@ -30,6 +30,8 @@
   "autoStartHint": "Restore automatically after service restart",
   "allowAllActions": "エージェントに最大権限を許可",
   "allowAllActionsHint": "Codex / Claude / Opencode のすべての操作確認をスキップ(最大権限)",
+  "desktopNotify": "デスクトップ通知",
+  "desktopNotifyHint": "返信完了時に OS 通知をプッシュ(タイトルに agent、本文にプロンプト要約);ユーザーが直接送ったプロンプトのみ対象、agent 間メッセージは通知しない",
   "useProxy": "Enable proxy",
   "useProxyHint": "Runs cicy_proxy_on before launch and checks the mihomo IN-USER rule",
   "proxyPassword": "Proxy password",

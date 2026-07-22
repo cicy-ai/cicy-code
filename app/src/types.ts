@@ -11,6 +11,7 @@ export interface EditPaneData {
   title: string;
   agent_type?: string;
   allow_all_actions?: boolean;
+  desktop_notify?: boolean;
   use_custom_gateway?: boolean;
   use_mitm?: boolean;
   use_proxy?: boolean;

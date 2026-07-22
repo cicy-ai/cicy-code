@@ -4004,6 +4004,7 @@ func agentInspectorLoadPaneDetail(agentID string) M {
 	var active sql.NullInt64
 	var allowAllActions sql.NullBool
 	var replyInChinese sql.NullBool
+	var desktopNotify sql.NullBool
 	var tgEnable sql.NullBool
 	var tgToken, tgChatID sql.NullString
 	var groupID sql.NullInt64
@@ -4014,6 +4015,7 @@ func agentInspectorLoadPaneDetail(agentID string) M {
 		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.config, t.common_prompt, gp.group_id, t.role, t.default_model, t.trust_level, COALESCE(t.role_template,''),
 		COALESCE(t.allow_all_actions, 0),
 		COALESCE(t.reply_in_chinese, 0),
+		COALESCE(t.desktop_notify, 0),
 		COALESCE(t.machine_id, 0), COALESCE(m.label, ''), COALESCE(m.url, ''), COALESCE(json_extract(m.capabilities_json, '$.runtime_kind'), ''), COALESCE(m.capabilities_json, '{}')
 		FROM agent_config t
 		LEFT JOIN group_windows gp ON t.pane_id=gp.win_id
@@ -4022,6 +4024,7 @@ func agentInspectorLoadPaneDetail(agentID string) M {
 		&paneID, &title, &workspace, &initScript,
 		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &config, &commonPrompt, &groupID, &role, &defaultModel, &trustLevel, &roleTemplate, &allowAllActions,
 		&replyInChinese,
+		&desktopNotify,
 		&machineID, &machineLabel, &machineURL, &runtimeKind, &capabilitiesJSON)
 	if err != nil {
 		return nil
@@ -4034,6 +4037,7 @@ func agentInspectorLoadPaneDetail(agentID string) M {
 		"config": config.String, "common_prompt": commonPrompt.String,
 		"allow_all_actions": allowAllActions.Bool,
 		"reply_in_chinese":  replyInChinese.Bool,
+		"desktop_notify":    desktopNotify.Bool,
 		"role":              role.String, "default_model": defaultModel.String,
 		"role_template": roleTemplate.String,
 		"trust_level":   trustLevel.String,

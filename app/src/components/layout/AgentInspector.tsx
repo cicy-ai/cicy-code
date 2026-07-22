@@ -59,6 +59,7 @@ function serializeGeneralSettings(value: EditPaneData | null) {
     title: String(value?.title || ''),
     active: value?.active !== false,
     allow_all_actions: !!value?.allow_all_actions,
+    desktop_notify: !!value?.desktop_notify,
     use_proxy: !!value?.use_proxy,
     proxy: {
       password: String(value?.proxy?.password || ''),
@@ -554,6 +555,7 @@ export default function AgentInspector({
         title: String(merged.title || '').trim(),
         active: merged.active !== false,
         allow_all_actions: !!merged.allow_all_actions,
+        desktop_notify: !!merged.desktop_notify,
         tg_enable: !!merged.tg_enable,
         tg_token: String(merged.tg_token || '').trim(),
         tg_chat_id: String(merged.tg_chat_id || '').trim(),
@@ -824,6 +826,18 @@ export default function AgentInspector({
                       onChange={(value) => {
                         patchSettingsData({ allow_all_actions: value });
                         void saveSettings({ allow_all_actions: value });
+                      }}
+                    />
+                  </div>
+
+                  <div data-id="agent-inspector-settings-general-notify" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <InspectorToggle
+                      label={t('desktopNotify')}
+                      desc={t('desktopNotifyHint')}
+                      checked={!!settingsData?.desktop_notify}
+                      onChange={(value) => {
+                        patchSettingsData({ desktop_notify: value });
+                        void saveSettings({ desktop_notify: value });
                       }}
                     />
                   </div>

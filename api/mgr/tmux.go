@@ -1057,6 +1057,7 @@ var paneUpdateCols = map[string]bool{
 	"default_model": true, "trust_level": true,
 	"tg_token": true, "tg_chat_id": true, "tg_enable": true, "active": true,
 	"allow_all_actions":  true,
+	"desktop_notify":     true,
 	"reply_in_chinese":   true,
 	"use_custom_gateway": true,
 	"use_mitm":           true,

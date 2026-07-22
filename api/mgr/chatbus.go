@@ -369,6 +369,33 @@ func (h *chatHub) broadcastElectron(agentID string, evt ChatEvent) {
 	}
 }
 
+// broadcastElectronAll fans an event out to every connected electron
+// (cicy-desktop) client across ALL agents. Desktop notifications ride this:
+// the desktop's main window may be attached to any agent, so per-agent
+// broadcast would miss it. Dedup by client pointer — a client registered
+// under several agent keys must receive the event once.
+func (h *chatHub) broadcastElectronAll(evt ChatEvent) int {
+	b, _ := json.Marshal(evt)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	sent := 0
+	seen := map[*chatClient]bool{}
+	for _, list := range h.clients {
+		for _, c := range list {
+			if !c.electron || seen[c] {
+				continue
+			}
+			seen[c] = true
+			select {
+			case c.send <- b:
+				sent++
+			default:
+			}
+		}
+	}
+	return sent
+}
+
 func (h *chatHub) sendToClient(clientID string, evt ChatEvent) bool {
 	b, _ := json.Marshal(evt)
 	h.mu.RLock()

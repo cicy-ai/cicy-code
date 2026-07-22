@@ -280,6 +280,9 @@ func (d *DB) Migrate() {
 	d.runOnceMigration("use_custom_gateway_v1", `UPDATE agent_config SET use_custom_gateway = CASE WHEN COALESCE(use_official_auth, 0) = 1 THEN 0 ELSE 1 END`)
 	d.ensureColumn("agent_config", "inspector_notes", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_config", "inspector_notes_updated_at", "TEXT")
+	// 桌面通知开关(issue #27):该 agent 的用户 prompt 回复完成时,向 cicy-desktop
+	// 推系统通知。默认关,按 agent 打开。
+	d.ensureColumn("agent_config", "desktop_notify", "INTEGER DEFAULT 0")
 	// Memory-template selections made at creation time, persisted so forks can
 	// inherit the same project/role layers (see composeAgentMemory).
 	d.ensureColumn("agent_config", "project_template", "TEXT DEFAULT ''")
