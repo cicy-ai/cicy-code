@@ -48,6 +48,7 @@
   "allowAllActionsHint": "对 Codex / Claude / Opencode 跳过所有操作确认(赋予最高权限)",
   "desktopNotify": "桌面通知",
   "desktopNotifyHint": "回复完成时推送系统桌面通知(标题含 agent,正文带 prompt 摘要);仅用户直接发的 prompt 触发,agent 间消息不通知",
+  "desktopNotifyOpenSystem": "打开系统通知设置(需允许 Electron / CiCy Desktop)",
   "useProxy": "启用代理",
   "useProxyHint": "启动前执行 cicy_proxy_on，并检查 mihomo IN-USER 规则",
   "proxyPassword": "代理密码",

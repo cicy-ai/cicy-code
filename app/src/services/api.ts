@@ -105,6 +105,7 @@ const api = {
     return request;
   },
   updatePane: (id: string, data: any) => http.patch(`/api/tmux/panes/${encodeURIComponent(id)}`, data),
+  openSystemNotificationSettings: () => http.post('/api/desktop/open-notification-settings', {}),
   deletePane: (id: string) => http.delete(`/api/tmux/panes/${encodeURIComponent(id)}`),
   createPane: (data: any) => http.post('/api/tmux/create', data),
   forkPane: (data: { source_pane_id: string; title?: string; master_pane_id?: string; prompt?: string }) => http.post('/api/tmux/fork', data),

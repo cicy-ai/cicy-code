@@ -6,6 +6,8 @@ package main
 import (
 	"database/sql"
 	"log"
+	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -142,4 +144,32 @@ func notifyActiveMastersByTmuxSend(workerPaneID string, text string) {
 		}
 		log.Printf("[hook] tmux-sent master %s: %s", masterPane, text)
 	}
+}
+
+// handleDesktopOpenNotificationSettings opens the OS notification settings on
+// the connected cicy-desktop(s) — the entry next to the desktop_notify toggle.
+// macOS silently drops Electron notifications until the user allows them in
+// System Settings, so the UI needs a one-click way to land exactly there.
+func handleDesktopOpenNotificationSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, 405, "POST only")
+		return
+	}
+	var cmd string
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = `open "x-apple.systempreferences:com.apple.Notifications-Settings.extension"`
+	case "windows":
+		cmd = `start ms-settings:notifications`
+	default:
+		cmd = `xdg-open gnome-control-center://notifications 2>/dev/null || gnome-control-center notifications`
+	}
+	evt := ChatEvent{Type: "desktop_event", Data: M{
+		"type":      "rpc_call",
+		"tool":      "exec_shell",
+		"args":      M{"command": cmd},
+		"requestId": "opennotif-" + randomAssetID(4),
+	}}
+	sent := hub.broadcastElectronAll(evt)
+	jsonResp(w, M{"success": sent > 0, "clients": sent})
 }

@@ -32,6 +32,7 @@
   "allowAllActionsHint": "Ignore toutes les confirmations d'action pour Codex / Claude / Opencode (permissions complètes)",
   "desktopNotify": "Notifications bureau",
   "desktopNotifyHint": "Notification système à la fin d'une réponse (titre = agent, corps = extrait du prompt) ; uniquement pour les prompts envoyés par l'utilisateur, jamais pour les messages inter-agents",
+  "desktopNotifyOpenSystem": "Ouvrir les réglages de notifications système (autoriser Electron / CiCy Desktop)",
   "useProxy": "Activer le proxy",
   "useProxyHint": "Exécute cicy_proxy_on et vérifie la règle mihomo IN-USER",
   "proxyPassword": "Mot de passe du proxy",

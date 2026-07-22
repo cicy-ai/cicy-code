@@ -48,6 +48,7 @@
   "allowAllActionsHint": "Skips all action confirmations for Codex / Claude / Opencode (full permissions)",
   "desktopNotify": "Desktop notifications",
   "desktopNotifyHint": "Push an OS desktop notification when a reply completes (title shows the agent, body carries a prompt snippet); only user-sent prompts trigger it — inter-agent messages never notify",
+  "desktopNotifyOpenSystem": "Open system notification settings (allow Electron / CiCy Desktop)",
   "useProxy": "Enable proxy",
   "useProxyHint": "Runs cicy_proxy_on before launch and checks the mihomo IN-USER rule",
   "proxyPassword": "Proxy password",

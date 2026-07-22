@@ -840,6 +840,14 @@ export default function AgentInspector({
                         void saveSettings({ desktop_notify: value });
                       }}
                     />
+                    {/* macOS 会静默丢弃未授权应用的通知——给一个直达系统设置通知页的入口
+                        (经 desktop 的 exec_shell RPC 在桌面侧打开)。 */}
+                    <button
+                      type="button"
+                      data-id="agent-inspector-settings-notify-open-system"
+                      onClick={() => { void apiService.openSystemNotificationSettings().catch(() => {}); }}
+                      className="rounded-lg border border-white/10 px-2 py-1 text-[11px] text-zinc-300 transition-colors hover:bg-white/5"
+                    >{t('desktopNotifyOpenSystem')}</button>
                   </div>
 
                 </div>
