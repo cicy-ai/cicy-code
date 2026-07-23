@@ -2140,8 +2140,18 @@ func codexCatalogBuildLines(catalogPath string, wantedModels []string) []string 
 // "--resume <id>" when the agent's last conversation is resumable, else leaves
 // it empty (fresh start). Resumable means: the (symlinked) current.json carries
 // a real session id — NOT the 8-hex gateway fallback — AND claude's own
-// transcript for it exists under ~/.claude/projects/*/<id>.jsonl. The id IS
-// current.json's conversation_id (== claude's session_id == the .jsonl name).
+// transcript for it exists under THIS pane's project dir
+// (~/.claude/projects/<workspace-slug>/<id>.jsonl). The id IS current.json's
+// conversation_id (== claude's session_id == the .jsonl name).
+//
+// Issue #30: the lookup used to glob projects/*/ across ALL agents, so a
+// foreign conversation_id in current.json silently resumed ANOTHER agent's
+// session under this pane's proxy identity (usage/billing/history all
+// mis-attributed, self-perpetuating). Now the transcript must live under this
+// pane's own project dir; a foreign match is refused OUT LOUD and the pane
+// starts fresh. The slug mirrors claude's own project-dir naming: every
+// non-alphanumeric byte of the absolute workspace path becomes '-'. If the
+// slug rule ever diverges the failure mode is safe: refuse + WARN + fresh.
 // All decided inside boot.sh; no send-keys.
 func claudeResumeBootLines() []string {
 	return []string{
@@ -2150,9 +2160,16 @@ func claudeResumeBootLines() []string {
 		`if [ -f "$WORKSPACE/.cicy/history/current.json" ]; then _cid=$(sed -n 's/.*"conversation_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$WORKSPACE/.cicy/history/current.json" | head -1); fi`,
 		`case "$_cid" in`,
 		`  ""|[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;`,
-		`  *) ls "$HOME"/.claude/projects/*/"$_cid".jsonl >/dev/null 2>&1 && CICY_RESUME="--resume $_cid" && echo "[cicy] resuming claude session $_cid" ;;`,
+		`  *)`,
+		`    _projdir="$HOME/.claude/projects/$(printf '%s' "$WORKSPACE" | sed 's#[^A-Za-z0-9]#-#g')"`,
+		`    if [ -f "$_projdir/$_cid.jsonl" ]; then`,
+		`      CICY_RESUME="--resume $_cid"; echo "[cicy] resuming claude session $_cid"`,
+		`    elif ls "$HOME"/.claude/projects/*/"$_cid".jsonl >/dev/null 2>&1; then`,
+		`      echo "[cicy] WARN: conversation $_cid exists only OUTSIDE this agent's project dir ($_projdir) — refusing cross-agent resume, starting a fresh session (issue #30; also happens after a workspace path move)" >&2`,
+		`    fi`,
+		`    ;;`,
 		`esac`,
-		`unset _cid`,
+		`unset _cid _projdir`,
 	}
 }
 

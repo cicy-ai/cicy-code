@@ -1662,6 +1662,7 @@ func aiGatewayWriteSnapshotFile(agentID, name, convID string, value interface{})
 }
 
 func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnapshot) error {
+	warnOnForeignConversationID(agentID, current.ConversationID)
 	current.Body = aiGatewayAnnotateCurrentBodyHistoryIDs(agentID, aiGatewayCloneJSONValue(current.Body))
 	current.MaxHistoryID = aiGatewayCurrentBodyMaxHistoryID(current.Body)
 	current.Prompts = aiGatewayBuildCurrentPrompts(agentID, current.ConversationID, current.Body, current.Timestamp)
