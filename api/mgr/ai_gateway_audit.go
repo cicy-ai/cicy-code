@@ -484,7 +484,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	)
 	requestID := aiGatewayFirstNonEmpty(aiGatewayString(payloadMap["request_id"]), aiGatewayString(payloadMap["id"]), aiGatewayShortID())
 	question := aiGatewayExtractQuestion(payloadMap)
-	turnID := aiGatewayFirstNonEmpty(codexMeta.TurnID, aiGatewayString(payloadMap["turn_id"]), aiGatewayShortID())
+	turnID := aiGatewayFirstNonEmpty(codexMeta.TurnID, strings.TrimSpace(requestHeaders.Get("X-Cicy-Turn-Id")), aiGatewayString(payloadMap["turn_id"]), aiGatewayShortID())
 	targetURL := *targetBase
 	targetURL.Path = resolveOpenClawProviderTargetPath(targetBase.Path, suffix)
 	targetURL.RawPath = ""
@@ -558,7 +558,11 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	// prevConv (pre-split legacy snapshots) keeps inheriting.
 	prevConvMatches := strings.TrimSpace(prevReply.ConversationID) == "" ||
 		strings.TrimSpace(prevReply.ConversationID) == strings.TrimSpace(conversationID)
-	if prevReply.TurnID != "" && isContinuation && prevConvMatches {
+	// 显式同轮声明(cicy runtime 的 X-Cicy-Turn-Id):同一逻辑轮的所有 round 带同
+	// 一个 id → 无条件继承 items(append 语义)。语义猜测(isContinuation)只是没有
+	// 声明时的后备——猜错一次,前面 round 的 thinking/工具过程就被清零覆盖。
+	declaredSameTurn := turnID != "" && turnID == strings.TrimSpace(prevReply.TurnID)
+	if prevReply.TurnID != "" && (isContinuation || declaredSameTurn) && prevConvMatches {
 		prevItems = prevReply.Items
 		turnID = prevReply.TurnID
 		// This continuation request carries the tool_result blocks for the

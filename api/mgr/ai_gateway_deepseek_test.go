@@ -167,6 +167,57 @@ func TestTransformMessagesRequestAddsStreamOptionsUsage(t *testing.T) {
 	}
 }
 
+// A turn stopped mid-thinking persists an assistant message whose only block is
+// `thinking`. Translated naively that becomes content:null with no tool_calls —
+// OpenAI-style upstreams 400 the whole request ("content or tool_calls must be
+// set") and the session wedges forever (every retry re-sends the same history).
+// The converter must DROP such a message, not forward it.
+func TestConvertAnthropicThinkingOnlyAssistantIsDropped(t *testing.T) {
+	out := convertAnthropicMessageToChatCompletions("assistant", []interface{}{
+		map[string]interface{}{"type": "thinking", "thinking": "half-finished reasoning..."},
+	}, true)
+	if len(out) != 0 {
+		t.Fatalf("thinking-only assistant should be dropped, got: %#v", out)
+	}
+	// Sanity: a normal assistant turn (text) still comes through.
+	out = convertAnthropicMessageToChatCompletions("assistant", []interface{}{
+		map[string]interface{}{"type": "thinking", "thinking": "hm"},
+		map[string]interface{}{"type": "text", "text": "hello"},
+	}, true)
+	if len(out) != 1 || out[0]["content"] != "hello" {
+		t.Fatalf("normal assistant turn mangled: %#v", out)
+	}
+	// Sanity: tool_use-only assistant keeps its tool_calls message.
+	out = convertAnthropicMessageToChatCompletions("assistant", []interface{}{
+		map[string]interface{}{"type": "tool_use", "id": "c1", "name": "shell", "input": map[string]interface{}{}},
+	}, true)
+	if len(out) != 1 {
+		t.Fatalf("tool_use assistant dropped: %#v", out)
+	}
+	if _, ok := out[0]["tool_calls"]; !ok {
+		t.Fatalf("tool_calls missing: %#v", out)
+	}
+}
+
+// A user message carrying BOTH a tool_result and text must translate to the
+// tool message FIRST, then the user text — OpenAI-style upstreams 400 the whole
+// request when anything sits between assistant.tool_calls and its tool message.
+func TestConvertAnthropicToolResultPlusTextOrdersToolFirst(t *testing.T) {
+	out := convertAnthropicMessageToChatCompletions("user", []interface{}{
+		map[string]interface{}{"type": "tool_result", "tool_use_id": "c1", "content": "ok"},
+		map[string]interface{}{"type": "text", "text": "该你了"},
+	}, true)
+	if len(out) != 2 {
+		t.Fatalf("expected tool+user messages, got: %#v", out)
+	}
+	if out[0]["role"] != "tool" || out[0]["tool_call_id"] != "c1" {
+		t.Fatalf("tool message must come first: %#v", out)
+	}
+	if out[1]["role"] != "user" || out[1]["content"] != "该你了" {
+		t.Fatalf("user text must follow the tool message: %#v", out)
+	}
+}
+
 func TestChatUsageToAnthropicUsageSubtractsCache(t *testing.T) {
 	u := chatUsageToAnthropicUsage(map[string]interface{}{
 		"prompt_tokens": float64(13669), "completion_tokens": float64(366),

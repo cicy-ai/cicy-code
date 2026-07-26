@@ -228,7 +228,7 @@ func cicySummarizeViaGateway(ctx context.Context, shortID, convID, model, transc
 		"system":     []M{{"type": "text", "text": cicyCompactSystemPrompt}},
 		"messages":   []M{{"role": "user", "content": transcript}},
 	}
-	resp, _, err := cicyCallGateway(ctx, shortID, convID, "compact", payload, func(M) {})
+	resp, _, err := cicyCallGateway(ctx, shortID, convID, "compact", "", payload, func(M) {})
 	if err != nil {
 		return "", err
 	}
@@ -1613,7 +1613,7 @@ func cicyModel(shortID string) string {
 // Messages SSE, so the consumption side is one format regardless of provider.
 // The second return reports whether deltas were emitted (the caller must then
 // not re-emit the assembled text blocks).
-func cicyCallGateway(ctx context.Context, shortID, sessionID, auxKind string, payload M, emit func(M)) (map[string]interface{}, bool, error) {
+func cicyCallGateway(ctx context.Context, shortID, sessionID, auxKind, turnID string, payload M, emit func(M)) (map[string]interface{}, bool, error) {
 	payload["stream"] = true
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -1659,6 +1659,12 @@ func cicyCallGateway(ctx context.Context, shortID, sessionID, auxKind string, pa
 			// cicy runtime itself; the audit layer must keep it instead of
 			// overwriting it with the (possibly compact-sliced) wire body.
 			req.Header.Set("X-Cicy-Current-Owned", "1")
+		}
+		// 显式声明本请求属于哪个逻辑 turn:同一轮的多个 round(工具循环、重试)
+		// 带同一个 id,审计层据此继承 reply.Items,不再靠「尾部是否 tool_result」猜
+		// ——猜错一次,前面 round 的 thinking/工具过程就从 reply.json 里被清掉。
+		if turnID != "" {
+			req.Header.Set("X-Cicy-Turn-Id", turnID)
 		}
 
 		resp, err := client.Do(req)
@@ -2816,6 +2822,9 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 	// 仍修复历史中段的孤儿 tool_use(被打断的轮次),否则坏窗口会让每轮 provider 400。
 	session.messages = cicyBalanceToolCalls(session.messages)
 	cfg := resolveLiteConfig(shortID, workspace)
+	// 本逻辑轮的稳定 id:轮内每个 round(工具循环/续写)的网关请求都带同一个
+	// X-Cicy-Turn-Id,审计层据此把 reply.Items 一路 append 累积——绝不清零覆盖。
+	windowTurnID := aiGatewayShortID()
 
 	// 新一轮开始:先把当前窗口(含刚追加的 q)落 current.json,再把 reply.json 重置成
 	// working 空占位 —— 清掉上一轮残留(尤其被覆盖的失败轮 ⚠️error),让 web 立刻显示
@@ -2870,7 +2879,7 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 		// per-role system prompt + tool defs too so the inspector's 提示词/工具
 		// panels match a CLI agent's.
 		cicySeedCurrentSnapshotReq(shortID, session.convID, session.messages, cfg.systemPrompt, cicyCachedToolDefs(cfg))
-		resp, streamed, err := cicyCallGateway(ctx, shortID, session.convID, "", payload, emit)
+		resp, streamed, err := cicyCallGateway(ctx, shortID, session.convID, "", windowTurnID, payload, emit)
 		if err != nil {
 			// A mid-flight cancel surfaces here as a ctx error — record it as a
 			// cancellation, not a failure. Anything else is a genuine gateway error
@@ -2975,6 +2984,11 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 
 		if len(toolResults) == 0 || stopReason != "tool_use" {
 			session.persistLocked(workspace)
+			// 轮末立刻把完整历史固化进 current.json(不等下一轮开始才 Seed):
+			// 排队中的下一条消息一开跑就会 cicyResetReplyForNewTurn 清空 reply.json,
+			// 而 reply 是「最新一轮」展示的唯一来源——不先固化,本轮的 thinking/工具
+			// 过程就会从最新 a 里消失(桌宠下棋时看棋事件常与回合消息背靠背排队,必现)。
+			cicySeedCurrentSnapshot(shortID, session.convID, session.messages)
 			// 记忆养成:成功收尾的轮次入队做记忆识别(去抖批处理,fire-and-forget)。
 			cicyMemoryHarvestEnqueue(shortID, workspace, session.messages)
 			return true
@@ -2987,5 +3001,6 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 	// and return success so the partial work + last answer aren't dropped.
 	emit(M{"type": "flush", "text": fmt.Sprintf("Tool-round limit (%d) reached — wrapping up.", maxRounds)})
 	session.persistLocked(workspace)
+	cicySeedCurrentSnapshot(shortID, session.convID, session.messages)
 	return true
 }

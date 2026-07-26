@@ -1282,7 +1282,14 @@ function AgentStackCard({
       {promptOpen && !isCicyLiteAgent(item.agentType) ? (
         <TermPromptArea paneId={item.paneId} />
       ) : null}
-      {(headerControls || !isCicyLiteAgent(item.agentType)) ? (
+      {/* Always render this bar so its 40px height is reserved regardless of
+          active state. Gating it on `headerControls` (which is non-null only for
+          the single activeCliPaneId) collapsed the bar on the OTHER split half —
+          both halves are visible in split mode — reflowing the body and making
+          the history/prompt above jump when focus switched between them. The
+          inner controls stay gated; an inactive cicy half just shows an empty
+          bar, matching how non-cicy halves already behave. */}
+      {(
         <div data-id={`agent-stack-card-header-controls-${item.paneId}`} className="flex h-10 shrink-0 items-center gap-3 border-t border-white/[0.04] bg-black/[0.18] px-3">
           {/* attach sits immediately left of the model picker (headerControls'
               first item) as one group; the spacer inside headerControls pushes
@@ -1305,7 +1312,7 @@ function AgentStackCard({
           ) : null}
           {headerControls}
         </div>
-      ) : null}
+      )}
       {!item.isApiOnly && item.ttydSrc ? (
         <ShellPanel agentId={item.paneId} ttydSrc={item.ttydSrc} active={active} />
       ) : null}

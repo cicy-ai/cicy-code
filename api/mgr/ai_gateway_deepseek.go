@@ -1425,6 +1425,15 @@ func convertAnthropicMessageToChatCompletions(role string, content interface{}, 
 	// For assistant role: emit one message with text content + tool_calls (both may be empty).
 	// For user role: emit text message if present; tool_result becomes role=tool messages.
 	if role == "assistant" {
+		// A stopped-mid-thinking turn leaves an assistant message whose only block
+		// is `thinking` (no text, no tool_use). Translated it becomes content:null
+		// with no tool_calls — OpenAI-style upstreams reject the whole request with
+		// 400 "content or tool_calls must be set", permanently wedging the session
+		// (every retry re-sends the same history). Such a turn contributed nothing
+		// visible to the conversation: drop it here instead of forwarding it.
+		if text.Len() == 0 && len(toolCalls) == 0 {
+			return toolResultMsgs
+		}
 		msg := map[string]interface{}{"role": "assistant"}
 		if text.Len() > 0 {
 			msg["content"] = text.String()
@@ -1446,7 +1455,15 @@ func convertAnthropicMessageToChatCompletions(role string, content interface{}, 
 			msg["reasoning_content"] = rc
 		}
 		out = append(out, msg)
+		out = append(out, toolResultMsgs...)
 	} else {
+		// A user message can carry BOTH tool_result blocks and text (the runtime
+		// folds a queued user line into the continuation). OpenAI-style upstreams
+		// require the tool messages to IMMEDIATELY follow the assistant tool_calls
+		// message — emitting the user text first wedges the whole session with
+		// 400 "tool_calls must be followed by tool messages". Tool results first,
+		// then the text.
+		out = append(out, toolResultMsgs...)
 		if text.Len() > 0 {
 			out = append(out, map[string]interface{}{
 				"role":    role,
@@ -1454,7 +1471,6 @@ func convertAnthropicMessageToChatCompletions(role string, content interface{}, 
 			})
 		}
 	}
-	out = append(out, toolResultMsgs...)
 	return out
 }
 

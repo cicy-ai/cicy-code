@@ -482,7 +482,7 @@ func cicyMemoryFlush(shortID string, buf *cicyMemoryBuffer) {
 		"system":     []M{{"type": "text", "text": cicyMemoryRecognizerPrompt}},
 		"messages":   []M{{"role": "user", "content": b.String()}},
 	}
-	resp, _, err := cicyCallGateway(ctx, shortID, "memory-"+shortID, "memory", payload, func(M) {})
+	resp, _, err := cicyCallGateway(ctx, shortID, "memory-"+shortID, "memory", "", payload, func(M) {})
 	if err != nil {
 		log.Printf("[cicy-memory] recognizer failed agent=%s turns=%d: %v", shortID, len(turns), err)
 		return

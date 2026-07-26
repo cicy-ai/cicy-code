@@ -560,7 +560,9 @@ export function useCurrentHistory(opts: {
           // keeps a multi-round turn correct instead of splitting tools into a
           // committed block above the live thinking.
           const liveItems: any[] = Array.isArray((data as any)?.items) ? (data as any).items : [];
-          const sig = `${turnId}:${effectiveAnswerId}:${status}:${String(data?.updated_at || '')}:${thinking.length}:${answer.length}:${liveItems.length}:${JSON.stringify(liveItems.map((it: any) => [it?.type, String(it?.thinking || it?.text || '').length, it?.name || '']))}`;
+          // 签名必须带上 output 长度:工具结果是后一拍才注入 items 的,不计进签名的话
+          // 快照"看起来没变"→ 不重建 steps → 结果永远不显示。
+          const sig = `${turnId}:${effectiveAnswerId}:${status}:${String(data?.updated_at || '')}:${thinking.length}:${answer.length}:${liveItems.length}:${JSON.stringify(liveItems.map((it: any) => [it?.type, String(it?.thinking || it?.text || '').length, it?.name || '', String(it?.output ?? '').length]))}`;
           if (sig !== lastSig) {
             lastSig = sig;
             const steps: NonNullable<HistoryTurn['steps']> = [];
@@ -574,7 +576,18 @@ export function useCurrentHistory(opts: {
                 if (tx) steps.push({ type: 'text', text: tx });
               } else if (ty === 'tool_use') {
                 const inp = it?.input;
-                const tool = { name: String(it?.name || ''), arg: inp == null ? '' : (typeof inp === 'string' ? inp : JSON.stringify(inp)), tool_id: String(it?.tool_id || '') };
+                // reply.json 的 tool_use 条目本来没有结果:result 是续传请求到达时由
+                // aiGatewayInjectToolResultsIntoItems 注入到 **output** 字段的(见知识库
+                // tool-result-进-reply-json)。不读 output,工具卡展开就只有命令没有输出。
+                const rawOut = it?.output ?? it?.result;
+                const out = rawOut == null ? '' : (typeof rawOut === 'string' ? rawOut : JSON.stringify(rawOut));
+                const tool = {
+                  name: String(it?.name || ''),
+                  arg: inp == null ? '' : (typeof inp === 'string' ? inp : JSON.stringify(inp)),
+                  tool_id: String(it?.tool_id || ''),
+                  result: out,
+                  isError: it?.output_is_error === true || it?.is_error === true,
+                };
                 const last = steps[steps.length - 1];
                 if (last && (last as any).type === 'tool') (last as any).tools.push(tool);
                 else steps.push({ type: 'tool', tools: [tool] } as any);
