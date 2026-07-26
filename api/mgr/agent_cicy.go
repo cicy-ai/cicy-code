@@ -1018,6 +1018,30 @@ func cicyMessageHasToolResult(msg M) bool {
 	return false
 }
 
+// cicyMessageHasToolUse reports whether a message contains at least one tool_use
+// block. Mirrors cicyMessageHasToolResult for the assistant side — used when
+// trimming the window tail (dropTrailingFailedTurnLocked / compaction) so we
+// don't leave an orphan assistant.tool_use whose matching tool_result was dropped.
+func cicyMessageHasToolUse(msg M) bool {
+	switch blocks := msg["content"].(type) {
+	case []interface{}:
+		for _, b := range blocks {
+			if bm, ok := b.(map[string]interface{}); ok {
+				if t, _ := bm["type"].(string); t == "tool_use" {
+					return true
+				}
+			}
+		}
+	case []M:
+		for _, bm := range blocks {
+			if t, _ := bm["type"].(string); t == "tool_use" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // cicySyntheticToolResult is injected to pair an orphan tool_use whose
 // matching tool_result never arrived (a turn interrupted by a new user message
 // before the tool resolved). Without it the provider rejects the whole window
@@ -2702,6 +2726,11 @@ func (s *cicySession) lastOutcomeKindLocked() string {
 // no real answer, so accumulating "q→失败 / q→失败 / …" only pollutes the window
 // and compaction — the next q should REPLACE the failed attempt, not stack on it.
 // Cancelled turns are left intact (the user explicitly stopped them and may 重试).
+//
+// After cutting the failed turn, we also drop any preceding assistant messages that
+// end with orphan tool_use blocks — their tool_results lived inside the dropped user
+// message and are now gone. Without this cleanup the next request carries an
+// assistant.tool_calls with no matching tool message → provider 400.
 // Caller holds session.mu.
 func (s *cicySession) dropTrailingFailedTurnLocked() {
 	n := len(s.messages)
@@ -2716,6 +2745,22 @@ func (s *cicySession) dropTrailingFailedTurnLocked() {
 		}
 	}
 	s.messages = s.messages[:cut]
+	// The cut may have just dropped a user message whose content contained both
+	// a tool_result (pairing a prior assistant's tool_use) and a new text query.
+	// That prior assistant is now orphan — its tool_use has no matching
+	// tool_result anywhere in the window. Walk backwards from the new tail,
+	// dropping any assistant that carries at least one unpaired tool_use.
+	for len(s.messages) > 0 {
+		last := s.messages[len(s.messages)-1]
+		role, _ := last["role"].(string)
+		if role != "assistant" {
+			break
+		}
+		if !cicyMessageHasToolUse(last) {
+			break
+		}
+		s.messages = s.messages[:len(s.messages)-1]
+	}
 }
 
 // retryCicyPane re-runs the latest cancelled/failed turn for a cicy agent (web 点
