@@ -829,6 +829,26 @@ func readLocalizedSkillDoc(skill *marketSkill, stem, lang string) string {
 	if content := readSkillDoc(skill, localizedFile, localizedKey); content != "" {
 		return content
 	}
+	// The public registry's legacy file endpoint only accepts the original
+	// skill_md/help_md/tools_md keys. Localized documents are still packaged in
+	// each immutable GitHub tag, so read that static source as a compatibility
+	// fallback until every registry deployment accepts the new keys.
+	if skill.Source != "private" && skill.Source != "user" && skill.Version != "" {
+		tag := skill.Name + "-v" + skill.Version
+		rawURL := fmt.Sprintf(
+			"https://raw.githubusercontent.com/cicy-ai/cicy-skills/%s/skills/%s/references/%s.%s.md",
+			url.PathEscape(tag), url.PathEscape(skill.Name), url.PathEscape(stem), url.PathEscape(suffix),
+		)
+		client := &http.Client{Timeout: 6 * time.Second}
+		if resp, err := client.Get(rawURL); err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				if body, readErr := io.ReadAll(resp.Body); readErr == nil && len(body) > 0 {
+					return string(body)
+				}
+			}
+		}
+	}
 	return readSkillDoc(skill, filepath.Join("references", stem+".md"), stem+"_md")
 }
 
