@@ -86,7 +86,10 @@ export default defineConfig({
         { text: '界面截图', link: '/guide/screenshots' },
       ]},
       { text: '常见问题', collapsed: false, items: [
-        { text: 'Agent 登录与 API 配置', link: '/faq/agent-login' },
+        { text: 'Claude Code 官方登录', link: '/faq/claude-official-login' },
+        { text: 'Claude Code 第三方中转 API', link: '/faq/claude-third-party-api' },
+        { text: 'Codex 官方登录', link: '/faq/codex-official-login' },
+        { text: 'Codex 第三方中转 API', link: '/faq/codex-third-party-api' },
       ]},
       { text: '核心概念', collapsed: false, items: [
         { text: 'Agent 与 Pane', link: '/concepts/agent-pane' },
