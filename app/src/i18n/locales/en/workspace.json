@@ -446,5 +446,9 @@
   "stDraft": "Draft",
   "stDeprecated": "Deprecated",
   "stRejected": "Archived",
-  "emailNeedsSetup": "Token delivery email / SMTP not configured"
+  "emailNeedsSetup": "Token delivery email / SMTP not configured",
+  "marketplaceUpdateAll": "Update all skills",
+  "marketplaceUpdateAllCount": "Update all ({{count}})",
+  "marketplaceUpdatingAll": "Updating all…",
+  "marketplaceUpdateAllResult": "Update complete: {{succeeded}} succeeded, {{failed}} failed"
 }

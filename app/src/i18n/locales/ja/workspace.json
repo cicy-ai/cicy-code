@@ -443,5 +443,9 @@
   "stDraft": "ドラフト",
   "stDeprecated": "非推奨",
   "stRejected": "アーカイブ",
-  "emailNeedsSetup": "トークン配信メール / SMTP が未設定"
+  "emailNeedsSetup": "トークン配信メール / SMTP が未設定",
+  "marketplaceUpdateAll": "すべての Skill を更新",
+  "marketplaceUpdateAllCount": "すべて更新 ({{count}})",
+  "marketplaceUpdatingAll": "すべて更新中…",
+  "marketplaceUpdateAllResult": "更新完了：成功 {{succeeded}}、失敗 {{failed}}"
 }

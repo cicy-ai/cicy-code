@@ -446,5 +446,9 @@
   "stDraft": "草案",
   "stDeprecated": "废弃",
   "stRejected": "归档",
-  "emailNeedsSetup": "未配置令牌投递邮箱 / SMTP"
+  "emailNeedsSetup": "未配置令牌投递邮箱 / SMTP",
+  "marketplaceUpdateAll": "更新全部 Skill",
+  "marketplaceUpdateAllCount": "全部更新 ({{count}})",
+  "marketplaceUpdatingAll": "正在全部更新…",
+  "marketplaceUpdateAllResult": "更新完成：成功 {{succeeded}}，失败 {{failed}}"
 }

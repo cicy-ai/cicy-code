@@ -443,5 +443,9 @@
   "stDraft": "Brouillon",
   "stDeprecated": "Obsolète",
   "stRejected": "Archivé",
-  "emailNeedsSetup": "E-mail de remise du jeton / SMTP non configuré"
+  "emailNeedsSetup": "E-mail de remise du jeton / SMTP non configuré",
+  "marketplaceUpdateAll": "Tout mettre à jour",
+  "marketplaceUpdateAllCount": "Tout mettre à jour ({{count}})",
+  "marketplaceUpdatingAll": "Mise à jour en cours…",
+  "marketplaceUpdateAllResult": "Mise à jour terminée : {{succeeded}} réussies, {{failed}} échouées"
 }

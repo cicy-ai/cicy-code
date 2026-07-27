@@ -157,6 +157,8 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   const [proxySshManagerOpen, setProxySshManagerOpen] = useState(false);
   const [frpServerManagerOpen, setFrpServerManagerOpen] = useState(false);
   const [webClientsOpen, setWebClientsOpen] = useState(false);
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [bulkUpdateResult, setBulkUpdateResult] = useState('');
   // Stable refs for props passed to <SkillDetailModal>. Without these, every
   // parent re-render (e.g. the 5s WS poll cycle) emits new closures, which
   // propagates through sendToAgent → MarkdownPane.components → react-markdown
@@ -225,6 +227,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   const counts = useMemo(() => ({
     total: skills.length,
     installed: skills.filter(s => s.status.installed).length,
+    updates: skills.filter(s => s.status.installed && s.has_update).length,
   }), [skills]);
 
   const onInstall = async (skill: MarketSkill) => {
@@ -264,6 +267,23 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
       return { ok: false, error: e?.message || t('marketplaceUpdateFailed') };
     }
     finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
+  };
+
+  const updateAll = async () => {
+    const pending = skills.filter(skill => skill.status.installed && skill.has_update);
+    if (pending.length === 0 || bulkUpdating) return;
+    setBulkUpdating(true);
+    setBulkUpdateResult('');
+    let succeeded = 0;
+    let failed = 0;
+    for (const skill of pending) {
+      const result = await onUpdate(skill);
+      if (result?.ok === false) failed += 1;
+      else succeeded += 1;
+    }
+    await load();
+    setBulkUpdateResult(t('marketplaceUpdateAllResult', { succeeded, failed }));
+    setBulkUpdating(false);
   };
 
   // Eject: keep the installed files in ~/cicy-ai/skills/<name>/ but rewrite
@@ -364,10 +384,27 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
                     {f === 'available' && `${t('marketplaceAvailable')} ${counts.total - counts.installed}`}
                   </button>
                 ))}
-                <button data-id="skill-market-refresh" onClick={load} className="ml-auto p-1 text-zinc-500 hover:text-zinc-300 rounded" title={t('marketplaceRetry')}>
+                <button
+                  data-id="skill-market-update-all"
+                  onClick={() => { void updateAll(); }}
+                  disabled={bulkUpdating || counts.updates === 0}
+                  className="ml-auto inline-flex items-center gap-1 rounded px-2 py-0.5 text-amber-300 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:text-zinc-600"
+                  title={t('marketplaceUpdateAll')}
+                >
+                  <RefreshCw className={cn('h-3 w-3', bulkUpdating && 'animate-spin')} />
+                  {bulkUpdating
+                    ? t('marketplaceUpdatingAll')
+                    : t('marketplaceUpdateAllCount', { count: counts.updates })}
+                </button>
+                <button data-id="skill-market-refresh" onClick={load} className="p-1 text-zinc-500 hover:text-zinc-300 rounded" title={t('marketplaceRetry')}>
                   <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
                 </button>
               </div>
+              {bulkUpdateResult && (
+                <div data-id="skill-market-update-all-result" className="text-[10px] text-zinc-500">
+                  {bulkUpdateResult}
+                </div>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto" data-id="skill-market-list">
