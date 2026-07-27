@@ -75,6 +75,7 @@ export default defineConfig({
       { text: '首页', link: 'https://cicy-ai.com', target: '_self' },
       { text: '快速开始', link: '/guide/getting-started' },
       { text: '下载', link: '/guide/download' },
+      { text: 'FAQ', link: '/faq/agent-login' },
       { text: '文档', link: '/guide/introduction', activeMatch: '/guide/' },
     ],
     sidebar: [
@@ -83,6 +84,9 @@ export default defineConfig({
         { text: '下载与安装', link: '/guide/download' },
         { text: '快速开始', link: '/guide/getting-started' },
         { text: '界面截图', link: '/guide/screenshots' },
+      ]},
+      { text: '常见问题', collapsed: false, items: [
+        { text: 'Agent 登录与 API 配置', link: '/faq/agent-login' },
       ]},
       { text: '核心概念', collapsed: false, items: [
         { text: 'Agent 与 Pane', link: '/concepts/agent-pane' },
