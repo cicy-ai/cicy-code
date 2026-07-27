@@ -175,7 +175,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
       const res = await apiService.listMarketSkills();
       setSkills(Array.isArray(res?.data?.skills) ? res.data.skills : []);
     } catch (e: any) {
-      setLoadError(e?.message || 'load failed');
+      setLoadError(e?.message || t('marketplaceLoadFailed'));
     } finally {
       setLoading(false);
     }
@@ -242,7 +242,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
       return data;
     } catch (e: any) {
       await load();
-      return { ok: false, error: e?.message || 'install failed' };
+      return { ok: false, error: e?.message || t('marketplaceInstallFailed') };
     }
     finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
   };
@@ -261,7 +261,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
       return data;
     } catch (e: any) {
       await load();
-      return { ok: false, error: e?.message || 'update failed' };
+      return { ok: false, error: e?.message || t('marketplaceUpdateFailed') };
     }
     finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
   };
@@ -283,7 +283,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
       return data;
     } catch (e: any) {
       await load();
-      return { ok: false, error: e?.message || 'eject failed' };
+      return { ok: false, error: e?.message || t('marketplaceEjectFailed') };
     }
     finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
   };
@@ -302,7 +302,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
       return data;
     } catch (e: any) {
       await load();
-      return { ok: false, error: e?.message || 'uninstall failed' };
+      return { ok: false, error: e?.message || t('marketplaceUninstallFailed') };
     }
     finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
   };
@@ -535,7 +535,7 @@ function SubscribePanel({ onChanged, skills, onOpenDetail, selectedName }: { onC
       await refresh();
       onChanged();
     } catch (e: any) {
-      setError(e?.response?.data?.error || e?.message || 'add failed');
+      setError(e?.response?.data?.error || e?.message || t('marketplaceError'));
     } finally {
       setBusy(false);
     }
@@ -556,7 +556,7 @@ function SubscribePanel({ onChanged, skills, onOpenDetail, selectedName }: { onC
       await refresh();
       onChanged();
     } catch (e: any) {
-      setError(e?.response?.data?.error || e?.message || 'remove failed');
+      setError(e?.response?.data?.error || e?.message || t('marketplaceError'));
     } finally {
       setBusy(false);
     }
@@ -662,7 +662,7 @@ function PublishPanel({ onChanged, onOpenDetail }: { onChanged: () => void; onOp
       const res = await apiService.getLocalRegistry();
       setStatus(res?.data || null);
     } catch (e: any) {
-      setError(e?.message || 'failed');
+      setError(e?.message || t('marketplaceError'));
     } finally {
       setLoading(false);
     }
@@ -680,7 +680,7 @@ function PublishPanel({ onChanged, onOpenDetail }: { onChanged: () => void; onOp
     if (!window.confirm(t('publishRotateConfirm'))) return;
     setBusy(true); setError('');
     try { await apiService.rotateLocalRegistry(); await refresh(); onChanged(); }
-    catch (e: any) { setError(e?.response?.data?.detail || e?.message || 'rotate failed'); }
+    catch (e: any) { setError(e?.response?.data?.detail || e?.message || t('marketplaceError')); }
     finally { setBusy(false); }
   };
   const setShared = async (name: string, on: boolean) => {
@@ -690,7 +690,7 @@ function PublishPanel({ onChanged, onOpenDetail }: { onChanged: () => void; onOp
       else await apiService.unpublishLocalRegistry(name);
       await refresh();
       onChanged();
-    } catch (e: any) { setError(e?.response?.data?.detail || e?.message || (on ? 'share failed' : 'unshare failed')); }
+    } catch (e: any) { setError(e?.response?.data?.detail || e?.message || t('marketplaceError')); }
     finally { setBusy(false); }
   };
 
@@ -773,6 +773,7 @@ function SkillRow({ skill, selected, onClick, trailing, hideSourceBadge }: {
   // team's header (subscribe tab) — avoids repeating "hk" on every row.
   hideSourceBadge?: boolean;
 }) {
+  const { t } = useTranslation('workspace');
   const installed = skill.status.installed;
 
   return (
@@ -800,7 +801,7 @@ function SkillRow({ skill, selected, onClick, trailing, hideSourceBadge }: {
               <span
                 className="text-[10px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-300 inline-flex items-center gap-0.5 shrink-0"
                 data-id={`skill-market-private-${skill.name}`}
-                title={`私有库: ${skill.registry_source}`}
+                title={t('marketplacePrivateRegistry', { name: skill.registry_source })}
               >
                 <Lock className="w-2.5 h-2.5" />
                 <span>{skill.registry_source}</span>
@@ -860,14 +861,15 @@ function CategoryBadge({ category }: { category: string }) {
 }
 
 function InlineStatus({ skill }: { skill: MarketSkill }) {
+  const { t } = useTranslation('workspace');
   const pills: { ok: boolean; label: string; title?: string }[] = [];
   if (skill.status.installed) {
-    pills.push({ ok: !skill.status.last_error, label: skill.status.last_error ? 'error' : 'installed', title: skill.status.last_error });
+    pills.push({ ok: !skill.status.last_error, label: skill.status.last_error ? t('marketplaceError') : t('marketplaceInstalled'), title: skill.status.last_error });
   } else {
-    pills.push({ ok: false, label: 'available' });
+    pills.push({ ok: false, label: t('marketplaceAvailable') });
   }
   if (skill.config_file) {
-    pills.push({ ok: !!skill.status.config_present, label: 'config', title: skill.config_file });
+    pills.push({ ok: !!skill.status.config_present, label: t('marketplaceConfig'), title: skill.config_file });
   }
   if (skill.status.requires_met) {
     for (const [dep, met] of Object.entries(skill.status.requires_met)) {
@@ -943,7 +945,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
       const res = await apiService.getGoogleSkillConfig();
       setGoogleStatus(res?.data || null);
     } catch (e: any) {
-      setGoogleError(e?.message || 'load failed');
+      setGoogleError(e?.message || t('marketplaceLoadFailed'));
     }
   }, [name]);
 
@@ -957,9 +959,9 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
 
   const handleGoogleDisconnect = async () => {
     const ok = await confirm({
-      title: 'Disconnect Google?',
-      body: <>This will revoke the refresh token and delete <code className="font-mono text-xs">~/cicy-ai/db/google.json</code>.</>,
-      confirmLabel: 'Disconnect',
+      title: t('marketplaceGoogleDisconnectTitle'),
+      body: <>{t('marketplaceGoogleDisconnectBody')} <code className="font-mono text-xs">~/cicy-ai/db/google.json</code>.</>,
+      confirmLabel: t('marketplaceGoogleDisconnect'),
       danger: true,
     });
     if (!ok) return;
@@ -969,7 +971,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
       await apiService.disconnectGoogleSkillConfig();
       await refreshGoogleStatus();
     } catch (e: any) {
-      setGoogleError(e?.message || 'disconnect failed');
+      setGoogleError(e?.message || t('marketplaceGoogleDisconnectFailed'));
     } finally {
       setGoogleBusy(false);
     }
@@ -997,11 +999,11 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
       const r = await onInstall();
       if (r && typeof r === 'object') {
         if (r.log) setInstallLog(r.log);
-        if (r.ok === false) setInstallError(r.error || 'install failed');
+        if (r.ok === false) setInstallError(r.error || t('marketplaceInstallFailed'));
       }
       await fetchDetail();
     } catch (e: any) {
-      setInstallError(e?.message || 'install failed');
+      setInstallError(e?.message || t('marketplaceInstallFailed'));
     } finally {
       setBusyAction(null);
     }
@@ -1014,11 +1016,11 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
       const r = await onUpdate();
       if (r && typeof r === 'object') {
         if (r.log) setInstallLog(r.log);
-        if (r.ok === false) setInstallError(r.error || 'update failed');
+        if (r.ok === false) setInstallError(r.error || t('marketplaceUpdateFailed'));
       }
       await fetchDetail();
     } catch (e: any) {
-      setInstallError(e?.message || 'update failed');
+      setInstallError(e?.message || t('marketplaceUpdateFailed'));
     } finally {
       setBusyAction(null);
     }
@@ -1039,11 +1041,11 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
       const r = await onUninstall();
       if (r && typeof r === 'object') {
         if (r.log) setInstallLog(r.log);
-        if (r.ok === false) setInstallError(r.error || 'uninstall failed');
+        if (r.ok === false) setInstallError(r.error || t('marketplaceUninstallFailed'));
       }
       await fetchDetail();
     } catch (e: any) {
-      setInstallError(e?.message || 'uninstall failed');
+      setInstallError(e?.message || t('marketplaceUninstallFailed'));
     } finally {
       setBusyAction(null);
     }
@@ -1063,11 +1065,11 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
       const r = await onEject();
       if (r && typeof r === 'object') {
         if (r.log) setInstallLog(r.log);
-        if (r.ok === false) setInstallError(r.error || 'eject failed');
+        if (r.ok === false) setInstallError(r.error || t('marketplaceEjectFailed'));
       }
       await fetchDetail();
     } catch (e: any) {
-      setInstallError(e?.message || 'eject failed');
+      setInstallError(e?.message || t('marketplaceEjectFailed'));
     } finally {
       setBusyAction(null);
     }
@@ -1153,7 +1155,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
                           <span className="ml-1">{t('marketplacePublisher')}</span>
                         </span>
                       ) : (
-                        <>installed v{skill.installed_version} · {t('marketplacePublisher')}</>
+                        <>{t('marketplaceVersionInstalled')} v{skill.installed_version} · {t('marketplacePublisher')}</>
                       )
                     ) : (
                       <>v{skill.version} · {t('marketplacePublisher')}</>
@@ -1256,10 +1258,10 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
                     <>
                       <span data-id="skill-detail-google-connected" className="text-[12px] px-2 py-1 rounded bg-emerald-500/15 text-emerald-300 inline-flex items-center gap-1.5">
                         <CheckCircle2 className="w-3 h-3" />
-                        {googleStatus.authorized_email || 'connected'}
+                        {googleStatus.authorized_email || t('marketplaceGoogleConnected')}
                       </span>
                       <button data-id="skill-detail-google-disconnect" onClick={handleGoogleDisconnect} disabled={googleBusy} className="text-[12px] px-2 py-1 rounded text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors">
-                        Disconnect
+                        {t('marketplaceGoogleDisconnect')}
                       </button>
                     </>
                   )}
@@ -1273,7 +1275,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
                       className="text-[12px] px-3 py-1.5 rounded bg-blue-500/20 text-blue-200 hover:bg-blue-500/30 transition-colors inline-flex items-center gap-1"
                     >
                       <Send className="w-3 h-3" />
-                      Authorize Google
+                      {t('marketplaceGoogleAuthorize')}
                     </button>
                   )}
                   {skill.name === 'google' && googleError && (
@@ -1416,9 +1418,9 @@ function SkillDetailTabs({ data, skill, setSendText, sendToAgent, copy, copied }
         {/* Main content (scrollable) */}
         <div className="flex-1 overflow-y-auto px-5 py-4 min-w-0">
           {tab === 'help' && (
-            (data?.skill_md || data?.help_md)
+            (data?.help_md || data?.skill_md)
               ? <MarkdownPane
-                  content={data?.skill_md || data?.help_md || ''}
+                  content={data?.help_md || data?.skill_md || ''}
                   setSendText={setSendText}
                   skillName={skill.name}
                   manifest={data?.manifest || null}
@@ -1426,8 +1428,11 @@ function SkillDetailTabs({ data, skill, setSendText, sendToAgent, copy, copied }
               : <div className="text-xs text-zinc-500">{t('marketplaceNoContent')}</div>
           )}
           {tab === 'tools' && (
-            tools.length > 0
-              ? <SkillToolsPanel tools={tools} skillName={skill.name} installed={skill.status.installed} onSend={sendToAgent} />
+            (data?.tools_md || tools.length > 0)
+              ? <div data-id="skill-tools-content" className="space-y-4">
+                  {data?.tools_md && <MarkdownPane content={data.tools_md} setSendText={setSendText} skillName={skill.name} manifest={data?.manifest || null} />}
+                  {tools.length > 0 && <SkillToolsPanel tools={tools} skillName={skill.name} installed={skill.status.installed} onSend={sendToAgent} />}
+                </div>
               : <div className="text-xs text-zinc-500">{t('marketplaceNoContent')}</div>
           )}
           {tab === 'updates' && (
@@ -1583,7 +1588,6 @@ function SkillToolsPanel({ tools, skillName, installed, onSend }: {
 
 const MarkdownPane = memo(function MarkdownPane({ content, setSendText, skillName, manifest }: { content: string; setSendText: (s: string) => void; skillName: string; manifest?: SkillManifest | null }) {
   const { t } = useTranslation('workspace');
-
   const shown = content.startsWith('---')
     ? content.replace(/^---[\s\S]*?---\n?/, '')
     : content;
@@ -1710,7 +1714,9 @@ const MarkdownPane = memo(function MarkdownPane({ content, setSendText, skillNam
 
   return (
     <div data-id="skill-md-pane" className="relative">
-      <div data-id="skill-md-content" className="prose-skill text-[13px] leading-relaxed text-zinc-300">{rendered}</div>
+      <div data-id="skill-md-content" className="prose-skill text-[13px] leading-relaxed text-zinc-300">
+        {rendered}
+      </div>
     </div>
   );
 });

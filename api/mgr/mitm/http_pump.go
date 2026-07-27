@@ -24,13 +24,13 @@ import (
 // MITM-specific header names. Carried between chain hops; stripped at
 // final_hop before dialing the real provider.
 const (
-	HeaderTraceID    = "X-Cicy-Mitm-Trace-Id"
-	HeaderTrace      = "X-Cicy-Mitm-Trace"
-	HeaderAgent      = "X-Cicy-Mitm-Agent"
-	HeaderClientIP   = "X-Cicy-Mitm-Client-IP"
-	HeaderHopCount   = "X-Cicy-Mitm-Hop-Count"
-	HeaderBlockedBy  = "X-Cicy-Mitm-Blocked-By"
-	HeaderNode       = "X-Cicy-Mitm-Node"
+	HeaderTraceID   = "X-Cicy-Mitm-Trace-Id"
+	HeaderTrace     = "X-Cicy-Mitm-Trace"
+	HeaderAgent     = "X-Cicy-Mitm-Agent"
+	HeaderClientIP  = "X-Cicy-Mitm-Client-IP"
+	HeaderHopCount  = "X-Cicy-Mitm-Hop-Count"
+	HeaderBlockedBy = "X-Cicy-Mitm-Blocked-By"
+	HeaderNode      = "X-Cicy-Mitm-Node"
 )
 
 var (
@@ -72,6 +72,8 @@ func pumpHTTP(
 	_ = req.Body.Close()
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
+	isWebSocketUpgrade := strings.EqualFold(strings.TrimSpace(req.Header.Get("Upgrade")), "websocket") &&
+		headerHasToken(req.Header, "Connection", "upgrade")
 
 	// Chain bookkeeping — annotate headers so audit / next-hop see the trace.
 	if err := annotateChainHeaders(req, &cfg.Node, identity); err != nil {
@@ -89,7 +91,13 @@ func pumpHTTP(
 
 	// === Audit: start turn === — sees the request *with* trace headers, so
 	// downstream audit / dashboards can correlate across hops.
-	turn := hook.StartTurn(provider, identity.AgentID, target, req.Method, req.Header.Clone(), body)
+	var turn AuditTurn = noopAuditTurn{}
+	if !isWebSocketUpgrade {
+		// The WebSocket handshake has no model payload, and recording it as a
+		// normal turn would overwrite the latest HTTPS/SSE snapshot (including
+		// its prompts and tools). WebSocket frame auditing is a separate concern.
+		turn = hook.StartTurn(provider, identity.AgentID, target, req.Method, req.Header.Clone(), body)
+	}
 
 	// === Breaker: PreventiveCheck ===
 	// Audit has already recorded the outbound payload via current.json
@@ -139,11 +147,37 @@ func pumpHTTP(
 		req.Host = host
 	}
 
-	resp, err := dialer.RoundTrip(req)
+	var resp *http.Response
+	if isWebSocketUpgrade {
+		resp, err = roundTripWebSocket(ctx, dialer, req)
+	} else {
+		resp, err = dialer.RoundTrip(req)
+	}
 	if err != nil {
 		turn.Fail(err)
 		writeSyntheticError(client, 502, fmt.Sprintf("upstream request failed: %v", err), cfg.Node.ID)
 		return err
+	}
+	if isWebSocketUpgrade {
+		if resp.StatusCode != http.StatusSwitchingProtocols {
+			defer resp.Body.Close()
+			resp.Close = true
+			resp.Header.Set("Connection", "close")
+			if err := resp.Write(client); err != nil {
+				return fmt.Errorf("mitm: write websocket rejection to client: %w", err)
+			}
+			return nil
+		}
+		upgraded, ok := resp.Body.(io.ReadWriteCloser)
+		if !ok {
+			_ = resp.Body.Close()
+			return errors.New("mitm: websocket 101 response body is not writable")
+		}
+		if err := writeUpgradeResponse(client, resp); err != nil {
+			_ = upgraded.Close()
+			return err
+		}
+		return proxyUpgradedConnection(ctx, client, br, upgraded)
 	}
 
 	// Wrap response body with audit reader so SSE events are parsed as they
@@ -161,6 +195,104 @@ func pumpHTTP(
 	if err := resp.Write(client); err != nil {
 		// Audit reader has already captured the partial body; let it Close.
 		return fmt.Errorf("mitm: write response to client: %w", err)
+	}
+	return nil
+}
+
+type bufferedUpstreamConn struct {
+	net.Conn
+	reader *bufio.Reader
+}
+
+func (c *bufferedUpstreamConn) Read(p []byte) (int, error) {
+	return c.reader.Read(p)
+}
+
+// roundTripWebSocket intentionally bypasses http.Transport. A successful
+// WebSocket upgrade changes an HTTP connection into an opaque full-duplex
+// stream, so handing it to the pooled HTTP state machine risks response-body
+// framing and connection lifecycle logic touching WebSocket frame bytes.
+func roundTripWebSocket(ctx context.Context, dialer *Dialer, req *http.Request) (*http.Response, error) {
+	upstream, err := dialer.DialTLS(ctx, req.URL.Host)
+	if err != nil {
+		return nil, err
+	}
+	if err := req.Write(upstream); err != nil {
+		_ = upstream.Close()
+		return nil, fmt.Errorf("mitm: write websocket handshake upstream: %w", err)
+	}
+	reader := bufio.NewReader(upstream)
+	resp, err := http.ReadResponse(reader, req)
+	if err != nil {
+		_ = upstream.Close()
+		return nil, fmt.Errorf("mitm: read websocket handshake upstream: %w", err)
+	}
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		resp.Body = &bufferedUpstreamConn{Conn: upstream, reader: reader}
+		return resp, nil
+	}
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{
+		Reader: resp.Body,
+		Closer: upstream,
+	}
+	return resp, nil
+}
+
+func headerHasToken(header http.Header, name, token string) bool {
+	for _, value := range header.Values(name) {
+		for _, part := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// writeUpgradeResponse forwards only the HTTP 101 head. The response body is
+// the upgraded bidirectional stream and must not be consumed by http.Response.Write.
+func writeUpgradeResponse(client io.Writer, resp *http.Response) error {
+	if _, err := fmt.Fprintf(client, "HTTP/1.1 %s\r\n", resp.Status); err != nil {
+		return fmt.Errorf("mitm: write websocket status: %w", err)
+	}
+	if err := resp.Header.Write(client); err != nil {
+		return fmt.Errorf("mitm: write websocket headers: %w", err)
+	}
+	if _, err := io.WriteString(client, "\r\n"); err != nil {
+		return fmt.Errorf("mitm: finish websocket headers: %w", err)
+	}
+	return nil
+}
+
+// proxyUpgradedConnection keeps the TLS-terminated client and upstream 101 body
+// connected in both directions until either side closes. clientReader is the
+// bufio.Reader used for the HTTP handshake so any eagerly-pipelined WebSocket
+// frame bytes already buffered there are forwarded instead of lost.
+func proxyUpgradedConnection(ctx context.Context, client io.ReadWriteCloser, clientReader io.Reader, upstream io.ReadWriteCloser) error {
+	errCh := make(chan error, 2)
+	go func() {
+		_, err := io.Copy(upstream, clientReader)
+		errCh <- err
+	}()
+	go func() {
+		_, err := io.Copy(client, upstream)
+		errCh <- err
+	}()
+
+	var firstErr error
+	select {
+	case firstErr = <-errCh:
+	case <-ctx.Done():
+		firstErr = ctx.Err()
+	}
+	_ = client.Close()
+	_ = upstream.Close()
+	<-errCh
+	if firstErr != nil && !errors.Is(firstErr, net.ErrClosed) && !errors.Is(firstErr, io.EOF) {
+		return fmt.Errorf("mitm: websocket tunnel: %w", firstErr)
 	}
 	return nil
 }

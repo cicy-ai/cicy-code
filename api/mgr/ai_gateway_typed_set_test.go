@@ -6,6 +6,16 @@ import (
 	"testing"
 )
 
+func TestPromptTextFromUserMessageAcceptsCodexInputText(t *testing.T) {
+	content := []interface{}{
+		M{"type": "input_text", "text": "Fix the Codex history"},
+		M{"type": "function_call_output", "output": "tool noise"},
+	}
+	if got := aiGatewayPromptTextFromUserMessage(content); got != "Fix the Codex history" {
+		t.Fatalf("prompt text = %q", got)
+	}
+}
+
 // TestTranscriptTypedSetIncremental verifies the per-cid incremental-offset
 // cache (#4B) preserves the exact typed-set semantics: same filtering, and an
 // incremental read after an append equals a full rebuild from scratch. Also

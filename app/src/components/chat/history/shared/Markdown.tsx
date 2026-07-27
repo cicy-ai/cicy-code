@@ -2,16 +2,91 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { memo, useContext, useState, useEffect } from 'react';
+import type { MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { Download } from 'lucide-react';
+import { Download, FileText } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { OpenUrlContext } from '../contexts';
 import { isExternalUrl, assetAbsPathToURL } from '../lib/misc';
 
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif', 'heic', 'heif']);
+const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'ogg', 'opus', 'm4a', 'aac', 'flac']);
+const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'ogv']);
+
+function attachmentInfo(href: string) {
+  const source = String(href || '').trim();
+  const url = assetAbsPathToURL(source);
+  const isAttachment = source.includes('/cicy-ai/assets/') || url.startsWith('/assets/files/');
+  const cleanPath = source.split(/[?#]/, 1)[0];
+  const filename = decodeURIComponent(cleanPath.split('/').pop() || 'attachment');
+  const extension = filename.includes('.') ? filename.split('.').pop()!.toLowerCase() : '';
+  const media = IMAGE_EXTENSIONS.has(extension)
+    ? 'image'
+    : AUDIO_EXTENSIONS.has(extension)
+      ? 'audio'
+      : VIDEO_EXTENSIONS.has(extension)
+        ? 'video'
+        : 'file';
+  return { source, url, filename, media, isAttachment };
+}
+
+function AttachmentLink({ href, children }: { href: string; children: any }) {
+  const info = attachmentInfo(href);
+  const openFile = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    window.dispatchEvent(new CustomEvent('cicy:open-file', { detail: { path: info.source } }));
+  };
+  return (
+    <span data-id="current-history-attachment" className="my-2 block max-w-2xl overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.025]">
+      {info.media === 'image' ? (
+        <span data-id="current-history-attachment-image" className="block px-2 pt-2">
+          <MarkdownImg src={info.source} alt={info.filename} reserveSpace />
+        </span>
+      ) : null}
+      {info.media === 'audio' ? (
+        <span data-id="current-history-attachment-audio" className="block px-3 pt-3">
+          <audio data-id="current-history-attachment-audio-player" src={info.url} controls preload="metadata" className="w-full" />
+        </span>
+      ) : null}
+      {info.media === 'video' ? (
+        <span data-id="current-history-attachment-video" className="block px-2 pt-2">
+          <video data-id="current-history-attachment-video-player" src={info.url} controls preload="metadata" className="aspect-video max-h-96 w-full rounded-lg bg-black object-contain" />
+        </span>
+      ) : null}
+      <span data-id="current-history-attachment-actions" className="flex min-w-0 items-center gap-2 px-3 py-2">
+        <FileText data-id="current-history-attachment-file-icon" className="h-4 w-4 shrink-0 text-zinc-500" />
+        <button
+          type="button"
+          data-id="current-history-attachment-open"
+          onClick={openFile}
+          className="min-w-0 flex-1 truncate text-left text-sm text-sky-400/90 underline decoration-sky-400/30 underline-offset-2 hover:text-sky-300"
+          title={info.source}
+        >
+          {children || info.filename}
+        </button>
+        <a
+          data-id="current-history-attachment-download"
+          href={info.url}
+          download={info.filename}
+          onClick={(event) => event.stopPropagation()}
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.04] px-2.5 text-xs text-zinc-300 hover:bg-white/[0.08] hover:text-white"
+          title="下载"
+        >
+          <Download className="h-3.5 w-3.5" /> 下载
+        </a>
+      </span>
+    </span>
+  );
+}
+
 export function MarkdownLink({ href, children, ...props }: any) {
   const requestOpenUrl = useContext(OpenUrlContext);
   const url = String(href || '').trim();
+  if (attachmentInfo(url).isAttachment) {
+    return <AttachmentLink href={url}>{children}</AttachmentLink>;
+  }
   return (
     <a
       {...props}
@@ -35,7 +110,7 @@ export function MarkdownLink({ href, children, ...props }: any) {
   );
 }
 
-export function MarkdownImg({ src, alt, ...props }: any) {
+export function MarkdownImg({ src, alt, reserveSpace = false, ...props }: any) {
   const [zoom, setZoom] = useState(false);
   const url = assetAbsPathToURL(String(src || ''));
   useEffect(() => {
@@ -52,13 +127,15 @@ export function MarkdownImg({ src, alt, ...props }: any) {
         src={url}
         alt={alt || ''}
         loading="lazy"
-        className="my-1 h-auto max-h-80 max-w-full cursor-zoom-in rounded-md border border-white/5 object-contain"
+        className={reserveSpace
+          ? 'my-1 h-64 w-full cursor-zoom-in rounded-md border border-white/5 bg-black/20 object-contain'
+          : 'my-1 h-auto max-h-80 max-w-full cursor-zoom-in rounded-md border border-white/5 object-contain'}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setZoom(true); }}
       />
       {zoom && createPortal(
         <div
           data-id="current-history-md-img-lightbox"
-          className="fixed inset-0 z-[100] flex cursor-zoom-out items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
+          className="fixed inset-0 z-[2147483647] flex cursor-zoom-out items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
           onClick={() => setZoom(false)}
         >
           <img src={url} alt={alt || ''} className="max-h-full max-w-full rounded-md object-contain shadow-2xl" />

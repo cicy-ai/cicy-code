@@ -819,6 +819,19 @@ func readSkillDoc(skill *marketSkill, file, fileKey string) string {
 	return ""
 }
 
+func readLocalizedSkillDoc(skill *marketSkill, stem, lang string) string {
+	suffix := "en"
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(lang)), "zh") {
+		suffix = "cn"
+	}
+	localizedFile := filepath.Join("references", stem+"."+suffix+".md")
+	localizedKey := stem + "_" + suffix + "_md"
+	if content := readSkillDoc(skill, localizedFile, localizedKey); content != "" {
+		return content
+	}
+	return readSkillDoc(skill, filepath.Join("references", stem+".md"), stem+"_md")
+}
+
 // fetchRegistryManifest GET /v1/skills/<name> from the worker and returns
 // the raw manifest as a generic map (so we can pass through new fields the
 // worker adds without recompiling). Used by the detail handler to surface
@@ -987,8 +1000,8 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 		J(w, M{
 			"skill":    skill,
 			"skill_md": readSkillDoc(skill, "SKILL.md", "skill_md"),
-			"help_md":  readSkillDoc(skill, filepath.Join("references", "help.md"), "help_md"),
-			"tools_md": readSkillDoc(skill, filepath.Join("references", "tools.md"), "tools_md"),
+			"help_md":  readLocalizedSkillDoc(skill, "help", lang),
+			"tools_md": readLocalizedSkillDoc(skill, "tools", lang),
 			"manifest": manifest,
 		})
 		return

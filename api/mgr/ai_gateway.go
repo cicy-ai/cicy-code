@@ -101,6 +101,17 @@ func cicyCloudGatewayHost(host string) bool {
 	return host == "cicy-ai.com" || strings.HasSuffix(host, ".cicy-ai.com")
 }
 
+func setUpstreamAgentIdentityHeader(header http.Header, upstreamHost, agentID string) {
+	if cicyCloudGatewayHost(upstreamHost) {
+		header.Set("X_AGENT_ID", agentID)
+		return
+	}
+	// X_AGENT_ID is an internal cicy gateway routing header. Third-party
+	// providers must not receive it; OpenCode Zen returns HTTP 500 when it is
+	// present even though the identical request succeeds without the header.
+	header.Del("X_AGENT_ID")
+}
+
 func isLoopbackRemote(addr string) bool {
 	host := addr
 	if parsedHost, _, err := net.SplitHostPort(addr); err == nil {
@@ -123,6 +134,15 @@ func resolveOpenClawProviderTargetPath(basePath, suffix string) string {
 	basePath = strings.TrimRight(basePath, "/")
 	if basePath != "" && (suffix == basePath || strings.HasPrefix(suffix, basePath+"/")) {
 		return suffix
+	}
+	// A provider URL may be configured as the final API endpoint rather than a
+	// base prefix (for example OpenCode Zen:
+	// /zen/v1/chat/completions). In that form, do not append the client's
+	// versioned suffix and produce .../chat/completions/v1/chat/completions.
+	for _, endpoint := range []string{"/chat/completions", "/responses", "/messages"} {
+		if strings.HasSuffix(basePath, endpoint) && strings.HasSuffix(strings.TrimRight(suffix, "/"), endpoint) {
+			return basePath
+		}
 	}
 	return joinURLPath(basePath, suffix)
 }
@@ -422,7 +442,7 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 		req.URL.Path = resolveOpenClawProviderTargetPath(targetBase.Path, suffix)
 		req.URL.RawPath = ""
 		req.Host = targetBase.Host
-		req.Header.Set("X_AGENT_ID", agentID)
+		setUpstreamAgentIdentityHeader(req.Header, targetBase.Host, agentID)
 		// Internal audit markers — never forward upstream.
 		req.Header.Del("X-Cicy-Aux")
 		req.Header.Del("X-Cicy-Current-Owned")

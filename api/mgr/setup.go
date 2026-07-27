@@ -569,6 +569,7 @@ func officialRoleRoster() []builtinWorker {
 		{Port: 102, AgentType: "codex", Title: "Full-stack Engineer", BindToPrimary: true},
 		{Port: 103, AgentType: "opencode", Title: "Software Engineer"},
 		{Port: 104, AgentType: "cicy", Title: "Audit Policy Specialist", RoleTemplate: "audit-policy-specialist"},
+		{Port: 105, AgentType: "cicy", Title: "口播智能体", RoleTemplate: "koubo", BindToPrimary: true},
 	}
 	return roster
 }
@@ -1125,6 +1126,7 @@ func checkEnv() {
 	ensureDefaultProject()
 
 	ensureDefaultProviders()
+	ensureTranslateRoute()
 	applyGatewayEnvToDefaultProviders()
 	ensureClientProviders()
 	ensureVisionProvider()
@@ -1191,7 +1193,7 @@ func checkEnv() {
 }
 
 var preinstalledSkills = []string{
-	"agent-chrome", "agent-editor", "agent-desktop", "agent-webpage",
+	"agent-chrome", "agent-electron", "agent-editor", "agent-desktop", "agent-webpage",
 	"cicy-agent", "cicy-todo", "cicy-mihomo", "cicy-ssh", "proxy_ssh", "global-api-token",
 	"agent-summary",
 	// Team knowledge Layer 2 store CLI (add/list/recall/promote/...) — fresh
@@ -1206,6 +1208,10 @@ var preinstalledSkills = []string{
 	// Author custom cicy agents (persona + tools + model) from the CLI; backs the
 	// "build an agent like a skill" flow (~/cicy-ai/agents/<slug>/AGENT.md).
 	"agent-creator",
+	// Spoken-content workspace lifecycle (install/start/open/stop/status). The
+	// w-105 koubo agent and its bright header action both call this public skill;
+	// agent-electron above is its mandatory profile-1 browser dependency.
+	"cicy-koubo",
 	// Self-hosted email (SMTP/IMAP/POP3) — lets any agent send mail / notify the
 	// user on task completion out of the box; reuses the same email.json the
 	// token-delivery UI configures. `email status --check` verifies live login.

@@ -3867,6 +3867,11 @@ func agentInspectorProviderRequestMessageItems(items []interface{}) []M {
 			}
 			continue
 		}
+		// Codex marks its tool bundle as role=developer, but it is schema
+		// metadata rather than a developer prompt. Tools are extracted separately.
+		if strings.EqualFold(strings.TrimSpace(aiGatewayString(item["type"])), "additional_tools") {
+			continue
+		}
 		role := strings.TrimSpace(aiGatewayString(item["role"]))
 		if role == "" {
 			role = strings.TrimSpace(aiGatewayString(item["type"]))
@@ -3905,6 +3910,23 @@ func agentInspectorProviderRequestMessageItemsByRole(items []interface{}, roleFi
 	return out
 }
 
+func agentInspectorProviderRequestPromptItemsByRole(items []interface{}, roleFilter string) []M {
+	messages := agentInspectorProviderRequestMessageItemsByRole(items, roleFilter)
+	out := make([]M, 0, len(messages))
+	for index, message := range messages {
+		text := strings.TrimSpace(aiGatewayString(message["text"]))
+		if text == "" {
+			continue
+		}
+		out = append(out, M{
+			"index":     index,
+			"part_type": roleFilter,
+			"text":      text,
+		})
+	}
+	return out
+}
+
 func agentInspectorProviderRequestPromptItems(items []interface{}) []M {
 	out := make([]M, 0, len(items))
 	for index, raw := range items {
@@ -3933,11 +3955,28 @@ func agentInspectorProviderRequestPromptItems(items []interface{}) []M {
 	return out
 }
 
+// Codex's HTTPS/SSE Responses transport carries its effective tools inside an
+// input item of type "additional_tools" instead of the top-level tools field.
+// Keep accepting top-level tools for standard Responses clients, then append
+// every embedded tool bundle used by current Codex releases.
+func agentInspectorProviderRequestTools(body map[string]interface{}, inputItems []interface{}) []interface{} {
+	out := append([]interface{}{}, aiGatewaySlice(body["tools"])...)
+	for _, raw := range inputItems {
+		item := aiGatewayMap(raw)
+		if !strings.EqualFold(strings.TrimSpace(aiGatewayString(item["type"])), "additional_tools") {
+			continue
+		}
+		out = append(out, aiGatewaySlice(item["tools"])...)
+	}
+	return out
+}
+
 func agentInspectorProviderRequestView(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot) M {
 	body := aiGatewayMap(current.Body)
 	if len(body) == 0 {
 		return M{}
 	}
+	inputItems := aiGatewayExtractInputItems(body)
 	replyProvider := ""
 	if len(reply.HTTPRequests) > 0 {
 		replyProvider = reply.HTTPRequests[0].Provider
@@ -3959,15 +3998,27 @@ func agentInspectorProviderRequestView(agentID string, current aiGatewayCurrentS
 		requestKind = "anthropic_messages"
 		promptLabel = "System"
 	} else if instructions := strings.TrimSpace(aiGatewayString(body["instructions"])); instructions != "" {
-		inputItems := aiGatewayExtractInputItems(body)
 		promptText = instructions
 		requestKind = "openai_responses"
 		promptLabel = "Instructions"
 		developerItems = agentInspectorProviderRequestMessageItemsByRole(inputItems, "developer")
+	} else if len(inputItems) > 0 && strings.Contains(strings.ToLower(strings.TrimSpace(current.URL)), "/responses") {
+		// Current Codex HTTPS fallback sends no top-level `instructions`; the
+		// effective system prompt is a sequence of role=developer input messages.
+		requestKind = "openai_responses"
+		promptLabel = "Instructions"
+		developerItems = agentInspectorProviderRequestMessageItemsByRole(inputItems, "developer")
+	} else if messageItems := aiGatewaySlice(body["messages"]); len(messageItems) > 0 {
+		// OpenAI Chat Completions clients such as OpenCode carry their effective
+		// prompt as role=system messages rather than in a top-level system field.
+		requestKind = "openai_chat_completions"
+		promptLabel = "System"
+		promptItems = agentInspectorProviderRequestPromptItemsByRole(messageItems, "system")
+		developerItems = agentInspectorProviderRequestMessageItemsByRole(messageItems, "developer")
 	}
-	toolItems := agentInspectorProviderRequestToolItems(aiGatewaySlice(body["tools"]))
+	toolItems := agentInspectorProviderRequestToolItems(agentInspectorProviderRequestTools(body, inputItems))
 	sections := []agentInspectorProviderRequestSection{}
-	if strings.TrimSpace(promptText) != "" {
+	if strings.TrimSpace(promptText) != "" || len(promptItems) > 0 {
 		section := agentInspectorProviderRequestSection{Type: "prompt", Label: promptLabel, Text: promptText}
 		if len(promptItems) > 0 {
 			section.Items = promptItems

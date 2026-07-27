@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -224,33 +225,76 @@ func storeCachedTranslation(text string, target string, translated string) {
 	_ = os.WriteFile(path, append(body, '\n'), 0644)
 }
 
+func openAIChatCompletionsURL(apiURL string) string {
+	apiURL = strings.TrimRight(strings.TrimSpace(apiURL), "/")
+	if strings.HasSuffix(apiURL, "/chat/completions") {
+		return apiURL
+	}
+	return apiURL + "/chat/completions"
+}
+
 func translateTextViaProvider(text string, target string) (string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return "", nil
 	}
-	if cached, ok := loadCachedTranslation(text, target); ok {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		target = "zh-CN"
+	}
+	target = regexp.MustCompile(`[^A-Za-z0-9_-]`).ReplaceAllString(target, "")
+	// Translation has its own configurable provider route. This keeps the
+	// marketplace independent from claude/codex routing and lets operators pick
+	// any OpenAI-compatible provider in Settings → Agent routing.
+	providerKey := "opencodeZen"
+	if providers := loadProvidersConfig(); providers != nil {
+		if key := strings.TrimSpace(providers.Default["translate"]); key != "" {
+			providerKey = key
+		}
+	}
+	// Include the routed provider and cache schema in the cache namespace.
+	// Otherwise a bad result produced by a previous provider remains visible
+	// after the operator switches the translation route.
+	cacheTarget := "v3:" + providerKey + ":" + target
+	if cached, ok := loadCachedTranslation(text, cacheTarget); ok {
 		return cached, nil
 	}
-	// Route translation through the defaultAnthropic provider (CiCyAi gateway)
-	// and ask for deepseek-v4-pro by model name. Fall back to defaultOpenAi, then
-	// the global default AI, if defaultAnthropic isn't configured. The gateway is
-	// OpenAI-compatible at <url>/v1/chat/completions for both providers, so the
-	// request shape below works regardless of which one resolves.
-	cfg, ok := loadRuntimeAIConfigForProvider("defaultAnthropic")
-	if !ok || strings.TrimSpace(cfg.APIURL) == "" || strings.TrimSpace(cfg.APIKey) == "" {
-		cfg, ok = loadRuntimeAIConfigForProvider("defaultOpenAi")
-	}
+	cfg, ok := loadRuntimeAIConfigForProvider(providerKey)
 	if !ok || strings.TrimSpace(cfg.APIURL) == "" || strings.TrimSpace(cfg.APIKey) == "" {
 		cfg = loadRuntimeAIConfig()
 	}
 	apiURL := strings.TrimRight(strings.TrimSpace(cfg.APIURL), "/")
 	apiKey := strings.TrimSpace(cfg.APIKey)
-	// Use the pro variant for translation quality. Override via
-	// ~/cicy-ai/global.json key `translate_model`; otherwise default to pro.
+	// Provider records may intentionally store a complete chat-completions
+	// endpoint (OpenCode Zen does). runtimeAIConfig normalizes OpenAI providers
+	// as base URLs for gateway proxying, so use the provider record verbatim for
+	// this direct request.
+	var routedProvider *providerConfig
+	if provider, found := loadProviderByKey(providerKey); found {
+		routedProvider = provider
+		if rawURL := strings.TrimRight(strings.TrimSpace(provider.URL), "/"); rawURL != "" {
+			apiURL = rawURL
+		}
+		if rawKey := strings.TrimSpace(provider.APIKey); rawKey != "" {
+			apiKey = rawKey
+		}
+	}
+	// Use the routed provider's default model. An operator can override it with
+	// ~/cicy-ai/global.json key `translate_model`.
 	model := ""
 	if raw, ok := readGlobalJSONConfig()["translate_model"].(string); ok {
 		model = strings.TrimSpace(raw)
+	}
+	if model == "" {
+		if routedProvider != nil {
+			model = strings.TrimSpace(routedProvider.DefaultModel)
+		}
+	}
+	if model == "" {
+		model = strings.TrimSpace(cfg.DefaultOpencodeModel)
+	}
+	if model == "" {
+		model = strings.TrimSpace(cfg.CodexModel)
 	}
 	if model == "" {
 		model = "deepseek-v4-pro"
@@ -263,7 +307,7 @@ func translateTextViaProvider(text string, target string) (string, error) {
 		"messages": []M{
 			{
 				"role":    "system",
-				"content": "Translate the following technical content into concise Simplified Chinese. Preserve code identifiers, JSON keys, CLI flags, filenames, URLs, and markdown structure. Return translation only.",
+				"content": "Translate the following technical content into the language identified by BCP-47 tag " + target + ". Preserve code identifiers, JSON keys, CLI flags, filenames, URLs, and markdown structure. Return translation only.",
 			},
 			{
 				"role":    "user",
@@ -279,7 +323,7 @@ func translateTextViaProvider(text string, target string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequest(http.MethodPost, apiURL+"/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, openAIChatCompletionsURL(apiURL), bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -311,7 +355,7 @@ func translateTextViaProvider(text string, target string) (string, error) {
 		return "", fmt.Errorf("translation empty")
 	}
 	translated := strings.TrimSpace(result.Choices[0].Message.Content)
-	storeCachedTranslation(text, target, translated)
+	storeCachedTranslation(text, cacheTarget, translated)
 	return translated, nil
 }
 

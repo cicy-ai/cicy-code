@@ -106,6 +106,8 @@ const api = {
   },
   updatePane: (id: string, data: any) => http.patch(`/api/tmux/panes/${encodeURIComponent(id)}`, data),
   openSystemNotificationSettings: () => http.post('/api/desktop/open-notification-settings', {}),
+  getKouboStatus: (paneId: string) => http.get('/api/koubo/status', { params: { pane_id: paneId } }),
+  startOpenKoubo: (paneId: string) => http.post('/api/koubo/start-open', { pane_id: paneId }),
   deletePane: (id: string) => http.delete(`/api/tmux/panes/${encodeURIComponent(id)}`),
   createPane: (data: any) => http.post('/api/tmux/create', data),
   forkPane: (data: { source_pane_id: string; title?: string; master_pane_id?: string; prompt?: string }) => http.post('/api/tmux/fork', data),

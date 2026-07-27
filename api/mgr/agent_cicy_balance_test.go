@@ -122,3 +122,34 @@ func TestBalancePartialResultsOnlyFillsMissing(t *testing.T) {
 		t.Errorf("both a and b must be paired after balance, got %v", res)
 	}
 }
+
+// Reproduces the v2.3.266 failure exactly: a tool result and the next user input
+// share one continuation message, that turn fails, and replacing the failed turn
+// removes the continuation. The preceding assistant tool_use must be removed too,
+// otherwise the replacement request is rejected by OpenAI-style providers.
+func TestDropTrailingFailedTurnRemovesNewlyOrphanedToolUse(t *testing.T) {
+	s := &cicySession{messages: []M{
+		{"role": "user", "content": "先执行工具"},
+		{"role": "assistant", "content": []interface{}{
+			map[string]interface{}{"type": "tool_use", "id": "call_failed_turn", "name": "shell", "input": map[string]interface{}{"cmd": "true"}},
+		}},
+		{"role": "user", "content": []interface{}{
+			map[string]interface{}{"type": "tool_result", "tool_use_id": "call_failed_turn", "content": "ok"},
+			map[string]interface{}{"type": "text", "text": "继续处理"},
+		}},
+		cicyOutcomeMessage("error", "gateway 400"),
+	}}
+
+	s.dropTrailingFailedTurnLocked()
+	s.messages = append(s.messages, M{"role": "user", "content": "替换失败请求"})
+
+	if hasOrphanToolUse(s.messages) {
+		t.Fatalf("replacement window still contains orphan tool_use: %#v", s.messages)
+	}
+	if len(s.messages) != 2 {
+		t.Fatalf("expected original question plus replacement question, got %#v", s.messages)
+	}
+	if got, _ := s.messages[1]["content"].(string); got != "替换失败请求" {
+		t.Fatalf("replacement question missing: %#v", s.messages)
+	}
+}

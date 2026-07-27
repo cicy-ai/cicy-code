@@ -95,6 +95,11 @@ function classifyForRender(stat: FsStatResponse, path: string): EditorMode {
   if (AUDIO_EXT.has(ext) || mime.startsWith('audio/')) return 'audio';
   if (VIDEO_EXT.has(ext) || mime.startsWith('video/')) return 'video';
   if (IMAGE_EXT.has(ext) || mime.startsWith('image/')) return 'image';
+  // Empty files are commonly reported as application/x-empty (or generic
+  // octet-stream), neither of which passes the text MIME checks below. Treat
+  // every non-media 0-byte file as editable text so a newly created file opens
+  // in CodeMirror immediately instead of falling into the binary placeholder.
+  if (stat.size === 0) return 'text';
   const isText =
     mime.startsWith('text/') ||
     /\b(json|javascript|xml|yaml|toml)\b/.test(mime) ||

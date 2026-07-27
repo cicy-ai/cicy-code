@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { BookOpen, Braces, Brain, Check, Columns2, Copy, CornerDownLeft, Folder, History, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, X } from 'lucide-react'
+import { BookOpen, Braces, Brain, Check, CircleHelp, Columns2, Copy, CornerDownLeft, ExternalLink, Folder, History, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -15,7 +15,66 @@ import CurrentHistoryView from '../chat/CurrentHistoryView'
 import DispatcherChat from '../chat/DispatcherChat'
 import { isCicyLiteAgent } from '../../lib/agentType'
 import { replAttachmentMarkdown } from '../../lib/attachmentMarkdown'
+import { openOrActivateElectronProfileTab } from '../../lib/speedup/rpc'
 import apiService from '../../services/api'
+
+const HELP_TOPICS = [
+  { title: '如何使用 Claude Code 官方登录', href: 'https://docs.cicy-ai.com/faq/claude-official-login' },
+  { title: '如何使用 Claude Code 第三方中转 API', href: 'https://docs.cicy-ai.com/faq/claude-third-party-api' },
+  { title: '如何使用 Codex 官方登录', href: 'https://docs.cicy-ai.com/faq/codex-official-login' },
+  { title: '如何使用 Codex 第三方中转 API', href: 'https://docs.cicy-ai.com/faq/codex-third-party-api' },
+]
+
+async function openHelpDocs(event: React.MouseEvent<HTMLAnchorElement>, url: string) {
+  event.stopPropagation()
+  event.preventDefault()
+  try {
+    if (await openOrActivateElectronProfileTab(url, 1)) return
+  } catch {
+    // Fall through to the browser when Electron profile RPC is unavailable.
+  }
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function HelpDocsLink({ paneId, compact }: { paneId: string; compact: boolean }) {
+  return (
+    <div data-id={`agent-stack-help-${paneId}`} className="flex min-w-0 items-center justify-end">
+      {compact ? (
+        <a
+          data-id={`agent-stack-help-button-${paneId}`}
+          href="https://docs.cicy-ai.com/faq/agent-login"
+          target="_blank"
+          rel="noreferrer"
+          onClick={(event) => { void openHelpDocs(event, 'https://docs.cicy-ai.com/faq/agent-login') }}
+          title="帮助文档"
+          aria-label="帮助文档"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+        >
+          <CircleHelp className="h-4 w-4" />
+        </a>
+      ) : (
+        <div data-id={`agent-stack-help-ticker-${paneId}`} className="agent-stack-help-ticker h-8 w-[min(280px,30vw)] overflow-hidden text-right">
+          <div data-id={`agent-stack-help-ticker-track-${paneId}`} className="agent-stack-help-ticker-track">
+            {[...HELP_TOPICS, HELP_TOPICS[0]].map((topic, index) => (
+              <a
+                key={`${topic.title}-${index}`}
+                data-id={`agent-stack-help-topic-${index}`}
+                href={topic.href}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => { void openHelpDocs(event, topic.href) }}
+                className="flex h-8 items-center justify-end truncate px-1 text-right text-xs text-zinc-500 transition-colors hover:text-zinc-200"
+                title={topic.title}
+              >
+                {topic.title}
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 // Header attach button for NON-cicy agents (claude/codex/opencode run in tmux).
 // Like dispatcher-chat-attach but "upload → send immediately": pick file(s) →
@@ -451,6 +510,7 @@ export interface AgentCanvasItem {
   machineLabel?: string;
   ttydSrc?: string;
   workspace?: string;
+  roleTemplate?: string;
   isPrimary?: boolean;
   isApiOnly?: boolean;
 }
@@ -788,6 +848,8 @@ function AgentStackCard({
   const [termReloadNonce, setTermReloadNonce] = useState(0)
   const copiedPaneTimerRef = useRef<number | null>(null)
   const [editingTitle, setEditingTitle] = useState(false)
+  const [kouboBusy, setKouboBusy] = useState(false)
+  const [kouboHealthy, setKouboHealthy] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const titleInputRef = useRef<HTMLInputElement | null>(null)
   // IME composition tracking. On Mac's built-in Pinyin IME pressing Enter
@@ -847,6 +909,34 @@ function AgentStackCard({
   }, [item.paneId])
 
   const displayTitle = item.title || item.paneId
+  const isKouboAgent = item.roleTemplate === 'koubo'
+
+  useEffect(() => {
+    if (!isKouboAgent) return
+    let cancelled = false
+    apiService.getKouboStatus(item.paneId)
+      .then((response: any) => {
+        if (!cancelled) setKouboHealthy(response?.data?.healthy === true)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [isKouboAgent, item.paneId])
+
+  const handleStartOpenKoubo = useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    if (kouboBusy) return
+    setKouboBusy(true)
+    try {
+      const response: any = await apiService.startOpenKoubo(item.paneId)
+      if (response?.data?.success !== true) throw new Error(response?.data?.error || '口播工作台启动失败')
+      setKouboHealthy(true)
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '口播工作台已在 Electron Profile 1 打开' }))
+    } catch (error: any) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: error?.response?.data?.error || error?.message || '口播工作台启动失败' }))
+    } finally {
+      setKouboBusy(false)
+    }
+  }, [item.paneId, kouboBusy])
 
   const beginTitleEdit = useCallback(() => {
     if (!onRenamePaneTitle) return
@@ -1092,6 +1182,23 @@ function AgentStackCard({
             the card body now (see agent-stack-card-view-tabs below). */}
         {!globalVar?.helper_mode && (
         <div data-id={`agent-stack-card-header-right-${item.paneId}`} className="ml-2 flex items-center gap-1">
+          {showHeaderButtons ? (
+            <HelpDocsLink paneId={item.paneId} compact={splitControl.isSplit} />
+          ) : null}
+          {isKouboAgent ? (
+            <button
+              type="button"
+              data-id={`agent-stack-card-koubo-open-${item.paneId}`}
+              onClick={handleStartOpenKoubo}
+              disabled={kouboBusy}
+              title="启动或打开口播工作台（Electron Profile 1）"
+              aria-label="启动或打开口播工作台"
+              className="mr-1 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-400 to-blue-500 px-3 text-xs font-semibold text-slate-950 shadow-[0_0_18px_rgba(34,211,238,0.45)] ring-1 ring-cyan-200/70 transition-all hover:brightness-110 hover:shadow-[0_0_24px_rgba(34,211,238,0.65)] disabled:cursor-wait disabled:opacity-70"
+            >
+              {kouboBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
+              <span>{kouboBusy ? '启动中' : kouboHealthy ? '打开口播' : '启动口播'}</span>
+            </button>
+          ) : null}
           {/* 历史入口:与分屏 ib 同排。沿用原悬浮按钮的 data-id。仅非 cicy
               (cicy 卡本身就是 chat/历史优先,没有终端⇄历史切换)。 */}
           {showHeaderButtons && !isCicyLiteAgent(item.agentType) ? (

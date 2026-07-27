@@ -54,15 +54,20 @@ type Tab = 'routing' | 'providers';
 // "voice" = speech provider (TTS/ASR, vendor protocol — e.g. 豆包语音/volcengine);
 // never a chat routing target, but editable here like any provider.
 const PROTOCOLS = ['openai', 'anthropic', 'voice'] as const;
-const KNOWN_SLOTS = ['claude', 'cicy', 'codex', 'opencode'];
+const KNOWN_SLOTS = ['claude', 'cicy', 'codex', 'opencode', 'translate'];
 const PROTECTED_PROVIDER_KEYS = new Set(['defaultAnthropic', 'defaultOpenAi']);
-const SLOT_LABELS: Record<string, string> = { claude: 'Claude', cicy: 'CiCy', codex: 'Codex', opencode: 'OpenCode' };
-const SLOT_DESC: Record<string, string> = { claude: 'Claude Code CLI', cicy: 'CiCy Lite Agent', codex: 'OpenAI Codex CLI', opencode: 'OpenCode CLI' };
+const SLOT_LABELS: Record<string, string> = { claude: 'Claude', cicy: 'CiCy', codex: 'Codex', opencode: 'OpenCode', translate: 'Translation' };
+const SLOT_DESC: Record<string, string> = { claude: 'Claude Code CLI', cicy: 'CiCy Lite Agent', codex: 'OpenAI Codex CLI', opencode: 'OpenCode CLI', translate: 'Marketplace and inspector translation' };
 // cicy has no protocol restriction: it always speaks Anthropic Messages but the
 // gateway bridges an openai-protocol provider down to Chat Completions, so either
 // kind of provider can back the cicy slot (mirrors opencode, which is also open).
-const SLOT_PROTOCOL: Record<string, string> = { claude: 'anthropic', cicy: '', codex: 'openai', opencode: 'openai' };
-const SLOT_FALLBACK_MODEL: Record<string, string> = { claude: 'claude-opus-4-7', cicy: 'deepseek-v4-pro', codex: 'gpt-5.4', opencode: 'deepseek-v4-pro' };
+const SLOT_PROTOCOL: Record<string, string> = { claude: 'anthropic', cicy: '', codex: 'openai', opencode: 'openai', translate: 'openai' };
+const SLOT_FALLBACK_MODEL: Record<string, string> = { claude: 'claude-opus-4-7', cicy: 'deepseek-v4-pro', codex: 'gpt-5.4', opencode: 'deepseek-v4-pro', translate: 'big-pickle' };
+
+const slotLabel = (slot: string, t: (key: string) => string) =>
+  slot === 'translate' ? t('slotTranslate') : (SLOT_LABELS[slot] || slot);
+const slotDescription = (slot: string, t: (key: string) => string) =>
+  slot === 'translate' ? t('slotTranslateDesc') : (SLOT_DESC[slot] || slot);
 
 /* ───────────────────────── helpers ───────────────────────── */
 
@@ -489,7 +494,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
     try {
       const resp = await apiService.updateProviderDefaults(next);
       setData((d) => (d ? { ...d, defaults: resp.data?.defaults || next } : d));
-      toast(i18n.t('defaultProviderUpdated', { ns: 'provider', name: SLOT_LABELS[agentType] || agentType }));
+      toast(i18n.t('defaultProviderUpdated', { ns: 'provider', name: agentType === 'translate' ? i18n.t('slotTranslate', { ns: 'provider' }) : (SLOT_LABELS[agentType] || agentType) }));
     } catch (err) {
       setData((d) => (d ? { ...d, defaults: prev } : d));
       toast(i18n.t('updateFailed', { ns: 'provider', err: errText(err) }));
@@ -570,13 +575,13 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
               return (
                 <div key={slot} className={cn(CARD, 'flex flex-col p-3')}>
                   <div className="flex items-center gap-2.5">
-                    <AgentAvatar agentType={slot} title={SLOT_LABELS[slot] || slot} variant="panel" />
+                    <AgentAvatar agentType={slot} title={slotLabel(slot, t)} variant="panel" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <span className="truncate text-[13px] font-semibold text-white">{SLOT_LABELS[slot] || slot}</span>
+                        <span className="truncate text-[13px] font-semibold text-white">{slotLabel(slot, t)}</span>
                         <StatusDot tone={tone} />
                       </div>
-                      <div className="mt-0.5 truncate text-[10.5px] text-zinc-500">{SLOT_DESC[slot] || slot}</div>
+                      <div className="mt-0.5 truncate text-[10.5px] text-zinc-500">{slotDescription(slot, t)}</div>
                     </div>
                   </div>
 
@@ -597,7 +602,7 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
                   {mismatch && (
                     <div className="mt-1.5 flex items-center gap-1.5 text-[10.5px] text-amber-300">
                       <AlertTriangle size={10} className="shrink-0 text-amber-400" />
-                      <span className="truncate">{t('protoMismatchInline', { has: proto(provider), slot: SLOT_LABELS[slot] || slot, want })}</span>
+                      <span className="truncate">{t('protoMismatchInline', { has: proto(provider), slot: slotLabel(slot, t), want })}</span>
                     </div>
                   )}
                 </div>

@@ -30,6 +30,8 @@
   "tabRouting": "Agent routing",
   "tabProviders": "Providers",
   "routingTitle": "Agent routing",
+  "slotTranslate": "Traduction",
+  "slotTranslateDesc": "Traduction des textes du Skill Marketplace et de l’Inspector",
   "routingHelp": "The provider and model used by each agent when it starts or when requests go through the local gateway. The pane's own runtime_ai.provider_name and default_model take precedence.",
   "noProvidersHeadline": "No providers yet",
   "noProvidersBody": "Go to \"Providers\" to add one, then come back to assign defaults for Claude / Codex.",

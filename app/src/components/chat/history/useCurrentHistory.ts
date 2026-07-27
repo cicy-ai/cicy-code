@@ -261,7 +261,11 @@ export function useCurrentHistory(opts: {
       if (e.deltaY < 0) disengage();
     };
     let touchY = 0;
-    const onTouchStart = (e: TouchEvent) => { touchY = e.touches[0]?.clientY ?? 0; };
+    const onTouchStart = (e: TouchEvent) => {
+      touchY = e.touches[0]?.clientY ?? 0;
+      disengage();
+    };
+    const onPointerDown = () => disengage();
     const onTouchMove = (e: TouchEvent) => {
       const y = e.touches[0]?.clientY ?? 0;
       if (y > touchY + 2) disengage(); // 手指向下拖 = 内容向上滚
@@ -271,11 +275,13 @@ export function useCurrentHistory(opts: {
     el.addEventListener('wheel', onWheel, { passive: true });
     el.addEventListener('touchstart', onTouchStart, { passive: true });
     el.addEventListener('touchmove', onTouchMove, { passive: true });
+    el.addEventListener('pointerdown', onPointerDown, { passive: true });
     return () => {
       el.removeEventListener('scroll', updateStickBottom);
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('pointerdown', onPointerDown);
     };
   }, [open, paneId]);
 

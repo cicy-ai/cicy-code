@@ -9,7 +9,7 @@ import (
 // English default persona) so a fresh install can seed them before creating the
 // role agents.
 func TestRoleRosterTemplatesEmbedded(t *testing.T) {
-	want := []string{"knowledge-specialist", "audit-policy-specialist"}
+	want := []string{"knowledge-specialist", "audit-policy-specialist", "koubo"}
 	for _, slug := range want {
 		raw, err := agentRoleTemplatesFS.ReadFile("embed/memory-seed/agents/" + slug + "/role.md")
 		if err != nil {
@@ -25,9 +25,31 @@ func TestRoleRosterTemplatesEmbedded(t *testing.T) {
 // Each role's meta.yaml must carry a greeting (the empty-chat opening line lives
 // in meta.yaml now, never in the persona/memory).
 func TestRoleGreetingsInMeta(t *testing.T) {
-	for _, slug := range []string{"knowledge-specialist", "audit-policy-specialist"} {
+	for _, slug := range []string{"knowledge-specialist", "audit-policy-specialist", "koubo"} {
 		if g := strings.TrimSpace(loadRoleMeta(slug).Greeting); g == "" {
 			t.Errorf("role %q has no greeting in meta.yaml", slug)
+		}
+	}
+}
+
+func TestKouboSystemPromptRequiresPublicSkill(t *testing.T) {
+	raw, err := agentRoleTemplatesFS.ReadFile("embed/memory-seed/agents/koubo/system.md")
+	if err != nil {
+		t.Fatalf("koubo system prompt not embedded: %v", err)
+	}
+	prompt := string(raw)
+	for _, required := range []string{
+		"cicy-koubo skill (required)",
+		"cicy-koubo status --json",
+		"references/ui-workflows.md",
+		"agent-electron",
+		"profile 1",
+		"restore, show, and focus its owning Electron window",
+		"session_download_url",
+		"~/cicy-ai/global.json",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Errorf("koubo system prompt missing %q", required)
 		}
 	}
 }

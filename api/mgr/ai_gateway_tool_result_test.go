@@ -124,3 +124,48 @@ func TestSessionContinuationCarriesToolResultIntoReply(t *testing.T) {
 		t.Fatalf("inherited tool_use not found in reply.json: %s", replyData)
 	}
 }
+
+// The cicy runtime explicitly labels every HTTP round in one logical turn with
+// X-Cicy-Turn-Id. Even when the legacy body heuristic does not recognize a
+// continuation, that declaration must consistently preserve both items and
+// accumulated usage/cost.
+func TestDeclaredSameTurnPreservesItemsAndUsage(t *testing.T) {
+	withTempCicyRoot(t)
+	withTestStore(t)
+	agent := "w-19008"
+	const convID = "sess-explicit-turn"
+	const turnID = "turn-explicit-1"
+
+	if err := aiGatewayWriteReplySnapshot(agent, aiGatewayReplySnapshot{
+		TurnID:         turnID,
+		ConversationID: convID,
+		Items: []map[string]interface{}{
+			{"id": 1, "type": "thinking", "thinking": "working"},
+		},
+		InputTokens:  100,
+		OutputTokens: 23,
+		TotalTokens:  123,
+		CostCredit:   0.75,
+	}); err != nil {
+		t.Fatalf("seed reply: %v", err)
+	}
+
+	base, _ := url.Parse("https://api.anthropic.com")
+	hdr := http.Header{
+		"Content-Type":             []string{"application/json"},
+		"X-Claude-Code-Session-Id": []string{convID},
+		"X-Cicy-Turn-Id":           []string{turnID},
+	}
+	// Deliberately a plain user body: aiGatewayIsToolContinuation returns false,
+	// so only the explicit turn id can establish continuation semantics.
+	req := []byte(`{"model":"m","messages":[{"role":"user","content":"continue"}]}`)
+	s := newAIGatewayAuditSession("anthropic", agent, base, "/v1/messages", "POST", hdr, req)
+
+	if len(s.reply.Items) != 1 || aiGatewayString(s.reply.Items[0]["thinking"]) != "working" {
+		t.Fatalf("declared same turn lost prior items: %#v", s.reply.Items)
+	}
+	if s.reply.OutputTokens != 23 || s.reply.TotalTokens != 123 || s.reply.CostCredit != 0.75 {
+		t.Fatalf("declared same turn reset usage: output=%d total=%d cost=%v",
+			s.reply.OutputTokens, s.reply.TotalTokens, s.reply.CostCredit)
+	}
+}

@@ -14,6 +14,50 @@ export async function electronRPC(tool: string, args: Record<string, any> = {}):
   return raw;
 }
 
+function parseElectronRPCJSON(raw: any): any {
+  if (typeof raw !== 'string') return raw;
+  const text = raw.trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function comparableTabUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.hash = '';
+    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, '');
+    return url.toString();
+  } catch {
+    return value.replace(/#.*$/, '').replace(/\/+$/, '');
+  }
+}
+
+/**
+ * Open a URL in an Electron profile tab without creating duplicates.
+ * Returns false outside cicy-desktop so callers can fall back to window.open.
+ */
+export async function openOrActivateElectronProfileTab(url: string, accountIdx = 1): Promise<boolean> {
+  if (typeof (window as any).electronRPC !== 'function') return false;
+
+  const listed = parseElectronRPCJSON(await electronRPC('electron_tabs', { accountIdx }));
+  const tabs: any[] = Array.isArray(listed?.tabs) ? listed.tabs : [];
+  const wanted = comparableTabUrl(url);
+  const existing = tabs.find((tab) =>
+    typeof tab?.url === 'string' && comparableTabUrl(tab.url) === wanted,
+  );
+
+  if (existing && typeof existing.webContentsId === 'number') {
+    await electronRPC('electron_tab_activate', { webContentsId: existing.webContentsId });
+  } else {
+    await electronRPC('electron_tab_open', { accountIdx, url });
+  }
+  return true;
+}
+
 // exec_shell has a ~30s hard timeout on the cicy-desktop side. Use this for
 // short queries only (curl probes, version checks, config writes).
 export async function execShell(command: string): Promise<string> {

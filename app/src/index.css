@@ -329,6 +329,28 @@ select optgroup {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+@keyframes agent-stack-help-ticker-up {
+  0%, 18% { transform: translateY(0); }
+  25%, 43% { transform: translateY(-2rem); }
+  50%, 68% { transform: translateY(-4rem); }
+  75%, 93% { transform: translateY(-6rem); }
+  100% { transform: translateY(-8rem); }
+}
+
+.agent-stack-help-ticker-track {
+  animation: agent-stack-help-ticker-up 16s ease-in-out infinite;
+}
+
+.agent-stack-help-ticker:hover .agent-stack-help-ticker-track {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-stack-help-ticker-track {
+    animation: none;
+  }
+}
+
 .inspector-history-hit {
   padding: 0 0.12rem;
   border-radius: 0.22rem;

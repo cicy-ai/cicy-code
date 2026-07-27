@@ -242,24 +242,24 @@ type aiGatewayStreamDelta struct {
 }
 
 type aiGatewayAuditSession struct {
-	mu              sync.Mutex
-	finalized       bool
-	agentID         string
-	provider        string
-	model           string
-	turnID          string
-	requestID       string
-	conversationID  string
-	question        string
+	mu             sync.Mutex
+	finalized      bool
+	agentID        string
+	provider       string
+	model          string
+	turnID         string
+	requestID      string
+	conversationID string
+	question       string
 	// requestBody is the RAW outbound request bytes (the full prompt the agent
 	// sends to the model). Scanned at turn completion as the OUTBOUND audit
 	// payload — this is the real interception point, same as the MITM adapter.
-	requestBody     []byte
+	requestBody []byte
 	// auditSourceChannel tags which path this session came from for audit
 	// events: "" / "gateway" (default) for the cooperative AI gateway, "mitm"
 	// when the mitm adapter created it. Drives Envelope.SourceChannel.
 	auditSourceChannel string
-	startedAt       time.Time
+	startedAt          time.Time
 	// firstByteAt is stamped when the first upstream response byte arrives
 	// (≈ reply start / time-to-first-token for streaming). Zero until then.
 	firstByteAt     time.Time
@@ -297,21 +297,21 @@ type aiGatewayAuditSession struct {
 // aiGatewayPendingItem 描述一个尚未 flush 到 reply.Items 的流中 item。
 // 不区分 provider —— 通过 stream_kind / tool 切换识别 block 边界。
 type aiGatewayPendingItem struct {
-	Kind          string // "thinking" | "text" | "tool_use"
-	Thinking      string // for thinking
-	Text          string // for text
-	ToolID        string // stream 累积 key（Codex 用 fc_xxx；Anthropic / OpenAI Chat 用 call_xxx）
-	OutputToolID  string // reply.items 输出用的 tool_id（跟 current.json 中的 tool_use_id 对齐，Codex=call_xxx）
-	ToolName      string // for tool_use
-	Arguments     string // for tool_use (累积的 raw JSON 字符串)
+	Kind         string // "thinking" | "text" | "tool_use"
+	Thinking     string // for thinking
+	Text         string // for text
+	ToolID       string // stream 累积 key（Codex 用 fc_xxx；Anthropic / OpenAI Chat 用 call_xxx）
+	OutputToolID string // reply.items 输出用的 tool_id（跟 current.json 中的 tool_use_id 对齐，Codex=call_xxx）
+	ToolName     string // for tool_use
+	Arguments    string // for tool_use (累积的 raw JSON 字符串)
 }
 
 type aiGatewayAuditReadCloser struct {
-	inner      io.ReadCloser
-	audit      *aiGatewayAuditSession
-	statusCode int
-	headers    http.Header
-	buf        bytes.Buffer
+	inner       io.ReadCloser
+	audit       *aiGatewayAuditSession
+	statusCode  int
+	headers     http.Header
+	buf         bytes.Buffer
 	ssePending  string
 	isStream    bool
 	startMarked bool
@@ -421,7 +421,7 @@ var (
 	// human prompt: slash-command wrappers (/compact, /clear, …) and the
 	// auto-compaction continuation preamble. Stripped so the real-prompt list
 	// (aiGatewayBuildCurrentPrompts) doesn't surface them as questions.
-	localCommandBlockRe = regexp.MustCompile(`(?s)<local-command-caveat>.*?</local-command-caveat>|<command-name>.*?</command-name>|<command-message>.*?</command-message>|<command-args>.*?</command-args>|<local-command-stdout>.*?</local-command-stdout>|<local-command-stderr>.*?</local-command-stderr>`)
+	localCommandBlockRe  = regexp.MustCompile(`(?s)<local-command-caveat>.*?</local-command-caveat>|<command-name>.*?</command-name>|<command-message>.*?</command-message>|<command-args>.*?</command-args>|<local-command-stdout>.*?</local-command-stdout>|<local-command-stderr>.*?</local-command-stderr>`)
 	compactionPreambleRe = regexp.MustCompile(`(?s)^\s*This session is being continued from a previous conversation.*`)
 	// The /loop wakeup "recap" prompt is harness-injected as a role=user message
 	// ("The user stepped away and is coming back. Recap in under N words…"), not a
@@ -562,7 +562,8 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	// 一个 id → 无条件继承 items(append 语义)。语义猜测(isContinuation)只是没有
 	// 声明时的后备——猜错一次,前面 round 的 thinking/工具过程就被清零覆盖。
 	declaredSameTurn := turnID != "" && turnID == strings.TrimSpace(prevReply.TurnID)
-	if prevReply.TurnID != "" && (isContinuation || declaredSameTurn) && prevConvMatches {
+	sameTurn := prevReply.TurnID != "" && (isContinuation || declaredSameTurn) && prevConvMatches
+	if sameTurn {
 		prevItems = prevReply.Items
 		turnID = prevReply.TurnID
 		// This continuation request carries the tool_result blocks for the
@@ -582,7 +583,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	// prefill window — they're a single-request snapshot that message_start
 	// overwrites within seconds, so they can't accumulate.
 	inheritOutput, inheritTotal, inheritCost := 0, prevInputTokens, 0.0
-	if isContinuation {
+	if sameTurn {
 		inheritOutput, inheritTotal, inheritCost = prevOutputTokens, prevTotalTokens, prevCostCredit
 	}
 	// Self-describing answer slot for reply.json: the answer occupies current.json's
@@ -595,31 +596,31 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		answerSlot = int64(current.MaxHistoryID) + 1
 	}
 	reply := aiGatewayReplySnapshot{
-		TurnID:           turnID,
-		ConversationID:   conversationID,
-		HistoryID:        answerSlot,
-		Status:           "thinking",
-		StartedAt:        startedAtISO,
-		UpdatedAt:        startedAtISO,
-		Thinking:         "",
-		Answer:           "",
-		ToolCalls:        []aiGatewayToolCall{},
-		Items:            prevItems,
-		HTTPRequests:     []aiGatewayRequestSpan{requestSpan},
-		Usage:            map[string]interface{}{},
-		InputTokens:      prevInputTokens,
-		OutputTokens:     inheritOutput,
-		TotalTokens:      inheritTotal,
-		CostCredit:       inheritCost,
+		TurnID:                   turnID,
+		ConversationID:           conversationID,
+		HistoryID:                answerSlot,
+		Status:                   "thinking",
+		StartedAt:                startedAtISO,
+		UpdatedAt:                startedAtISO,
+		Thinking:                 "",
+		Answer:                   "",
+		ToolCalls:                []aiGatewayToolCall{},
+		Items:                    prevItems,
+		HTTPRequests:             []aiGatewayRequestSpan{requestSpan},
+		Usage:                    map[string]interface{}{},
+		InputTokens:              prevInputTokens,
+		OutputTokens:             inheritOutput,
+		TotalTokens:              inheritTotal,
+		CostCredit:               inheritCost,
 		CacheReadInputTokens:     prevCacheRead,
 		CacheCreationInputTokens: prevCacheCreate,
-		LastUsage:        aiGatewayCloneAnyMap(prevReply.LastUsage),
-		LastInputTokens:  prevReply.LastInputTokens,
-		LastOutputTokens: prevReply.LastOutputTokens,
-		LastTotalTokens:  prevReply.LastTotalTokens,
-		LastCostCredit:   prevReply.LastCostCredit,
-		Models:           aiGatewayOptionalStringList(model),
-		RequestCount:     0,
+		LastUsage:                aiGatewayCloneAnyMap(prevReply.LastUsage),
+		LastInputTokens:          prevReply.LastInputTokens,
+		LastOutputTokens:         prevReply.LastOutputTokens,
+		LastTotalTokens:          prevReply.LastTotalTokens,
+		LastCostCredit:           prevReply.LastCostCredit,
+		Models:                   aiGatewayOptionalStringList(model),
+		RequestCount:             0,
 		StatusMap: aiGatewayStatusMap{
 			Primary: "thinking",
 			Items: []aiGatewayStatusItem{
@@ -665,10 +666,10 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		reply:          reply,
 		// 继承自上一次续传的 items 已经被上一个 session 推送过，本 session 只推本次 HTTP
 		// 新产生的 items（见 completeFromResponse 的 backstop）。
-		pushedItems:    len(prevItems),
-		replyHooks:     newReplyHooksForPane(agentID, isContinuation),
-		auxiliary:      auxKind != "",
-		auxKind:        auxKind,
+		pushedItems:      len(prevItems),
+		replyHooks:       newReplyHooksForPane(agentID, sameTurn),
+		auxiliary:        auxKind != "",
+		auxKind:          auxKind,
 		compSystemHash:   hashJSON(payloadMap["system"]),
 		compToolsHash:    hashJSON(payloadMap["tools"]),
 		compFirstMsgHash: hashJSON(firstMsg),
@@ -1605,7 +1606,8 @@ func sanitizeConvID(id string) string {
 }
 
 // aiGatewayConversationDir is the per-conversation snapshot dir:
-//   .cicy/history/chat/<conversation_id>/
+//
+//	.cicy/history/chat/<conversation_id>/
 func aiGatewayConversationDir(agentID, convID string) string {
 	return filepath.Join(aiGatewayHistoryDir(agentID), "chat", sanitizeConvID(convID))
 }
@@ -1987,7 +1989,7 @@ func aiGatewayPromptTextFromUserMessage(content interface{}) string {
 				continue
 			}
 			switch strings.ToLower(strings.TrimSpace(aiGatewayString(blk["type"]))) {
-			case "text", "":
+			case "text", "input_text", "":
 				hasText = true
 				t := aiGatewayString(blk["text"])
 				if strings.TrimSpace(t) == "" || strings.TrimSpace(t) == strings.TrimSpace(lastKept) {
@@ -4169,11 +4171,11 @@ func aiGatewayReplyEventsFromStreamPayload(payload map[string]interface{}) []aiG
 			events = append(events, aiGatewayReplyEvent{
 				Kind: "tool_call",
 				Payload: M{
-					"type":            payloadType,
-					"tool_id":         aiGatewayFirstNonEmpty(aiGatewayString(item["id"]), aiGatewayString(item["call_id"])),
-					"output_tool_id":  aiGatewayString(item["call_id"]),
-					"tool_name":       aiGatewayString(item["name"]),
-					"arguments":       aiGatewayString(item["arguments"]),
+					"type":           payloadType,
+					"tool_id":        aiGatewayFirstNonEmpty(aiGatewayString(item["id"]), aiGatewayString(item["call_id"])),
+					"output_tool_id": aiGatewayString(item["call_id"]),
+					"tool_name":      aiGatewayString(item["name"]),
+					"arguments":      aiGatewayString(item["arguments"]),
 				},
 			})
 		}
@@ -4190,11 +4192,11 @@ func aiGatewayReplyEventsFromStreamPayload(payload map[string]interface{}) []aiG
 		events = append(events, aiGatewayReplyEvent{
 			Kind: "tool_call",
 			Payload: M{
-				"type":            payloadType,
-				"tool_id":         aiGatewayFirstNonEmpty(aiGatewayString(payload["item_id"]), aiGatewayString(payload["call_id"])),
-				"output_tool_id":  aiGatewayString(payload["call_id"]),
-				"tool_name":       toolName,
-				"arguments":       arguments,
+				"type":           payloadType,
+				"tool_id":        aiGatewayFirstNonEmpty(aiGatewayString(payload["item_id"]), aiGatewayString(payload["call_id"])),
+				"output_tool_id": aiGatewayString(payload["call_id"]),
+				"tool_name":      toolName,
+				"arguments":      arguments,
 			},
 		})
 	}
@@ -4942,6 +4944,7 @@ func aiGatewayExtractQuestion(body map[string]interface{}) string {
 //   - Anthropic: 最后一条 role=user 且 content 数组里含 tool_result block → 续传
 //   - OpenAI Chat: 最后一条 role=tool → 续传
 //   - Codex Responses: 最后一条 input item type=function_call_output / tool_result / computer_call_output → 续传
+//
 // 其余情况都视为用户新 q（包括最后一条 role=user 是纯文本、第一条请求等）。
 // aiGatewayFirstUserText 取 messages 里首条 role=user 消息的扁平文本(线程身份指纹)。
 func aiGatewayFirstUserText(messages []map[string]interface{}) string {

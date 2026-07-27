@@ -329,7 +329,7 @@ export default function AgentProviderRequestView({
   const developerSection = useMemo(() => sections.find((section: any) => section?.type === 'developer_messages') || null, [sections]);
   const toolSection = useMemo(() => sections.find((section: any) => section?.type === 'tools') || null, [sections]);
   const metaSection = useMemo(() => sections.find((section: any) => section?.type === 'meta') || null, [sections]);
-  const isOpenAIStyle = data?.request_kind === 'openai_responses';
+  const isOpenAIStyle = data?.request_kind === 'openai_responses' || data?.request_kind === 'openai_chat_completions';
   const toolItems = Array.isArray(toolSection?.items) ? toolSection.items : [];
 
   useEffect(() => {
@@ -337,10 +337,14 @@ export default function AgentProviderRequestView({
       setBrainTab('instructions');
       return;
     }
+    if (brainTab === 'instructions' && !promptSection) {
+      setBrainTab('developer');
+      return;
+    }
     if (brainTab === 'developer' && !developerSection?.items?.length) {
       setBrainTab('instructions');
     }
-  }, [brainTab, developerSection, isOpenAIStyle]);
+  }, [brainTab, developerSection, isOpenAIStyle, promptSection]);
 
   useEffect(() => {
     if (!toolItems.length) {
@@ -464,26 +468,30 @@ export default function AgentProviderRequestView({
         <div data-id="agent-provider-request-brain-panel" className="h-full overflow-y-auto space-y-3">
           {isOpenAIStyle && (promptSection || developerSection?.items?.length) ? (
             <div data-id="agent-provider-request-brain-tabs" className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-none">
-              <button
-                type="button"
-                data-id="agent-provider-request-brain-tab-instructions"
-                onClick={() => setBrainTab('instructions')}
-                className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] leading-5 transition-colors ${
-                  brainTab === 'instructions' ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
-                }`}
-              >
-                Instructions
-              </button>
-              <button
-                type="button"
-                data-id="agent-provider-request-brain-tab-developer"
-                onClick={() => setBrainTab('developer')}
-                className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] leading-5 transition-colors ${
-                  brainTab === 'developer' ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
-                }`}
-              >
-                Developer
-              </button>
+              {promptSection ? (
+                <button
+                  type="button"
+                  data-id="agent-provider-request-brain-tab-instructions"
+                  onClick={() => setBrainTab('instructions')}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] leading-5 transition-colors ${
+                    brainTab === 'instructions' ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
+                  }`}
+                >
+                  Instructions
+                </button>
+              ) : null}
+              {developerSection?.items?.length ? (
+                <button
+                  type="button"
+                  data-id="agent-provider-request-brain-tab-developer"
+                  onClick={() => setBrainTab('developer')}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] leading-5 transition-colors ${
+                    brainTab === 'developer' ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
+                  }`}
+                >
+                  Developer
+                </button>
+              ) : null}
             </div>
           ) : null}
 

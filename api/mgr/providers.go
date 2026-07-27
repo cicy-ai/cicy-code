@@ -26,7 +26,7 @@ var providersFileMu sync.Mutex
 var providerKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
 // agent types exposed in the provider manager defaults editor.
-var providerDefaultAgentTypes = []string{"claude", "cicy", "codex", "opencode"}
+var providerDefaultAgentTypes = []string{"claude", "cicy", "codex", "opencode", "translate"}
 
 // Official cicy-shipped providers — protected from deletion via API.
 var protectedProviderKeys = map[string]bool{
@@ -66,6 +66,7 @@ const defaultProvidersBlockJSON = `{
     "cicy": "opencodeZen",
     "codex": "opencodeZen",
     "opencode": "opencodeZen",
+    "translate": "opencodeZen",
     "stt": "groqStt",
     "vision": "zhipuVision",
     "voice": "doubaoVoice"
@@ -274,6 +275,44 @@ func ensureDefaultProviders() {
 	log.Printf("[setup] seeded default providers (CiCyAi gateway) into global.json")
 }
 
+// ensureTranslateRoute backfills the dedicated translation route on existing
+// installs. Operator choices are authoritative and are never overwritten.
+func ensureTranslateRoute() {
+	providersFileMu.Lock()
+	defer providersFileMu.Unlock()
+
+	cfg := readGlobalJSONConfig()
+	providers, ok := cfg["providers"].(map[string]any)
+	if !ok {
+		return
+	}
+	defaults, ok := providers["default"].(map[string]any)
+	if !ok {
+		defaults = map[string]any{}
+		providers["default"] = defaults
+	}
+	if route, _ := defaults["translate"].(string); strings.TrimSpace(route) != "" {
+		return
+	}
+	target := "defaultOpenAi"
+	if items, ok := providers["items"].([]any); ok {
+		for _, raw := range items {
+			item, _ := raw.(map[string]any)
+			if key, _ := item["key"].(string); key == "opencodeZen" {
+				target = "opencodeZen"
+				break
+			}
+		}
+	}
+	defaults["translate"] = target
+	cfg["providers"] = providers
+	if err := writeGlobalJSONConfig(cfg); err != nil {
+		log.Printf("[setup] translate route write failed: %v", err)
+		return
+	}
+	log.Printf("[setup] ensured translate route → %s", target)
+}
+
 // opencodeZenProviderJSON is the OpenCode Zen free-tier provider. Its free models
 // (big-pickle, *-free) need no real key ("public") and the gateway translates the
 // Anthropic-speaking cicy agent down to this openai-protocol upstream.
@@ -289,7 +328,7 @@ const opencodeZenProviderJSON = `{
     "deepseek-v4-flash-free"
   ],
   "protocol": "openai",
-  "url": "https://opencode.ai/zen/v1"
+  "url": "https://opencode.ai/zen/v1/chat/completions"
 }`
 
 // cloudGatewayKey returns this node's sk-cicy- gateway key for authenticating to
@@ -632,7 +671,6 @@ func sanitizeProviderDraft(raw map[string]any, existing map[string]any) (map[str
 	if _, ok := out["defaultModel"]; !ok {
 		out["defaultModel"] = ""
 	}
-
 
 	if rawDM, ok := raw["defaultModels"]; ok {
 		dm := map[string]any{}

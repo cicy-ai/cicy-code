@@ -350,6 +350,15 @@ export function HistoryList(props: HistoryListProps) {
                 ) : null}
               </>
             ) : null}
+            {/* Keep a permanent tail slot after the latest assistant answer.
+                During retry the latest a rapidly swaps between pending, failed
+                and live snapshots; without a stable final node the scroll
+                height briefly collapses and the whole conversation jumps. */}
+            <div
+              data-id="current-history-final-answer-placeholder"
+              aria-hidden="true"
+              className="h-8 shrink-0"
+            />
           </>}
         </div>
       </div>

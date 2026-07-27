@@ -30,6 +30,8 @@
   "tabRouting": "Agent 路由",
   "tabProviders": "供应商",
   "routingTitle": "Agent 路由",
+  "slotTranslate": "翻译",
+  "slotTranslateDesc": "Skill 市场与 Inspector 文本翻译",
   "routingHelp": "每种 agent 启动 / 经本地网关请求时默认使用的供应商与模型。pane 自身的 runtime_ai.provider_name 与 default_model 优先级更高。",
   "noProvidersHeadline": "还没有任何供应商",
   "noProvidersBody": "先去「供应商」添加一个，再回来为 Claude / Codex 指定默认路由。",

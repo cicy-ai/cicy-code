@@ -2422,6 +2422,7 @@ function resolvePaneMeta({
     machineLabel: binding?.instance_label || binding?.machine_label || agent?.machine_label || agent?.instance_label || '',
     contextUsage: status?.contextUsage ?? null,
     workspace: detail?.workspace || agent?.workspace || defaultWorkerWorkspace(paneId),
+    roleTemplate: detail?.role_template || agent?.role_template || '',
     isApiOnly: !!(detail && detail.capabilities?.supports_tmux === false),
   };
 }
@@ -2458,6 +2459,7 @@ function buildCanvasItems({
       machineLabel: meta.machineLabel,
       ttydSrc: token && !meta.isApiOnly ? urls.ttydOpen(targetPaneId, token, lang) : '',
       workspace: meta.workspace,
+      roleTemplate: meta.roleTemplate,
       isPrimary: targetPaneId === paneId,
       isApiOnly: meta.isApiOnly,
     };
