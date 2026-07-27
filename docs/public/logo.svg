@@ -1,12 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
   <defs>
-    <linearGradient id="cicyMark" x1="16" y1="12" x2="80" y2="84" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#60A5FA"/>
-      <stop offset="0.55" stop-color="#2563EB"/>
-      <stop offset="1" stop-color="#1E3A8A"/>
+    <linearGradient id="a" x1="13" y1="15" x2="83" y2="82" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9B7BFF"/>
+      <stop offset=".48" stop-color="#4BE3FF"/>
+      <stop offset="1" stop-color="#3A7BFF"/>
     </linearGradient>
+    <radialGradient id="b" cx="0" cy="0" r="1" gradientTransform="translate(48 48) rotate(90) scale(19)">
+      <stop stop-color="#4BE3FF" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#7C5CFF" stop-opacity=".06"/>
+    </radialGradient>
+    <filter id="g" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="2.4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
-  <path d="M48 11L39.5 33.3L16 29.5L31 48L16 66.5L39.5 62.7L48 85L56.5 62.7L80 66.5L65 48L80 29.5L56.5 33.3Z"
-        fill="url(#cicyMark)" stroke="url(#cicyMark)" stroke-width="8"
-        stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M48 8 84 28v40L48 88 12 68V28L48 8Z" stroke="url(#a)" stroke-opacity=".22" stroke-width="1.5"/>
+  <g stroke="url(#a)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" filter="url(#g)">
+    <path d="m48 13 32 56H16l32-56Z"/>
+    <path d="m48 83 32-56H16l32 56Z"/>
+  </g>
+  <g fill="#0A0A0F" stroke="url(#a)" stroke-width="2">
+    <circle cx="48" cy="13" r="4"/><circle cx="80" cy="27" r="4"/>
+    <circle cx="80" cy="69" r="4"/><circle cx="48" cy="83" r="4"/>
+    <circle cx="16" cy="69" r="4"/><circle cx="16" cy="27" r="4"/>
+  </g>
+  <path d="m48 32 14 8v16l-14 8-14-8V40l14-8Z" fill="url(#b)" stroke="url(#a)" stroke-width="2.5"/>
+  <circle cx="48" cy="48" r="5.5" fill="#E9FCFF"/>
+  <circle cx="48" cy="48" r="2.5" fill="#4BE3FF"/>
 </svg>
