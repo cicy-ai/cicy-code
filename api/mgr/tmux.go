@@ -3130,6 +3130,10 @@ EOF
 		return lines
 	case "codex":
 		installLog := tmuxHomeJoin("logs", fmt.Sprintf("codex-install-%s.log", shortID))
+		// Pin Codex to the HTTPS/SSE Responses transport. Keep this on every
+		// launch path (custom gateway and official login) so a future Codex
+		// default cannot silently switch an Agent back to WebSockets.
+		codexHTTPSArgs := "-c features.responses_websockets=false -c features.responses_websockets_v2=false"
 		lines := []string{
 			ensureAgentCommandLine("codex", "Codex", codexInstallCmd(), installLog),
 		}
@@ -3164,7 +3168,7 @@ EOF
 			if allowAllActions {
 				bypass = " --dangerously-bypass-approvals-and-sandbox"
 			}
-			base := fmt.Sprintf("codex $CODEX_RESUME -m %s -c %s -c %s -c %s", modelArg, providerOverride, providerNameOverride, baseURLOverride)
+			base := fmt.Sprintf("codex $CODEX_RESUME -m %s %s -c %s -c %s -c %s", modelArg, codexHTTPSArgs, providerOverride, providerNameOverride, baseURLOverride)
 			// Only attach the catalog when its build succeeded (file present and
 			// non-empty); otherwise launch Codex without it so a failed catalog
 			// build never blocks startup.
@@ -3181,9 +3185,9 @@ EOF
 		lines = append(lines, mitmAgentProxyBootLines(useMitm)...)
 		lines = append(lines, "clear")
 		if allowAllActions {
-			lines = append(lines, "codex $CODEX_RESUME --dangerously-bypass-approvals-and-sandbox")
+			lines = append(lines, "codex $CODEX_RESUME "+codexHTTPSArgs+" --dangerously-bypass-approvals-and-sandbox")
 		} else {
-			lines = append(lines, "codex $CODEX_RESUME")
+			lines = append(lines, "codex $CODEX_RESUME "+codexHTTPSArgs)
 		}
 		return lines
 	case "gemini":

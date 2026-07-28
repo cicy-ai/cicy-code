@@ -47,6 +47,14 @@ func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
 	if !strings.Contains(script, "codex $CODEX_RESUME -m 'gpt-5.5'") {
 		t.Error("missing explicit codex model override")
 	}
+	for _, flag := range []string{
+		"-c features.responses_websockets=false",
+		"-c features.responses_websockets_v2=false",
+	} {
+		if !strings.Contains(script, flag) {
+			t.Errorf("custom-gateway codex must force HTTPS/SSE with %s", flag)
+		}
+	}
 
 	// Must have --dangerously-bypass-approvals-and-sandbox
 	if !strings.Contains(script, "--dangerously-bypass-approvals-and-sandbox") {
@@ -94,6 +102,14 @@ func TestAgentBootLinesCodexModelCatalog(t *testing.T) {
 	off := strings.Join(agentBootLines("codex", true, false, false, true, "w-1001", ""), "\n")
 	if strings.Contains(off, "model_catalog_json") {
 		t.Error("non-gateway codex should not inject a model catalog")
+	}
+	for _, flag := range []string{
+		"-c features.responses_websockets=false",
+		"-c features.responses_websockets_v2=false",
+	} {
+		if !strings.Contains(off, flag) {
+			t.Errorf("official codex must force HTTPS/SSE with %s", flag)
+		}
 	}
 }
 
