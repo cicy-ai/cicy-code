@@ -719,6 +719,50 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
               </div>
             </section>
 
+            {/* Access */}
+            <section className="space-y-3.5">
+              <SectionHeader>{t('sectionAccess')}</SectionHeader>
+              <Field label="API Base URL" help={t('fieldApiBaseHelp')}>
+                <div className="relative">
+                  <Link2 size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
+                  <input data-id="provider-detail-url-input" value={draft.url || ''} onChange={(e) => patchDraft({ url: e.target.value })} className={cn(INPUT, 'pl-8 font-mono')} placeholder="https://api.2000.run/v1" />
+                </div>
+              </Field>
+              <div className="grid gap-3.5 sm:grid-cols-[150px_1fr]">
+                <Field label={t('fieldProtocol')}>
+                  <Select
+                    dataId="provider-protocol-select"
+                    className="w-full"
+                    disabled={!isNew}
+                    value={proto(draft) || 'openai'}
+                    onChange={(v) => patchDraft({ protocol: v })}
+                    options={PROTOCOLS.map((p) => ({ value: p, label: p }))}
+                  />
+                </Field>
+                <Field label="API Key" help={apiKeyConsole ? (
+                  <button data-id="provider-detail-get-apikey" type="button"
+                    onClick={() => window.open(apiKeyConsole.href, '_blank', 'noopener')}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-400 transition-colors hover:text-blue-300">
+                    {apiKeyConsole.label}
+                    <ExternalLink size={11} />
+                  </button>
+                ) : undefined}>
+                  <div className="relative">
+                    {/* type="text" so Chrome's password manager never prompts to save */}
+                    <input
+                      data-id="provider-detail-apikey-input" type="text" name="cicy-provider-api-key" value={draft.apiKey || ''} onChange={(e) => patchDraft({ apiKey: e.target.value })}
+                      className={cn(INPUT, 'pr-9 font-mono')} placeholder={proto(draft) === 'voice' ? 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' : 'sk-…'} autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                      data-1p-ignore data-lpignore="true"
+                      style={showApiKey ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)}
+                    />
+                    <button data-id="provider-detail-apikey-toggle" type="button" onClick={() => setShowApiKey((s) => !s)} className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300" title={showApiKey ? t('hide') : t('show')}>
+                      {showApiKey ? <EyeOff size={13} /> : <Eye size={13} />}
+                    </button>
+                  </div>
+                </Field>
+              </div>
+            </section>
+
             {/* Models */}
             <section className="space-y-3.5">
               <SectionHeader>{t('sectionModels')}</SectionHeader>
@@ -785,50 +829,6 @@ export default function ProviderDashboard({ leftMount, rightMount, tab: controll
                   );
                 })()}
               </Field>
-            </section>
-
-            {/* Access */}
-            <section className="space-y-3.5">
-              <SectionHeader>{t('sectionAccess')}</SectionHeader>
-              <Field label="API Base URL" help={t('fieldApiBaseHelp')}>
-                <div className="relative">
-                  <Link2 size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
-                  <input data-id="provider-detail-url-input" value={draft.url || ''} onChange={(e) => patchDraft({ url: e.target.value })} className={cn(INPUT, 'pl-8 font-mono')} placeholder="https://api.2000.run/v1" />
-                </div>
-              </Field>
-              <div className="grid gap-3.5 sm:grid-cols-[150px_1fr]">
-                <Field label={t('fieldProtocol')}>
-                  <Select
-                    dataId="provider-protocol-select"
-                    className="w-full"
-                    disabled={!isNew}
-                    value={proto(draft) || 'openai'}
-                    onChange={(v) => patchDraft({ protocol: v })}
-                    options={PROTOCOLS.map((p) => ({ value: p, label: p }))}
-                  />
-                </Field>
-                <Field label="API Key" help={apiKeyConsole ? (
-                  <button data-id="provider-detail-get-apikey" type="button"
-                    onClick={() => window.open(apiKeyConsole.href, '_blank', 'noopener')}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-400 transition-colors hover:text-blue-300">
-                    {apiKeyConsole.label}
-                    <ExternalLink size={11} />
-                  </button>
-                ) : undefined}>
-                  <div className="relative">
-                    {/* type="text" so Chrome's password manager never prompts to save */}
-                    <input
-                      data-id="provider-detail-apikey-input" type="text" name="cicy-provider-api-key" value={draft.apiKey || ''} onChange={(e) => patchDraft({ apiKey: e.target.value })}
-                      className={cn(INPUT, 'pr-9 font-mono')} placeholder={proto(draft) === 'voice' ? 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' : 'sk-…'} autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
-                      data-1p-ignore data-lpignore="true"
-                      style={showApiKey ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)}
-                    />
-                    <button data-id="provider-detail-apikey-toggle" type="button" onClick={() => setShowApiKey((s) => !s)} className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300" title={showApiKey ? t('hide') : t('show')}>
-                      {showApiKey ? <EyeOff size={13} /> : <Eye size={13} />}
-                    </button>
-                  </div>
-                </Field>
-              </div>
             </section>
 
             {/* test result */}
