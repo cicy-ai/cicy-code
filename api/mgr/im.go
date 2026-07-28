@@ -744,6 +744,23 @@ func imBindNamedChatToPane(accID int64, chatID, chatName, bindingType, paneID st
 	return err
 }
 
+func imExistingNamedChatBinding(accID int64, paneID, bindingType string) (chatID, chatName string, ok bool) {
+	paneID = normPaneID(strings.TrimSpace(paneID))
+	if store == nil || accID == 0 || paneID == "" {
+		return "", "", false
+	}
+	err := store.QueryRow(`SELECT chat_id, COALESCE(chat_name,'')
+		FROM im_chat_bindings
+		WHERE account_id=? AND pane_id=? AND binding_type=?
+		ORDER BY updated_at DESC LIMIT 1`, accID, paneID, strings.TrimSpace(bindingType)).Scan(&chatID, &chatName)
+	chatID = strings.TrimSpace(chatID)
+	return chatID, strings.TrimSpace(chatName), err == nil && chatID != ""
+}
+
+// Serialize group creation so concurrent clicks cannot both pass the local
+// existence check before either request has persisted its binding.
+var imFeishuGroupCreateMu sync.Mutex
+
 // imChatBindingsForPane 反查:哪些 (账号, 会话) 绑到了这个 agent。
 // /api/im/send(agent 主动推送)用它把消息送到按会话绑定的目标。
 func imChatBindingsForPane(paneID string) []imChatBinding {
@@ -1502,6 +1519,7 @@ func handleIMAccountByID(w http.ResponseWriter, r *http.Request, id int64, actio
 		}
 		var chatID string
 		var createErr error
+		createdGroup := false
 		switch mode {
 		case "direct":
 			chatID, createErr = feishuOpenDirectChat(acc, chatName)
@@ -1515,7 +1533,20 @@ func handleIMAccountByID(w http.ResponseWriter, r *http.Request, id int64, actio
 			// call below to succeed. im:message.group_msg and im:resource affect
 			// subsequent receive/media behavior and remain visible in the setup
 			// health check, but must not prevent the group itself from binding.
-			chatID, createErr = feishuCreateChat(acc, chatName)
+			imFeishuGroupCreateMu.Lock()
+			defer imFeishuGroupCreateMu.Unlock()
+			if existingID, existingName, ok := imExistingNamedChatBinding(acc.ID, paneID, "group"); ok {
+				if existingName != "" {
+					chatName = existingName
+				}
+				J(w, M{
+					"success": true, "mode": mode, "reused": true,
+					"chat_id": existingID, "chat_name": chatName, "pane_id": shortPaneID(paneID),
+				})
+				return
+			}
+			chatID, createErr = feishuCreateChat(acc, chatName, paneID)
+			createdGroup = createErr == nil && strings.TrimSpace(chatID) != ""
 		default:
 			httpErr(w, 400, "mode must be direct or group")
 			return
@@ -1528,10 +1559,16 @@ func handleIMAccountByID(w http.ResponseWriter, r *http.Request, id int64, actio
 			chatName = acc.Name + " Bot 私聊"
 		}
 		if err := imBindNamedChatToPane(acc.ID, chatID, chatName, mode, paneID); err != nil {
+			if createdGroup {
+				if rollbackErr := feishuDeleteChat(acc, chatID); rollbackErr != nil {
+					httpErr(w, 500, fmt.Sprintf("飞书群已创建但绑定保存失败：%v；自动解散群也失败：%v", err, rollbackErr))
+					return
+				}
+			}
 			httpErr(w, 500, err.Error())
 			return
 		}
-		J(w, M{"success": true, "mode": mode, "chat_id": chatID, "chat_name": chatName, "pane_id": shortPaneID(paneID)})
+		J(w, M{"success": true, "mode": mode, "reused": false, "chat_id": chatID, "chat_name": chatName, "pane_id": shortPaneID(paneID)})
 	case "bind":
 		if r.Method != http.MethodPost {
 			httpErr(w, 405, "method not allowed")

@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -487,7 +488,7 @@ func (t *feishuTransport) tenantToken() (string, error) {
 // feishuCreateChat creates one private group per Agent. A bot has only one P2P
 // chat with a given user, so P2P cannot independently route multiple Agents.
 // Separate groups let one Feishu app/bot serve any number of Agents.
-func feishuCreateChat(acc *imAccount, name string) (string, error) {
+func feishuCreateChat(acc *imAccount, name, paneID string) (string, error) {
 	receiveID := strings.TrimSpace(acc.configString("last_feishu_open_id"))
 	receiveIDType := "open_id"
 	if receiveID == "" {
@@ -505,12 +506,18 @@ func feishuCreateChat(acc *imAccount, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	bindingKey := fmt.Sprintf("cicy-code:%s:%s", ft.appID, shortPaneID(paneID))
+	requestUUID := fmt.Sprintf("%x", sha256.Sum256([]byte(bindingKey)))
 	body, _ := json.Marshal(M{
 		"name":         strings.TrimSpace(name),
-		"description":  "由 cicy-code 为 Agent 自动创建",
+		"description":  "由 cicy-code 为 Agent 自动创建 · " + bindingKey,
 		"chat_mode":    "group",
 		"chat_type":    "private",
 		"user_id_list": []string{receiveID},
+		// Feishu de-duplicates successful create requests with the same uuid for
+		// ten hours. Together with the local binding check this prevents double
+		// clicks/retries from leaving multiple orphan groups.
+		"uuid": requestUUID,
 	})
 	req, _ := http.NewRequest(http.MethodPost, feishuBaseURL+"/open-apis/im/v1/chats?user_id_type="+receiveIDType, strings.NewReader(string(body)))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -541,6 +548,43 @@ func feishuCreateChat(acc *imAccount, name string) (string, error) {
 	chatID := strings.TrimSpace(out.Data.ChatID)
 	_, _ = ft.Send(botPeer{ChatID: chatID}, fmt.Sprintf("✅ 已绑定 Agent：%s\n之后在本群发送消息即可交给该 Agent 处理。", strings.TrimSpace(name)))
 	return chatID, nil
+}
+
+// feishuDeleteChat is a best-effort rollback for the narrow window where
+// Feishu created a group but persisting its local Agent binding failed.
+func feishuDeleteChat(acc *imAccount, chatID string) error {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return nil
+	}
+	tr, err := newFeishuTransport(acc)
+	if err != nil {
+		return err
+	}
+	ft := tr.(*feishuTransport)
+	token, err := ft.tenantToken()
+	if err != nil {
+		return err
+	}
+	req, _ := http.NewRequest(http.MethodDelete, feishuBaseURL+"/open-apis/im/v1/chats/"+chatID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var out struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if json.Unmarshal(raw, &out) != nil {
+		return fmt.Errorf("解散飞书群返回异常")
+	}
+	if out.Code != 0 {
+		return fmt.Errorf("解散飞书群失败 code=%d: %s", out.Code, strings.TrimSpace(out.Msg))
+	}
+	return nil
 }
 
 // feishuOpenDirectChat opens or reuses the app bot's single P2P conversation
