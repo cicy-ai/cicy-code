@@ -2506,6 +2506,7 @@ function AgentDrawer({ agents, paneId, statuses = {}, onSelectAgent, onAgentsCha
         project_template: values.project_template,
         role_template: values.role_template,
         lang: values.lang,
+        api_style: values.api_style,
       });
       const id = data?.pane_id || data?.id;
       if (id) {

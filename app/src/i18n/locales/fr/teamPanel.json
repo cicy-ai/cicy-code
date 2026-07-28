@@ -55,5 +55,20 @@
   "updateRunning": "Mise à jour du CLI… (sessions en cours intactes)",
   "updateDone": "Mise à jour terminée. Redémarrez pour appliquer.",
   "updateRetrySwitchSource": "Réessayer avec un autre registre",
-  "updateRestartNow": "Redémarrer l'agent"
+  "updateRestartNow": "Redémarrer l'agent",
+  "feishuBindTitle": "Conversations Feishu",
+  "feishuCurrentChats": "Conversations Feishu liées à cet Agent",
+  "feishuNoChatBound": "Aucune conversation Feishu n’est liée. Sélectionnez une application pour créer et lier un groupe dédié.",
+  "feishuChatNamePreview": "Sera créé : {{name}} · {{id}}",
+  "feishuBindDirectChat": "Lier le chat direct du bot",
+  "feishuDirectChatBadge": "Chat direct du bot",
+  "feishuGroupChatBadge": "Groupe Agent",
+  "feishuAppUnbound": "Non lié",
+  "feishuDirectBoundTo": "Chat bot : {{agent}}",
+  "feishuGroupsBoundCount": "Groupes Agent : {{count}}",
+  "feishuBotAuthLink": "Autorisations du bot",
+  "feishuChatAuthLink": "Autorisations du chat",
+  "feishuCreateAndBindChat": "Créer un groupe Agent",
+  "feishuSendMessageFirst": "Envoyez d’abord un message à ce Bot dans Feishu",
+  "feishuWaitingForMessage": "En attente d’un message du Bot"
 }

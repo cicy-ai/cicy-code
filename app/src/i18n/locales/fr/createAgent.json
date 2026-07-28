@@ -48,5 +48,10 @@
     "handoff": "Messages d'équipe",
     "a2a": "Tâches externes"
   },
-  "languageLabel": "Langue"
+  "languageLabel": "Langue",
+  "apiStyleLabel": "Style d’API",
+  "apiStyleOpenAI": "Style OpenAI",
+  "apiStyleClaude": "Style Claude",
+  "apiStyleLocked": "· définitif après création",
+  "apiStyleHint": "Ce choix est définitif après la création. Le sélecteur de modèle n’affichera que ce style."
 }

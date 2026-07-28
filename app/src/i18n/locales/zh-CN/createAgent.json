@@ -48,5 +48,10 @@
     "handoff": "团队消息",
     "a2a": "对外任务"
   },
-  "languageLabel": "语言"
+  "languageLabel": "语言",
+  "apiStyleLabel": "API 风格",
+  "apiStyleOpenAI": "OpenAI 风格",
+  "apiStyleClaude": "Claude 风格",
+  "apiStyleLocked": "· 创建后锁定",
+  "apiStyleHint": "创建后不可更改；模型选择器只显示该风格的 Provider 和模型。"
 }

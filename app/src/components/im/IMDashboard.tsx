@@ -271,6 +271,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const [showSecret, setShowSecret] = useState(false);
   const [secretLoading, setSecretLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [syncingFeishuName, setSyncingFeishuName] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testRes, setTestRes] = useState<TestResult | null>(null);
   const [wxLogin, setWxLogin] = useState<WxLoginState | null>(null);
@@ -744,6 +745,21 @@ export default function IMDashboard({ leftMount, rightMount }: {
     }
   };
 
+  const syncFeishuName = async () => {
+    if (!selected || selected.platform !== 'feishu') return;
+    setSyncingFeishuName(true);
+    try {
+      const res = await apiService.syncFeishuAccountName(selected.id);
+      const name = String(res?.data?.name || '');
+      toast(t('feishuNameSynced', { name }));
+      await load(selected.id);
+    } catch (e) {
+      toast(t('feishuNameSyncFailed', { err: errText(e) }));
+    } finally {
+      setSyncingFeishuName(false);
+    }
+  };
+
   const remove = async (acc: IMAccount) => {
     const ok = await confirm({
       title: t('confirmDeleteTitle'),
@@ -1154,9 +1170,24 @@ export default function IMDashboard({ leftMount, rightMount }: {
               {isWeChat ? t('testSendWeChat') : t('testSend')}
             </Btn>
             {isFeishu && (
-              <Btn data-id="im-detail-fs-guide" variant="secondary" size="md" onClick={() => openFeishuGuide(selected.id)}>
-                {t('feishuGuide', '配置向导')}
-              </Btn>
+              <>
+                {!selected.config?.app_name_synced && (
+                  <Btn
+                    data-id="im-detail-fs-sync-name"
+                    variant="secondary"
+                    size="md"
+                    icon={<RefreshCw size={13} />}
+                    busy={syncingFeishuName}
+                    disabled={syncingFeishuName}
+                    onClick={() => void syncFeishuName()}
+                  >
+                    {t('feishuSyncName', '同步名称')}
+                  </Btn>
+                )}
+                <Btn data-id="im-detail-fs-guide" variant="secondary" size="md" onClick={() => openFeishuGuide(selected.id)}>
+                  {t('feishuGuide', '配置向导')}
+                </Btn>
+              </>
             )}
             <div className="flex-1" />
           </div>
@@ -1306,7 +1337,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
                   <ExternalLink size={11} /> {t('openFeishuConsole', '打开飞书开放平台')}
                 </a>
               </div>
-              <div className="text-zinc-500">{t('feishuSteps', '创建企业自建应用 → 添加机器人能力 → 开通 im:message 权限 → 事件订阅选「长连接」并订阅 im.message.receive_v1 → 发布。绑定后在飞书里对机器人发 /help,每个会话可用 /bind 绑不同的 agent。')}</div>
+              <div className="text-zinc-500">{t('feishuSteps', '创建企业自建应用 → 添加机器人能力 → 一次开通 im:message、im:chat:create、im:message.group_msg 和 im:resource → 事件订阅选「长连接」并订阅 im.message.receive_v1 → 发布。一个 App 可以为多个 Agent 自动创建独立群聊并收发媒体。')}</div>
             </div>
             {addBindField}
             <div className="flex justify-end gap-2 pt-1">

@@ -26,6 +26,7 @@ export interface CreateAgentValues {
   /** UI language for the agent's role persona + greeting (e.g. "en", "zh-CN").
    *  Defaults to the current browser/UI language. */
   lang: string;
+  api_style: 'openai' | 'anthropic';
 }
 
 interface Props {
@@ -54,6 +55,7 @@ const DEFAULT_VALUES: CreateAgentValues = {
   project_template: 'default', // 开箱即用:新 agent 默认归属 default 项目(共享记忆)
   role_template: 'assistant', // role library 默认 = assistant(通用基座/默认人设)
   lang: '', // set to the current UI language when the dialog opens
+  api_style: 'openai',
 };
 
 export default function CreateAgentDialog({
@@ -127,6 +129,7 @@ export default function CreateAgentDialog({
 
   const canSubmit = values.title.trim().length > 0 && values.agent_type.trim().length > 0 && !submitting;
   const selectedAgent = mergedAgentTypeOptions.find((option) => option.value === values.agent_type) || null;
+  const supportsAPIStyle = values.agent_type === 'cicy' || values.agent_type.startsWith('custom:');
 
   const set = (patch: Partial<CreateAgentValues>) => {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -242,6 +245,31 @@ export default function CreateAgentDialog({
                 ]}
               />
             </div>
+            {supportsAPIStyle && (
+              <div data-id="create-agent-dialog-api-style-field" title={t('apiStyleHint')}>
+                <label data-id="create-agent-dialog-api-style-label" className="mb-1.5 flex items-center gap-1.5 text-[13px] font-medium text-zinc-300">
+                  {t('apiStyleLabel')}
+                  <span data-id="create-agent-dialog-api-style-locked" className="text-[10px] font-normal text-amber-300/65">{t('apiStyleLocked')}</span>
+                </label>
+                <div data-id="create-agent-dialog-api-style-options" className="grid h-[34px] grid-cols-2 rounded-lg border border-white/[0.08] bg-white/[0.03] p-0.5">
+                  {(['openai', 'anthropic'] as const).map((style) => (
+                    <button
+                      data-id={`create-agent-dialog-api-style-${style}`}
+                      key={style}
+                      type="button"
+                      onClick={() => set({ api_style: style })}
+                      className={`rounded-md px-2 text-[12px] transition-colors ${
+                        values.api_style === style
+                          ? 'bg-blue-500/20 font-medium text-blue-200 shadow-sm'
+                          : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
+                      }`}
+                    >
+                      {t(style === 'openai' ? 'apiStyleOpenAI' : 'apiStyleClaude')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <p className="col-span-2 text-[11px] text-zinc-600">{t('templateHint')}</p>
           </div>
 

@@ -92,6 +92,7 @@ type paneCreateOpts struct {
 	projectTemplate  string
 	roleTemplate     string
 	lang             string // UI language at creation (selects EN/ZH role persona + greeting)
+	apiStyle         string // immutable provider protocol for cicy agents
 	// skipPrimaryBind suppresses the default "bind under w-1001" when no master is
 	// named — used by official-roster members that are created standalone (in the
 	// DB, but not on the master's team until the user/HR adds them).
@@ -557,6 +558,7 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 		ProjectTemplate  string  `json:"project_template"`
 		RoleTemplate     string  `json:"role_template"`
 		Lang             string  `json:"lang"`
+		APIStyle         string  `json:"api_style"`
 	}
 	req.AllowAllActions = true
 	req.ReplyInChinese = true
@@ -591,7 +593,7 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	if req.InheritGuidance != nil {
 		inheritGuidance = *req.InheritGuidance
 	}
-	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, useCustomGateway, useProxy, proxySettings, req.WinName, strings.TrimSpace(req.MasterPaneID), strings.TrimSpace(req.MasterAgentType), inheritGuidance, strings.TrimSpace(req.ProjectTemplate), strings.TrimSpace(req.RoleTemplate), strings.TrimSpace(req.Lang), token, nil)
+	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, useCustomGateway, useProxy, proxySettings, req.WinName, strings.TrimSpace(req.MasterPaneID), strings.TrimSpace(req.MasterAgentType), inheritGuidance, strings.TrimSpace(req.ProjectTemplate), strings.TrimSpace(req.RoleTemplate), strings.TrimSpace(req.Lang), strings.TrimSpace(req.APIStyle), token, nil)
 	if err != nil {
 		J(w, M{"success": false, "error": err.Error()})
 		return
@@ -614,7 +616,7 @@ func resolveCustomAgentSelection(agentType, roleTemplate string) (string, string
 	return agentType, roleTemplate
 }
 
-func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, projectTemplate string, roleTemplate string, lang string, token string, runtimeAI *runtimeAIOverride) (M, error) {
+func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, projectTemplate string, roleTemplate string, lang string, apiStyle string, token string, runtimeAI *runtimeAIOverride) (M, error) {
 	agentType, roleTemplate = resolveCustomAgentSelection(agentType, roleTemplate)
 	agentType = normalizeAgentType(agentType)
 	if agentType == "" {
@@ -628,6 +630,17 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 	if strings.TrimSpace(defaultModel) == "" {
 		if ca, ok := customAgentFor(roleTemplate); ok && strings.TrimSpace(ca.Model) != "" {
 			defaultModel = strings.TrimSpace(ca.Model)
+		}
+	}
+	if agentType == "cicy" {
+		apiStyle = normalizeCicyAPIStyle(apiStyle)
+		if runtimeAI == nil {
+			if provider, ok := providerForProtocol(apiStyle); ok {
+				runtimeAI = &runtimeAIOverride{ProviderName: provider.Key}
+				if !providerServesModel(provider, defaultModel) {
+					defaultModel = providerDefaultModelForAgentType(provider, agentType)
+				}
+			}
 		}
 	}
 	// Get next worker index. CRITICAL: skip any index whose pane id already
@@ -683,6 +696,7 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 		projectTemplate:  projectTemplate,
 		roleTemplate:     roleTemplate,
 		lang:             lang,
+		apiStyle:         apiStyle,
 		runtimeAI:        runtimeAI,
 	})
 }
@@ -809,6 +823,51 @@ func mergeLangIntoConfigJSON(configJSON, lang string) string {
 	return configJSON
 }
 
+func normalizeCicyAPIStyle(style string) string {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "anthropic", "claude":
+		return "anthropic"
+	default:
+		return "openai"
+	}
+}
+
+func mergeAPIStyleIntoConfigJSON(configJSON, style string) string {
+	m := map[string]interface{}{}
+	_ = json.Unmarshal([]byte(configJSON), &m)
+	if m == nil {
+		m = map[string]interface{}{}
+	}
+	m["api_style"] = normalizeCicyAPIStyle(style)
+	b, err := json.Marshal(m)
+	if err != nil {
+		return configJSON
+	}
+	return string(b)
+}
+
+func cicyAPIStyleFromConfig(configJSON string) string {
+	var m map[string]interface{}
+	if json.Unmarshal([]byte(configJSON), &m) == nil {
+		if style, ok := m["api_style"].(string); ok && strings.TrimSpace(style) != "" {
+			return normalizeCicyAPIStyle(style)
+		}
+		if runtimeAI, err := runtimeAIOverrideFromAny(m["runtime_ai"]); err == nil && runtimeAI != nil {
+			if provider, ok := loadProviderByKey(runtimeAI.ProviderName); ok {
+				if protocol := normalizeAIGatewayProvider(provider.Protocol); protocol == "openai" || protocol == "anthropic" {
+					return protocol
+				}
+			}
+		}
+	}
+	if provider, ok := loadProviderForAgentType("cicy"); ok {
+		if protocol := normalizeAIGatewayProvider(provider.Protocol); protocol == "openai" || protocol == "anthropic" {
+			return protocol
+		}
+	}
+	return "openai"
+}
+
 // mergeThinkingIntoConfigJSON sets {"thinking": <mode>} on a pane's config JSON
 // blob — the per-pane switch read by paneThinkingMode (composer 🧠 toggle).
 func mergeThinkingIntoConfigJSON(configJSON, mode string) string {
@@ -827,6 +886,17 @@ func mergeThinkingIntoConfigJSON(configJSON, mode string) string {
 }
 
 func createManagedPane(opts paneCreateOpts) (M, error) {
+	if normalizeAgentType(opts.agentType) == "cicy" {
+		opts.apiStyle = normalizeCicyAPIStyle(opts.apiStyle)
+		if opts.runtimeAI == nil {
+			if provider, ok := providerForProtocol(opts.apiStyle); ok {
+				opts.runtimeAI = &runtimeAIOverride{ProviderName: provider.Key}
+				if !providerServesModel(provider, opts.defaultModel) {
+					opts.defaultModel = providerDefaultModelForAgentType(provider, opts.agentType)
+				}
+			}
+		}
+	}
 	workspace := strings.TrimSpace(opts.workspace)
 	if err := ensureRuntimeDir(workspace, 0755); err != nil {
 		return M{"success": false}, err
@@ -846,6 +916,9 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 	// (agentOpeningGreeting) can pick the matching meta.yaml variant later.
 	if l := strings.TrimSpace(opts.lang); l != "" {
 		proxyConfigJSON = mergeLangIntoConfigJSON(proxyConfigJSON, l)
+	}
+	if normalizeAgentType(opts.agentType) == "cicy" {
+		proxyConfigJSON = mergeAPIStyleIntoConfigJSON(proxyConfigJSON, opts.apiStyle)
 	}
 	// Seed the per-pane runtime_ai override (fork carries the source's so a
 	// gateway fork routes through the SAME provider — otherwise it falls back to
@@ -990,6 +1063,10 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	runtimeAI := extractRuntimeAIFromConfigJSON(config.String)
+	apiStyle := ""
+	if normalizeAgentType(agentType.String) == "cicy" {
+		apiStyle = cicyAPIStyleFromConfig(config.String)
+	}
 	proxySettings := extractProxySettingsFromConfigJSON(config.String)
 	runtimeAIDefault := runtimeAIDefaultSummaryForAgentType(agentType.String)
 	resp := M{
@@ -1010,8 +1087,9 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		"machine_url":                 machineURL.String,
 		"runtime_kind":                runtimeKind.String,
 		"runtime_ai":                  runtimeAIOverrideToMap(runtimeAI),
+		"api_style":                   apiStyle,
 		"proxy":                       proxySettingsToMap(proxySettings),
-		"runtime_ai_provider_options": runtimeAIProviderOptionsForAgentType(agentType.String),
+		"runtime_ai_provider_options": runtimeAIProviderOptionsForAgent(agentType.String, apiStyle),
 		"runtime_ai_default":          runtimeAIDefault,
 	}
 	if machineID.Valid && machineID.Int64 > 0 {
@@ -1111,6 +1189,11 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 			httpErr(w, 400, err.Error())
 			return
 		}
+		if loadPaneAgentType(paneID) == "cicy" {
+			var existingConfig string
+			_ = store.QueryRow("SELECT COALESCE(config, '{}') FROM agent_config WHERE pane_id=?", paneID).Scan(&existingConfig)
+			normalizedConfig = mergeAPIStyleIntoConfigJSON(normalizedConfig, cicyAPIStyleFromConfig(existingConfig))
+		}
 		filtered["config"] = normalizedConfig
 	}
 	var pendingRuntimeAI *runtimeAIOverride
@@ -1189,6 +1272,11 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 			if runtimeAIInReq {
 				expected := runtimeAIExpectedProtocolForAgentType(agentType)
 				actual := normalizeAIGatewayProvider(provider.Protocol)
+				if normalizeAgentType(agentType) == "cicy" {
+					var configJSON string
+					_ = store.QueryRow("SELECT COALESCE(config, '{}') FROM agent_config WHERE pane_id=?", paneID).Scan(&configJSON)
+					expected = cicyAPIStyleFromConfig(configJSON)
+				}
 				if expected != "" && actual != "" && actual != expected {
 					httpErr(w, 400, ErrRuntimeAIProviderMismatch.Error())
 					return
@@ -6030,14 +6118,15 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		srcReplyChinese.Bool,
 		srcUseCustomGateway.Bool,
 		srcProxyEnable.Bool,
-		nil,                       // proxy settings
-		nil,                       // win name
-		masterID,                  // master pane id
-		srcAgentType.String,       // master agent type (use source agent type as hint)
-		false,                     // inherit_guidance
-		srcProjectTemplate.String, // inherit the source agent's project template (composed in if the file still exists)
-		srcRoleTemplate.String,    // inherit the source agent's role template
+		nil,                                   // proxy settings
+		nil,                                   // win name
+		masterID,                              // master pane id
+		srcAgentType.String,                   // master agent type (use source agent type as hint)
+		false,                                 // inherit_guidance
+		srcProjectTemplate.String,             // inherit the source agent's project template (composed in if the file still exists)
+		srcRoleTemplate.String,                // inherit the source agent's role template
 		agentLangFromConfig(srcConfig.String), // inherit the source agent's creation language
+		cicyAPIStyleFromConfig(srcConfig.String),
 		token,
 		forkRuntimeAI, // gateway fork: same runtime_ai provider as source
 	)

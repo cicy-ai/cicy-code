@@ -55,5 +55,20 @@
   "updateRunning": "正在更新 CLI…(不打断正在运行的会话)",
   "updateDone": "更新完成。重启后新版本生效。",
   "updateRetrySwitchSource": "换源重试",
-  "updateRestartNow": "重启 Agent 生效"
+  "updateRestartNow": "重启 Agent 生效",
+  "feishuBindTitle": "飞书会话",
+  "feishuCurrentChats": "当前 Agent 已绑定的飞书会话",
+  "feishuNoChatBound": "当前 Agent 还没有绑定飞书会话。选择一个飞书应用，自动创建独立群聊并绑定。",
+  "feishuChatNamePreview": "将创建：{{name}} · {{id}}",
+  "feishuBindDirectChat": "绑定 Bot 私聊",
+  "feishuDirectChatBadge": "Bot 私聊",
+  "feishuGroupChatBadge": "Agent 群聊",
+  "feishuAppUnbound": "未绑定",
+  "feishuDirectBoundTo": "Bot 私聊：{{agent}}",
+  "feishuGroupsBoundCount": "Agent 群聊：{{count}} 个",
+  "feishuBotAuthLink": "Bot 权限",
+  "feishuChatAuthLink": "会话权限",
+  "feishuCreateAndBindChat": "新建 Agent 群聊",
+  "feishuSendMessageFirst": "请先在飞书里给这个 Bot 发任意消息",
+  "feishuWaitingForMessage": "等待 Bot 收到消息"
 }

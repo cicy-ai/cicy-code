@@ -48,5 +48,10 @@
     "handoff": "Team messages",
     "a2a": "External tasks"
   },
-  "languageLabel": "Language"
+  "languageLabel": "Language",
+  "apiStyleLabel": "API style",
+  "apiStyleOpenAI": "OpenAI style",
+  "apiStyleClaude": "Claude style",
+  "apiStyleLocked": "· locked after creation",
+  "apiStyleHint": "This cannot be changed after creation. The model picker will only show providers and models in this style."
 }

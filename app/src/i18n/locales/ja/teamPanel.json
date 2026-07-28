@@ -55,5 +55,20 @@
   "updateRunning": "CLI を更新中…(実行中のセッションは中断されません)",
   "updateDone": "更新完了。再起動で反映されます。",
   "updateRetrySwitchSource": "ソースを切替えて再試行",
-  "updateRestartNow": "エージェントを再起動"
+  "updateRestartNow": "エージェントを再起動",
+  "feishuBindTitle": "Feishuチャット",
+  "feishuCurrentChats": "このAgentにバインド済みのFeishuチャット",
+  "feishuNoChatBound": "このAgentにはFeishuチャットがありません。アプリを選択して専用グループを作成・バインドします。",
+  "feishuChatNamePreview": "作成予定：{{name}} · {{id}}",
+  "feishuBindDirectChat": "Botダイレクトチャットをバインド",
+  "feishuDirectChatBadge": "Botダイレクト",
+  "feishuGroupChatBadge": "Agentグループ",
+  "feishuAppUnbound": "未バインド",
+  "feishuDirectBoundTo": "Botダイレクト：{{agent}}",
+  "feishuGroupsBoundCount": "Agentグループ：{{count}}件",
+  "feishuBotAuthLink": "Bot権限",
+  "feishuChatAuthLink": "チャット権限",
+  "feishuCreateAndBindChat": "Agentグループを作成",
+  "feishuSendMessageFirst": "先にFeishuでこのBotへメッセージを送信してください",
+  "feishuWaitingForMessage": "Botのメッセージを待機中"
 }

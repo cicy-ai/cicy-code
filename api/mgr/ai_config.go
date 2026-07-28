@@ -541,6 +541,48 @@ func runtimeAIProviderOptionsForAgentType(agentType string) []runtimeAIProviderO
 	return options
 }
 
+func runtimeAIProviderOptionsForAgent(agentType, apiStyle string) []runtimeAIProviderOption {
+	options := runtimeAIProviderOptionsForAgentType(agentType)
+	if normalizeAgentType(agentType) != "cicy" {
+		return options
+	}
+	apiStyle = normalizeCicyAPIStyle(apiStyle)
+	filtered := make([]runtimeAIProviderOption, 0, len(options))
+	for _, option := range options {
+		if normalizeAIGatewayProvider(option.Protocol) == apiStyle {
+			filtered = append(filtered, option)
+		}
+	}
+	return filtered
+}
+
+func providerForProtocol(protocol string) (*providerConfig, bool) {
+	protocol = normalizeAIGatewayProvider(protocol)
+	for _, provider := range loadAllProviderConfigs() {
+		if normalizeAIGatewayProvider(provider.Protocol) == protocol && strings.TrimSpace(provider.Key) != "" {
+			p := provider
+			return &p, true
+		}
+	}
+	return nil, false
+}
+
+func providerServesModel(provider *providerConfig, model string) bool {
+	model = strings.TrimSpace(model)
+	if provider == nil || model == "" {
+		return false
+	}
+	if len(provider.Models) == 0 {
+		return true
+	}
+	for _, candidate := range provider.Models {
+		if strings.TrimSpace(candidate) == model {
+			return true
+		}
+	}
+	return false
+}
+
 // listProviderKeys returns all provider keys from the new providers.items array
 func listProviderKeys() []string {
 	providers := loadProvidersConfig()

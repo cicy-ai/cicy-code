@@ -23,7 +23,25 @@ interface IMAccountRow {
   enabled: boolean;
   bound_pane_id: string;
   bound_pane_title: string;
-  config?: { app_id?: string };
+  config?: { app_id?: string; last_feishu_open_id?: string };
+}
+
+interface FeishuChatBinding {
+  account_id: number;
+  account_name: string;
+  chat_id: string;
+  chat_name: string;
+  binding_type: 'direct' | 'group';
+  pane_id: string;
+}
+
+interface FeishuAccountBinding {
+  account_id: number;
+  chat_id: string;
+  chat_name: string;
+  binding_type: 'direct' | 'group';
+  pane_id: string;
+  pane_title: string;
 }
 
 const t = (key: string, defaultValue: string, opts: Record<string, unknown> = {}) =>
@@ -42,7 +60,7 @@ const PLATFORM_COPY = {
     iconCls: 'text-emerald-400',
   },
   feishu: {
-    title: () => t('feishuBindTitle', '绑定飞书'),
+    title: () => t('feishuBindTitle', '飞书会话'),
     loading: () => t('feishuBindLoading', '加载飞书应用…'),
     empty: () => t('feishuBindEmpty', '还没有添加飞书应用。先去 IM 设置填 App ID/App Secret(有配置向导),回来就能绑定。'),
     goto: () => t('feishuBindGotoIM', '去添加飞书应用'),
@@ -61,21 +79,36 @@ export default function WechatBindModal({ paneId, title, onClose, platform = 'we
 }) {
   const C = PLATFORM_COPY[platform];
   const [accounts, setAccounts] = useState<IMAccountRow[] | null>(null); // null = loading
-  const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [chatBindings, setChatBindings] = useState<FeishuChatBinding[] | null>(platform === 'feishu' ? null : []);
+  const [accountBindings, setAccountBindings] = useState<FeishuAccountBinding[]>([]);
 
   const load = useCallback(async () => {
     try {
-      const res = await apiService.getIMAccounts();
+      const [res, bindingsRes] = await Promise.all([
+        apiService.getIMAccounts(),
+        platform === 'feishu' ? apiService.getFeishuChatBindings(paneId) : Promise.resolve(null),
+      ]);
       const all = (res?.data?.accounts || []) as IMAccountRow[];
       setAccounts(all.filter((a) => a.platform === platform));
-      setError('');
+      if (platform === 'feishu') {
+        setChatBindings((bindingsRes?.data?.bindings || []) as FeishuChatBinding[]);
+        setAccountBindings((bindingsRes?.data?.account_bindings || []) as FeishuAccountBinding[]);
+      }
+      setLoadError('');
     } catch (e: any) {
       setAccounts([]);
-      setError(String(e?.message || e));
+      setLoadError(String(e?.message || e));
     }
-  }, [platform]);
+  }, [paneId, platform]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (platform !== 'feishu' || (chatBindings || []).length > 0) return;
+    const timer = window.setInterval(() => void load(), 5000);
+    return () => window.clearInterval(timer);
+  }, [chatBindings, load, platform]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -85,12 +118,13 @@ export default function WechatBindModal({ paneId, title, onClose, platform = 'we
 
   const act = async (id: number, fn: () => Promise<unknown>) => {
     setBusyId(id);
-    setError('');
+    setActionError('');
     try {
       await fn();
+      setActionError('');
       await load();
     } catch (e: any) {
-      setError(String(e?.response?.data?.error || e?.message || e));
+      setActionError(String(e?.response?.data?.detail || e?.response?.data?.error || e?.message || e));
     } finally {
       setBusyId(null);
     }
@@ -102,6 +136,7 @@ export default function WechatBindModal({ paneId, title, onClose, platform = 'we
   };
 
   const boundHere = (accounts || []).find((a) => a.bound_pane_id === paneId);
+  const error = actionError || loadError;
 
   return (
     <div
@@ -144,6 +179,149 @@ export default function WechatBindModal({ paneId, title, onClose, platform = 'we
                 <ExternalLink className="h-3.5 w-3.5" />
                 {C.goto()}
               </button>
+            </div>
+          ) : platform === 'feishu' ? (
+            <div data-id="team-panel-feishu-chat-bindings" className="space-y-2">
+              {(chatBindings || []).length > 0 ? (
+                <>
+                  <div className="px-2 pb-1 text-[11px] text-zinc-500">
+                    {t('feishuCurrentChats', '当前 Agent 已绑定的飞书会话')}
+                  </div>
+                  {(chatBindings || []).map((binding) => (
+                    <div
+                      key={`${binding.account_id}:${binding.chat_id}`}
+                      data-id={`team-panel-feishu-chat-${binding.chat_id}`}
+                      className="flex items-center gap-3 rounded-xl border border-emerald-500/15 bg-emerald-500/[0.04] px-3 py-2.5"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[13px] text-zinc-200">
+                          <span
+                            data-id={`team-panel-feishu-chat-type-${binding.chat_id}`}
+                            className={`mr-1.5 inline-flex rounded px-1.5 py-0.5 text-[10px] ${
+                              binding.binding_type === 'direct'
+                                ? 'bg-blue-500/15 text-blue-300'
+                                : 'bg-emerald-500/15 text-emerald-300'
+                            }`}
+                          >
+                            {binding.binding_type === 'direct'
+                              ? t('feishuDirectChatBadge', 'Bot 私聊')
+                              : t('feishuGroupChatBadge', 'Agent 群聊')}
+                          </span>
+                          {binding.chat_name || `${title || paneId} · ${paneId}`}
+                        </div>
+                        <div className="truncate text-[11px] text-zinc-600">
+                          {binding.account_name} · {binding.chat_id}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        data-id={`team-panel-feishu-chat-unbind-${binding.chat_id}`}
+                        disabled={busyId === binding.account_id}
+                        onClick={() => act(binding.account_id, () => apiService.unbindFeishuChat(binding.account_id, binding.chat_id, paneId))}
+                        className="rounded-lg bg-red-500/10 px-3 py-1.5 text-[12px] text-red-300 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                      >
+                        {busyId === binding.account_id ? '…' : t('wechatUnbind', '解绑')}
+                      </button>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <>
+                  <div className="px-2 pb-1 text-[11px] leading-5 text-zinc-500">
+                    {t('feishuNoChatBound', '当前 Agent 还没有绑定飞书会话。选择一个飞书应用，自动创建独立群聊并绑定。')}
+                  </div>
+                  {accounts.map((a) => {
+                    const busy = busyId === a.id;
+                    const appBindings = accountBindings.filter((binding) => binding.account_id === a.id);
+                    const directBinding = appBindings.find((binding) => binding.binding_type === 'direct');
+                    const groupBindings = appBindings.filter((binding) => binding.binding_type === 'group');
+                    return (
+                      <div
+                        key={a.id}
+                        data-id={`team-panel-feishu-create-chat-row-${a.id}`}
+                        className="flex items-center gap-3 rounded-xl border border-white/[0.05] bg-white/[0.02] px-3 py-2.5"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[13px] text-zinc-200">{a.name || `feishu #${a.id}`}</div>
+                          <div className="truncate text-[11px] text-zinc-600">
+                            {t('feishuChatNamePreview', '将创建：{{name}} · {{id}}', { name: title || paneId, id: paneId })}
+                          </div>
+                          <div
+                            data-id={`team-panel-feishu-app-binding-status-${a.id}`}
+                            className="mt-1 flex flex-wrap gap-1 text-[10px]"
+                          >
+                            {appBindings.length === 0 ? (
+                              <span className="rounded bg-zinc-500/10 px-1.5 py-0.5 text-zinc-500">
+                                {t('feishuAppUnbound', '未绑定')}
+                              </span>
+                            ) : (
+                              <>
+                                {directBinding ? (
+                                  <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-blue-300">
+                                    {t('feishuDirectBoundTo', 'Bot 私聊：{{agent}}', {
+                                      agent: directBinding.pane_title || directBinding.pane_id,
+                                    })}
+                                  </span>
+                                ) : null}
+                                {groupBindings.length > 0 ? (
+                                  <span
+                                    title={groupBindings.map((binding) => binding.pane_title || binding.pane_id).join('、')}
+                                    className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-300"
+                                  >
+                                    {t('feishuGroupsBoundCount', 'Agent 群聊：{{count}} 个', { count: groupBindings.length })}
+                                  </span>
+                                ) : null}
+                              </>
+                            )}
+                          </div>
+                          {a.config?.app_id ? (
+                            <div data-id={`team-panel-feishu-auth-links-${a.id}`} className="mt-1.5 flex flex-wrap gap-2 text-[10px]">
+                              <a
+                                data-id={`team-panel-feishu-bot-auth-link-${a.id}`}
+                                href={`https://open.feishu.cn/app/${a.config.app_id}/auth?q=im:message,im:message.p2p_msg:readonly,im:resource&op_from=openapi&token_type=tenant`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-300 underline decoration-blue-300/40 hover:text-blue-200"
+                              >
+                                {t('feishuBotAuthLink', 'Bot 权限')}
+                              </a>
+                              <a
+                                data-id={`team-panel-feishu-chat-auth-link-${a.id}`}
+                                href={`https://open.feishu.cn/app/${a.config.app_id}/auth?q=im:chat:create,im:message.group_msg,im:resource&op_from=openapi&token_type=tenant`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-emerald-300 underline decoration-emerald-300/40 hover:text-emerald-200"
+                              >
+                                {t('feishuChatAuthLink', '会话权限')}
+                              </a>
+                            </div>
+                          ) : null}
+                        </div>
+                        <div data-id={`team-panel-feishu-bind-actions-${a.id}`} className="flex shrink-0 flex-col gap-1.5">
+                          <button
+                            type="button"
+                            data-id={`team-panel-feishu-bind-direct-${a.id}`}
+                            disabled={busy || !a.enabled}
+                            onClick={() => act(a.id, () => apiService.createFeishuChat(a.id, paneId, 'direct'))}
+                            className="rounded-lg bg-blue-500/15 px-3 py-1.5 text-[12px] text-blue-300 transition-colors hover:bg-blue-500/25 disabled:opacity-50"
+                          >
+                            {busy ? '…' : t('feishuBindDirectChat', '绑定 Bot 私聊')}
+                          </button>
+                          <button
+                            type="button"
+                            data-id={`team-panel-feishu-create-chat-${a.id}`}
+                            disabled={busy || !a.enabled}
+                            onClick={() => act(a.id, () => apiService.createFeishuChat(a.id, paneId, 'group'))}
+                            className="rounded-lg bg-emerald-500/15 px-3 py-1.5 text-[12px] text-emerald-300 transition-colors hover:bg-emerald-500/25 disabled:opacity-50"
+                          >
+                            {busy ? '…' : t('feishuCreateAndBindChat', '新建 Agent 群聊')}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
             </div>
           ) : (
             accounts.map((a) => {
@@ -220,7 +398,34 @@ export default function WechatBindModal({ paneId, title, onClose, platform = 'we
             })
           )}
           {error ? (
-            <div data-id={`team-panel-${platform}-bind-error`} className="mx-1 mt-1 rounded-lg bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{error}</div>
+            <div data-id={`team-panel-${platform}-bind-error`} className="relative mx-1 mt-1 rounded-lg bg-red-500/10 py-2 pl-3 pr-9 text-[12px] leading-5 text-red-300">
+              <button
+                type="button"
+                data-id={`team-panel-${platform}-bind-error-close`}
+                aria-label="关闭错误"
+                onClick={() => {
+                  setActionError('');
+                  setLoadError('');
+                }}
+                className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded text-red-300/70 transition-colors hover:bg-red-500/15 hover:text-red-200"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+              <div data-id={`team-panel-${platform}-bind-error-content`}>
+                {error.split(/(https?:\/\/\S+)/g).map((part, index) => part.startsWith('http') ? (
+                  <a
+                    key={`${part}-${index}`}
+                    data-id={`team-panel-${platform}-bind-error-link`}
+                    href={part}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block break-all text-blue-300 underline hover:text-blue-200"
+                  >
+                    打开飞书授权页面
+                  </a>
+                ) : <span key={`${part}-${index}`}>{part}</span>)}
+              </div>
+            </div>
           ) : null}
         </div>
 

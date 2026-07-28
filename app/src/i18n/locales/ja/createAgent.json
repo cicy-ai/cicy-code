@@ -48,5 +48,10 @@
     "handoff": "チームメッセージ",
     "a2a": "外部タスク"
   },
-  "languageLabel": "言語"
+  "languageLabel": "言語",
+  "apiStyleLabel": "API スタイル",
+  "apiStyleOpenAI": "OpenAI スタイル",
+  "apiStyleClaude": "Claude スタイル",
+  "apiStyleLocked": "· 作成後に固定",
+  "apiStyleHint": "作成後は変更できません。モデル選択には選んだスタイルだけが表示されます。"
 }

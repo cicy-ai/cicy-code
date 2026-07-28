@@ -24,6 +24,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -35,9 +36,10 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
 
-const feishuBaseURL = "https://open.feishu.cn"
 const feishuPollWait = 25 * time.Second
 const feishuWSIdleTimeout = 2 * time.Minute
+
+var feishuBaseURL = "https://open.feishu.cn"
 
 // feishuValidateCredentials 用 tenant_access_token 接口验证 App ID/Secret。
 // reachable=false 表示网络不通(凭据先存着,worker 会重试);appName 尽力而为,拿不到给空。
@@ -53,14 +55,39 @@ func feishuValidateCredentials(appID, appSecret string) (appName string, reachab
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	var out struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
+		Code              int    `json:"code"`
+		Msg               string `json:"msg"`
+		TenantAccessToken string `json:"tenant_access_token"`
 	}
 	if jerr := json.Unmarshal(raw, &out); jerr != nil {
 		return "", true, fmt.Errorf("unexpected response: %s", strings.TrimSpace(string(raw)))
 	}
 	if out.Code != 0 {
 		return "", true, fmt.Errorf("feishu code=%d: %s", out.Code, out.Msg)
+	}
+	if strings.TrimSpace(out.TenantAccessToken) == "" {
+		return "", true, nil
+	}
+
+	// bot/v3/info 不需要额外的应用权限，适合在刚创建账号、尚未完成权限配置时
+	// 读取开放平台里的当前应用名。名称读取失败不影响凭据校验和账号创建。
+	infoReq, _ := http.NewRequest(http.MethodGet, feishuBaseURL+"/open-apis/bot/v3/info", nil)
+	infoReq.Header.Set("Authorization", "Bearer "+out.TenantAccessToken)
+	infoResp, infoErr := client.Do(infoReq)
+	if infoErr != nil {
+		return "", true, nil
+	}
+	defer infoResp.Body.Close()
+	infoRaw, _ := io.ReadAll(io.LimitReader(infoResp.Body, 1<<20))
+	var info struct {
+		Code int `json:"code"`
+		Bot  struct {
+			AppName string `json:"app_name"`
+		} `json:"bot"`
+	}
+	if infoResp.StatusCode >= 200 && infoResp.StatusCode < 300 &&
+		json.Unmarshal(infoRaw, &info) == nil && info.Code == 0 {
+		return strings.TrimSpace(info.Bot.AppName), true, nil
 	}
 	return "", true, nil
 }
@@ -263,7 +290,7 @@ func (t *feishuTransport) runWS() {
 			delete(feishuWSRegistry.m, t.appID)
 		}
 		feishuWSRegistry.mu.Unlock()
-		cli.Close()   // 兜底:无论怎么退出,底层连接必须关死
+		cli.Close() // 兜底:无论怎么退出,底层连接必须关死
 	}()
 
 	log.Printf("[feishu] account=%d 长连接启动 (app=%s)", t.accID, t.appID)
@@ -324,8 +351,8 @@ func feishuExtractMessage(event *larkim.P2MessageReceiveV1) (out botMsg, msgID s
 	case "post":
 		// 富文本:{"title":"..","content":[[{tag:text|a|at|img,...}]]}
 		var parsed struct {
-			Title   string                       `json:"title"`
-			Content [][]map[string]interface{}   `json:"content"`
+			Title   string                     `json:"title"`
+			Content [][]map[string]interface{} `json:"content"`
 		}
 		if json.Unmarshal([]byte(content), &parsed) == nil {
 			var sb strings.Builder
@@ -457,6 +484,160 @@ func (t *feishuTransport) tenantToken() (string, error) {
 	return t.token, nil
 }
 
+// feishuCreateChat creates one private group per Agent. A bot has only one P2P
+// chat with a given user, so P2P cannot independently route multiple Agents.
+// Separate groups let one Feishu app/bot serve any number of Agents.
+func feishuCreateChat(acc *imAccount, name string) (string, error) {
+	receiveID := strings.TrimSpace(acc.configString("last_feishu_open_id"))
+	receiveIDType := "open_id"
+	if receiveID == "" {
+		receiveID, receiveIDType = feishuLocalUserID(acc.configString("app_id"))
+	}
+	if receiveID == "" {
+		return "", fmt.Errorf("找不到当前飞书用户，请先在飞书里给这个机器人发一条消息后重试")
+	}
+	tr, err := newFeishuTransport(acc)
+	if err != nil {
+		return "", err
+	}
+	ft := tr.(*feishuTransport)
+	token, err := ft.tenantToken()
+	if err != nil {
+		return "", err
+	}
+	body, _ := json.Marshal(M{
+		"name":         strings.TrimSpace(name),
+		"description":  "由 cicy-code 为 Agent 自动创建",
+		"chat_mode":    "group",
+		"chat_type":    "private",
+		"user_id_list": []string{receiveID},
+	})
+	req, _ := http.NewRequest(http.MethodPost, feishuBaseURL+"/open-apis/im/v1/chats?user_id_type="+receiveIDType, strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("创建飞书会话失败: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var out struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			ChatID string `json:"chat_id"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &out) != nil || out.Code != 0 || strings.TrimSpace(out.Data.ChatID) == "" {
+		if feishuLooksLikePermError(out.Code, out.Msg) {
+			authURL := fmt.Sprintf(
+				"https://open.feishu.cn/app/%s/auth?q=im:chat:create&op_from=openapi&token_type=tenant",
+				ft.appID,
+			)
+			return "", fmt.Errorf("缺少创建群聊权限 im:chat:create，请开通后发布新版本。\n%s", authURL)
+		}
+		return "", fmt.Errorf("创建 Agent 飞书群失败 code=%d: %s", out.Code, strings.TrimSpace(out.Msg))
+	}
+	chatID := strings.TrimSpace(out.Data.ChatID)
+	_, _ = ft.Send(botPeer{ChatID: chatID}, fmt.Sprintf("✅ 已绑定 Agent：%s\n之后在本群发送消息即可交给该 Agent 处理。", strings.TrimSpace(name)))
+	return chatID, nil
+}
+
+// feishuOpenDirectChat opens or reuses the app bot's single P2P conversation
+// with the current user and returns its chat_id.
+func feishuOpenDirectChat(acc *imAccount, name string) (string, error) {
+	receiveID := strings.TrimSpace(acc.configString("last_feishu_open_id"))
+	receiveIDType := "open_id"
+	if receiveID == "" {
+		receiveID, receiveIDType = feishuLocalUserID(acc.configString("app_id"))
+	}
+	if receiveID == "" {
+		return "", fmt.Errorf("找不到当前飞书用户，请先在飞书里给这个机器人发一条消息后重试")
+	}
+	tr, err := newFeishuTransport(acc)
+	if err != nil {
+		return "", err
+	}
+	ft := tr.(*feishuTransport)
+	token, err := ft.tenantToken()
+	if err != nil {
+		return "", err
+	}
+	content, _ := json.Marshal(M{
+		"text": fmt.Sprintf("✅ Bot 私聊已绑定 Agent：%s\n之后在这个私聊发送消息即可交给该 Agent 处理。", strings.TrimSpace(name)),
+	})
+	body, _ := json.Marshal(M{
+		"receive_id": receiveID,
+		"msg_type":   "text",
+		"content":    string(content),
+	})
+	req, _ := http.NewRequest(http.MethodPost,
+		feishuBaseURL+"/open-apis/im/v1/messages?receive_id_type="+receiveIDType, strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("打开飞书 Bot 私聊失败: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var out struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			ChatID string `json:"chat_id"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &out) != nil || out.Code != 0 || strings.TrimSpace(out.Data.ChatID) == "" {
+		return "", fmt.Errorf("打开飞书 Bot 私聊失败 code=%d: %s", out.Code, strings.TrimSpace(out.Msg))
+	}
+	return strings.TrimSpace(out.Data.ChatID), nil
+}
+
+// feishuLocalUserID reuses lark-cli's locally authorized user. open_id is
+// app-scoped, so it is used only when both sides use the same app. For a
+// different bot app, union_id identifies the same user across apps in the
+// tenant and lets that bot open the P2P conversation without a first message.
+func feishuLocalUserID(appID string) (string, string) {
+	path, err := exec.LookPath("lark-cli")
+	if err != nil {
+		return "", ""
+	}
+	out, err := exec.Command(path, "auth", "status").Output()
+	if err == nil {
+		var status struct {
+			AppID      string `json:"appId"`
+			Identities struct {
+				User struct {
+					Available bool   `json:"available"`
+					OpenID    string `json:"openId"`
+				} `json:"user"`
+			} `json:"identities"`
+		}
+		if json.Unmarshal(out, &status) == nil &&
+			strings.TrimSpace(status.AppID) == strings.TrimSpace(appID) &&
+			status.Identities.User.Available &&
+			strings.TrimSpace(status.Identities.User.OpenID) != "" {
+			return strings.TrimSpace(status.Identities.User.OpenID), "open_id"
+		}
+	}
+
+	out, err = exec.Command(path, "api", "GET", "/open-apis/authen/v1/user_info", "--as", "user").Output()
+	if err != nil {
+		return "", ""
+	}
+	var current struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			UnionID string `json:"union_id"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(out, &current) != nil || !current.OK {
+		return "", ""
+	}
+	return strings.TrimSpace(current.Data.UnionID), "union_id"
+}
+
 func (t *feishuTransport) Send(peer botPeer, text string) (string, error) {
 	chatID := strings.TrimSpace(peer.ChatID)
 	if chatID == "" {
@@ -555,6 +736,129 @@ func (t *feishuTransport) probeSendPermission() (ok bool, detail string) {
 	return true, "" // 走到了业务校验(假目标被拒)= 权限已开通
 }
 
+// probeCreateChatPermission uses an invalid member ID so no group is actually
+// created. Permission errors happen before member validation; a member error
+// therefore means im:chat:create is already available.
+func (t *feishuTransport) probeCreateChatPermission() (ok bool, detail string) {
+	token, err := t.tenantToken()
+	if err != nil {
+		return false, err.Error()
+	}
+	body, _ := json.Marshal(M{
+		"name":         "cicy-code permission probe",
+		"chat_mode":    "group",
+		"chat_type":    "private",
+		"user_id_list": []string{"ou_cicycode_permission_probe"},
+	})
+	req, _ := http.NewRequest(http.MethodPost,
+		feishuBaseURL+"/open-apis/im/v1/chats?user_id_type=open_id", strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return false, err.Error()
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var out struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if json.Unmarshal(raw, &out) != nil {
+		return false, "创建群聊权限探针返回异常"
+	}
+	if out.Code == 0 {
+		return true, ""
+	}
+	if feishuLooksLikePermError(out.Code, out.Msg) {
+		return false, fmt.Sprintf("code=%d: %s", out.Code, out.Msg)
+	}
+	return true, ""
+}
+
+// probeGroupMessagePermission checks im:message.group_msg without consuming
+// real chat data. With the scope enabled, the fake chat fails business
+// validation; without it, Feishu returns a permission error first.
+func (t *feishuTransport) probeGroupMessagePermission() (ok bool, detail string) {
+	token, err := t.tenantToken()
+	if err != nil {
+		return false, err.Error()
+	}
+	req, _ := http.NewRequest(http.MethodGet,
+		feishuBaseURL+"/open-apis/im/v1/messages?container_id_type=chat&container_id=oc_cicycode_permission_probe&page_size=1", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return false, err.Error()
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var out struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if json.Unmarshal(raw, &out) != nil {
+		return false, "群消息权限探针返回异常"
+	}
+	if out.Code == 0 {
+		return true, ""
+	}
+	if feishuLooksLikePermError(out.Code, out.Msg) {
+		return false, fmt.Sprintf("code=%d: %s", out.Code, out.Msg)
+	}
+	return true, ""
+}
+
+// probeResourceUploadPermission checks media upload scope without uploading a
+// file. Once authorized, the empty request reaches parameter validation.
+func (t *feishuTransport) probeResourceUploadPermission() (ok bool, detail string) {
+	token, err := t.tenantToken()
+	if err != nil {
+		return false, err.Error()
+	}
+	req, _ := http.NewRequest(http.MethodPost, feishuBaseURL+"/open-apis/im/v1/images", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return false, err.Error()
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var out struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if json.Unmarshal(raw, &out) != nil {
+		return false, "媒体资源权限探针返回异常"
+	}
+	if out.Code == 0 {
+		return true, ""
+	}
+	if feishuLooksLikePermError(out.Code, out.Msg) {
+		return false, fmt.Sprintf("code=%d: %s", out.Code, out.Msg)
+	}
+	return true, ""
+}
+
+func feishuGroupBindMissingPermissions(acc *imAccount) ([]string, error) {
+	tr, err := newFeishuTransport(acc)
+	if err != nil {
+		return nil, err
+	}
+	ft := tr.(*feishuTransport)
+	missing := []string{}
+	if ok, _ := ft.probeCreateChatPermission(); !ok {
+		missing = append(missing, "im:chat:create")
+	}
+	if ok, _ := ft.probeGroupMessagePermission(); !ok {
+		missing = append(missing, "im:message.group_msg")
+	}
+	if ok, _ := ft.probeResourceUploadPermission(); !ok {
+		missing = append(missing, "im:resource")
+	}
+	return missing, nil
+}
+
 // feishuCheckItem 是体检单里的一项:配置向导按它逐项亮灯,每项可带直达链接。
 type feishuCheckItem struct {
 	Key    string `json:"key"`
@@ -620,7 +924,40 @@ func feishuRunChecks(acc *imAccount) (checks []feishuCheckItem, allOK bool) {
 		}
 	}
 
-	// 4. 收消息(事件订阅,经验判断)。收不到=端到端没通,判失败。
+	// 4. 创建群权限:一个 App 服务多个 Agent 时,每个 Agent 需要独立群聊。
+	if verr == nil && ft != nil {
+		if ok, detail := ft.probeCreateChatPermission(); ok {
+			add("create_chat_perm", "创建群聊权限", "ok", "im:chat:create 已开通", "")
+		} else {
+			add("create_chat_perm", "创建群聊权限", "fail",
+				"在「权限管理」搜 im:chat:create 并开通，然后到版本管理创建版本并发布。"+detail,
+				authURL+"?q=im:chat:create&op_from=openapi&token_type=tenant")
+		}
+	}
+
+	// 5. 普通群消息权限:没有它时只有 @Bot 的群消息能进入 Agent。
+	if verr == nil && ft != nil {
+		if ok, detail := ft.probeGroupMessagePermission(); ok {
+			add("group_message_perm", "接收群消息权限", "ok", "im:message.group_msg 已开通", "")
+		} else {
+			add("group_message_perm", "接收群消息权限", "fail",
+				"在「权限管理」开通 im:message.group_msg，然后到版本管理创建版本并发布。"+detail,
+				authURL+"?q=im:message.group_msg&op_from=openapi&token_type=tenant")
+		}
+	}
+
+	// 6. 媒体资源权限:图片、文件、视频和音频收发都依赖它。
+	if verr == nil && ft != nil {
+		if ok, detail := ft.probeResourceUploadPermission(); ok {
+			add("resource_perm", "媒体文件权限", "ok", "im:resource 已开通", "")
+		} else {
+			add("resource_perm", "媒体文件权限", "fail",
+				"在「权限管理」开通 im:resource，然后到版本管理创建版本并发布。"+detail,
+				authURL+"?q=im:resource&op_from=openapi&token_type=tenant")
+		}
+	}
+
+	// 7. 收消息(事件订阅,经验判断)。收不到=端到端没通,判失败。
 	if acc.configString("chat_id") != "" || !imLastInboundTimeGet(acc.ID).IsZero() {
 		add("inbound", "接收消息", "ok", "已收到过消息,事件订阅正常", "")
 	} else {
@@ -628,13 +965,13 @@ func feishuRunChecks(acc *imAccount) (checks []feishuCheckItem, allOK bool) {
 			"机器人还听不见你说话。到「事件与回调」:订阅方式选「使用长连接接收事件」,添加事件「接收消息 im.message.receive_v1」(会提示顺带申请单聊消息读取权限,一起开通);再到版本管理**创建版本并发布**。发布后在飞书搜索你的应用名,私聊发一条 /help——这一项会自动变绿。", eventURL)
 	}
 
-	// 5. 发布提示:凡有失败项,都补一条发版检查(飞书所有配置不发版不生效)
+	// 8. 发布提示:凡有失败项,都补一条发版检查(飞书所有配置不发版不生效)
 	if !allOK {
 		add("publish", "发布版本", "warn",
 			"改完任何权限/事件后,必须到「版本管理与发布」创建版本并发布,配置才会生效(企业自建应用自己就是审核人,秒过)。", versionURL)
 	}
 
-	// 6. 真实测试发送(已捕获会话才发)
+	// 9. 真实测试发送(已捕获会话才发)
 	if peer := imPeerForAccount(acc); !peer.empty() && ft != nil && verr == nil {
 		if _, err := imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: ft, Peer: peer, Text: "✅ cicy 测试消息", Purpose: imOutboundPurposeTest}); err != nil {
 			add("send", "测试发送", "fail", err.Error(), "")

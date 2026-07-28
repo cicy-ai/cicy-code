@@ -212,7 +212,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         };
       case 'feishu':
         return {
-          title: i18n.t('feishuBindTitle', { ns: 'teamPanel', defaultValue: '绑定飞书' }),
+          title: i18n.t('feishuBindTitle', { ns: 'teamPanel', defaultValue: '飞书会话' }),
           desc: i18n.t('tipFeishuBind', { ns: 'teamPanel', defaultValue: '把一个飞书应用(机器人)绑定到这个 agent:飞书收到的消息转给它处理,回复推回飞书。也可以不占账号——在飞书会话里对机器人发 /bind 按会话绑定。添加应用在 IM 设置里(带配置向导)。' }),
         };
       case 'compact':
@@ -302,6 +302,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         project_template: values.project_template,
         role_template: values.role_template,
         lang: values.lang,
+        api_style: values.api_style,
       });
       if (data?.pane_id || data?.session) {
         setCreateDialogOpen(false);
@@ -805,7 +806,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-white/[0.06]"
             >
               <Zap className="w-3.5 h-3.5 shrink-0" />
-              <span data-id="team-panel-worker-menu-feishu-label">{i18n.t('feishuBindTitle', { ns: 'teamPanel', defaultValue: '绑定飞书' })}</span>
+              <span data-id="team-panel-worker-menu-feishu-label">{i18n.t('feishuBindTitle', { ns: 'teamPanel', defaultValue: '飞书会话' })}</span>
             </button>
             {/* /compact、/clear 已从此菜单移除 —— 这两个命令改由对话输入框的斜杠命令菜单
                 (输入 `/` 弹出)触发,菜单里不再重复。 */}

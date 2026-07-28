@@ -526,6 +526,13 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	// 先记录来源,再处理命令。以前捕获在命令处理**后面**:只发过 /help 的账号
 	// 提前 return,chat_id 永远不落盘,重启后体检误报「从未收到过消息」(实测踩坑)。
 	imRememberPeer(acc.ID, msg.Peer)
+	if acc.Platform == imPlatformFeishu && strings.HasPrefix(msg.FromID, "feishu:open_id:") {
+		openID := strings.TrimSpace(strings.TrimPrefix(msg.FromID, "feishu:open_id:"))
+		if openID != "" && acc.configString("last_feishu_open_id") != openID {
+			acc.setConfig("last_feishu_open_id", openID)
+			imSaveAccountConfig(acc)
+		}
+	}
 	imLastInboundTime.mu.Lock()
 	imLastInboundTime.m[acc.ID] = time.Now()
 	imLastInboundTime.mu.Unlock()
@@ -716,6 +723,25 @@ func imBindChatToPane(accID int64, chatID, paneID string) error {
 type imChatBinding struct {
 	AccountID int64
 	ChatID    string
+}
+
+func imBindNamedChatToPane(accID int64, chatID, chatName, bindingType, paneID string) error {
+	chatID = strings.TrimSpace(chatID)
+	chatName = strings.TrimSpace(chatName)
+	bindingType = strings.TrimSpace(bindingType)
+	paneID = normPaneID(strings.TrimSpace(paneID))
+	if store == nil || accID == 0 || chatID == "" || paneID == "" {
+		return fmt.Errorf("account/chat/pane required")
+	}
+	_, err := store.Exec(`INSERT INTO im_chat_bindings (account_id, chat_id, pane_id, chat_name, binding_type, updated_at)
+		VALUES (?,?,?,?,?,datetime('now'))
+		ON CONFLICT(account_id, chat_id) DO UPDATE SET
+			pane_id=excluded.pane_id,
+			chat_name=CASE WHEN excluded.chat_name<>'' THEN excluded.chat_name ELSE im_chat_bindings.chat_name END,
+			binding_type=CASE WHEN excluded.binding_type<>'' THEN excluded.binding_type ELSE im_chat_bindings.binding_type END,
+			updated_at=excluded.updated_at`,
+		accID, chatID, paneID, chatName, bindingType)
+	return err
 }
 
 // imChatBindingsForPane 反查:哪些 (账号, 会话) 绑到了这个 agent。
@@ -1240,6 +1266,9 @@ func handleIMRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		handleIMAccountByID(w, r, id, action)
 		return
+	case "chat-bindings":
+		handleIMChatBindings(w, r)
+		return
 	}
 	httpErr(w, 404, "not found")
 }
@@ -1328,12 +1357,13 @@ func handleIMAccounts(w http.ResponseWriter, r *http.Request) {
 				detail = "无法连接飞书验证凭据(检查网络/代理),已保存: " + verr.Error()
 			} else if appName != "" {
 				detail = appName
+				cfg["app_name_synced"] = true
 			}
 			if name == "" {
 				if appName != "" {
 					name = appName
 				} else if len(appID) > 6 {
-					name = "飞书应用 …" + appID[len(appID)-6:]   // 多应用时可区分
+					name = "飞书应用 …" + appID[len(appID)-6:] // 多应用时可区分
 				} else {
 					name = "飞书应用"
 				}
@@ -1405,6 +1435,107 @@ func handleIMAccountByID(w http.ResponseWriter, r *http.Request, id int64, actio
 			return
 		}
 		handleIMAccountTest(w, acc)
+	case "sync-name":
+		if r.Method != http.MethodPost {
+			httpErr(w, 405, "method not allowed")
+			return
+		}
+		if acc.Platform != imPlatformFeishu {
+			httpErr(w, 400, "sync-name only applies to feishu")
+			return
+		}
+		appName, reachable, syncErr := feishuValidateCredentials(acc.configString("app_id"), acc.Secret)
+		if syncErr != nil {
+			if !reachable {
+				httpErr(w, 502, "无法连接飞书: "+syncErr.Error())
+			} else {
+				httpErr(w, 400, "飞书凭据无效: "+syncErr.Error())
+			}
+			return
+		}
+		if appName == "" {
+			httpErr(w, 502, "飞书未返回应用名称，请确认已添加机器人能力")
+			return
+		}
+		acc.setConfig("app_name_synced", true)
+		if _, err := store.Exec(
+			"UPDATE im_accounts SET name=?, state_detail=?, config=?, updated_at="+store.Now()+" WHERE id=?",
+			appName, appName, imJSON(acc.Config), acc.ID,
+		); err != nil {
+			httpErr(w, 500, err.Error())
+			return
+		}
+		acc, _ = imGetAccount(id)
+		J(w, M{"success": true, "name": appName, "account": imAccountToMap(acc)})
+	case "create-chat":
+		if r.Method != http.MethodPost {
+			httpErr(w, 405, "method not allowed")
+			return
+		}
+		if acc.Platform != imPlatformFeishu {
+			httpErr(w, 400, "create-chat only applies to feishu")
+			return
+		}
+		var body struct {
+			PaneID string `json:"pane_id"`
+			Mode   string `json:"mode"`
+		}
+		if err := readBody(r, &body); err != nil {
+			httpErr(w, 400, "invalid request body")
+			return
+		}
+		paneID := normPaneID(strings.TrimSpace(body.PaneID))
+		var paneTitle string
+		if err := store.QueryRow("SELECT COALESCE(title,'') FROM agent_config WHERE pane_id=? AND active=1", paneID).Scan(&paneTitle); err != nil {
+			httpErr(w, 404, "agent not found")
+			return
+		}
+		chatName := strings.TrimSpace(paneTitle)
+		if chatName == "" {
+			chatName = shortPaneID(paneID)
+		} else {
+			chatName += " · " + shortPaneID(paneID)
+		}
+		mode := strings.TrimSpace(body.Mode)
+		if mode == "" {
+			mode = "group"
+		}
+		var chatID string
+		var createErr error
+		switch mode {
+		case "direct":
+			chatID, createErr = feishuOpenDirectChat(acc, chatName)
+		case "group":
+			missing, permErr := feishuGroupBindMissingPermissions(acc)
+			if permErr != nil {
+				httpErr(w, 502, "飞书权限检测失败: "+permErr.Error())
+				return
+			}
+			if len(missing) > 0 {
+				authURL := fmt.Sprintf(
+					"https://open.feishu.cn/app/%s/auth?q=im:chat:create,im:message.group_msg,im:resource&op_from=openapi&token_type=tenant",
+					acc.configString("app_id"),
+				)
+				httpErr(w, 403, "新建 Agent 群聊需要以下权限："+strings.Join(missing, "、")+"。请授权后发布新版本。\n"+authURL)
+				return
+			}
+			chatID, createErr = feishuCreateChat(acc, chatName)
+		default:
+			httpErr(w, 400, "mode must be direct or group")
+			return
+		}
+		if createErr != nil {
+			httpErr(w, 502, createErr.Error())
+			return
+		}
+		if mode == "direct" {
+			chatName = acc.Name + " Bot 私聊"
+		}
+		if err := imBindNamedChatToPane(acc.ID, chatID, chatName, mode, paneID); err != nil {
+			httpErr(w, 500, err.Error())
+			return
+		}
+		J(w, M{"success": true, "mode": mode, "chat_id": chatID, "chat_name": chatName, "pane_id": shortPaneID(paneID)})
 	case "bind":
 		if r.Method != http.MethodPost {
 			httpErr(w, 405, "method not allowed")
@@ -1451,6 +1582,78 @@ func handleIMAccountByID(w http.ResponseWriter, r *http.Request, id int64, actio
 		J(w, M{"success": true})
 	default:
 		httpErr(w, 404, "not found")
+	}
+}
+
+func handleIMChatBindings(w http.ResponseWriter, r *http.Request) {
+	paneID := normPaneID(strings.TrimSpace(r.URL.Query().Get("pane_id")))
+	if paneID == "" {
+		httpErr(w, 400, "pane_id required")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		rows, err := store.Query(`SELECT b.account_id, b.chat_id, COALESCE(b.chat_name,''),
+				COALESCE(NULLIF(b.binding_type,''), CASE WHEN b.chat_name LIKE '%Bot 私聊' THEN 'direct' ELSE 'group' END), a.name
+			FROM im_chat_bindings b
+			JOIN im_accounts a ON a.id=b.account_id
+			WHERE b.pane_id=? AND a.platform='feishu'
+			ORDER BY b.updated_at DESC`, paneID)
+		if err != nil {
+			httpErr(w, 500, err.Error())
+			return
+		}
+		defer rows.Close()
+		bindings := []M{}
+		for rows.Next() {
+			var accountID int64
+			var chatID, chatName, bindingType, accountName string
+			if rows.Scan(&accountID, &chatID, &chatName, &bindingType, &accountName) == nil {
+				bindings = append(bindings, M{
+					"account_id": accountID, "account_name": accountName,
+					"chat_id": chatID, "chat_name": chatName, "binding_type": bindingType, "pane_id": shortPaneID(paneID),
+				})
+			}
+		}
+		allRows, allErr := store.Query(`SELECT b.account_id, b.chat_id,
+				COALESCE(NULLIF(b.binding_type,''), CASE WHEN b.chat_name LIKE '%Bot 私聊' THEN 'direct' ELSE 'group' END),
+				b.pane_id, COALESCE(b.chat_name,''), COALESCE(c.title,'')
+			FROM im_chat_bindings b
+			JOIN im_accounts a ON a.id=b.account_id
+			LEFT JOIN agent_config c ON c.pane_id=b.pane_id AND c.active=1
+			WHERE a.platform='feishu'
+			ORDER BY b.updated_at DESC`)
+		if allErr != nil {
+			httpErr(w, 500, allErr.Error())
+			return
+		}
+		defer allRows.Close()
+		accountBindings := []M{}
+		for allRows.Next() {
+			var accountID int64
+			var chatID, bindingType, boundPaneID, chatName, paneTitle string
+			if allRows.Scan(&accountID, &chatID, &bindingType, &boundPaneID, &chatName, &paneTitle) == nil {
+				accountBindings = append(accountBindings, M{
+					"account_id": accountID, "chat_id": chatID, "binding_type": bindingType,
+					"pane_id": shortPaneID(boundPaneID), "pane_title": paneTitle, "chat_name": chatName,
+				})
+			}
+		}
+		J(w, M{"bindings": bindings, "account_bindings": accountBindings})
+	case http.MethodDelete:
+		chatID := strings.TrimSpace(r.URL.Query().Get("chat_id"))
+		accountID, _ := strconv.ParseInt(r.URL.Query().Get("account_id"), 10, 64)
+		if chatID == "" || accountID == 0 {
+			httpErr(w, 400, "account_id and chat_id required")
+			return
+		}
+		if _, err := store.Exec("DELETE FROM im_chat_bindings WHERE account_id=? AND chat_id=? AND pane_id=?", accountID, chatID, paneID); err != nil {
+			httpErr(w, 500, err.Error())
+			return
+		}
+		J(w, M{"success": true})
+	default:
+		httpErr(w, 405, "method not allowed")
 	}
 }
 

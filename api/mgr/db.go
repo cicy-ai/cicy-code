@@ -224,6 +224,8 @@ func (d *DB) Migrate() {
 			account_id INTEGER NOT NULL,
 			chat_id TEXT NOT NULL,
 			pane_id TEXT NOT NULL,
+			chat_name TEXT DEFAULT '',
+			binding_type TEXT DEFAULT '',
 			updated_at TEXT DEFAULT (datetime('now')),
 			PRIMARY KEY (account_id, chat_id)
 		)`,
@@ -314,6 +316,8 @@ func (d *DB) Migrate() {
 	// tables (the CREATE TABLE above already carries them for fresh installs).
 	d.ensureColumn("agent_messages", "from_conversation_id", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_messages", "from_turn_id", "TEXT DEFAULT ''")
+	d.ensureColumn("im_chat_bindings", "chat_name", "TEXT DEFAULT ''")
+	d.ensureColumn("im_chat_bindings", "binding_type", "TEXT DEFAULT ''")
 
 	// todo #104: the lite agent's agent_type "dispatcher" was renamed to the
 	// product name "cicy". Migrate existing rows once, idempotently. Runs in the

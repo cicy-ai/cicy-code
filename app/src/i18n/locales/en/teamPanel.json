@@ -55,5 +55,20 @@
   "updateRunning": "Updating CLI… (running sessions are untouched)",
   "updateDone": "Update complete. Restart to take effect.",
   "updateRetrySwitchSource": "Retry with other registry",
-  "updateRestartNow": "Restart agent now"
+  "updateRestartNow": "Restart agent now",
+  "feishuBindTitle": "Feishu chats",
+  "feishuCurrentChats": "Feishu chats bound to this Agent",
+  "feishuNoChatBound": "No Feishu chat is bound to this Agent. Select an app to create and bind a dedicated group.",
+  "feishuChatNamePreview": "Will create: {{name}} · {{id}}",
+  "feishuBindDirectChat": "Bind bot direct chat",
+  "feishuDirectChatBadge": "Bot direct chat",
+  "feishuGroupChatBadge": "Agent group",
+  "feishuAppUnbound": "Not bound",
+  "feishuDirectBoundTo": "Bot direct: {{agent}}",
+  "feishuGroupsBoundCount": "Agent groups: {{count}}",
+  "feishuBotAuthLink": "Bot permissions",
+  "feishuChatAuthLink": "Chat permissions",
+  "feishuCreateAndBindChat": "Create Agent group",
+  "feishuSendMessageFirst": "Send any message to this Bot in Feishu first",
+  "feishuWaitingForMessage": "Waiting for Bot message"
 }
