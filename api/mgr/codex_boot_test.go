@@ -47,13 +47,8 @@ func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
 	if !strings.Contains(script, "codex $CODEX_RESUME -m 'gpt-5.5'") {
 		t.Error("missing explicit codex model override")
 	}
-	for _, flag := range []string{
-		"-c features.responses_websockets=false",
-		"-c features.responses_websockets_v2=false",
-	} {
-		if !strings.Contains(script, flag) {
-			t.Errorf("custom-gateway codex must force HTTPS/SSE with %s", flag)
-		}
+	if !strings.Contains(script, `model_providers.custom.supports_websockets=false`) {
+		t.Error("custom-gateway codex must disable provider WebSocket support")
 	}
 
 	// Must have --dangerously-bypass-approvals-and-sandbox
@@ -103,13 +98,18 @@ func TestAgentBootLinesCodexModelCatalog(t *testing.T) {
 	if strings.Contains(off, "model_catalog_json") {
 		t.Error("non-gateway codex should not inject a model catalog")
 	}
-	for _, flag := range []string{
-		"-c features.responses_websockets=false",
-		"-c features.responses_websockets_v2=false",
+	for _, want := range []string{
+		`model_provider="cicy_https"`,
+		`model_providers.cicy_https.base_url="https://chatgpt.com/backend-api/codex"`,
+		`model_providers.cicy_https.requires_openai_auth=true`,
+		`model_providers.cicy_https.supports_websockets=false`,
 	} {
-		if !strings.Contains(off, flag) {
-			t.Errorf("official codex must force HTTPS/SSE with %s", flag)
+		if !strings.Contains(off, want) {
+			t.Errorf("official codex HTTPS provider missing %s", want)
 		}
+	}
+	if strings.Contains(off, "features.responses_websockets") {
+		t.Error("official codex must not use removed responses_websockets feature flags")
 	}
 }
 

@@ -3130,10 +3130,6 @@ EOF
 		return lines
 	case "codex":
 		installLog := tmuxHomeJoin("logs", fmt.Sprintf("codex-install-%s.log", shortID))
-		// Pin Codex to the HTTPS/SSE Responses transport. Keep this on every
-		// launch path (custom gateway and official login) so a future Codex
-		// default cannot silently switch an Agent back to WebSockets.
-		codexHTTPSArgs := "-c features.responses_websockets=false -c features.responses_websockets_v2=false"
 		lines := []string{
 			ensureAgentCommandLine("codex", "Codex", codexInstallCmd(), installLog),
 		}
@@ -3155,6 +3151,7 @@ EOF
 			providerOverride := tmuxShellQuote(`model_provider="custom"`)
 			providerNameOverride := tmuxShellQuote(`model_providers.custom.name="cicy-local"`)
 			baseURLOverride := tmuxShellQuote(`model_providers.custom.base_url="` + baseURL + `"`)
+			httpsTransportOverride := tmuxShellQuote(`model_providers.custom.supports_websockets=false`)
 			modelArg := tmuxShellQuote(model)
 			// Build a local model catalog covering the provider's configured
 			// models so they all show in /model (gpt-* kept from Codex's own
@@ -3168,7 +3165,8 @@ EOF
 			if allowAllActions {
 				bypass = " --dangerously-bypass-approvals-and-sandbox"
 			}
-			base := fmt.Sprintf("codex $CODEX_RESUME -m %s %s -c %s -c %s -c %s", modelArg, codexHTTPSArgs, providerOverride, providerNameOverride, baseURLOverride)
+			base := fmt.Sprintf("codex $CODEX_RESUME -m %s -c %s -c %s -c %s -c %s",
+				modelArg, providerOverride, providerNameOverride, baseURLOverride, httpsTransportOverride)
 			// Only attach the catalog when its build succeeded (file present and
 			// non-empty); otherwise launch Codex without it so a failed catalog
 			// build never blocks startup.
@@ -3184,10 +3182,22 @@ EOF
 		// when MITM is off (default). Parity with the claude/opencode paths.
 		lines = append(lines, mitmAgentProxyBootLines(useMitm)...)
 		lines = append(lines, "clear")
+		// Current Codex versions choose Responses-over-WebSocket from the model
+		// provider capability, not the removed responses_websockets feature
+		// flags. Use a custom provider that still consumes the user's official
+		// OpenAI login while explicitly advertising HTTPS/SSE-only transport.
+		officialHTTPSArgs := strings.Join([]string{
+			"-c " + tmuxShellQuote(`model_provider="cicy_https"`),
+			"-c " + tmuxShellQuote(`model_providers.cicy_https.name="OpenAI HTTPS"`),
+			"-c " + tmuxShellQuote(`model_providers.cicy_https.base_url="https://chatgpt.com/backend-api/codex"`),
+			"-c " + tmuxShellQuote(`model_providers.cicy_https.requires_openai_auth=true`),
+			"-c " + tmuxShellQuote(`model_providers.cicy_https.supports_websockets=false`),
+			"-c " + tmuxShellQuote(`model_providers.cicy_https.wire_api="responses"`),
+		}, " ")
 		if allowAllActions {
-			lines = append(lines, "codex $CODEX_RESUME "+codexHTTPSArgs+" --dangerously-bypass-approvals-and-sandbox")
+			lines = append(lines, "codex $CODEX_RESUME "+officialHTTPSArgs+" --dangerously-bypass-approvals-and-sandbox")
 		} else {
-			lines = append(lines, "codex $CODEX_RESUME "+codexHTTPSArgs)
+			lines = append(lines, "codex $CODEX_RESUME "+officialHTTPSArgs)
 		}
 		return lines
 	case "gemini":
