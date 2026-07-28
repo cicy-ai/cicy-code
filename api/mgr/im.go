@@ -1506,19 +1506,15 @@ func handleIMAccountByID(w http.ResponseWriter, r *http.Request, id int64, actio
 		case "direct":
 			chatID, createErr = feishuOpenDirectChat(acc, chatName)
 		case "group":
-			missing, permErr := feishuGroupBindMissingPermissions(acc)
-			if permErr != nil {
-				httpErr(w, 502, "飞书权限检测失败: "+permErr.Error())
-				return
-			}
-			if len(missing) > 0 {
-				authURL := fmt.Sprintf(
-					"https://open.feishu.cn/app/%s/auth?q=im:chat:create,im:message.group_msg,im:resource&op_from=openapi&token_type=tenant",
-					acc.configString("app_id"),
-				)
-				httpErr(w, 403, "新建 Agent 群聊需要以下权限："+strings.Join(missing, "、")+"。请授权后发布新版本。\n"+authURL)
-				return
-			}
+			// Do not gate a real bind on synthetic permission probes. Feishu can
+			// reject the probes for their fake chat/member IDs (or require an
+			// unrelated read scope), which previously produced a false "missing
+			// permission" result even after the app had been authorized.
+			//
+			// Creating and binding the group only requires the real create-chat
+			// call below to succeed. im:message.group_msg and im:resource affect
+			// subsequent receive/media behavior and remain visible in the setup
+			// health check, but must not prevent the group itself from binding.
 			chatID, createErr = feishuCreateChat(acc, chatName)
 		default:
 			httpErr(w, 400, "mode must be direct or group")
