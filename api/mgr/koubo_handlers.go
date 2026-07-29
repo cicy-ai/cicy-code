@@ -89,7 +89,10 @@ func handleKouboStartOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
-	out, err := runKouboSkill(ctx, "open-or-start")
+	// The renderer owns Electron tab activation through its native RPC bridge.
+	// Keep this endpoint responsible only for making the service healthy; this
+	// avoids stale agent-electron CLI commands and duplicate BrowserWindows.
+	out, err := runKouboSkill(ctx, "start", "--no-open")
 	if err != nil {
 		message := strings.TrimSpace(string(out))
 		if message == "" {
@@ -98,5 +101,9 @@ func handleKouboStartOpen(w http.ResponseWriter, r *http.Request) {
 		J(w, M{"success": false, "error": message})
 		return
 	}
-	J(w, M{"success": true, "output": strings.TrimSpace(string(out))})
+	J(w, M{
+		"success": true,
+		"output":  strings.TrimSpace(string(out)),
+		"url":     "http://127.0.0.1:8770",
+	})
 }

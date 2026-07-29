@@ -15,7 +15,7 @@ import CurrentHistoryView from '../chat/CurrentHistoryView'
 import DispatcherChat from '../chat/DispatcherChat'
 import { isCicyLiteAgent } from '../../lib/agentType'
 import { replAttachmentMarkdown } from '../../lib/attachmentMarkdown'
-import { openOrActivateElectronProfileTab } from '../../lib/speedup/rpc'
+import { openOrActivateElectronProfileTab, openOrActivateElectronWindow } from '../../lib/speedup/rpc'
 import apiService from '../../services/api'
 
 const HELP_TOPICS = [
@@ -850,6 +850,7 @@ function AgentStackCard({
   const [editingTitle, setEditingTitle] = useState(false)
   const [kouboBusy, setKouboBusy] = useState(false)
   const [kouboHealthy, setKouboHealthy] = useState(false)
+  const kouboOpeningRef = useRef(false)
   const [titleDraft, setTitleDraft] = useState('')
   const titleInputRef = useRef<HTMLInputElement | null>(null)
   // IME composition tracking. On Mac's built-in Pinyin IME pressing Enter
@@ -910,6 +911,7 @@ function AgentStackCard({
 
   const displayTitle = item.title || item.paneId
   const isKouboAgent = item.roleTemplate === 'koubo'
+  const hasElectronEnvironment = typeof (window as any).electronRPC === 'function'
 
   useEffect(() => {
     if (!isKouboAgent) return
@@ -924,19 +926,33 @@ function AgentStackCard({
 
   const handleStartOpenKoubo = useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
-    if (kouboBusy) return
+    if (kouboBusy || kouboOpeningRef.current) return
+    kouboOpeningRef.current = true
     setKouboBusy(true)
     try {
-      const response: any = await apiService.startOpenKoubo(item.paneId)
-      if (response?.data?.success !== true) throw new Error(response?.data?.error || '口播工作台启动失败')
+      let url = 'http://127.0.0.1:8770'
+      if (!kouboHealthy) {
+        const response: any = await apiService.startOpenKoubo(item.paneId)
+        if (response?.data?.success !== true) throw new Error(response?.data?.error || '口播工作台启动失败')
+        url = response?.data?.url || url
+      }
+      const opened = await openOrActivateElectronWindow(
+        url,
+        1,
+        { x: 132, y: 33, width: 1406, height: 945 },
+      )
+      if (!opened) {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      }
       setKouboHealthy(true)
       window.dispatchEvent(new CustomEvent('show-toast', { detail: '口播工作台已在 Electron Profile 1 打开' }))
     } catch (error: any) {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: error?.response?.data?.error || error?.message || '口播工作台启动失败' }))
     } finally {
+      kouboOpeningRef.current = false
       setKouboBusy(false)
     }
-  }, [item.paneId, kouboBusy])
+  }, [item.paneId, kouboBusy, kouboHealthy])
 
   const beginTitleEdit = useCallback(() => {
     if (!onRenamePaneTitle) return
@@ -1185,7 +1201,7 @@ function AgentStackCard({
           {showHeaderButtons ? (
             <HelpDocsLink paneId={item.paneId} compact={splitControl.isSplit} />
           ) : null}
-          {isKouboAgent ? (
+          {isKouboAgent && hasElectronEnvironment ? (
             <button
               type="button"
               data-id={`agent-stack-card-koubo-open-${item.paneId}`}

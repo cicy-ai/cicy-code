@@ -58,6 +58,43 @@ export async function openOrActivateElectronProfileTab(url: string, accountIdx =
   return true;
 }
 
+/**
+ * Open a standalone Electron BrowserWindow exactly once. Existing matching
+ * URLs are restored/shown/focused natively; only a missing URL creates a
+ * window, using the requested bounds.
+ */
+export async function openOrActivateElectronWindow(
+  url: string,
+  accountIdx = 1,
+  bounds: { x: number; y: number; width: number; height: number },
+): Promise<boolean> {
+  if (typeof (window as any).electronRPC !== 'function') return false;
+  const listed = parseElectronRPCJSON(await electronRPC('get_windows', {}));
+  const windows: any[] = Array.isArray(listed) ? listed : [];
+  const wanted = comparableTabUrl(url);
+  const existing = windows.find((win) =>
+    win?.id != null &&
+    win?.status !== 'closed' &&
+    typeof win?.url === 'string' &&
+    comparableTabUrl(win.url) === wanted,
+  );
+  if (existing) {
+    await electronRPC('control_electron_BrowserWindow', {
+      win_id: existing.id,
+      code: '(win.isMinimized()&&win.restore(),win.show(),win.focus())',
+    });
+    return true;
+  }
+  await electronRPC('open_window', {
+    url,
+    accountIdx,
+    reuseWindow: false,
+    background: false,
+    options: bounds,
+  });
+  return true;
+}
+
 // exec_shell has a ~30s hard timeout on the cicy-desktop side. Use this for
 // short queries only (curl probes, version checks, config writes).
 export async function execShell(command: string): Promise<string> {
