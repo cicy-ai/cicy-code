@@ -356,7 +356,7 @@ function accountsToLogins(accounts: any): LoginRec[] {
     name: svc,
     username: (v && typeof v === 'object' ? v.account : v) || '',
     email: svc === 'gmail' || svc === 'google' ? ((v && v.account) || '') : '',
-    twofa: v && v.totp ? '✓' : '',
+    twofa: v && typeof v === 'object' ? (v.totp || '') : '',
   }));
 }
 // Merge manual logins with account-derived rows; a manual record of the same
@@ -981,6 +981,21 @@ export default function BrowserWindowsPanel({
     return () => clearInterval(id);
   }, [refreshDevices]);
 
+  // Profile details are edited from the selected profile column, while this
+  // list owns a separate snapshot. Keep fields changed in the modal (such as a
+  // freshly probed exit IP) in sync without requiring a manual list refresh.
+  useEffect(() => {
+    const onProfileUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<Partial<Profile> & { key?: string }>).detail;
+      if (!detail?.key) return;
+      setProfiles((current) => current.map((profile) => (
+        profile.key === detail.key ? { ...profile, ...detail } : profile
+      )));
+    };
+    window.addEventListener('cicy-profile-updated', onProfileUpdated);
+    return () => window.removeEventListener('cicy-profile-updated', onProfileUpdated);
+  }, []);
+
   const refresh = useCallback(async () => {
     if (!clientId) { setProfiles([]); setPhones([]); return; }
     // Desktop snapshots have no profile/phone list — the body renders the
@@ -1480,7 +1495,11 @@ function LoginTable({ logins, busy, onSet, onRemove }: {
                   {c.key === 'loginAt' || c.key === 'updatedAt' ? (
                     <span className="px-1.5 text-zinc-500 whitespace-nowrap">{fmtLoginTime(l[c.key])}</span>
                   ) : c.editable ? (
-                    <LoginCell value={(l[c.key] as string) || ''} disabled={busy} onSave={(v) => onSet({ name: l.name, [c.key]: v })} />
+                    <LoginCell
+                      value={(l[c.key] as string) || ''}
+                      disabled={busy}
+                      onSave={(v) => onSet({ ...l, [c.key]: v })}
+                    />
                   ) : (
                     <span className="px-1.5 text-zinc-100 font-medium whitespace-nowrap">{(l[c.key] as string) || '—'}</span>
                   )}
@@ -1564,7 +1583,13 @@ function ProfileConfigModal({ clientId, profile, onClose }: { clientId: string; 
   const onProbeIp = async () => {
     if (probing) return;
     setProbing(true); setErr('');
-    try { setIpInfo(await probeProfileIp(clientId, profile)); }
+    try {
+      const nextIpInfo = await probeProfileIp(clientId, profile);
+      setIpInfo(nextIpInfo);
+      window.dispatchEvent(new CustomEvent('cicy-profile-updated', {
+        detail: { key: profile.key, ipInfo: nextIpInfo || undefined },
+      }));
+    }
     catch (e: any) { setErr(e?.message || String(e)); }
     finally { setProbing(false); }
   };
