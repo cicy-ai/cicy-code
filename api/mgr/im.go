@@ -757,6 +757,48 @@ func imExistingNamedChatBinding(accID int64, paneID, bindingType string) (chatID
 	return chatID, strings.TrimSpace(chatName), err == nil && chatID != ""
 }
 
+// imSyncFeishuGroupTitles updates every dedicated Feishu group bound to an
+// Agent. Bot direct chats are intentionally excluded because their title is
+// controlled by Feishu rather than cicy-code.
+func imSyncFeishuGroupTitles(paneID, title string) (updated int, failures []string) {
+	paneID = normPaneID(strings.TrimSpace(paneID))
+	title = strings.TrimSpace(title)
+	if store == nil || paneID == "" || title == "" {
+		return 0, nil
+	}
+	chatName := title + " · " + shortPaneID(paneID)
+	rows, err := store.Query(`SELECT b.account_id, b.chat_id
+		FROM im_chat_bindings b
+		JOIN im_accounts a ON a.id=b.account_id
+		WHERE b.pane_id=? AND b.binding_type='group' AND a.platform=?`,
+		paneID, imPlatformFeishu)
+	if err != nil {
+		return 0, []string{err.Error()}
+	}
+	defer rows.Close()
+	var bindings []imChatBinding
+	for rows.Next() {
+		var binding imChatBinding
+		if err := rows.Scan(&binding.AccountID, &binding.ChatID); err == nil {
+			bindings = append(bindings, binding)
+		}
+	}
+	for _, binding := range bindings {
+		acc, err := imGetAccount(binding.AccountID)
+		if err == nil && acc != nil {
+			err = feishuUpdateChatName(acc, binding.ChatID, chatName)
+		}
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("account=%d chat=%s: %v", binding.AccountID, binding.ChatID, err))
+			continue
+		}
+		_, _ = store.Exec(`UPDATE im_chat_bindings SET chat_name=?, updated_at=datetime('now')
+			WHERE account_id=? AND chat_id=?`, chatName, binding.AccountID, binding.ChatID)
+		updated++
+	}
+	return updated, failures
+}
+
 // Serialize group creation so concurrent clicks cannot both pass the local
 // existence check before either request has persisted its binding.
 var imFeishuGroupCreateMu sync.Mutex

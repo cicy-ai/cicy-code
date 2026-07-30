@@ -451,4 +451,5 @@
   "marketplaceUpdateAllCount": "Update all ({{count}})",
   "marketplaceUpdatingAll": "Updating all…",
   "marketplaceUpdateAllResult": "Update complete: {{succeeded}} succeeded, {{failed}} failed"
+  ,"agentTitleFeishuSyncFailed": "The Agent title was updated, but some Feishu group names could not be synced. Check the app's im:chat:update permission."
 }

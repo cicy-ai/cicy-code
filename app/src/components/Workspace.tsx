@@ -820,7 +820,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     try { chatWs.send({ type: 'poll_request' }); } catch {}
   }, [paneId, patchSharedAgentDetail]);
   const handleRenamePaneTitle = useCallback(async (targetPaneId: string, nextTitle: string) => {
-    await apiService.updatePane(targetPaneId, { title: nextTitle });
+    const response: any = await apiService.updatePane(targetPaneId, { title: nextTitle });
     applyPanePatch(targetPaneId, { title: nextTitle });
     setBoundAgents(prev => prev.map((item: any) => {
       const id = String(item?.name || item?.pane_id || '').replace(/:.*$/, '');
@@ -830,7 +830,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       const { data } = await apiService.getPanes();
       setAgents(Array.isArray(data) ? data : data?.panes || []);
     } catch {}
-  }, [applyPanePatch]);
+    const failures = response?.data?.feishu_title_sync?.failures;
+    if (Array.isArray(failures) && failures.length > 0) {
+      window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: t('agentTitleFeishuSyncFailed'),
+      }));
+    }
+  }, [applyPanePatch, t]);
 
   const refreshPanes = useCallback(async () => {
     if (!token) return;

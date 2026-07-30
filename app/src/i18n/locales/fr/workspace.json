@@ -448,4 +448,5 @@
   "marketplaceUpdateAllCount": "Tout mettre à jour ({{count}})",
   "marketplaceUpdatingAll": "Mise à jour en cours…",
   "marketplaceUpdateAllResult": "Mise à jour terminée : {{succeeded}} réussies, {{failed}} échouées"
+  ,"agentTitleFeishuSyncFailed": "Le titre de l’Agent a été mis à jour, mais certains noms de groupes Feishu n’ont pas pu être synchronisés. Vérifiez l’autorisation im:chat:update de l’application."
 }

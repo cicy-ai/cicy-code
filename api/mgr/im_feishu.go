@@ -587,6 +587,46 @@ func feishuDeleteChat(acc *imAccount, chatID string) error {
 	return nil
 }
 
+// feishuUpdateChatName keeps an Agent's dedicated group title aligned with the
+// title shown in cicy-code. Direct chats are never passed to this helper.
+func feishuUpdateChatName(acc *imAccount, chatID, name string) error {
+	chatID = strings.TrimSpace(chatID)
+	name = strings.TrimSpace(name)
+	if chatID == "" || name == "" {
+		return fmt.Errorf("chat id/name required")
+	}
+	tr, err := newFeishuTransport(acc)
+	if err != nil {
+		return err
+	}
+	ft := tr.(*feishuTransport)
+	token, err := ft.tenantToken()
+	if err != nil {
+		return err
+	}
+	body, _ := json.Marshal(M{"name": name})
+	req, _ := http.NewRequest(http.MethodPut, feishuBaseURL+"/open-apis/im/v1/chats/"+chatID, strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return fmt.Errorf("更新飞书群名失败: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var out struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if json.Unmarshal(raw, &out) != nil {
+		return fmt.Errorf("更新飞书群名返回异常")
+	}
+	if out.Code != 0 {
+		return fmt.Errorf("更新飞书群名失败 code=%d: %s", out.Code, strings.TrimSpace(out.Msg))
+	}
+	return nil
+}
+
 // feishuOpenDirectChat opens or reuses the app bot's single P2P conversation
 // with the current user and returns its chat_id.
 func feishuOpenDirectChat(acc *imAccount, name string) (string, error) {
@@ -687,14 +727,24 @@ func (t *feishuTransport) Send(peer botPeer, text string) (string, error) {
 	if chatID == "" {
 		return "", fmt.Errorf("feishu send: empty chat_id")
 	}
+	text = imClampMessage(text)
 	token, err := t.tenantToken()
 	if err != nil {
 		return "", err
 	}
-	content, _ := json.Marshal(map[string]string{"text": text})
+	// Feishu has no standalone markdown message type. Markdown is rendered by
+	// placing an `md` node inside a rich-text `post` message.
+	content, _ := json.Marshal(M{
+		"zh_cn": M{
+			"content": [][]M{{{
+				"tag":  "md",
+				"text": text,
+			}}},
+		},
+	})
 	body, _ := json.Marshal(map[string]string{
 		"receive_id": chatID,
-		"msg_type":   "text",
+		"msg_type":   "post",
 		"content":    string(content),
 	})
 	req, _ := http.NewRequest(http.MethodPost, feishuBaseURL+"/open-apis/im/v1/messages?receive_id_type=chat_id", strings.NewReader(string(body)))

@@ -170,6 +170,44 @@ func TestFeishuDeleteChat(t *testing.T) {
 	}
 }
 
+func TestFeishuUpdateChatName(t *testing.T) {
+	var gotMethod, gotName string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
+			_, _ = w.Write([]byte(`{"code":0,"msg":"ok","tenant_access_token":"tenant-token","expire":3600}`))
+		case "/open-apis/im/v1/chats/oc_group":
+			gotMethod = r.Method
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			gotName = body["name"]
+			_, _ = w.Write([]byte(`{"code":0,"msg":"success"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	oldBaseURL := feishuBaseURL
+	feishuBaseURL = server.URL
+	defer func() { feishuBaseURL = oldBaseURL }()
+
+	err := feishuUpdateChatName(&imAccount{
+		ID:       1,
+		Platform: imPlatformFeishu,
+		Secret:   "secret",
+		Config:   map[string]any{"app_id": "cli_test"},
+	}, "oc_group", "新标题 · w-10265")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != http.MethodPut || gotName != "新标题 · w-10265" {
+		t.Fatalf("method=%q name=%q", gotMethod, gotName)
+	}
+}
+
 func TestFeishuOpenDirectChat(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -201,6 +239,70 @@ func TestFeishuOpenDirectChat(t *testing.T) {
 	}
 	if chatID != "oc_direct" {
 		t.Fatalf("chat id = %q", chatID)
+	}
+}
+
+func TestFeishuSendUsesMarkdownPost(t *testing.T) {
+	var gotBody struct {
+		ReceiveID string `json:"receive_id"`
+		MsgType   string `json:"msg_type"`
+		Content   string `json:"content"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
+			_, _ = w.Write([]byte(`{"code":0,"msg":"ok","tenant_access_token":"tenant-token","expire":3600}`))
+		case "/open-apis/im/v1/messages":
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"msg":"success","data":{"message_id":"om_markdown"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	oldBaseURL := feishuBaseURL
+	feishuBaseURL = server.URL
+	defer func() { feishuBaseURL = oldBaseURL }()
+
+	tr, err := newFeishuTransport(&imAccount{
+		ID:       1,
+		Platform: imPlatformFeishu,
+		Secret:   "secret",
+		Config:   map[string]any{"app_id": "cli_test"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageID, err := tr.Send(botPeer{ChatID: "oc_markdown"}, " **粗体** 和 [链接](https://example.com) ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageID != "om_markdown" {
+		t.Fatalf("message id = %q", messageID)
+	}
+	if gotBody.ReceiveID != "oc_markdown" || gotBody.MsgType != "post" {
+		t.Fatalf("receive_id=%q msg_type=%q", gotBody.ReceiveID, gotBody.MsgType)
+	}
+	var content struct {
+		ZhCN struct {
+			Content [][]struct {
+				Tag  string `json:"tag"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"zh_cn"`
+	}
+	if err := json.Unmarshal([]byte(gotBody.Content), &content); err != nil {
+		t.Fatal(err)
+	}
+	if len(content.ZhCN.Content) != 1 || len(content.ZhCN.Content[0]) != 1 {
+		t.Fatalf("content = %#v", content.ZhCN.Content)
+	}
+	node := content.ZhCN.Content[0][0]
+	if node.Tag != "md" || node.Text != "**粗体** 和 [链接](https://example.com)" {
+		t.Fatalf("markdown node = %#v", node)
 	}
 }
 

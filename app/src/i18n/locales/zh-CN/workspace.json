@@ -451,4 +451,5 @@
   "marketplaceUpdateAllCount": "全部更新 ({{count}})",
   "marketplaceUpdatingAll": "正在全部更新…",
   "marketplaceUpdateAllResult": "更新完成：成功 {{succeeded}}，失败 {{failed}}"
+  ,"agentTitleFeishuSyncFailed": "Agent 标题已更新，但部分飞书群名同步失败，请检查该飞书 App 的 im:chat:update 权限。"
 }

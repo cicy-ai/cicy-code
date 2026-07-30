@@ -1350,7 +1350,17 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	_ = res
 
-	J(w, M{"success": true, "pane_id": shortPaneID(paneID), "updated": filtered})
+	response := M{"success": true, "pane_id": shortPaneID(paneID), "updated": filtered}
+	if rawTitle, ok := filtered["title"]; ok {
+		if title, ok := rawTitle.(string); ok && strings.TrimSpace(title) != "" {
+			updated, failures := imSyncFeishuGroupTitles(paneID, title)
+			response["feishu_title_sync"] = M{"updated": updated, "failures": failures}
+			for _, failure := range failures {
+				log.Printf("[feishu] title sync failed pane=%s: %s", shortPaneID(paneID), failure)
+			}
+		}
+	}
+	J(w, response)
 }
 
 func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
