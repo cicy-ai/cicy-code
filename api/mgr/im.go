@@ -458,6 +458,8 @@ func imBuildTransport(acc *imAccount) (botTransport, error) {
 		return newWeChatTransport(acc)
 	case imPlatformFeishu:
 		return newFeishuTransport(acc)
+	case imPlatformCiCyCloud:
+		return newCiCyCloudTransport(acc)
 	default:
 		return nil, fmt.Errorf("unsupported IM platform %q", acc.Platform)
 	}
@@ -1025,6 +1027,9 @@ func imTransportFor(accID int64) botTransport {
 }
 
 func imManagerStart() {
+	if err := ensureCiCyCloudAccountFromEnvironment(); err != nil {
+		log.Printf("[im-cloud] restore account failed: %v", err)
+	}
 	imReconcile()
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)

@@ -285,6 +285,8 @@ const api = {
   cancelWeChatLogin: (sessionId: string) => http.post(`/api/im/wechat/login/${encodeURIComponent(sessionId)}/cancel`),
   startCiCyCloudLogin: (email: string) => http.post('/api/im/cicy-cloud/login', { email }),
   getCiCyCloudLoginStatus: (state: string) => http.get(`/api/im/cicy-cloud/login/${encodeURIComponent(state)}`),
+  getCiCyCloudInstances: () => http.get('/api/im/cicy-cloud/instances'),
+  sendCiCyCloudMessage: (targetInstanceId: string, text: string) => http.post('/api/im/cicy-cloud/send', { target_instance_id: targetInstanceId, text }),
 
   getTokens: () => http.get('/api/auth/tokens'),
   createToken: (data: any) => http.post('/api/auth/tokens', data),

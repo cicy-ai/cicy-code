@@ -135,10 +135,10 @@ func upsertCiCyCloudIMAccount(cred cicyCloudCredential) (*imAccount, error) {
 	var id int64
 	err := store.QueryRow("SELECT id FROM im_accounts WHERE platform=? ORDER BY id LIMIT 1", imPlatformCiCyCloud).Scan(&id)
 	if err == nil {
-		_, err = store.Exec("UPDATE im_accounts SET name=?,secret=?,config=?,enabled=0,state='connected',state_detail='',updated_at="+store.Now()+" WHERE id=?",
+		_, err = store.Exec("UPDATE im_accounts SET name=?,secret=?,config=?,enabled=1,state='connected',state_detail='',updated_at="+store.Now()+" WHERE id=?",
 			cred.Email, cred.Token, string(cfg), id)
 	} else {
-		res, insertErr := store.Exec("INSERT INTO im_accounts (platform,name,secret,config,enabled,state,state_detail,inbound_to_agent) VALUES (?,?,?,?,0,'connected','',1)",
+		res, insertErr := store.Exec("INSERT INTO im_accounts (platform,name,secret,config,enabled,state,state_detail,inbound_to_agent,bound_pane_id) VALUES (?,?,?,?,1,'connected','',1,'w-1001')",
 			imPlatformCiCyCloud, cred.Email, cred.Token, string(cfg))
 		if insertErr != nil {
 			return nil, insertErr
@@ -152,7 +152,135 @@ func upsertCiCyCloudIMAccount(cred cicyCloudCredential) (*imAccount, error) {
 	return imGetAccount(id)
 }
 
+func ensureCiCyCloudAccountFromEnvironment() error {
+	if store == nil {
+		return nil
+	}
+	cred := cicyCloudCredential{
+		Email:      strings.TrimSpace(os.Getenv("CICY_CLOUD_EMAIL")),
+		InstanceID: strings.TrimSpace(os.Getenv("CICY_CLOUD_INSTANCE_ID")),
+		Token:      strings.TrimSpace(os.Getenv("CICY_CLOUD_TOKEN")),
+		Origin:     cicyCloudOrigin(),
+	}
+	if data, err := os.ReadFile(cicyCloudCredentialPath()); err == nil {
+		var saved cicyCloudCredential
+		if json.Unmarshal(data, &saved) == nil {
+			if cred.Email == "" {
+				cred.Email = saved.Email
+			}
+			if cred.InstanceID == "" {
+				cred.InstanceID = saved.InstanceID
+			}
+			if cred.Token == "" {
+				cred.Token = saved.Token
+			}
+			if saved.Origin != "" {
+				cred.Origin = saved.Origin
+			}
+		}
+	}
+	if cred.Email == "" || cred.InstanceID == "" || cred.Token == "" {
+		return nil
+	}
+	_, err := upsertCiCyCloudIMAccount(cred)
+	return err
+}
+
+type cicyCloudTransport struct {
+	accountID int64
+	token     string
+}
+
+func newCiCyCloudTransport(acc *imAccount) (botTransport, error) {
+	if strings.TrimSpace(acc.Secret) == "" {
+		return nil, fmt.Errorf("CiCy Cloud token missing")
+	}
+	return &cicyCloudTransport{accountID: acc.ID, token: strings.TrimSpace(acc.Secret)}, nil
+}
+
+func (t *cicyCloudTransport) Kind() string                       { return imPlatformCiCyCloud }
+func (t *cicyCloudTransport) CanEdit() bool                      { return false }
+func (t *cicyCloudTransport) Edit(botPeer, string, string) error { return errBotEditUnsupported }
+func (t *cicyCloudTransport) Typing(botPeer) error               { return nil }
+
+func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
+	route := "/api/code/messages/poll"
+	if strings.TrimSpace(cursor) != "" {
+		route += "?ack=" + strings.TrimSpace(cursor)
+	}
+	var out struct {
+		Messages []struct {
+			ID               string `json:"id"`
+			SenderInstanceID string `json:"senderInstanceId"`
+			Text             string `json:"text"`
+		} `json:"messages"`
+	}
+	if err := cloudJSON(http.MethodGet, route, t.token, nil, &out); err != nil {
+		return nil, cursor, err
+	}
+	if len(out.Messages) == 0 {
+		time.Sleep(2 * time.Second)
+		return nil, "", nil
+	}
+	msgs := make([]botMsg, 0, len(out.Messages))
+	ids := make([]string, 0, len(out.Messages))
+	for _, item := range out.Messages {
+		ids = append(ids, item.ID)
+		msgs = append(msgs, botMsg{Text: item.Text, FromID: item.SenderInstanceID,
+			Peer: botPeer{ChatID: item.SenderInstanceID}})
+	}
+	return msgs, strings.Join(ids, ","), nil
+}
+
+func (t *cicyCloudTransport) Send(peer botPeer, text string) (string, error) {
+	var out struct {
+		Message struct {
+			ID string `json:"id"`
+		} `json:"message"`
+	}
+	err := cloudJSON(http.MethodPost, "/api/code/messages", t.token, M{
+		"targetInstanceId": strings.TrimSpace(peer.ChatID), "text": text,
+	}, &out)
+	return out.Message.ID, err
+}
+
 func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []string) {
+	if len(parts) >= 2 && parts[1] == "instances" && r.Method == http.MethodGet {
+		var token string
+		_ = store.QueryRow("SELECT secret FROM im_accounts WHERE platform=? ORDER BY id LIMIT 1", imPlatformCiCyCloud).Scan(&token)
+		if strings.TrimSpace(token) == "" {
+			httpErr(w, 401, "CiCy Cloud account not connected")
+			return
+		}
+		var out any
+		if err := cloudJSON(http.MethodGet, "/api/code/instances", token, nil, &out); err != nil {
+			httpErr(w, 502, err.Error())
+			return
+		}
+		J(w, out)
+		return
+	}
+	if len(parts) >= 2 && parts[1] == "send" && r.Method == http.MethodPost {
+		var in struct {
+			TargetInstanceID string `json:"target_instance_id"`
+			Text             string `json:"text"`
+		}
+		if readBody(r, &in) != nil || strings.TrimSpace(in.TargetInstanceID) == "" || strings.TrimSpace(in.Text) == "" {
+			httpErr(w, 400, "target_instance_id and text required")
+			return
+		}
+		var token string
+		_ = store.QueryRow("SELECT secret FROM im_accounts WHERE platform=? ORDER BY id LIMIT 1", imPlatformCiCyCloud).Scan(&token)
+		var out any
+		if err := cloudJSON(http.MethodPost, "/api/code/messages", token, M{
+			"targetInstanceId": strings.TrimSpace(in.TargetInstanceID), "text": strings.TrimSpace(in.Text),
+		}, &out); err != nil {
+			httpErr(w, 502, err.Error())
+			return
+		}
+		J(w, out)
+		return
+	}
 	// POST /api/im/cicy-cloud/login; GET /api/im/cicy-cloud/login/{state}
 	if len(parts) < 2 || parts[1] != "login" {
 		httpErr(w, 404, "not found")

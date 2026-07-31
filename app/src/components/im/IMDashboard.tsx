@@ -311,8 +311,36 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const [cloudState, setCloudState] = useState('');
   const [cloudSubmitting, setCloudSubmitting] = useState(false);
   const [cloudError, setCloudError] = useState('');
+  const [cloudInstances, setCloudInstances] = useState<Array<{ instanceId: string; platform: string; runtime: string; status: string }>>([]);
+  const [cloudTarget, setCloudTarget] = useState('');
+  const [cloudMessage, setCloudMessage] = useState('');
+  const [cloudSending, setCloudSending] = useState(false);
 
   const selected = useMemo(() => accounts.find((a) => a.id === selectedId) || null, [accounts, selectedId]);
+
+  useEffect(() => {
+    if (selected?.platform !== 'cicy_cloud') return;
+    let stopped = false;
+    apiService.getCiCyCloudInstances().then((res) => {
+      if (stopped) return;
+      const current = String(selected.config?.instance_id || '');
+      const list = ((res?.data?.instances || []) as Array<{ instanceId: string; platform: string; runtime: string; status: string }>)
+        .filter((item) => item.instanceId !== current);
+      setCloudInstances(list);
+      setCloudTarget((value) => value && list.some((item) => item.instanceId === value) ? value : (list[0]?.instanceId || ''));
+    }).catch((e) => { if (!stopped) setCloudError(errText(e)); });
+    return () => { stopped = true; };
+  }, [selected]);
+
+  const sendCloudMessage = async () => {
+    if (!cloudTarget || !cloudMessage.trim()) return;
+    setCloudSending(true); setCloudError('');
+    try {
+      await apiService.sendCiCyCloudMessage(cloudTarget, cloudMessage.trim());
+      setCloudMessage(''); toast('消息已发送');
+    } catch (e) { setCloudError(errText(e)); }
+    finally { setCloudSending(false); }
+  };
 
   /* ---- editor sync ---- */
   // Default new accounts to w-1001 (the primary built-in pane). If acc has no
@@ -1015,6 +1043,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const isTelegram = selected?.platform === 'telegram';
   const isWeChat = selected?.platform === 'wechat';
   const isFeishu = selected?.platform === 'feishu';
+  const isCloud = selected?.platform === 'cicy_cloud';
   const testOk = !!(testRes && (testRes.ok || testRes.success));
   const testFail = !!(testRes && !testOk);
 
@@ -1132,6 +1161,25 @@ export default function IMDashboard({ leftMount, rightMount }: {
                 </div>
               )}
             </section>
+
+            {isCloud && (
+              <section data-id="im-detail-section-cloud-message" className="space-y-3.5">
+                <SectionHeader>发送到 cicy-code Instance</SectionHeader>
+                <Field label="目标 Instance">
+                  <select value={cloudTarget} onChange={(e) => setCloudTarget(e.target.value)} className={INPUT}>
+                    {cloudInstances.length === 0 && <option value="">没有其他在线 Instance</option>}
+                    {cloudInstances.map((item) => <option key={item.instanceId} value={item.instanceId}>{item.platform}/{item.runtime} · {item.instanceId.slice(0, 14)}… · {item.status}</option>)}
+                  </select>
+                </Field>
+                <Field label="消息" help="消息会发送到目标实例绑定的 Agent，回复会回到当前实例。">
+                  <textarea value={cloudMessage} onChange={(e) => setCloudMessage(e.target.value)} rows={4}
+                    className={cn(INPUT, 'h-auto resize-y py-2')} placeholder="输入消息或任务…" />
+                </Field>
+                {cloudError && <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[12px] text-red-300">{cloudError}</div>}
+                <Btn variant="primary" size="md" icon={<Send size={13} />} busy={cloudSending}
+                  disabled={cloudSending || !cloudTarget || !cloudMessage.trim()} onClick={() => void sendCloudMessage()}>发送消息</Btn>
+              </section>
+            )}
 
             {/* Agent binding */}
             <section data-id="im-detail-section-binding" className="space-y-3.5">
