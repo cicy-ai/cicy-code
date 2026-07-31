@@ -10,11 +10,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -187,8 +190,10 @@ func ensureCiCyCloudAccountFromEnvironment() error {
 }
 
 type cicyCloudTransport struct {
-	accountID int64
-	token     string
+	accountID    int64
+	token        string
+	presenceMu   sync.Mutex
+	lastPresence time.Time
 }
 
 func newCiCyCloudTransport(acc *imAccount) (botTransport, error) {
@@ -204,6 +209,7 @@ func (t *cicyCloudTransport) Edit(botPeer, string, string) error { return errBot
 func (t *cicyCloudTransport) Typing(botPeer) error               { return nil }
 
 func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
+	t.reportAllAgents()
 	route := "/api/code/messages/poll"
 	if strings.TrimSpace(cursor) != "" {
 		route += "?ack=" + strings.TrimSpace(cursor)
@@ -212,6 +218,8 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 		Messages []struct {
 			ID               string `json:"id"`
 			SenderInstanceID string `json:"senderInstanceId"`
+			SenderAgentID    string `json:"senderAgentId"`
+			TargetAgentID    string `json:"targetAgentId"`
 			Text             string `json:"text"`
 		} `json:"messages"`
 	}
@@ -226,8 +234,13 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 	ids := make([]string, 0, len(out.Messages))
 	for _, item := range out.Messages {
 		ids = append(ids, item.ID)
+		peer := item.SenderInstanceID
+		if item.SenderAgentID != "" {
+			peer += "|" + item.SenderAgentID
+		}
 		msgs = append(msgs, botMsg{Text: item.Text, FromID: item.SenderInstanceID,
-			Peer: botPeer{ChatID: item.SenderInstanceID}})
+			TargetPaneID: item.TargetAgentID,
+			Peer:         botPeer{ChatID: peer, ContextToken: item.TargetAgentID}})
 	}
 	return msgs, strings.Join(ids, ","), nil
 }
@@ -238,14 +251,79 @@ func (t *cicyCloudTransport) Send(peer botPeer, text string) (string, error) {
 			ID string `json:"id"`
 		} `json:"message"`
 	}
+	targetInstance, targetAgent := splitCiCyCloudPeer(peer.ChatID)
 	err := cloudJSON(http.MethodPost, "/api/code/messages", t.token, M{
-		"targetInstanceId": strings.TrimSpace(peer.ChatID), "text": text,
+		"targetInstanceId": targetInstance, "targetAgentId": targetAgent,
+		"senderAgentId": strings.TrimSpace(peer.ContextToken), "text": text,
 	}, &out)
 	return out.Message.ID, err
 }
 
+func splitCiCyCloudPeer(peer string) (string, string) {
+	parts := strings.SplitN(strings.TrimSpace(peer), "|", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return parts[0], ""
+}
+
+// reportAllAgents follows cicy-hub's full-snapshot presence model: every report
+// replaces this instance's directory, so deleted agents disappear naturally.
+func (t *cicyCloudTransport) reportAllAgents() {
+	t.presenceMu.Lock()
+	defer t.presenceMu.Unlock()
+	if time.Since(t.lastPresence) < 15*time.Second {
+		return
+	}
+	t.lastPresence = time.Now()
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "8008"
+	}
+	u := "http://127.0.0.1:" + port + "/api/panes?token=" + url.QueryEscape(loadAPIToken())
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Get(u)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return
+	}
+	var doc struct {
+		Panes []struct {
+			PaneID         string `json:"pane_id"`
+			ID             string `json:"id"`
+			Title          string `json:"title"`
+			AgentType      string `json:"agent_type"`
+			Role           string `json:"role"`
+			Status         string `json:"status"`
+			Model          string `json:"model"`
+			ContextUsedPct int    `json:"context_used_pct"`
+		} `json:"panes"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&doc) != nil {
+		return
+	}
+	agents := make([]M, 0, len(doc.Panes))
+	for _, p := range doc.Panes {
+		id := strings.TrimSpace(p.PaneID)
+		if id == "" {
+			id = strings.TrimSpace(p.ID)
+		}
+		if id == "" {
+			continue
+		}
+		agents = append(agents, M{"agentId": shortPaneID(id), "title": p.Title,
+			"agentType": p.AgentType, "role": p.Role, "status": p.Status,
+			"model": p.Model, "contextUsedPct": p.ContextUsedPct})
+	}
+	if err := cloudJSON(http.MethodPost, "/api/code/agents", t.token, M{"agents": agents}, nil); err != nil {
+		log.Printf("[im] cicy cloud presence failed: %v", err)
+	}
+}
+
 func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []string) {
-	if len(parts) >= 2 && parts[1] == "instances" && r.Method == http.MethodGet {
+	if len(parts) >= 2 && (parts[1] == "instances" || parts[1] == "agents") && r.Method == http.MethodGet {
 		var token string
 		_ = store.QueryRow("SELECT secret FROM im_accounts WHERE platform=? ORDER BY id LIMIT 1", imPlatformCiCyCloud).Scan(&token)
 		if strings.TrimSpace(token) == "" {
@@ -253,7 +331,11 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			return
 		}
 		var out any
-		if err := cloudJSON(http.MethodGet, "/api/code/instances", token, nil, &out); err != nil {
+		route := "/api/code/instances"
+		if parts[1] == "agents" {
+			route = "/api/code/agents"
+		}
+		if err := cloudJSON(http.MethodGet, route, token, nil, &out); err != nil {
 			httpErr(w, 502, err.Error())
 			return
 		}
@@ -263,6 +345,8 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 	if len(parts) >= 2 && parts[1] == "send" && r.Method == http.MethodPost {
 		var in struct {
 			TargetInstanceID string `json:"target_instance_id"`
+			TargetAgentID    string `json:"target_agent_id"`
+			SenderAgentID    string `json:"sender_agent_id"`
 			Text             string `json:"text"`
 		}
 		if readBody(r, &in) != nil || strings.TrimSpace(in.TargetInstanceID) == "" || strings.TrimSpace(in.Text) == "" {
@@ -273,7 +357,9 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 		_ = store.QueryRow("SELECT secret FROM im_accounts WHERE platform=? ORDER BY id LIMIT 1", imPlatformCiCyCloud).Scan(&token)
 		var out any
 		if err := cloudJSON(http.MethodPost, "/api/code/messages", token, M{
-			"targetInstanceId": strings.TrimSpace(in.TargetInstanceID), "text": strings.TrimSpace(in.Text),
+			"targetInstanceId": strings.TrimSpace(in.TargetInstanceID),
+			"targetAgentId":    strings.TrimSpace(in.TargetAgentID),
+			"senderAgentId":    strings.TrimSpace(in.SenderAgentID), "text": strings.TrimSpace(in.Text),
 		}, &out); err != nil {
 			httpErr(w, 502, err.Error())
 			return

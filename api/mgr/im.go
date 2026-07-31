@@ -70,6 +70,9 @@ type botMsg struct {
 	VoiceData   []byte // raw audio bytes (nil if not voice)
 	VoiceFormat string // "silk", "amr", "ogg", etc.
 	Attachments []botAttachment
+	// TargetPaneID routes machine-to-machine messages to an exact local agent.
+	// Empty keeps the normal per-chat/account binding behaviour used by other IMs.
+	TargetPaneID string
 }
 
 // botTransport abstracts a "bot-shaped" IM platform: a token, long-poll updates,
@@ -580,7 +583,11 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	}
 
 	// 会话级绑定优先(一个 bot 多会话,各会话各自的 agent),没绑再退回账号级绑定。
-	pane := imChatBoundPane(acc.ID, msg.Peer.ChatID)
+	pane := normPaneID(strings.TrimSpace(msg.TargetPaneID))
+	explicitTarget := pane != ""
+	if pane == "" {
+		pane = imChatBoundPane(acc.ID, msg.Peer.ChatID)
+	}
 	if pane == "" {
 		pane = normPaneID(strings.TrimSpace(acc.BoundPaneID))
 	}
@@ -590,7 +597,13 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	}
 	// If the bound agent's tmux session isn't running (offline), fall back to the
 	// master pane w-1001 so the message still reaches an agent instead of failing.
-	if !imPaneSessionOnline(pane) {
+	if explicitTarget && !imPaneSessionOnline(pane) {
+		log.Printf("[im] account=%d exact target pane=%s offline", acc.ID, shortPaneID(pane))
+		imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: msg.Peer,
+			Text: "⚠️ 目标 Agent 当前不在线: " + shortPaneID(pane), Purpose: imOutboundPurposeError})
+		return
+	}
+	if !explicitTarget && !imPaneSessionOnline(pane) {
 		fallback := normPaneID("w-1001")
 		if pane != fallback && imPaneSessionOnline(fallback) {
 			log.Printf("[im] account=%d bound pane=%s offline → fallback to %s", acc.ID, shortPaneID(pane), shortPaneID(fallback))

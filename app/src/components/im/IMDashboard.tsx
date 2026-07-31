@@ -311,7 +311,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const [cloudState, setCloudState] = useState('');
   const [cloudSubmitting, setCloudSubmitting] = useState(false);
   const [cloudError, setCloudError] = useState('');
-  const [cloudInstances, setCloudInstances] = useState<Array<{ instanceId: string; platform: string; runtime: string; status: string }>>([]);
+  const [cloudAgents, setCloudAgents] = useState<Array<{ instanceId: string; agentId: string; title: string; agentType: string; role: string; status: string; platform: string; runtime: string }>>([]);
   const [cloudTarget, setCloudTarget] = useState('');
   const [cloudMessage, setCloudMessage] = useState('');
   const [cloudSending, setCloudSending] = useState(false);
@@ -321,13 +321,13 @@ export default function IMDashboard({ leftMount, rightMount }: {
   useEffect(() => {
     if (selected?.platform !== 'cicy_cloud') return;
     let stopped = false;
-    apiService.getCiCyCloudInstances().then((res) => {
+    apiService.getCiCyCloudAgents().then((res) => {
       if (stopped) return;
       const current = String(selected.config?.instance_id || '');
-      const list = ((res?.data?.instances || []) as Array<{ instanceId: string; platform: string; runtime: string; status: string }>)
+      const list = ((res?.data?.agents || []) as Array<{ instanceId: string; agentId: string; title: string; agentType: string; role: string; status: string; platform: string; runtime: string }>)
         .filter((item) => item.instanceId !== current);
-      setCloudInstances(list);
-      setCloudTarget((value) => value && list.some((item) => item.instanceId === value) ? value : (list[0]?.instanceId || ''));
+      setCloudAgents(list);
+      setCloudTarget((value) => value && list.some((item) => `${item.instanceId}|${item.agentId}` === value) ? value : (list[0] ? `${list[0].instanceId}|${list[0].agentId}` : ''));
     }).catch((e) => { if (!stopped) setCloudError(errText(e)); });
     return () => { stopped = true; };
   }, [selected]);
@@ -336,7 +336,8 @@ export default function IMDashboard({ leftMount, rightMount }: {
     if (!cloudTarget || !cloudMessage.trim()) return;
     setCloudSending(true); setCloudError('');
     try {
-      await apiService.sendCiCyCloudMessage(cloudTarget, cloudMessage.trim());
+      const [targetInstanceId, targetAgentId] = cloudTarget.split('|', 2);
+      await apiService.sendCiCyCloudMessage(targetInstanceId, targetAgentId, selected?.bound_pane_id || 'w-1001', cloudMessage.trim());
       setCloudMessage(''); toast('消息已发送');
     } catch (e) { setCloudError(errText(e)); }
     finally { setCloudSending(false); }
@@ -1167,8 +1168,8 @@ export default function IMDashboard({ leftMount, rightMount }: {
                 <SectionHeader>发送到 cicy-code Instance</SectionHeader>
                 <Field label="目标 Instance">
                   <select value={cloudTarget} onChange={(e) => setCloudTarget(e.target.value)} className={INPUT}>
-                    {cloudInstances.length === 0 && <option value="">没有其他在线 Instance</option>}
-                    {cloudInstances.map((item) => <option key={item.instanceId} value={item.instanceId}>{item.platform}/{item.runtime} · {item.instanceId.slice(0, 14)}… · {item.status}</option>)}
+                    {cloudAgents.length === 0 && <option value="">没有其他可用 Agent</option>}
+                    {cloudAgents.map((item) => <option key={`${item.instanceId}|${item.agentId}`} value={`${item.instanceId}|${item.agentId}`}>{item.platform}/{item.runtime} · {item.agentId} · {item.title || item.agentType} · {item.status}</option>)}
                   </select>
                 </Field>
                 <Field label="消息" help="消息会发送到目标实例绑定的 Agent，回复会回到当前实例。">

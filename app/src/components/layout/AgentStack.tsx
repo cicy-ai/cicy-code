@@ -916,12 +916,21 @@ function AgentStackCard({
   useEffect(() => {
     if (!isKouboAgent) return
     let cancelled = false
-    apiService.getKouboStatus(item.paneId)
-      .then((response: any) => {
-        if (!cancelled) setKouboHealthy(response?.data?.healthy === true)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
+    const refresh = () => {
+      apiService.getKouboStatus(item.paneId)
+        .then((response: any) => {
+          if (!cancelled) setKouboHealthy(response?.data?.healthy === true)
+        })
+        .catch(() => {
+          if (!cancelled) setKouboHealthy(false)
+        })
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
   }, [isKouboAgent, item.paneId])
 
   const handleStartOpenKoubo = useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -931,7 +940,10 @@ function AgentStackCard({
     setKouboBusy(true)
     try {
       let url = 'http://127.0.0.1:8770'
-      if (!kouboHealthy) {
+      const statusResponse: any = await apiService.getKouboStatus(item.paneId).catch(() => null)
+      const healthyNow = statusResponse?.data?.healthy === true
+      setKouboHealthy(healthyNow)
+      if (!healthyNow) {
         const response: any = await apiService.startOpenKoubo(item.paneId)
         if (response?.data?.success !== true) throw new Error(response?.data?.error || '口播工作台启动失败')
         url = response?.data?.url || url

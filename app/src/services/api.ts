@@ -286,7 +286,11 @@ const api = {
   startCiCyCloudLogin: (email: string) => http.post('/api/im/cicy-cloud/login', { email }),
   getCiCyCloudLoginStatus: (state: string) => http.get(`/api/im/cicy-cloud/login/${encodeURIComponent(state)}`),
   getCiCyCloudInstances: () => http.get('/api/im/cicy-cloud/instances'),
-  sendCiCyCloudMessage: (targetInstanceId: string, text: string) => http.post('/api/im/cicy-cloud/send', { target_instance_id: targetInstanceId, text }),
+  getCiCyCloudAgents: () => http.get('/api/im/cicy-cloud/agents'),
+  sendCiCyCloudMessage: (targetInstanceId: string, targetAgentId: string, senderAgentId: string, text: string) => http.post('/api/im/cicy-cloud/send', {
+    target_instance_id: targetInstanceId, target_agent_id: targetAgentId,
+    sender_agent_id: senderAgentId, text,
+  }),
 
   getTokens: () => http.get('/api/auth/tokens'),
   createToken: (data: any) => http.post('/api/auth/tokens', data),
