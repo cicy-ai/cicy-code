@@ -57,6 +57,27 @@ func TestLiteNoRoleNoTools(t *testing.T) {
 	}
 }
 
+func TestLiteUsesPerAgentCloudSystemOverride(t *testing.T) {
+	prev := cicyRootDir
+	cicyRootDir = t.TempDir()
+	resetLiteConfigCache()
+	defer func() { cicyRootDir = prev; resetLiteConfigCache() }()
+	ws := writeAgentsMD(t, "agent guidance")
+	if err := os.MkdirAll(filepath.Join(ws, ".cicy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".cicy", "system.md"), []byte("cloud system"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := resolveLiteConfig("w-1", ws)
+	if cfg.systemPrompt != "cloud system" {
+		t.Fatalf("systemPrompt=%q", cfg.systemPrompt)
+	}
+	if cfg.roleContext != "agent guidance" {
+		t.Fatalf("roleContext=%q", cfg.roleContext)
+	}
+}
+
 // ── custom-tool runner: argv fill-in safety + guardrails ─────────────────────
 
 func TestLiteCustomToolArgvNoShellInjection(t *testing.T) {

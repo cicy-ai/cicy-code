@@ -258,6 +258,78 @@ func collectCiCyCodeTelemetry() cicyCodeTelemetry {
 	return cicyCodeTelemetryValue
 }
 
+type cicyCloudAgentConfig struct {
+	AgentID      string  `json:"agentId"`
+	Title        *string `json:"title"`
+	Guidance     *string `json:"guidance"`
+	SystemPrompt *string `json:"systemPrompt"`
+	Meta         *string `json:"meta"`
+	Version      int64   `json:"version"`
+}
+
+func (t *cicyCloudTransport) syncAgentConfigs() {
+	var out struct {
+		Configs []cicyCloudAgentConfig `json:"configs"`
+	}
+	if err := cloudJSON(http.MethodGet, "/api/code/agent-configs", t.token, nil, &out); err != nil {
+		log.Printf("[im] cicy cloud config poll failed: %v", err)
+		return
+	}
+	results := make([]M, 0, len(out.Configs))
+	for _, cfg := range out.Configs {
+		errText := ""
+		paneID := normPaneID(cfg.AgentID)
+		var workspace string
+		if err := store.QueryRow("SELECT COALESCE(workspace,'') FROM agent_config WHERE pane_id=? AND active=1", paneID).Scan(&workspace); err != nil || strings.TrimSpace(workspace) == "" {
+			errText = "agent_not_found"
+		} else {
+			if cfg.Title != nil {
+				if title := strings.TrimSpace(*cfg.Title); title == "" {
+					errText = "title_required"
+				} else {
+					_, err := store.Exec(fmt.Sprintf("UPDATE agent_config SET title=?,updated_at=%s WHERE pane_id=?", store.Now()), title, paneID)
+					if err != nil {
+						errText = "rename_failed"
+					}
+				}
+			}
+			if errText == "" && cfg.Guidance != nil {
+				path, _, ok := agentGuidancePath(paneID)
+				if !ok {
+					errText = "guidance_not_available"
+				} else if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+					errText = "guidance_mkdir_failed"
+				} else if err := os.WriteFile(path, []byte(*cfg.Guidance), 0644); err != nil {
+					errText = "guidance_write_failed"
+				}
+			}
+			if errText == "" && (cfg.SystemPrompt != nil || cfg.Meta != nil) {
+				dir := filepath.Join(workspace, ".cicy")
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					errText = "override_mkdir_failed"
+				} else {
+					if cfg.SystemPrompt != nil {
+						if err := os.WriteFile(filepath.Join(dir, "system.md"), []byte(*cfg.SystemPrompt), 0644); err != nil {
+							errText = "system_write_failed"
+						}
+					}
+					if errText == "" && cfg.Meta != nil {
+						if err := os.WriteFile(filepath.Join(dir, "meta.yaml"), []byte(*cfg.Meta), 0644); err != nil {
+							errText = "meta_write_failed"
+						}
+					}
+				}
+			}
+		}
+		results = append(results, M{"agentId": shortPaneID(paneID), "version": cfg.Version, "error": errText})
+	}
+	if len(results) > 0 {
+		if err := cloudJSON(http.MethodPost, "/api/code/agent-configs", t.token, M{"results": results}, nil); err != nil {
+			log.Printf("[im] cicy cloud config ack failed: %v", err)
+		}
+	}
+}
+
 func newCiCyCloudTransport(acc *imAccount) (botTransport, error) {
 	if strings.TrimSpace(acc.Secret) == "" {
 		return nil, fmt.Errorf("CiCy Cloud token missing")
@@ -341,6 +413,7 @@ func (t *cicyCloudTransport) reportAllAgents() {
 	if err := cloudJSON(http.MethodPost, "/api/code/instances/heartbeat", t.token, collectCiCyCodeTelemetry(), nil); err != nil {
 		log.Printf("[im] cicy cloud heartbeat failed: %v", err)
 	}
+	t.syncAgentConfigs()
 	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {
 		port = "8008"

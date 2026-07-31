@@ -4,8 +4,11 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Lightweight customizable agent runtime.
@@ -41,14 +44,14 @@ import (
 
 // liteConfig is the resolved per-instance configuration.
 type liteConfig struct {
-	profile      string
-	systemPrompt string          // the shared system.md base (the `system` field)
-	roleContext  string          // the agent's AGENTS.md body — its role, carried as message context (NOT in system)
-	enabledTools map[string]bool // empty ⇒ pure chat
+	profile       string
+	systemPrompt  string          // the shared system.md base (the `system` field)
+	roleContext   string          // the agent's AGENTS.md body — its role, carried as message context (NOT in system)
+	enabledTools  map[string]bool // empty ⇒ pure chat
 	external      bool            // profile is outward-facing (liaison): exec/custom tools refused
 	workspace     string          // for custom-tool cwd
 	customTools   map[string]liteCustomTool
-	maxToolRounds int             // per-role override of the tool-round cap (0 = global default)
+	maxToolRounds int // per-role override of the tool-round cap (0 = global default)
 }
 
 // liteFrontmatter is the parsed AGENTS.md header (all optional).
@@ -133,12 +136,13 @@ func parseLiteList(val string) []string {
 // missing/empty file (→ dispatcher profile, backward compatible).
 //
 // Tool resolution enforces the L1–L4 trust model:
-//   grantable = expand(profile.GrantableGroups) ∪ expand(grants for this
-//               agent/profile)            — but for EXTERNAL profiles, grants are
-//               ignored and grantable is capped to the profile's own groups.
-//   selected  = expand(frontmatter.tools) if present, else expand(DefaultGroups)
-//   effective = selected ∩ grantable      — frontmatter (L3) can only NARROW;
-//               it can never name a tool the config (L1) didn't make grantable.
+//
+//	grantable = expand(profile.GrantableGroups) ∪ expand(grants for this
+//	            agent/profile)            — but for EXTERNAL profiles, grants are
+//	            ignored and grantable is capped to the profile's own groups.
+//	selected  = expand(frontmatter.tools) if present, else expand(DefaultGroups)
+//	effective = selected ∩ grantable      — frontmatter (L3) can only NARROW;
+//	            it can never name a tool the config (L1) didn't make grantable.
 func resolveLiteConfig(shortID, workspace string) liteConfig {
 	cfg := loadLiteConfig()
 	raw := loadTemplateFile(filepath.Join(workspace, "AGENTS.md"))
@@ -155,6 +159,12 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	// 以 role 为主. enabled = expand(the role's selected groups).
 	roleSlug := employeeRoleSlug(shortID) // this agent's role-template slug
 	rm := loadRoleMeta(roleSlug)
+	if raw, err := os.ReadFile(filepath.Join(workspace, ".cicy", "meta.yaml")); err == nil {
+		var override roleMeta
+		if yaml.Unmarshal(raw, &override) == nil {
+			rm = override
+		}
+	}
 	selectGroups := rm.Tools
 	if len(selectGroups) == 0 {
 		if ca, ok := customAgentFor(roleSlug); ok {
@@ -178,6 +188,9 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	//     leading context block in `messages`, NOT concatenated into `system`.
 	// Both stay byte-stable across turns (cache prefix) — no timestamps.
 	systemBase := cicySystemBase(roleSlug)
+	if raw, err := os.ReadFile(filepath.Join(workspace, ".cicy", "system.md")); err == nil {
+		systemBase = strings.TrimSpace(string(raw))
+	}
 	roleContext := strings.TrimSpace(fm.body)
 
 	return liteConfig{
