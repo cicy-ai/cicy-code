@@ -142,7 +142,7 @@ func renderReplyItems(items []map[string]interface{}, full bool) string {
 // 每个 type 一种格式，用空格 + emoji 让用户在 IM 客户端里更容易扫读。
 //   thinking: "💭 ..."
 //   text:     "..."
-//   tool_use: "🔧 <name>\n```json\n<input json>\n```"
+//   tool_use: skipped（内部执行细节不推送到 IM）
 // 长内容会截断（避免 IM 单条消息撑爆 WeChat ~4096 字符限制）：
 //   - thinking: 1500 char
 //   - text:     2500 char
@@ -165,17 +165,9 @@ func renderReplyItemForIM(item map[string]interface{}) string {
 		}
 		return imTruncateLongString(txt, 2500)
 	case "tool_use":
-		name, _ := item["name"].(string)
-		if strings.TrimSpace(name) == "" {
-			name = "tool"
-		}
-		// 不再把整个 input 当 JSON 丢给用户（很不友好）。解析出最关键的那个参数
-		// （command / file_path / url / pattern …）发出去即可。
-		summary := summarizeToolForIM(item["input"])
-		if summary == "" {
-			return "🔧 " + name
-		}
-		return "🔧 " + name + "\n" + summary
+		// wait / exec / write_stdin / read 等工具调用属于 agent 内部执行过程。
+		// reply.json 和网页端继续保留完整记录，但所有 IM 出站统一跳过，避免刷屏。
+		return ""
 	case "tool_error":
 		// 合成 item（aiGatewayInjectToolResultsIntoItems 发现 is_error 的
 		// tool_result 时造出来,只走 IM,不进 reply.json):工具跑失败,推一条
