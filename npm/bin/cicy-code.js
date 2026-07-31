@@ -14,10 +14,16 @@
 // and we abort. Utility invocations (--help/--version, `skill …`) skip the
 // port dance entirely — `npx cicy-code --version` must never touch :8008.
 const { spawn, execSync } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
+const https = require('https');
+const os = require('os');
+const path = require('path');
 
-const args = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
+const { email: cloudEmail, args } = takeEmailArg(rawArgs);
 const PORT = process.env.PORT || '8008';
+const CLOUD_ORIGIN = (process.env.CICY_CLOUD_ORIGIN || 'https://cicy-ai.com').replace(/\/$/, '');
 
 // Package name uses "windows", not the process.platform value "win32":
 // npm's spam filter rejects (403) new package names containing win32.
@@ -43,16 +49,191 @@ const isUtility =
   args.some((a) => a === '-h' || a === '--help' || a === '-v' || a === '--version') ||
   args[0] === 'skill';
 
-if (!isUtility) ensurePortFree(PORT);
+main().catch((err) => {
+  console.error(`cicy-code: ${err && err.message ? err.message : err}`);
+  process.exit(1);
+});
 
-const child = spawn(binPath, args, {
-  stdio: 'inherit',
-  env: { ...process.env, PORT },
-});
-child.on('exit', (code, signal) => {
-  if (signal) process.kill(process.pid, signal);
-  else process.exit(code == null ? 0 : code);
-});
+async function main() {
+  let cloudEnv = {};
+  if (cloudEmail) cloudEnv = await cloudLogin(cloudEmail);
+  if (!isUtility) ensurePortFree(PORT);
+  const child = spawn(binPath, args, {
+    stdio: 'inherit',
+    env: { ...process.env, ...cloudEnv, PORT },
+  });
+  child.on('exit', (code, signal) => {
+    if (signal) process.kill(process.pid, signal);
+    else process.exit(code == null ? 0 : code);
+  });
+}
+
+function takeEmailArg(input) {
+  const output = [];
+  let email = '';
+  for (let i = 0; i < input.length; i += 1) {
+    const value = input[i];
+    if (value === '--email') {
+      email = String(input[i + 1] || '').trim().toLowerCase();
+      i += 1;
+    } else if (value.startsWith('--email=')) {
+      email = value.slice('--email='.length).trim().toLowerCase();
+    } else {
+      output.push(value);
+    }
+  }
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    throw new Error('invalid --email address');
+  }
+  return { email, args: output };
+}
+
+async function cloudLogin(email) {
+  const credentialPath = cloudCredentialPath();
+  const saved = readJSON(credentialPath);
+  const instanceId = String(saved.instance_id || '').trim() ||
+    `code-${crypto.randomBytes(18).toString('hex')}`;
+  let token = saved.email === email ? String(saved.token || '') : '';
+
+  if (token) {
+    try {
+      await registerCloudInstance(token, instanceId);
+      console.log(`cicy-code: CiCy Cloud connected as ${email}`);
+      return cloudEnvironment(email, instanceId, token);
+    } catch {
+      token = '';
+    }
+  }
+
+  const state = crypto.randomBytes(32).toString('hex');
+  await requestJSON('/api/auth/email/request', {
+    method: 'POST',
+    body: { email, state, flow: 'desktop_poll', lang: preferredLanguage() },
+  });
+  console.log(`cicy-code: login email sent to ${email}`);
+  console.log('cicy-code: click the link in the email; waiting for confirmation…');
+
+  const deadline = Date.now() + 15 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await delay(2000);
+    const result = await requestJSON(`/api/auth/desktop/poll?state=${encodeURIComponent(state)}`);
+    if (result.status === 'pending') continue;
+    if (result.status !== 'ready' || !result.token) {
+      throw new Error('email login expired; start cicy-code again');
+    }
+    token = String(result.token);
+    await registerCloudInstance(token, instanceId);
+    writeCredential(credentialPath, {
+      email,
+      instance_id: instanceId,
+      token,
+      cloud_origin: CLOUD_ORIGIN,
+      updated_at: new Date().toISOString(),
+    });
+    console.log(`cicy-code: login successful; this device is now bound to ${email}`);
+    return cloudEnvironment(email, instanceId, token);
+  }
+  throw new Error('email login timed out; start cicy-code again');
+}
+
+async function registerCloudInstance(token, instanceId) {
+  await requestJSON('/api/code/instances/register', {
+    method: 'POST',
+    token,
+    body: {
+      instanceId,
+      platform: isColab() ? 'colab' : process.platform,
+      arch: process.arch,
+      runtime: isColab() ? 'colab' : 'native',
+      systemLanguage: preferredLanguage(),
+    },
+  });
+}
+
+function cloudEnvironment(email, instanceId, token) {
+  return {
+    CICY_CLOUD_ORIGIN: CLOUD_ORIGIN,
+    CICY_CLOUD_EMAIL: email,
+    CICY_CLOUD_INSTANCE_ID: instanceId,
+    CICY_CLOUD_TOKEN: token,
+  };
+}
+
+function cloudCredentialPath() {
+  return path.join(cloudHome(), 'db', 'cloud-device.json');
+}
+
+function cloudHome() {
+  return process.env.CICY_HOME || path.join(os.homedir(), 'cicy-ai');
+}
+
+function isColab() {
+  return process.platform === 'linux' && (
+    Boolean(process.env.COLAB_RELEASE_TAG) ||
+    Boolean(process.env.COLAB_GPU) ||
+    fs.existsSync('/content')
+  );
+}
+
+function readJSON(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
+}
+
+function writeCredential(file, value) {
+  writeJSONAtomic(file, value);
+}
+
+function writeJSONAtomic(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temporary, file);
+  try { fs.chmodSync(file, 0o600); } catch {}
+}
+
+function preferredLanguage() {
+  const lang = String(process.env.LANG || '').toLowerCase();
+  if (lang.startsWith('ja')) return 'ja';
+  if (lang.startsWith('fr')) return 'fr';
+  if (lang.startsWith('en')) return 'en';
+  return 'zh';
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function requestJSON(route, options = {}) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(route, CLOUD_ORIGIN);
+    const body = options.body ? Buffer.from(JSON.stringify(options.body)) : null;
+    const req = https.request(url, {
+      method: options.method || 'GET',
+      headers: {
+        accept: 'application/json',
+        ...(body ? { 'content-type': 'application/json', 'content-length': body.length } : {}),
+        ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+      },
+      timeout: 15000,
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        let data;
+        try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+        catch { return reject(new Error(`CiCy Cloud returned HTTP ${res.statusCode}`)); }
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(data.error || `CiCy Cloud returned HTTP ${res.statusCode}`));
+        }
+        resolve(data);
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('CiCy Cloud request timed out')));
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
 
 // --- dev.py-style port hygiene --------------------------------------------
 

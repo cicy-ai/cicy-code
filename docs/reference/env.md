@@ -14,6 +14,10 @@ description: cicy-code 支持的环境变量 —— 端口、运行模式、隧�
 | `CICY_API_PORT` | `PORT` | 各 agent shell 里注入的端口,指回同一个 server。 |
 | `SQLITE_PATH` | `~/cicy-ai/db/data.db` | SQLite 数据库文件。 |
 | `CICY_API_TOKEN` | 自动生成 | API 鉴权 token(写在 `~/cicy-ai/global.json`)。 |
+| `CICY_CLOUD_ORIGIN` | `https://cicy-ai.com` | `--email` 登录使用的 CiCy Cloud 地址。 |
+| `CICY_CLOUD_EMAIL` | `--email` 登录后注入 | 当前绑定的 CiCy Cloud 邮箱。 |
+| `CICY_CLOUD_INSTANCE_ID` | 首次绑定时生成 | 当前 cicy-code 节点的稳定实例 ID；与 Desktop 的 machine ID 相互独立。 |
+| `CICY_CLOUD_TOKEN` | 邮件确认后注入 | 当前设备的 Cloud 会话凭据；不要写入日志。 |
 | `CICY_CODE_VERSION` | `latest` | 容器首启时 `cicy-code-update.sh` 安装的版本。 |
 | `CICY_CODE_STORE` | `~/.local/cicy-code` | 版本化二进制的安装根目录。 |
 | `CICY_PPROF_PORT` | `6060` | Go pprof 端口(设了才开)。 |

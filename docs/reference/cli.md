@@ -31,6 +31,7 @@ cicy-code <subcommand> [args]       # skill / audit / mitm / reseed-memory / cic
 | --- | --- |
 | `--cft` | quick tunnel(`https://<随机>.trycloudflare.com`,每次重启换域名) |
 | `--cft-token TOKEN` | named tunnel(**域名稳定**,隐含 `--cft`);也可用 `CICY_CFT_TOKEN` |
+| `--email EMAIL` | 使用 CiCy Cloud 邮件链接登录并绑定当前设备；同一邮箱下的设备可互相发现 |
 | `--cft-host FQDN` | named tunnel 对外报告的完整域名;也可用 `CICY_CFT_HOST` |
 
 URL 会打日志、写入 `~/cicy-ai/db/cft.json`,并由 `/api/health` 的 `tunnel_url` 报告。
