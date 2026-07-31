@@ -4850,7 +4850,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		log.Printf("[init] failed to set script ownership: %v", err)
 		return
 	}
-	log.Printf("[init] v1 pane %s script path=%s\n%s", pid, scriptPath, script)
+	log.Printf("[init] v1 pane %s script path=%s", pid, scriptPath)
 
 	// On macOS the tmux pane can exist before the shell prompt is actually
 	// visible/interactive. Wait for the prompt marker before sending boot.sh.
