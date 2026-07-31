@@ -29,9 +29,10 @@ var errBotEditUnsupported = errors.New("bot transport does not support editing m
 var errWeChatNoActiveSession = errors.New("wechat: no active session window (ilink ret=-2); the user must message the bot first")
 
 const (
-	imPlatformTelegram = "telegram"
-	imPlatformWeChat   = "wechat"
-	imPlatformFeishu   = "feishu"
+	imPlatformTelegram  = "telegram"
+	imPlatformWeChat    = "wechat"
+	imPlatformFeishu    = "feishu"
+	imPlatformCiCyCloud = "cicy_cloud"
 )
 
 // botPeer identifies who/where to send a message. Telegram only uses ChatID;
@@ -340,6 +341,8 @@ func normalizeIMPlatform(p string) string {
 		return imPlatformWeChat
 	case "feishu", "lark":
 		return imPlatformFeishu
+	case "cicy_cloud", "cicy-cloud", "cicy":
+		return imPlatformCiCyCloud
 	default:
 		return strings.ToLower(strings.TrimSpace(p))
 	}
@@ -1218,6 +1221,13 @@ type imPlatformInfo struct {
 func imPlatforms() []imPlatformInfo {
 	return []imPlatformInfo{
 		{
+			Kind: imPlatformCiCyCloud, Label: "CiCy Cloud", NeedsToken: false, NeedsQR: false, CanEdit: false,
+			Help: map[string]string{
+				"title": "使用邮箱绑定 CiCy Cloud",
+				"steps": "输入邮箱并点击邮件中的登录链接。邮箱不存在时会自动注册，绑定后当前 cicy-code 成为该账号下的独立实例。",
+			},
+		},
+		{
 			Kind: imPlatformTelegram, Label: "Telegram", NeedsToken: true, NeedsQR: false, CanEdit: true,
 			Help: map[string]string{
 				"title": "获取 Bot Token",
@@ -1308,6 +1318,9 @@ func handleIMRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		httpErr(w, 404, "not found")
+		return
+	case "cicy-cloud":
+		handleCiCyCloudLoginRoute(w, r, parts)
 		return
 	case "accounts":
 		if len(parts) == 1 {

@@ -8,6 +8,7 @@ import i18n from '../../i18n';
 import {
   Plus, Save, Trash2, Zap, Eye, EyeOff, Check, X, ArrowLeft,
   Send, MessageCircle, QrCode, RefreshCw, Search, ExternalLink, ChevronDown, Loader2,
+  Mail,
 } from 'lucide-react';
 import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
@@ -16,7 +17,7 @@ import AgentAvatar from '../AgentAvatar';
 
 /* ───────────── types ───────────── */
 
-type Platform = 'telegram' | 'wechat' | 'feishu';
+type Platform = 'telegram' | 'wechat' | 'feishu' | 'cicy_cloud';
 
 interface IMAccount {
   id: number;
@@ -169,6 +170,7 @@ function errText(e: any) { return String(e?.response?.data?.detail || e?.message
 const INPUT = 'h-9 w-full rounded-lg border border-white/[0.09] bg-white/[0.025] px-3 text-[13px] text-zinc-100 placeholder:text-zinc-600 outline-none transition-colors hover:border-white/[0.14] focus:border-blue-500/55 focus:bg-white/[0.045] focus:ring-1 focus:ring-blue-500/15 disabled:opacity-50';
 
 function PlatformIcon({ platform, size = 14 }: { platform: string; size?: number }) {
+  if (platform === 'cicy_cloud') return <Mail size={size} className="text-blue-400" />;
   if (platform === 'telegram') return <Send size={size} className="text-sky-400" />;
   if (platform === 'wechat') return <MessageCircle size={size} className="text-emerald-400" />;
   if (platform === 'feishu') return <Zap size={size} className="text-indigo-400" />;
@@ -304,6 +306,11 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const [fsSecret, setFsSecret] = useState('');
   const [fsSubmitting, setFsSubmitting] = useState(false);
   const [fsError, setFsError] = useState('');
+  const [cloudModalOpen, setCloudModalOpen] = useState(false);
+  const [cloudEmail, setCloudEmail] = useState('');
+  const [cloudState, setCloudState] = useState('');
+  const [cloudSubmitting, setCloudSubmitting] = useState(false);
+  const [cloudError, setCloudError] = useState('');
 
   const selected = useMemo(() => accounts.find((a) => a.id === selectedId) || null, [accounts, selectedId]);
 
@@ -476,7 +483,43 @@ export default function IMDashboard({ leftMount, rightMount }: {
     if (platform === 'telegram') return void addTelegram();
     if (platform === 'wechat') return void addWeChat();
     if (platform === 'feishu') return void addFeishu();
+    if (platform === 'cicy_cloud') {
+      setCloudEmail(''); setCloudState(''); setCloudError(''); setCloudModalOpen(true);
+    }
   };
+
+  const submitCloudEmail = async () => {
+    setCloudSubmitting(true); setCloudError('');
+    try {
+      const res = await apiService.startCiCyCloudLogin(cloudEmail.trim());
+      setCloudState(String(res?.data?.state || ''));
+    } catch (e) { setCloudError(errText(e)); }
+    finally { setCloudSubmitting(false); }
+  };
+
+  useEffect(() => {
+    if (!cloudModalOpen || !cloudState) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const res = await apiService.getCiCyCloudLoginStatus(cloudState);
+        if (stopped) return;
+        if (res?.data?.status === 'ready') {
+          setCloudModalOpen(false); setCloudState('');
+          const account = res?.data?.account as IMAccount | undefined;
+          await load(account?.id);
+          if (account?.id) setSelectedId(account.id);
+          toast('CiCy Cloud 已连接');
+          return;
+        }
+        if (res?.data?.status === 'expired') { setCloudError('登录链接已过期，请重新发送'); return; }
+      } catch (e) { if (!stopped) setCloudError(errText(e)); return; }
+      timer = setTimeout(poll, 2000);
+    };
+    timer = setTimeout(poll, 1500);
+    return () => { stopped = true; if (timer) clearTimeout(timer); };
+  }, [cloudModalOpen, cloudState, load]);
 
   const addFeishu = () => {
     setFsError('');
@@ -847,7 +890,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
             <div data-id="im-add-dropdown" className="absolute right-0 top-[calc(100%+4px)] min-w-[160px] z-50 rounded-xl border border-white/[0.09] bg-[#141416] p-1 shadow-2xl shadow-black/60">
               {platforms.length === 0 && <div className="px-2.5 py-2 text-[11px] text-zinc-600">{t('loadingText')}</div>}
               {platforms.map((p) => {
-                const addable = p.kind === 'telegram' || p.kind === 'wechat' || p.kind === 'feishu';
+                const addable = p.kind === 'telegram' || p.kind === 'wechat' || p.kind === 'feishu' || p.kind === 'cicy_cloud';
                 return (
                   <button
                     key={p.kind}
@@ -1227,6 +1270,44 @@ export default function IMDashboard({ leftMount, rightMount }: {
     </div>
   );
 
+  let cloudModal: React.ReactNode = null;
+  if (cloudModalOpen) {
+    const waiting = !!cloudState;
+    cloudModal = (
+      <div data-id="im-cloud-modal" className="fixed inset-0 z-[10000] cursor-pointer" onClick={() => !cloudSubmitting && setCloudModalOpen(false)}>
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+        <div className="absolute left-1/2 top-1/2 w-[420px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 cursor-default rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
+            <div className="flex items-center gap-2"><PlatformIcon platform="cicy_cloud" size={16} /><h2 className="text-[15px] font-semibold text-white">添加 CiCy Cloud 账号</h2></div>
+            <button onClick={() => setCloudModalOpen(false)} className="rounded-lg p-1.5 text-zinc-600 hover:bg-white/[0.06] hover:text-zinc-300"><X className="h-4 w-4" /></button>
+          </div>
+          <div className="space-y-4 px-5 py-5">
+            {!waiting ? (
+              <Field label="Email" help="点击邮件中的登录链接后，账号会自动注册或登录，并绑定当前 cicy-code 实例。">
+                <input data-id="im-cloud-email" autoFocus type="email" value={cloudEmail}
+                  onChange={(e) => { setCloudEmail(e.target.value); setCloudError(''); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && cloudEmail.trim()) void submitCloudEmail(); }}
+                  placeholder="you@example.com" className={cn(INPUT, 'h-10')} disabled={cloudSubmitting} />
+              </Field>
+            ) : (
+              <div className="rounded-xl border border-blue-500/25 bg-blue-500/[0.06] px-4 py-4 text-center">
+                <Loader2 className="mx-auto h-5 w-5 animate-spin text-blue-300" />
+                <div className="mt-2 text-[13px] font-medium text-zinc-200">登录邮件已发送</div>
+                <div className="mt-1 text-[11px] text-zinc-500">请打开 {cloudEmail} 并点击登录链接，本页面会自动完成绑定。</div>
+              </div>
+            )}
+            {cloudError && <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[12px] text-red-300">{cloudError}</div>}
+            <div className="flex justify-end gap-2">
+              <Btn variant="ghost" size="md" onClick={() => setCloudModalOpen(false)}>取消</Btn>
+              {!waiting && <Btn data-id="im-cloud-submit" variant="primary" size="md" onClick={() => void submitCloudEmail()} disabled={cloudSubmitting || !cloudEmail.trim()}>{cloudSubmitting ? <Spinner size="xs" /> : '发送登录邮件'}</Btn>}
+              {waiting && cloudError && <Btn variant="secondary" size="md" onClick={() => { setCloudState(''); setCloudError(''); }}>重新发送</Btn>}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   /* ───────── WeChat QR modal ───────── */
   // Modal opens as soon as the user clicks "+ WeChat", even before the backend
   // returns the QR URL — otherwise the click feels unresponsive while we POST
@@ -1492,6 +1573,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
       {leftMount && createPortal(leftPanelUI, leftMount)}
       {rightMount && detailOpen && createPortal(detailUI, rightMount)}
       {wxModal && createPortal(wxModal, document.body)}
+      {cloudModal && createPortal(cloudModal, document.body)}
       {tgModal && createPortal(tgModal, document.body)}
       {fsModal && createPortal(fsModal, document.body)}
       {addBindOpen && (
