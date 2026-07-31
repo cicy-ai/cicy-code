@@ -77,6 +77,7 @@ func cloudJSON(method, route, token string, requestBody any, responseBody any) e
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", fmt.Sprintf("cicy-code/%s (%s; %s)", version, runtime.GOOS, runtime.GOARCH))
 	if requestBody != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -528,11 +529,18 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			httpErr(w, 500, err.Error())
 			return
 		}
-		runtimeKind := collectCiCyCodeTelemetry().Runtime
+		telemetry := collectCiCyCodeTelemetry()
+		hostname, _ := os.Hostname()
+		var existing cicyCloudCredential
+		if data, readErr := os.ReadFile(cicyCloudCredentialPath()); readErr == nil {
+			_ = json.Unmarshal(data, &existing)
+		}
 		err = cloudJSON(http.MethodPost, "/api/auth/email/request", "", M{
 			"email": email, "state": state, "flow": "desktop_poll", "lang": "zh",
-			"platform": "cicy-code", "system": runtime.GOOS,
-			"arch": runtime.GOARCH, "runtime": runtimeKind,
+			"platform": "cicy-code", "system": runtime.GOOS, "arch": runtime.GOARCH,
+			"runtime": telemetry.Runtime, "hostname": hostname, "instanceId": existing.InstanceID,
+			"clientVersion": version, "cpu": fmt.Sprintf("%s · %d cores", telemetry.CPUModel, telemetry.CPUCores),
+			"memory": fmt.Sprintf("%.1f GB", float64(telemetry.MemoryTotalMB)/1024), "gpu": telemetry.GPU,
 		}, nil)
 		if err != nil {
 			httpErr(w, 502, err.Error())
