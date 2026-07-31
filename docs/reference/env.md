@@ -52,4 +52,10 @@ description: cicy-code 支持的环境变量 —— 端口、运行模式、隧�
 | `CICY_MIHOMO_BIN` | runtime store | 覆盖 mihomo 二进制路径。 |
 | `CICY_AI_GATEWAY_LLM_ENDPOINT` / `..._API_KEY` | — | 本地 AI 网关的上游 LLM 端点 / key。 |
 
+## 调试日志
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `CICY_DEBUG_IM=1` | 关闭 | 输出 IM 收发、typing、reply hook、附件和平台轮询等正常链路日志。默认只记录 IM 错误与告警。 |
+
 > 端口/路径的完整含义见 [配置与路径](/reference/config);MITM/网关见 [MITM 审计代理](/advanced/mitm)、[本地 AI 网关](/advanced/gateway)。

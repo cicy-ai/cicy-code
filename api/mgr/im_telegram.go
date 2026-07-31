@@ -423,7 +423,7 @@ func (t *telegramTransport) Poll(cursor string) ([]botMsg, string, error) {
 			}
 		}
 		if len(atts) > 0 {
-			log.Printf("[im] tg pollMsg from=%s attachments=%d kinds=%v", fromID, len(atts), tgAttachmentKinds(atts))
+			imDebugf("[im] tg pollMsg from=%s attachments=%d kinds=%v", fromID, len(atts), tgAttachmentKinds(atts))
 			msgs = append(msgs, botMsg{
 				Text:        text,
 				Peer:        peer,
@@ -914,7 +914,7 @@ func (t *telegramTransport) handleCallback(cb *tgCallbackQuery) {
 		if len(parts) > 1 {
 			fromPage, _ = strconv.Atoi(parts[1])
 		}
-		log.Printf("[im] ag_summary pane=%s chat=%s", paneID, chatID)
+		imDebugf("[im] ag_summary pane=%s chat=%s", paneID, chatID)
 		telegramEditMessage(t.token, chatID, msgID, tgT(lang, "summaryRunning"), nil)
 		token := t.token
 		go func() {

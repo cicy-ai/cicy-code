@@ -69,7 +69,7 @@ func imSaveAttachmentsToInbox(paneID string, atts []botAttachment) []string {
 					shortPaneID(paneID), att.Kind, len(data), err)
 				continue
 			}
-			log.Printf("[im] attachment decrypted pane=%s kind=%s encrypted=%d plain=%d",
+			imDebugf("[im] attachment decrypted pane=%s kind=%s encrypted=%d plain=%d",
 				shortPaneID(paneID), att.Kind, len(data), len(plain))
 			data = plain
 		}
@@ -83,7 +83,7 @@ func imSaveAttachmentsToInbox(paneID string, atts []botAttachment) []string {
 		// 给 agent 看的是绝对路径 —— 避免 cwd 不匹配 worktree 后缀（如 w-10018 vs w-10018:main.0）
 		// 导致 agent 用错误的相对/绝对路径找文件。
 		paths = append(paths, full)
-		log.Printf("[im] attachment saved pane=%s kind=%s size=%d path=%s",
+		imDebugf("[im] attachment saved pane=%s kind=%s size=%d path=%s",
 			shortPaneID(paneID), att.Kind, len(data), full)
 	}
 	return paths
@@ -160,7 +160,6 @@ func imSafeAttachmentFilename(name, kind string) string {
 	}
 	return name
 }
-
 
 // imAESEncryptECB AES-128-ECB + PKCS7 加密— the inverse of imAESDecryptECB,
 // for the SEND direction (upload a local file to the WeChat CDN encrypted).

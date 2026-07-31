@@ -13,11 +13,18 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+func imDebugf(format string, args ...any) {
+	if os.Getenv("CICY_DEBUG_IM") == "1" {
+		log.Printf(format, args...)
+	}
+}
 
 // errBotEditUnsupported is returned by transports that cannot edit a sent message.
 var errBotEditUnsupported = errors.New("bot transport does not support editing messages")
@@ -196,7 +203,7 @@ func imSendOutbound(msg imOutboundMessage) (imOutboundResult, error) {
 		return res, err
 	}
 	res.MessageID = mid
-	log.Printf("[im] send OK account=%d kind=%s purpose=%s to=%s len=%d preview=%q", msg.AccountID, res.Platform, msg.purpose(), msg.Peer.ChatID, len(text), imLogPreview(text))
+	imDebugf("[im] send OK account=%d kind=%s purpose=%s to=%s len=%d preview=%q", msg.AccountID, res.Platform, msg.purpose(), msg.Peer.ChatID, len(text), imLogPreview(text))
 	return res, nil
 }
 
@@ -522,7 +529,7 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 				} else {
 					msg.Text = strings.TrimSpace(msg.Text) + "\n\n" + note
 				}
-				log.Printf("[im] account=%d attachments saved pane=%s count=%d", acc.ID, shortPaneID(paneID), len(paths))
+				imDebugf("[im] account=%d attachments saved pane=%s count=%d", acc.ID, shortPaneID(paneID), len(paths))
 			}
 		}
 	}
@@ -549,7 +556,7 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	if (acc.Platform == imPlatformTelegram || acc.Platform == imPlatformFeishu) && acc.configString("chat_id") == "" && strings.TrimSpace(msg.Peer.ChatID) != "" {
 		acc.setConfig("chat_id", strings.TrimSpace(msg.Peer.ChatID))
 		imSaveAccountConfig(acc)
-		log.Printf("[im] account=%d %s captured chat_id=%s", acc.ID, acc.Platform, msg.Peer.ChatID)
+		imDebugf("[im] account=%d %s captured chat_id=%s", acc.ID, acc.Platform, msg.Peer.ChatID)
 	}
 
 	// Handle bot commands (/help, /start, etc.) locally without forwarding to agent.
@@ -577,7 +584,7 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 			acc.setConfig("last_peer_context_token", strings.TrimSpace(msg.Peer.ContextToken))
 			imSaveAccountConfig(acc)
 			if chatChanged {
-				log.Printf("[im] account=%d wechat captured peer=%s", acc.ID, msg.Peer.ChatID)
+				imDebugf("[im] account=%d wechat captured peer=%s", acc.ID, msg.Peer.ChatID)
 			}
 		}
 	}
@@ -592,7 +599,7 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 		pane = normPaneID(strings.TrimSpace(acc.BoundPaneID))
 	}
 	if pane == "" || !acc.InboundToAgent {
-		log.Printf("[im] account=%d inbound dropped (chat=%s bound=%q inbound=%t): %q", acc.ID, msg.Peer.ChatID, acc.BoundPaneID, acc.InboundToAgent, text)
+		imDebugf("[im] account=%d inbound dropped (chat=%s bound=%q inbound=%t): %q", acc.ID, msg.Peer.ChatID, acc.BoundPaneID, acc.InboundToAgent, text)
 		return
 	}
 	// If the bound agent's tmux session isn't running (offline), fall back to the
@@ -606,7 +613,7 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	if !explicitTarget && !imPaneSessionOnline(pane) {
 		fallback := normPaneID("w-1001")
 		if pane != fallback && imPaneSessionOnline(fallback) {
-			log.Printf("[im] account=%d bound pane=%s offline → fallback to %s", acc.ID, shortPaneID(pane), shortPaneID(fallback))
+			imDebugf("[im] account=%d bound pane=%s offline → fallback to %s", acc.ID, shortPaneID(pane), shortPaneID(fallback))
 			pane = fallback
 		}
 	}
@@ -624,7 +631,7 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	if paneAgentType(pane) == "cicy" {
 		if ws := paneWorkspace(shortPaneID(pane)); ws != "" {
 			go deliverCicyMessage(shortPaneID(pane), ws, text)
-			log.Printf("[im] account=%d inbound → cicy(headless) %s: %q", acc.ID, shortPaneID(pane), text)
+			imDebugf("[im] account=%d inbound → cicy(headless) %s: %q", acc.ID, shortPaneID(pane), text)
 			return
 		}
 		imCancelReplyPushForInbound(pane, acc.ID)
@@ -638,7 +645,7 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 		imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: msg.Peer, Text: "⚠️ 发送给 agent 失败: " + err.Error(), Purpose: imOutboundPurposeError})
 		return
 	}
-	log.Printf("[im] account=%d inbound → pane=%s: %q", acc.ID, shortPaneID(pane), text)
+	imDebugf("[im] account=%d inbound → pane=%s: %q", acc.ID, shortPaneID(pane), text)
 }
 
 func imSendForPaneWithPurpose(paneID, platform, text string, purpose imOutboundPurpose) (int, error) {
@@ -949,7 +956,7 @@ func imRegisterReplyPushForInbound(paneID string, accID int64, peer botPeer) {
 	}
 	imPendingReplyPush.m[paneID][accID] = peer
 	imPendingReplyPush.mu.Unlock()
-	log.Printf("[im] reply push registered pane=%s account=%d chat=%s", shortPaneID(paneID), accID, peer.ChatID)
+	imDebugf("[im] reply push registered pane=%s account=%d chat=%s", shortPaneID(paneID), accID, peer.ChatID)
 }
 
 func imCancelReplyPushForInbound(paneID string, accID int64) {
@@ -1081,7 +1088,7 @@ func imReconcile() {
 		close(w.stop)
 		delete(imMgr.workers, id)
 		imSetAccountState(id, "disabled", "")
-		log.Printf("[im] stopped worker account=%d", id)
+		imDebugf("[im] stopped worker account=%d", id)
 	}
 	for id := range want {
 		if _, ok := imMgr.workers[id]; ok {
@@ -1090,7 +1097,7 @@ func imReconcile() {
 		w := &imWorker{accID: id, stop: make(chan struct{})}
 		imMgr.workers[id] = w
 		go w.loop()
-		log.Printf("[im] started worker account=%d", id)
+		imDebugf("[im] started worker account=%d", id)
 	}
 }
 
@@ -1168,7 +1175,7 @@ func (w *imWorker) loop() {
 			msgs, next, err := tr.Poll(cursor)
 			if err != nil {
 				if errors.Is(err, errIMSessionExpired) {
-					log.Printf("[im] account=%d session expired, re-authenticating", acc.ID)
+					imDebugf("[im] account=%d session expired, re-authenticating", acc.ID)
 					imSetAccountState(acc.ID, "logged_out", "")
 					break // back to outer loop → rebuild transport (re-login)
 				}

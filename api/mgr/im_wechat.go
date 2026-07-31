@@ -672,13 +672,13 @@ func (it *weChatItem) UnmarshalJSON(data []byte) error {
 }
 
 type weChatMessage struct {
-	MessageType  int          `json:"message_type"`
-	MessageState int          `json:"message_state,omitempty"`
-	FromUserID   string       `json:"from_user_id"`
-	ToUserID     string       `json:"to_user_id"`
-	ClientID     string       `json:"client_id"`
-	ContextToken string       `json:"context_token"`
-	ItemList     []weChatItem `json:"item_list"`
+	MessageType  int            `json:"message_type"`
+	MessageState int            `json:"message_state,omitempty"`
+	FromUserID   string         `json:"from_user_id"`
+	ToUserID     string         `json:"to_user_id"`
+	ClientID     string         `json:"client_id"`
+	ContextToken string         `json:"context_token"`
+	ItemList     []weChatItem   `json:"item_list"`
 	Extra        map[string]any `json:"-"`
 }
 
@@ -728,6 +728,7 @@ func (m *weChatMessage) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
+
 type weChatGetUpdatesResp struct {
 	Ret           int             `json:"ret"`
 	Errcode       int             `json:"errcode"`
@@ -800,7 +801,7 @@ func (t *weChatTransport) Poll(_ string) ([]botMsg, string, error) {
 		text := weChatExtractText(m)
 		peer := botPeer{ChatID: strings.TrimSpace(m.FromUserID), ContextToken: strings.TrimSpace(m.ContextToken)}
 		fromID := strings.TrimSpace(m.FromUserID)
-		log.Printf("[im] wechat pollMsg from=%s text=%q hasVoice=%v items=%d", fromID, text, weChatHasVoice(m.ItemList), len(m.ItemList))
+		imDebugf("[im] wechat pollMsg from=%s text=%q hasVoice=%v items=%d", fromID, text, weChatHasVoice(m.ItemList), len(m.ItemList))
 
 		if text == "" {
 			// Voice message: try CDN download or getmedia endpoint for audio.
@@ -836,7 +837,7 @@ func (t *weChatTransport) Poll(_ string) ([]botMsg, string, error) {
 			}
 			// 图片 / 文件 / 视频：提取 attachment（下载在 imHandleInbound 里做）。
 			if atts := weChatExtractAttachments(m.ItemList); len(atts) > 0 {
-				log.Printf("[im] wechat pollMsg from=%s attachments=%d kinds=%v",
+				imDebugf("[im] wechat pollMsg from=%s attachments=%d kinds=%v",
 					fromID, len(atts), weChatAttachmentKinds(atts))
 				msgs = append(msgs, botMsg{
 					Text:        "",
@@ -848,10 +849,10 @@ func (t *weChatTransport) Poll(_ string) ([]botMsg, string, error) {
 			}
 			if len(m.ItemList) > 0 || len(m.Extra) > 0 {
 				if raw, err := json.Marshal(m); err == nil {
-					log.Printf("[im] wechat non-text msg from=%s items=%d msg_extra=%s raw=%s", fromID, len(m.ItemList), jsonMarshalAny(m.Extra), string(raw))
+					imDebugf("[im] wechat non-text msg from=%s items=%d msg_extra=%s raw=%s", fromID, len(m.ItemList), jsonMarshalAny(m.Extra), string(raw))
 				}
 				for i, item := range m.ItemList {
-					log.Printf("[im] wechat item[%d] type=%d voice_item=%v extra=%s", i, item.Type, item.VoiceItem != nil, jsonMarshalAny(item.Extra))
+					imDebugf("[im] wechat item[%d] type=%d voice_item=%v extra=%s", i, item.Type, item.VoiceItem != nil, jsonMarshalAny(item.Extra))
 				}
 			}
 			continue
@@ -879,13 +880,13 @@ func weChatDownloadVoiceCDN(t *weChatTransport, vi *weChatVoiceItem) []byte {
 		}
 		cdnURL = "https://novac2c.cdn.weixin.qq.com/c2c/download?encrypted_query_param=" + url.QueryEscape(q)
 	}
-	log.Printf("[im] wechat downloading voice from CDN: %s", cdnURL[:min(len(cdnURL), 80)])
+	imDebugf("[im] wechat downloading voice from CDN: %s", cdnURL[:min(len(cdnURL), 80)])
 	audio, err := weChatDownloadFile(cdnURL)
 	if err != nil {
 		log.Printf("[im] wechat CDN voice download failed: %v", err)
 		return nil
 	}
-	log.Printf("[im] wechat CDN voice downloaded: %d bytes", len(audio))
+	imDebugf("[im] wechat CDN voice downloaded: %d bytes", len(audio))
 	return audio
 }
 
@@ -898,19 +899,19 @@ func weChatDownloadVoiceByMsgID(t *weChatTransport, msgID, contextToken string) 
 		fmt.Sprintf("ilink/bot/download?message_id=%s&type=voice", url.QueryEscape(msgID)),
 	}
 	for _, ep := range endpoints {
-		log.Printf("[im] wechat trying endpoint: %s", ep)
+		imDebugf("[im] wechat trying endpoint: %s", ep)
 		body, err := weChatGet(t.state.BaseURL, ep, 20*time.Second)
 		if err != nil {
 			log.Printf("[im] wechat endpoint %s failed: %v", ep, err)
 			continue
 		}
 		if len(body) > 0 {
-			log.Printf("[im] wechat endpoint %s returned %d bytes (first 100: %s)", ep, len(body), fmt.Sprintf("%x", body[:min(len(body), 100)]))
+			imDebugf("[im] wechat endpoint %s returned %d bytes (first 100: %s)", ep, len(body), fmt.Sprintf("%x", body[:min(len(body), 100)]))
 			if len(body) > 1024 {
 				return body
 			}
 			// Small response — likely JSON error, log it
-			log.Printf("[im] wechat endpoint %s small response: %s", ep, string(body))
+			imDebugf("[im] wechat endpoint %s small response: %s", ep, string(body))
 		}
 	}
 
@@ -924,18 +925,18 @@ func weChatDownloadVoiceByMsgID(t *weChatTransport, msgID, contextToken string) 
 			"message_id":    msgID,
 			"context_token": contextToken,
 		}
-		log.Printf("[im] wechat trying POST %s with msg_id=%s", ep, msgID)
+		imDebugf("[im] wechat trying POST %s with msg_id=%s", ep, msgID)
 		body, err := weChatPost(t.state.BaseURL, ep, t.state.BotToken, payload, 20*time.Second)
 		if err != nil {
 			log.Printf("[im] wechat POST %s failed: %v", ep, err)
 			continue
 		}
 		if len(body) > 0 {
-			log.Printf("[im] wechat POST %s returned %d bytes (first 100: %s)", ep, len(body), fmt.Sprintf("%x", body[:min(len(body), 100)]))
+			imDebugf("[im] wechat POST %s returned %d bytes (first 100: %s)", ep, len(body), fmt.Sprintf("%x", body[:min(len(body), 100)]))
 			if len(body) > 1024 {
 				return body
 			}
-			log.Printf("[im] wechat POST %s small response: %s", ep, string(body))
+			imDebugf("[im] wechat POST %s small response: %s", ep, string(body))
 		}
 	}
 
@@ -1035,7 +1036,6 @@ func (t *weChatTransport) Typing(peer botPeer) error {
 	}, 10*time.Second)
 	return err
 }
-
 
 // weChatExtractAttachments 把 weChatItemList 中的 image / file / video 转成 botAttachment。
 // 优先用 item.URL 字段（直接的可下载 URL），否则尝试从 Media.FullURL / EncryptQueryParam

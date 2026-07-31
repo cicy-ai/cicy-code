@@ -76,7 +76,7 @@ func imTypingEnsure(accID int64, pane string, tr botTransport, peer botPeer) {
 	s := &imTypingSession{stop: make(chan struct{})}
 	imTypingSessions.m[key] = s
 	imTypingSessions.mu.Unlock()
-	log.Printf("[im] typing start account=%d pane=%s", accID, shortPaneID(pane))
+	imDebugf("[im] typing start account=%d pane=%s", accID, shortPaneID(pane))
 	go imTypingRun(s, accID, pane, tr, peer)
 }
 
@@ -90,7 +90,7 @@ func imTypingStop(accID int64, pane string) {
 	imTypingSessions.mu.Unlock()
 	if s != nil {
 		s.once.Do(func() { close(s.stop) })
-		log.Printf("[im] typing stop account=%d pane=%s", accID, shortPaneID(pane))
+		imDebugf("[im] typing stop account=%d pane=%s", accID, shortPaneID(pane))
 	}
 }
 
@@ -108,7 +108,7 @@ func imTypingRun(s *imTypingSession, accID int64, pane string, tr botTransport, 
 		case <-s.stop:
 			return
 		case <-safety.C:
-			log.Printf("[im] typing safety-stop account=%d pane=%s", accID, shortPaneID(pane))
+			imDebugf("[im] typing safety-stop account=%d pane=%s", accID, shortPaneID(pane))
 			imTypingStop(accID, pane)
 			return
 		case <-ticker.C:
@@ -189,7 +189,7 @@ func newReplyHooksForPane(agentID string, isContinuation bool) []aiGatewayReplyH
 			peer:      peer,
 			canEdit:   tr.CanEdit(),
 		})
-		log.Printf("[im] reply hook attached account=%d pane=%s chat=%s transport=%s continuation=%t",
+		imDebugf("[im] reply hook attached account=%d pane=%s chat=%s transport=%s continuation=%t",
 			accID, shortPaneID(agentID), peer.ChatID, tr.Kind(), isContinuation)
 	}
 	return hooks
@@ -233,7 +233,7 @@ func (h *imReplyPushHook) onItems(items []map[string]interface{}) {
 			log.Printf("[im] reply per-item push failed account=%d type=%s err=%v", h.accID, item["type"], err)
 			continue
 		}
-		log.Printf("[im] reply per-item push account=%d type=%s len=%d", h.accID, item["type"], len(text))
+		imDebugf("[im] reply per-item push account=%d type=%s len=%d", h.accID, item["type"], len(text))
 	}
 }
 
@@ -260,7 +260,7 @@ func (h *imReplyPushHook) finalize(reply aiGatewayReplySnapshot) {
 	if !active {
 		imTypingStop(h.accID, h.paneID)
 	}
-	log.Printf("[im] reply finalize account=%d turn=%s status=%s items=%d active=%t",
+	imDebugf("[im] reply finalize account=%d turn=%s status=%s items=%d active=%t",
 		h.accID, reply.TurnID, reply.Status, len(reply.Items), active)
 }
 
@@ -317,7 +317,7 @@ func (h *imReplyPushHook) flush() {
 		return
 	}
 	if !h.canEdit && strings.TrimSpace(h.answer.String()) == "" {
-		log.Printf("[im] reply flush skipped account=%d (no answer for non-editable transport)", h.accID)
+		imDebugf("[im] reply flush skipped account=%d (no answer for non-editable transport)", h.accID)
 		return
 	}
 	h.mu.Lock()
@@ -332,7 +332,7 @@ func (h *imReplyPushHook) flush() {
 		}
 	}
 	if peer.empty() {
-		log.Printf("[im] reply flush skipped account=%d (no peer)", h.accID)
+		imDebugf("[im] reply flush skipped account=%d (no peer)", h.accID)
 		return
 	}
 	st := imLiveStateFor(h.accID)
@@ -344,7 +344,7 @@ func (h *imReplyPushHook) flush() {
 	// Suppress rapid re-sends (tmux send retry loop can fire a second Enter
 	// that triggers a garbage agent reply 2-5 s after the real one).
 	if time.Since(st.lastSendTime) < imSendCooldown {
-		log.Printf("[im] reply flush skipped account=%d (cooldown %v since last send)", h.accID, time.Since(st.lastSendTime).Round(time.Millisecond))
+		imDebugf("[im] reply flush skipped account=%d (cooldown %v since last send)", h.accID, time.Since(st.lastSendTime).Round(time.Millisecond))
 		return
 	}
 	if h.canEdit && strings.TrimSpace(st.messageID) != "" {
@@ -363,4 +363,3 @@ func (h *imReplyPushHook) flush() {
 	st.lastText = text
 	st.lastSendTime = time.Now()
 }
-

@@ -1478,7 +1478,7 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	}
 	// 先补推没推过的 items（见上面 backstop 注释），再 finalize 收尾。
 	if len(pendingHookItems) > 0 {
-		log.Printf("[im] reply backstop push agent=%s items=%d (live flush missed)", s.agentID, len(pendingHookItems))
+		imDebugf("[im] reply backstop push agent=%s items=%d (live flush missed)", s.agentID, len(pendingHookItems))
 		for _, h := range replyHooks {
 			h.onItems(pendingHookItems)
 		}
