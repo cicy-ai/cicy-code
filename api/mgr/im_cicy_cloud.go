@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -14,9 +15,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -197,6 +200,64 @@ type cicyCloudTransport struct {
 	lastPresence time.Time
 }
 
+type cicyCodeTelemetry struct {
+	Platform      string `json:"platform"`
+	Arch          string `json:"arch"`
+	Runtime       string `json:"runtime"`
+	CPUModel      string `json:"cpuModel"`
+	CPUCores      int    `json:"cpuCores"`
+	MemoryTotalMB int64  `json:"memoryTotalMB"`
+	GPU           string `json:"gpu"`
+}
+
+var cicyCodeTelemetryOnce sync.Once
+var cicyCodeTelemetryValue cicyCodeTelemetry
+
+func collectCiCyCodeTelemetry() cicyCodeTelemetry {
+	cicyCodeTelemetryOnce.Do(func() {
+		t := cicyCodeTelemetry{Platform: runtime.GOOS, Arch: runtime.GOARCH,
+			Runtime: "native", CPUCores: runtime.NumCPU()}
+		if os.Getenv("COLAB_RELEASE_TAG") != "" || os.Getenv("COLAB_GPU") != "" {
+			t.Runtime = "colab"
+		} else if info, err := os.Stat("/content"); err == nil && info.IsDir() {
+			t.Runtime = "colab"
+		}
+		if raw, err := os.ReadFile("/proc/cpuinfo"); err == nil {
+			for _, line := range strings.Split(string(raw), "\n") {
+				if p := strings.SplitN(line, ":", 2); len(p) == 2 && strings.TrimSpace(p[0]) == "model name" {
+					t.CPUModel = strings.TrimSpace(p[1])
+					break
+				}
+			}
+		}
+		if raw, err := os.ReadFile("/proc/meminfo"); err == nil {
+			for _, line := range strings.Split(string(raw), "\n") {
+				if f := strings.Fields(line); len(f) >= 2 && f[0] == "MemTotal:" {
+					kb, _ := strconv.ParseInt(f[1], 10, 64)
+					t.MemoryTotalMB = kb / 1024
+					break
+				}
+			}
+		}
+		if runtime.GOOS == "darwin" {
+			if out, err := exec.Command("sysctl", "-n", "machdep.cpu.brand_string").Output(); err == nil {
+				t.CPUModel = strings.TrimSpace(string(out))
+			}
+			if out, err := exec.Command("sysctl", "-n", "hw.memsize").Output(); err == nil {
+				b, _ := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+				t.MemoryTotalMB = b / 1024 / 1024
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if out, err := exec.CommandContext(ctx, "nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader").Output(); err == nil {
+			t.GPU = strings.TrimSpace(string(out))
+		}
+		cicyCodeTelemetryValue = t
+	})
+	return cicyCodeTelemetryValue
+}
+
 func newCiCyCloudTransport(acc *imAccount) (botTransport, error) {
 	if strings.TrimSpace(acc.Secret) == "" {
 		return nil, fmt.Errorf("CiCy Cloud token missing")
@@ -277,6 +338,9 @@ func (t *cicyCloudTransport) reportAllAgents() {
 		return
 	}
 	t.lastPresence = time.Now()
+	if err := cloudJSON(http.MethodPost, "/api/code/instances/heartbeat", t.token, collectCiCyCodeTelemetry(), nil); err != nil {
+		log.Printf("[im] cicy cloud heartbeat failed: %v", err)
+	}
 	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {
 		port = "8008"
@@ -391,10 +455,7 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			httpErr(w, 500, err.Error())
 			return
 		}
-		runtimeKind := "native"
-		if os.Getenv("COLAB_RELEASE_TAG") != "" || os.Getenv("COLAB_GPU") != "" {
-			runtimeKind = "colab"
-		}
+		runtimeKind := collectCiCyCodeTelemetry().Runtime
 		err = cloudJSON(http.MethodPost, "/api/auth/email/request", "", M{
 			"email": email, "state": state, "flow": "desktop_poll", "lang": "zh",
 			"platform": "cicy-code", "system": runtime.GOOS,
