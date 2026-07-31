@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -390,8 +391,14 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			httpErr(w, 500, err.Error())
 			return
 		}
+		runtimeKind := "native"
+		if os.Getenv("COLAB_RELEASE_TAG") != "" || os.Getenv("COLAB_GPU") != "" {
+			runtimeKind = "colab"
+		}
 		err = cloudJSON(http.MethodPost, "/api/auth/email/request", "", M{
 			"email": email, "state": state, "flow": "desktop_poll", "lang": "zh",
+			"platform": "cicy-code", "system": runtime.GOOS,
+			"arch": runtime.GOARCH, "runtime": runtimeKind,
 		}, nil)
 		if err != nil {
 			httpErr(w, 502, err.Error())
