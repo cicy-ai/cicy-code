@@ -56,6 +56,16 @@ type providersConfig struct {
 	Items   []providerConfig  `json:"items"`
 }
 
+func providerURLIsFinalEndpoint(raw string) bool {
+	path := strings.ToLower(strings.TrimRight(strings.SplitN(strings.SplitN(raw, "?", 2)[0], "#", 2)[0], "/"))
+	for _, endpoint := range []string{"/chat/completions", "/responses", "/messages"} {
+		if strings.HasSuffix(path, endpoint) {
+			return true
+		}
+	}
+	return false
+}
+
 func globalJSONPath() string {
 	return cicyGlobalJSONPath
 }
@@ -210,7 +220,7 @@ func loadRuntimeAIConfigForProvider(provider string) (runtimeAIConfig, bool) {
 		default:
 			// openai protocol
 			result.APIURL = baseURL
-			if !strings.HasSuffix(baseURL, "/v1") {
+			if !strings.HasSuffix(baseURL, "/v1") && !providerURLIsFinalEndpoint(baseURL) {
 				result.APIURL = baseURL + "/v1"
 			}
 			result.AnthropicURL = strings.TrimSuffix(baseURL, "/v1")

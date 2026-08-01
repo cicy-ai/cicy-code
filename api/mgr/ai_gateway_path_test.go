@@ -8,6 +8,30 @@ import (
 	"testing"
 )
 
+func TestProviderFinalEndpointURLIsNotExtendedWithV1(t *testing.T) {
+	withTempGlobalJSON(t)
+	if err := writeGlobalJSONConfig(map[string]any{"providers": map[string]any{
+		"default": map[string]any{"codex": "zen"},
+		"items": []any{map[string]any{
+			"key": "zen", "name": "Zen", "protocol": "openai",
+			"url":    "https://opencode.ai/zen/v1/chat/completions",
+			"apiKey": "test", "defaultModel": "big-pickle",
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, ok := loadRuntimeAIConfigForProvider("zen")
+	if !ok {
+		t.Fatal("provider was not loaded")
+	}
+	if want := "https://opencode.ai/zen/v1/chat/completions"; cfg.APIURL != want {
+		t.Fatalf("APIURL = %q, want %q", cfg.APIURL, want)
+	}
+	if got := resolveOpenClawProviderTargetPath("/zen/v1/chat/completions", "/v1/chat/completions"); got != "/zen/v1/chat/completions" {
+		t.Fatalf("resolved target = %q", got)
+	}
+}
+
 func TestResolveProviderTargetPathWithFinalEndpointURL(t *testing.T) {
 	tests := []struct {
 		name     string
