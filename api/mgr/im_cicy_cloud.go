@@ -355,6 +355,7 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 			SenderInstanceID string `json:"senderInstanceId"`
 			SenderAgentID    string `json:"senderAgentId"`
 			TargetAgentID    string `json:"targetAgentId"`
+			Kind             string `json:"kind"`
 			Text             string `json:"text"`
 		} `json:"messages"`
 	}
@@ -369,6 +370,12 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 	ids := make([]string, 0, len(out.Messages))
 	for _, item := range out.Messages {
 		ids = append(ids, item.ID)
+		// Agent output is a terminal reply, not another user request. A reply is
+		// acknowledged but must never be fed back into an Agent, otherwise two
+		// connected instances automatically answer each other forever.
+		if item.Kind == "agent_reply" {
+			continue
+		}
 		peer := item.SenderInstanceID
 		if item.SenderAgentID != "" {
 			peer += "|" + item.SenderAgentID
@@ -390,6 +397,7 @@ func (t *cicyCloudTransport) Send(peer botPeer, text string) (string, error) {
 	err := cloudJSON(http.MethodPost, "/api/code/messages", t.token, M{
 		"targetInstanceId": targetInstance, "targetAgentId": targetAgent,
 		"senderAgentId": strings.TrimSpace(peer.ContextToken), "text": text,
+		"kind": "agent_reply", "hopCount": 1,
 	}, &out)
 	return out.Message.ID, err
 }
