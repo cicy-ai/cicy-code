@@ -47,7 +47,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.331"
+const version = "2.3.332"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -104,6 +104,9 @@ func main() {
 	// any loopback agent-MITM proxy env up front.
 	sanitizeAgentMitmProxyEnv()
 
+	// Container/Desktop launchers cannot conveniently append CLI flags to the
+	// image entrypoint. CICY_CFT=1 is the environment equivalent of --cft.
+	cftMode = strings.TrimSpace(os.Getenv("CICY_CFT")) == "1"
 	cliArgs := os.Args[1:]
 	for i := 0; i < len(cliArgs); i++ {
 		arg := cliArgs[i]
@@ -170,6 +173,7 @@ Options:
 
 	Environment:
 	  PORT          API port (default: 8008)
+	  CICY_CFT=1    Enable a Cloudflare quick tunnel (same as --cft)
 	  SQLITE_PATH   SQLite database file (default: %s)`, defaultSQLitePath())
 			os.Exit(0)
 		case arg == "--dev":
@@ -370,10 +374,10 @@ Options:
 	http.HandleFunc("/api/cicy/clear", authM(handleCicyClear))   // 清空 headless cicy 会话(内存+conversation.json+快照)
 	http.HandleFunc("/api/tmux/reply_text", authM(handleAgentReplyText))
 	http.HandleFunc("/api/tmux/chat_history", authM(handleAgentChatHistory))
-	http.HandleFunc("/api/agent/messages", authM(handleAgentMessages)) // cross-agent message link view (JOIN history_turns)
-	http.HandleFunc("/api/knowledge", authM(handleKnowledge))          // team knowledge Layer 2 store: GET list/recall, POST add
+	http.HandleFunc("/api/agent/messages", authM(handleAgentMessages))             // cross-agent message link view (JOIN history_turns)
+	http.HandleFunc("/api/knowledge", authM(handleKnowledge))                      // team knowledge Layer 2 store: GET list/recall, POST add
 	http.HandleFunc("/api/knowledge/specialist", authM(handleKnowledgeSpecialist)) // GET/POST which pane governs (config-file backed)
-	http.HandleFunc("/api/knowledge/", authM(handleKnowledgeByID))     // GET one / PATCH promote|reject|supersede
+	http.HandleFunc("/api/knowledge/", authM(handleKnowledgeByID))                 // GET one / PATCH promote|reject|supersede
 	http.HandleFunc("/api/tmux/client-trace", authM(handleTmuxClientTrace))
 	// http.HandleFunc("/api/tmux/send_wait", authM(handleSendWait)) // TODO: implement handleSendWait
 	http.HandleFunc("/api/tmux/capture", authM(handleCapture))
