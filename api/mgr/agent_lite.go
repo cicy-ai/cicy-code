@@ -171,7 +171,24 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 			selectGroups = ca.Tools
 		}
 	}
+	// API-only runtimes (notably the native Android build) seed a standalone
+	// built-in CiCy agent without a role template. It still needs the minimal
+	// in-process tools in order to act as an agent instead of pure chat: shell
+	// executes commands as the host process user, while skill discovers any
+	// optional CLI capabilities installed alongside it.
+	if len(selectGroups) == 0 && isAPIOnlyRuntime() {
+		selectGroups = []string{"core"}
+	}
 	enabled := expandGroups(selectGroups, cfg.ToolGroups)
+	// A stale role can name an unknown group, which expandGroups intentionally
+	// preserves as a bare tool and therefore looks non-empty without matching an
+	// actual built-in definition. API-only has one trusted local agent, so grant
+	// its two concrete in-process tools explicitly rather than relying on role
+	// metadata being present or current.
+	if isAPIOnlyRuntime() {
+		enabled["skill"] = true
+		enabled["shell"] = true
+	}
 
 	// Custom tools available to this instance (subset of enabled that are
 	// declared custom).

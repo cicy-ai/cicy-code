@@ -593,6 +593,16 @@ var ipExitProbes = []ipExitProbe{
 // mihomoExitIPProbe) rename keys + add their own outer fields (via, ok,
 // elapsed_ms) before returning to the HTTP layer.
 func probeExitIPRace(parent context.Context, curlBaseArgs []string) (M, bool, int64) {
+	if _, err := exec.LookPath("curl"); err != nil {
+		proxyURL := ""
+		for i := 0; i+1 < len(curlBaseArgs); i++ {
+			if curlBaseArgs[i] == "-x" || curlBaseArgs[i] == "--proxy" {
+				proxyURL = curlBaseArgs[i+1]
+				break
+			}
+		}
+		return probeExitIPRaceNative(parent, proxyURL)
+	}
 	start := time.Now()
 	raceCtx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -612,6 +622,68 @@ func probeExitIPRace(parent context.Context, curlBaseArgs []string) (M, bool, in
 				return
 			}
 			m, ok := p.parse(out)
+			results <- result{m: m, ok: ok}
+		}()
+	}
+	for i := 0; i < len(ipExitProbes); i++ {
+		r := <-results
+		if r.ok {
+			return r.m, true, time.Since(start).Milliseconds()
+		}
+	}
+	return nil, false, time.Since(start).Milliseconds()
+}
+
+// probeExitIPRaceNative is the curl-free equivalent used by minimal hosts such
+// as native Android. Keep curl as the desktop path (its proxy/CONNECT behaviour
+// is battle-tested), but do not make the exit-IP UI depend on an executable
+// Android does not ship. Each request gets an isolated transport so direct and
+// proxied races cannot leak connection pools or proxy settings into each other.
+func probeExitIPRaceNative(parent context.Context, proxyURL string) (M, bool, int64) {
+	start := time.Now()
+	raceCtx, cancel := context.WithCancel(parent)
+	defer cancel()
+	type result struct {
+		m  M
+		ok bool
+	}
+	results := make(chan result, len(ipExitProbes))
+	for _, p := range ipExitProbes {
+		p := p
+		go func() {
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.Proxy = nil
+			if proxyURL != "" {
+				u, err := url.Parse(proxyURL)
+				if err != nil {
+					results <- result{ok: false}
+					return
+				}
+				transport.Proxy = http.ProxyURL(u)
+			}
+			client := &http.Client{Transport: transport}
+			req, err := http.NewRequestWithContext(raceCtx, http.MethodGet, p.url, nil)
+			if err != nil {
+				results <- result{ok: false}
+				return
+			}
+			req.Header.Set("User-Agent", "curl/8.0 cicy-code")
+			resp, err := client.Do(req)
+			if err != nil {
+				results <- result{ok: false}
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				results <- result{ok: false}
+				return
+			}
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+			if err != nil {
+				results <- result{ok: false}
+				return
+			}
+			m, ok := p.parse(body)
 			results <- result{m: m, ok: ok}
 		}()
 	}

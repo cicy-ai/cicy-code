@@ -580,7 +580,7 @@ func officialRoleRoster() []builtinWorker {
 // default release does: an explicit --agents value (incl. "all"), lab/dev and
 // helper modes all opt into the per-type path for development/override.
 func usesOfficialRoster() bool {
-	if helperMode {
+	if helperMode || isAPIOnlyRuntime() {
 		return false
 	}
 	return strings.TrimSpace(agentsFlag) == "" && !labMode && !devMode
@@ -1095,22 +1095,26 @@ func runSetupWithAgents(agentList string) {
 func checkEnv() {
 	extendPATH()
 
-	fmt.Println("🔍 检查基础环境...")
-	base := baseTools()
-	for i := range base {
-		_, err := exec.LookPath(base[i].Command)
-		base[i].Installed = err == nil
-		status := "❌"
-		if base[i].Installed {
-			status = "✅"
+	if isAPIOnlyRuntime() {
+		log.Printf("[setup] api-only runtime: skipping host CLI dependencies")
+	} else {
+		fmt.Println("🔍 检查基础环境...")
+		base := baseTools()
+		for i := range base {
+			_, err := exec.LookPath(base[i].Command)
+			base[i].Installed = err == nil
+			status := "❌"
+			if base[i].Installed {
+				status = "✅"
+			}
+			fmt.Printf("  %s %s\n", status, base[i].Name)
 		}
-		fmt.Printf("  %s %s\n", status, base[i].Name)
+		installMissing(base)
+		ensureSSHKeyPair()
+		ensureTmuxConf()
+		ensureCicyTmuxConf()
+		ensureCicyShellInit()
 	}
-	installMissing(base)
-	ensureSSHKeyPair()
-	ensureTmuxConf()
-	ensureCicyTmuxConf()
-	ensureCicyShellInit()
 	// Seed ~/cicy-ai/assets/ (with a README) so there's always a known place to
 	// drop uploaded resources.
 	ensureAssetsDir()
@@ -1153,6 +1157,10 @@ func checkEnv() {
 			// cicy "团队助手" on w-1001 (selectedBuiltinWorkers returns it regardless
 			// of the arg here), independent of --agents.
 			createSelectedWorkers(nil)
+		case isAPIOnlyRuntime():
+			// Mobile/API-only runtimes intentionally have no tmux, Node, or external
+			// agent CLIs. Seed only the built-in headless CiCy agent.
+			createSelectedWorkers([]string{"cicy"})
 		case isContainerRuntime():
 			// Preinstalled container runtime must never block on interactive setup.
 			// Respect explicit --agents=... when provided; otherwise keep the default
@@ -1188,7 +1196,9 @@ func checkEnv() {
 	// the desktop "open" landed on a login page. A fresh runtime has no
 	// proxy-routed workers yet, and existing ones tolerate a brief proxy gap,
 	// so backgrounding it is safe and gets :8008 serving immediately.
-	go startCicyMihomoIfNeeded()
+	if !isAPIOnlyRuntime() {
+		go startCicyMihomoIfNeeded()
+	}
 	ensureBuiltinAgents(selectedAgents)
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
@@ -1196,8 +1206,10 @@ func checkEnv() {
 	// advisor role is now an ordinary cicy agent (role_template=审计策略专员) the
 	// operator onboards on demand. Collection/scanning is wired in main.go via
 	// audit.Init(); finding hits dispatch to the 审计策略专员 (audit_agent_notify.go).
-	go ensureFfmpegAsync()
-	go ensurePreinstalledSkills()
+	if !isAPIOnlyRuntime() {
+		go ensureFfmpegAsync()
+		go ensurePreinstalledSkills()
+	}
 }
 
 var preinstalledSkills = []string{

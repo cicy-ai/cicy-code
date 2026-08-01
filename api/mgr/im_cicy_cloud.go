@@ -419,7 +419,16 @@ func (t *cicyCloudTransport) reportAllAgents() {
 		return
 	}
 	t.lastPresence = time.Now()
-	if err := cloudJSON(http.MethodPost, "/api/code/instances/heartbeat", t.token, collectCiCyCodeTelemetry(), nil); err != nil {
+	telemetry := collectCiCyCodeTelemetry()
+	heartbeat := M{"platform": telemetry.Platform, "arch": telemetry.Arch,
+		"runtime": telemetry.Runtime, "cpuModel": telemetry.CPUModel,
+		"cpuCores": telemetry.CPUCores, "memoryTotalMB": telemetry.MemoryTotalMB,
+		"gpu": telemetry.GPU}
+	if tunnelURL := cftCurrentURL(); tunnelURL != "" {
+		heartbeat["tunnelUrl"] = tunnelURL
+		heartbeat["tunnelToken"] = loadAPIToken()
+	}
+	if err := cloudJSON(http.MethodPost, "/api/code/instances/heartbeat", t.token, heartbeat, nil); err != nil {
 		log.Printf("[im] cicy cloud heartbeat failed: %v", err)
 	}
 	t.syncAgentConfigs()

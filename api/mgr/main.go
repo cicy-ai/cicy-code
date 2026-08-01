@@ -4,11 +4,13 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -47,7 +49,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.332"
+const version = "2.3.336"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -66,6 +68,7 @@ func resolvePort() string {
 var agentsFlag string
 
 func main() {
+	configureAndroidDNS()
 	// OS-specific process setup (Windows: locate the bundled MSYS2 runtime and
 	// prepend its usr\bin to PATH so tmux/sh/bash resolve). Before subcommand
 	// dispatch — subcommands shell out too.
@@ -284,9 +287,11 @@ Options:
 	containerMode = isContainerRuntime()
 	checkEnv()
 
-	go startWatcher()
-	go startTmuxHealth()
-	go startDesktopSnapshots()
+	if !isAPIOnlyRuntime() {
+		go startWatcher()
+		go startTmuxHealth()
+		go startDesktopSnapshots()
+	}
 	startSystemResourceMonitor()
 	if _, err := syncMachinesFromConfig(); err != nil {
 		log.Printf("[machines] initial sync error: %v", err)
@@ -800,6 +805,36 @@ Options:
 	}
 
 	log.Fatal(http.ListenAndServe(bind+":"+port, globalCORS(withGzip(http.DefaultServeMux))))
+}
+
+// Android binaries started by adb do not get libc's netd-backed resolver when
+// built with CGO disabled. The pure-Go resolver consequently reads Android's
+// loopback stub ([::1]:53), where no DNS server is listening for the shell UID.
+// Use Android's advertised DNS server when available, with a public fallback.
+func configureAndroidDNS() {
+	if runtime.GOOS != "android" {
+		return
+	}
+	dnsServer := "8.8.8.8"
+	if out, err := exec.Command("getprop", "net.dns1").Output(); err == nil {
+		if value := strings.TrimSpace(string(out)); net.ParseIP(value) != nil {
+			dnsServer = value
+		}
+	}
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "udp", net.JoinHostPort(dnsServer, "53"))
+		},
+	}
+	net.DefaultResolver = resolver
+	// Be explicit for outbound model traffic: transports created before main
+	// otherwise retain a dialer that may still consult Android's broken stub.
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport := base.Clone()
+		transport.DialContext = (&net.Dialer{Resolver: resolver}).DialContext
+		http.DefaultTransport = transport
+	}
 }
 
 func getFirstToken() string {

@@ -1323,6 +1323,9 @@ func platformShellArgv(command string) []string {
 	if runtime.GOOS == "windows" {
 		return []string{"powershell", "-NoProfile", "-NonInteractive", "-Command", command}
 	}
+	if runtime.GOOS == "android" {
+		return []string{"/system/bin/sh", "-c", command}
+	}
 	return []string{"bash", "-lc", command}
 }
 
