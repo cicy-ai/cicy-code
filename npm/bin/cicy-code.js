@@ -108,7 +108,13 @@ async function cloudLogin(email) {
   const state = crypto.randomBytes(32).toString('hex');
   await requestJSON('/api/auth/email/request', {
     method: 'POST',
-    body: { email, state, flow: 'desktop_poll', lang: preferredLanguage() },
+    body: {
+      email,
+      state,
+      flow: 'desktop_poll',
+      lang: preferredLanguage(),
+      ...loginRequestInfo(instanceId),
+    },
   });
   console.log(`cicy-code: login email sent to ${email}`);
   console.log('cicy-code: click the link in the email; waiting for confirmation…');
@@ -134,6 +140,35 @@ async function cloudLogin(email) {
     return cloudEnvironment(email, instanceId, token);
   }
   throw new Error('email login timed out; start cicy-code again');
+}
+
+function loginRequestInfo(instanceId) {
+  const cpus = os.cpus();
+  const cpu = cpus.length > 0 ? String(cpus[0].model || '').trim() : '';
+  let gpu = '';
+  try {
+    gpu = execSync('nvidia-smi --query-gpu=name,memory.total --format=csv,noheader', {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 3000,
+    }).trim();
+  } catch {}
+  let clientVersion = '';
+  try {
+    clientVersion = String(require('../package.json').version || '');
+  } catch {}
+  return {
+    platform: isColab() ? 'colab' : process.platform,
+    system: `${os.type()} ${os.release()}`.trim(),
+    arch: process.arch,
+    runtime: isColab() ? 'colab' : (process.env.GITHUB_ACTIONS === 'true' ? 'github-actions' : 'native'),
+    hostname: os.hostname(),
+    instanceId,
+    clientVersion,
+    cpu,
+    memory: `${Math.round(os.totalmem() / 1024 / 1024)} MB`,
+    gpu,
+  };
 }
 
 async function registerCloudInstance(token, instanceId) {
