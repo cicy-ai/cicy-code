@@ -32,6 +32,17 @@ func TestRoleGreetingsInMeta(t *testing.T) {
 	}
 }
 
+func TestAgentLanguageDefaultsToChinese(t *testing.T) {
+	for _, config := range []string{"", `{}`, `{"lang":""}`} {
+		if got := agentLangFromConfig(config); got != "zh-CN" {
+			t.Errorf("agentLangFromConfig(%q) = %q, want zh-CN", config, got)
+		}
+	}
+	if got := agentLangFromConfig(`{"lang":"en"}`); got != "en" {
+		t.Errorf("explicit English language = %q, want en", got)
+	}
+}
+
 func TestKouboSystemPromptRequiresPublicSkill(t *testing.T) {
 	raw, err := agentRoleTemplatesFS.ReadFile("embed/memory-seed/agents/koubo/system.md")
 	if err != nil {

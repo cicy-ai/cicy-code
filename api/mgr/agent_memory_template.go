@@ -19,15 +19,18 @@ import (
 )
 
 // agentLangFromConfig extracts the agent's stored UI language from its config
-// JSON (set at create time). Empty ⇒ English default.
+// JSON (set at create time). Empty ⇒ Simplified Chinese default.
 func agentLangFromConfig(config string) string {
 	if strings.TrimSpace(config) == "" {
-		return ""
+		return "zh-CN"
 	}
 	var c struct {
 		Lang string `json:"lang"`
 	}
 	_ = json.Unmarshal([]byte(config), &c)
+	if strings.TrimSpace(c.Lang) == "" {
+		return "zh-CN"
+	}
 	return c.Lang
 }
 
@@ -132,7 +135,8 @@ func loadRoleMeta(slug string) roleMeta {
 	return m
 }
 
-// roleMetaName / roleMetaGreeting pick the language variant (English default).
+// roleMetaName / roleMetaGreeting pick the requested language variant. Callers
+// use Simplified Chinese when an agent has no stored language.
 func roleMetaName(slug, lang string) string {
 	m := loadRoleMeta(slug)
 	if langIsZh(lang) && strings.TrimSpace(m.NameZh) != "" {
@@ -509,7 +513,7 @@ func extractOpeningSection(md string) string {
 
 // agentOpeningGreeting returns the opening line shown when an employee's chat
 // history is empty. It comes from the role's meta.yaml (`greeting` / `greeting_zh`),
-// picked by the agent's stored language (default English).
+// picked by the agent's stored language (default Simplified Chinese).
 func agentOpeningGreeting(shortID string) string {
 	var roleTemplate, title, agentType, workspace, config string
 	_ = store.QueryRow(
