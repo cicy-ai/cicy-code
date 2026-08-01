@@ -538,6 +538,7 @@ type builtinWorker struct {
 	Port          int
 	AgentType     string
 	Title         string
+	TitleEn       string // official English title; empty for non-localized workers
 	RoleTemplate  string // role template slug (~/cicy-ai/memory/agents/<slug>.md); "" = none
 	Master        bool   // the w-1001 PM master (role="master"); others are "worker"
 	BindToPrimary bool   // attach under w-1001 by default (shown on the master's team)
@@ -564,12 +565,12 @@ func officialRoleRoster() []builtinWorker {
 	// The coding agents (claude/codex/opencode) are kept and bind under the
 	// master. All other cicy roles (项目经理/HR/产品经理/…) are NOT preinstalled.
 	roster := []builtinWorker{
-		{Port: 1001, AgentType: "cicy", Title: "Knowledge Specialist", RoleTemplate: "knowledge-specialist", Master: true},
-		{Port: 101, AgentType: "claude", Title: "Architect", BindToPrimary: true},
-		{Port: 102, AgentType: "codex", Title: "Full-stack Engineer", BindToPrimary: true},
-		{Port: 103, AgentType: "opencode", Title: "Software Engineer"},
-		{Port: 104, AgentType: "cicy", Title: "Audit Policy Specialist", RoleTemplate: "audit-policy-specialist"},
-		{Port: 105, AgentType: "cicy", Title: "口播智能体", RoleTemplate: "koubo", BindToPrimary: true},
+		{Port: 1001, AgentType: "cicy", Title: "知识专员", TitleEn: "Knowledge Specialist", RoleTemplate: "knowledge-specialist", Master: true},
+		{Port: 101, AgentType: "claude", Title: "架构师", TitleEn: "Architect", BindToPrimary: true},
+		{Port: 102, AgentType: "codex", Title: "全栈工程师", TitleEn: "Full-stack Engineer", BindToPrimary: true},
+		{Port: 103, AgentType: "opencode", Title: "软件工程师", TitleEn: "Software Engineer"},
+		{Port: 104, AgentType: "cicy", Title: "审计策略专员", TitleEn: "Audit Policy Specialist", RoleTemplate: "audit-policy-specialist"},
+		{Port: 105, AgentType: "cicy", Title: "口播智能体", TitleEn: "Spoken Content Agent", RoleTemplate: "koubo", BindToPrimary: true},
 	}
 	return roster
 }
@@ -833,12 +834,19 @@ func syncWorkerIndexToExistingAgents() {
 func syncBuiltinAgentTitles(selected []string) {
 	for _, w := range selectedBuiltinWorkers(selected) {
 		paneID := builtinWorkerSession(w.Port) + ":main.0"
-		query := fmt.Sprintf("UPDATE agent_config SET title=?, updated_at=%s WHERE pane_id=? AND (COALESCE(TRIM(title), '')='' OR title=?)", store.Now())
-		legacyTitle := ""
-		if paneID == primaryWorkerPaneID {
-			legacyTitle = "商业顾问"
+		var config string
+		_ = store.QueryRow("SELECT COALESCE(config,'') FROM agent_config WHERE pane_id=?", paneID).Scan(&config)
+		targetTitle, legacyTitle := w.Title, w.TitleEn
+		if !langIsZh(agentLangFromConfig(config)) && strings.TrimSpace(w.TitleEn) != "" {
+			targetTitle, legacyTitle = w.TitleEn, w.Title
 		}
-		if _, err := store.Exec(query, w.Title, paneID, legacyTitle); err != nil {
+		secondLegacy := ""
+		if paneID == primaryWorkerPaneID {
+			secondLegacy = "商业顾问"
+		}
+		query := fmt.Sprintf(`UPDATE agent_config SET title=?, updated_at=%s
+			WHERE pane_id=? AND (COALESCE(TRIM(title), '')='' OR title=? OR (?!='' AND title=?))`, store.Now())
+		if _, err := store.Exec(query, targetTitle, paneID, legacyTitle, secondLegacy, secondLegacy); err != nil {
 			log.Printf("[startup] failed to sync builtin title for %s: %v", paneID, err)
 		}
 	}
