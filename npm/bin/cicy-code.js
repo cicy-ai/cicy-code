@@ -21,7 +21,7 @@ const os = require('os');
 const path = require('path');
 
 const rawArgs = process.argv.slice(2);
-const { email: cloudEmail, args } = takeEmailArg(rawArgs);
+const { email: cloudEmail, team: cloudTeam, args } = takeCloudArgs(rawArgs);
 const PORT = process.env.PORT || '8008';
 const CLOUD_ORIGIN = (process.env.CICY_CLOUD_ORIGIN || 'https://cicy-ai.com').replace(/\/$/, '');
 
@@ -56,7 +56,7 @@ main().catch((err) => {
 
 async function main() {
   let cloudEnv = {};
-  if (cloudEmail) cloudEnv = await cloudLogin(cloudEmail);
+  if (cloudEmail) cloudEnv = await cloudLogin(cloudEmail, cloudTeam);
   if (!isUtility) ensurePortFree(PORT);
   const child = spawn(binPath, args, {
     stdio: 'inherit',
@@ -68,9 +68,10 @@ async function main() {
   });
 }
 
-function takeEmailArg(input) {
+function takeCloudArgs(input) {
   const output = [];
   let email = '';
+  let team = '';
   for (let i = 0; i < input.length; i += 1) {
     const value = input[i];
     if (value === '--email') {
@@ -78,6 +79,11 @@ function takeEmailArg(input) {
       i += 1;
     } else if (value.startsWith('--email=')) {
       email = value.slice('--email='.length).trim().toLowerCase();
+    } else if (value === '--team') {
+      team = String(input[i + 1] || '').trim();
+      i += 1;
+    } else if (value.startsWith('--team=')) {
+      team = value.slice('--team='.length).trim();
     } else {
       output.push(value);
     }
@@ -85,21 +91,34 @@ function takeEmailArg(input) {
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     throw new Error('invalid --email address');
   }
-  return { email, args: output };
+  if (team && !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(team)) {
+    throw new Error('invalid --team identifier');
+  }
+  return { email, team, args: output };
 }
 
-async function cloudLogin(email) {
+async function cloudLogin(email, requestedTeam) {
   const credentialPath = cloudCredentialPath();
   const saved = readJSON(credentialPath);
   const instanceId = String(saved.instance_id || '').trim() ||
     `code-${crypto.randomBytes(18).toString('hex')}`;
+  const teamId = requestedTeam || String(saved.team_id || '').trim() || `team-${Date.now()}`;
   let token = saved.email === email ? String(saved.token || '') : '';
 
   if (token) {
     try {
-      await registerCloudInstance(token, instanceId);
+      await registerCloudInstance(token, instanceId, teamId);
+      writeCredential(credentialPath, {
+        ...saved,
+        email,
+        instance_id: instanceId,
+        team_id: teamId,
+        token,
+        cloud_origin: CLOUD_ORIGIN,
+        updated_at: new Date().toISOString(),
+      });
       console.log(`cicy-code: CiCy Cloud connected as ${email}`);
-      return cloudEnvironment(email, instanceId, token);
+      return cloudEnvironment(email, instanceId, teamId, token);
     } catch {
       token = '';
     }
@@ -114,6 +133,7 @@ async function cloudLogin(email) {
       flow: 'desktop_poll',
       lang: preferredLanguage(),
       ...loginRequestInfo(instanceId),
+      teamId,
     },
   });
   console.log(`cicy-code: login email sent to ${email}`);
@@ -128,16 +148,17 @@ async function cloudLogin(email) {
       throw new Error('email login expired; start cicy-code again');
     }
     token = String(result.token);
-    await registerCloudInstance(token, instanceId);
+    await registerCloudInstance(token, instanceId, teamId);
     writeCredential(credentialPath, {
       email,
       instance_id: instanceId,
+      team_id: teamId,
       token,
       cloud_origin: CLOUD_ORIGIN,
       updated_at: new Date().toISOString(),
     });
     console.log(`cicy-code: login successful; this device is now bound to ${email}`);
-    return cloudEnvironment(email, instanceId, token);
+    return cloudEnvironment(email, instanceId, teamId, token);
   }
   throw new Error('email login timed out; start cicy-code again');
 }
@@ -171,12 +192,13 @@ function loginRequestInfo(instanceId) {
   };
 }
 
-async function registerCloudInstance(token, instanceId) {
+async function registerCloudInstance(token, instanceId, teamId) {
   await requestJSON('/api/code/instances/register', {
     method: 'POST',
     token,
     body: {
       instanceId,
+      teamId,
       platform: isColab() ? 'colab' : process.platform,
       arch: process.arch,
       runtime: isColab() ? 'colab' : 'native',
@@ -185,11 +207,12 @@ async function registerCloudInstance(token, instanceId) {
   });
 }
 
-function cloudEnvironment(email, instanceId, token) {
+function cloudEnvironment(email, instanceId, teamId, token) {
   return {
     CICY_CLOUD_ORIGIN: CLOUD_ORIGIN,
     CICY_CLOUD_EMAIL: email,
     CICY_CLOUD_INSTANCE_ID: instanceId,
+    CICY_CLOUD_TEAM_ID: teamId,
     CICY_CLOUD_TOKEN: token,
   };
 }
