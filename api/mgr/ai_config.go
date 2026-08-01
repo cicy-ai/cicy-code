@@ -558,6 +558,15 @@ func runtimeAIProviderOptionsForAgent(agentType, apiStyle string) []runtimeAIPro
 
 func providerForProtocol(protocol string) (*providerConfig, bool) {
 	protocol = normalizeAIGatewayProvider(protocol)
+	// cicy's configured default is authoritative. Pane creation calls this helper
+	// to seed runtime_ai; choosing the first protocol-compatible item instead
+	// silently persisted an override (commonly defaultAnthropic) that then masked
+	// providers.default.cicy forever. Only fall back to list order when the cicy
+	// default is absent or genuinely incompatible with the requested API style.
+	if provider, ok := loadProviderForAgentType("cicy"); ok && provider != nil &&
+		normalizeAIGatewayProvider(provider.Protocol) == protocol {
+		return provider, true
+	}
 	for _, provider := range loadAllProviderConfigs() {
 		if normalizeAIGatewayProvider(provider.Protocol) == protocol && strings.TrimSpace(provider.Key) != "" {
 			p := provider

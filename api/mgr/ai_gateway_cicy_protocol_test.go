@@ -93,6 +93,25 @@ func TestCicyProviderPickersOfferBothProtocols(t *testing.T) {
 	}
 }
 
+func TestCicyPaneSeedPrefersConfiguredDefaultOverFirstProtocolMatch(t *testing.T) {
+	withTempCicyRoot(t)
+	withTestStore(t)
+	// Both providers speak openai, but the first list item is deliberately not
+	// the configured cicy default. Pane creation must seed the default, not list[0].
+	j := `{"api_token":"k","providers":{"default":{"cicy":"chosen"},"items":[
+      {"name":"First","key":"first","url":"https://first.example/v1","apiKey":"sk-first","protocol":"openai","defaultModel":"first-model"},
+      {"name":"Chosen","key":"chosen","url":"https://chosen.example/v1","apiKey":"public","protocol":"openai","defaultModel":"chosen-model"}]}}`
+	writeProvidersGlobalJSON(t, j)
+
+	provider, ok := providerForProtocol("openai")
+	if !ok || provider == nil {
+		t.Fatal("expected an openai provider")
+	}
+	if provider.Key != "chosen" {
+		t.Fatalf("providerForProtocol = %q, want configured cicy default %q", provider.Key, "chosen")
+	}
+}
+
 func TestCicyOpenAIOverrideNotMismatch(t *testing.T) {
 	withTempCicyRoot(t)
 	withTestStore(t)
