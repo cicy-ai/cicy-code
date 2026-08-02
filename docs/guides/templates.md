@@ -74,6 +74,35 @@ cicy-agent-role list
 `create` 默认拒绝覆盖已有模板。只有在检查现有文件并确认更新时才使用 `--force`。
 创建完成后无需注册或重启，新模板会进入「创建 Agent」的角色模板列表。
 
+### Agent Role Market
+
+公共角色市场位于 [`cicy-ai/cicy-agent-roles`](https://github.com/cicy-ai/cicy-agent-roles)。
+角色通过 PR 校验、版本 tag 和不可变 GitHub Release 发布；客户端在安装前校验 SHA-256。
+
+```sh
+# 浏览和搜索
+cicy-agent-role market
+cicy-agent-role search 销售
+cicy-agent-role info sales-assistant
+
+# 安装和更新
+cicy-agent-role install sales-assistant
+cicy-agent-role diff sales-assistant
+cicy-agent-role update sales-assistant
+```
+
+市场安装会在角色目录增加 `.cicy-role.json` 和 `.cicy-role/base/<version>/`，记录来源、版本、
+上游文件哈希和基线快照。这些内部文件不影响 CiCy 使用标准四文件。
+
+更新时不会覆盖用户修改：
+
+- 本地未修改：自动升级到上游版本；
+- 只有本地修改：保留本地内容；
+- 本地和上游同时修改：保留本地文件，写入 `<文件>.upstream` 并返回冲突状态；
+- 已创建 Agent 的 workspace `AGENTS.md` 不会被模板更新自动覆盖。
+
+因此不要对已有角色执行 `install --force`，除非用户明确要求丢弃本地修改。
+
 `meta.yaml` 示例:
 
 ```yaml
