@@ -1203,9 +1203,10 @@ func cicyToolDefs(cfg liteConfig) []M {
 	return append(out, liteCustomToolDefs(cfg)...)
 }
 
-// cicyAllToolDefs holds the IN-PROCESS built-in tool defs. There are only two:
-// `skill` (discover + read any installed skill's SKILL.md — the cicy-todo /
-// cicy-agent / … ecosystem) and `shell` (run a skill's CLI, or anything else).
+// cicyAllToolDefs holds the IN-PROCESS built-in tool defs: `skill` (discover +
+// read installed skills), `shell` (run their CLIs or other host commands), and
+// the optional `mobile` bridge to cicy-mobile's AccessibilityService. Mobile is
+// exposed only when a trusted loopback bridge is configured in API-only mode.
 // No per-skill hardcoded tools: 装个 skill 即可用, 改 skill 即更新.
 func cicyAllToolDefs() []M {
 	return append([]M{}, []M{
@@ -1230,6 +1231,33 @@ func cicyAllToolDefs() []M {
 					"timeout": M{"type": "integer", "description": "Optional timeout in seconds (default 120, max 1800)."},
 				},
 				"required": []string{"command"},
+			},
+		},
+		{
+			"name":        "mobile",
+			"description": "Operate the Android device through cicy-mobile's AccessibilityService. Read the current accessibility tree before choosing a target. Select nodes by nodeId, Android viewId, visible text, content description, or bounds. This tool works as the app UID and does not use adb or shell privileges.",
+			"input_schema": M{
+				"type": "object",
+				"properties": M{
+					"action": M{"type": "string", "enum": []string{"tree", "click", "input", "scroll", "back", "home", "launch"}},
+					"selector": M{
+						"type": "object",
+						"properties": M{
+							"nodeId":      M{"type": "string"},
+							"viewId":      M{"type": "string"},
+							"text":        M{"type": "string"},
+							"description": M{"type": "string"},
+							"bounds": M{"type": "object", "properties": M{
+								"left": M{"type": "integer"}, "top": M{"type": "integer"},
+								"right": M{"type": "integer"}, "bottom": M{"type": "integer"},
+							}},
+						},
+					},
+					"text":      M{"type": "string", "description": "Text for the input action."},
+					"direction": M{"type": "string", "enum": []string{"forward", "backward", "up", "down", "left", "right"}},
+					"package":   M{"type": "string", "description": "Android package name for the launch action."},
+				},
+				"required": []string{"action"},
 			},
 		},
 	}...)
@@ -1353,6 +1381,8 @@ func cicyRunTool(turnCtx context.Context, selfShortID, name string, input map[st
 	switch name {
 	case "skill":
 		return cicySkillTool(str("name"))
+	case "mobile":
+		return mobileBridgeCall(turnCtx, input)
 	case "shell":
 		command := str("command")
 		if command == "" {

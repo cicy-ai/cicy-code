@@ -188,6 +188,9 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	if isAPIOnlyRuntime() {
 		enabled["skill"] = true
 		enabled["shell"] = true
+		if mobileBridgeConfigured() {
+			enabled["mobile"] = true
+		}
 	}
 
 	// Custom tools available to this instance (subset of enabled that are
