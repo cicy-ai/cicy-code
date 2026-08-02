@@ -351,7 +351,12 @@ func cftNamedOnce(bin, token, url, port string) error {
 }
 
 func cftRunOnce(bin, port string) error {
-	cmd := exec.Command(bin, "tunnel", "--url", "http://127.0.0.1:"+port, "--no-autoupdate")
+	// HTTP/2 is substantially more reliable in Colab and other constrained
+	// containers where QUIC cannot raise the UDP receive buffer. Without this,
+	// cloudflared can print a Quick Tunnel URL before it has any registered edge
+	// connection, leaving the Cloud dashboard with a link that only returns 530.
+	cmd := exec.Command(bin, "tunnel", "--url", "http://127.0.0.1:"+port,
+		"--protocol", "http2", "--no-autoupdate")
 	// cloudflared logs the assigned URL on stderr; merge both to be safe.
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw
@@ -362,6 +367,8 @@ func cftRunOnce(bin, port string) error {
 	go func() {
 		sc := bufio.NewScanner(pr)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		pendingURL := ""
+		publishedURL := ""
 		for sc.Scan() {
 			line := sc.Text()
 			// Surface cloudflared's own failures — otherwise a dead tunnel is
@@ -374,19 +381,22 @@ func cftRunOnce(bin, port string) error {
 				log.Printf("[cft][cloudflared] %s", line)
 			}
 			m := cftURLRe.FindString(line)
-			if m == "" || strings.Contains(m, "api.trycloudflare.com") {
+			if m != "" && !strings.Contains(m, "api.trycloudflare.com") {
+				pendingURL = m
+			}
+			// A URL assignment alone is not proof that the connector is usable.
+			// Publish only after cloudflared confirms an edge registration.
+			if !strings.Contains(low, "registered tunnel connection") || pendingURL == "" || pendingURL == publishedURL {
 				continue
 			}
-			if cftCurrentURL() == m {
-				continue
-			}
-			cftTunnelURL.Store(m)
-			cftWriteState(m, port)
+			publishedURL = pendingURL
+			cftTunnelURL.Store(pendingURL)
+			cftWriteState(pendingURL, port)
 			token := getFirstToken()
 			log.Printf("[cft] ─────────────────────────────────────────────")
-			log.Printf("[cft] ✅ Public: %s/?token=%s", m, token)
+			log.Printf("[cft] ✅ Public: %s/?token=%s", pendingURL, token)
 			log.Printf("[cft] register from another team's box:")
-			log.Printf("[cft]   cicy-agent team add <name> %s %s", m, token)
+			log.Printf("[cft]   cicy-agent team add <name> %s %s", pendingURL, token)
 			log.Printf("[cft] ─────────────────────────────────────────────")
 		}
 	}()
