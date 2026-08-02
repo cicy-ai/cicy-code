@@ -166,6 +166,15 @@ func serveUI() http.Handler {
 				diskSrv.ServeHTTP(w, r)
 				return
 			}
+			// A missing hashed asset is not an SPA route. Returning index.html here
+			// gives module requests text/html and, worse, the /assets cache policy
+			// stores that bad response as immutable. Let the browser see a real 404
+			// so a stale index can recover on refresh after a deployment.
+			if strings.HasPrefix(path, "/assets/") {
+				w.Header().Set("Cache-Control", "no-store")
+				http.NotFound(w, r)
+				return
+			}
 			serveIndex()
 			return
 		}
@@ -176,6 +185,11 @@ func serveUI() http.Handler {
 				return
 			}
 			embedded.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(path, "/assets/") {
+			w.Header().Set("Cache-Control", "no-store")
+			http.NotFound(w, r)
 			return
 		}
 		serveIndex()

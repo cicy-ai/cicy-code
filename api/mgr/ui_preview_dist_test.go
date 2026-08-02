@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -100,6 +101,27 @@ func TestServeUISPAFallbackFromEnvDist(t *testing.T) {
 	body, _ := io.ReadAll(rec.Result().Body)
 	if string(body) != marker {
 		t.Fatalf("SPA fallback served %q, want %q", string(body), marker)
+	}
+}
+
+func TestServeUIMissingAssetReturnsUncached404(t *testing.T) {
+	dist := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dist, "index.html"), []byte("<html>spa root</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	withUIModes(t, false, false, dist)
+	rec := httptest.NewRecorder()
+	serveUI().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/stale-chunk.js", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing asset status = %d, want 404", rec.Code)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("missing asset Cache-Control = %q, want no-store", got)
+	}
+	if got := rec.Header().Get("Content-Type"); strings.Contains(got, "text/html") {
+		t.Fatalf("missing asset Content-Type = %q, must not be HTML", got)
 	}
 }
 
