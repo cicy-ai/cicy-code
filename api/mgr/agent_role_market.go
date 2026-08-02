@@ -15,7 +15,10 @@ import (
 	"time"
 )
 
-const publicAgentRoleRegistry = "https://raw.githubusercontent.com/cicy-ai/cicy-agent-roles/main/registry.json"
+// Use the same Cloud-owned catalog flow as the public Skill Market. The Cloud
+// sync workflow validates and snapshots the upstream immutable role registry,
+// so desktop clients do not depend on GitHub's raw endpoint directly.
+const publicAgentRoleRegistry = "https://cicy-ai.com/agent-role-catalog.json"
 
 var agentRoleSlugRE = regexp.MustCompile(`^[a-z][a-z0-9-]{1,62}$`)
 
