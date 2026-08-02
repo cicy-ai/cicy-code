@@ -531,6 +531,8 @@ Options:
 	http.HandleFunc("/api/skills/run", wa(handleSkillRun))
 	http.HandleFunc("/api/skill-market", wa(handleSkillMarketList))
 	http.HandleFunc("/api/skill-market/", wa(handleSkillMarketAction))
+	http.HandleFunc("/api/agent-role-market", wa(handleAgentRoleMarket))
+	http.HandleFunc("/api/agent-role-market/", wa(handleAgentRoleMarketAction))
 	http.HandleFunc("/api/cicy-update", wa(handleCicyUpdateStatus)) // 是否有 cicy-code 新版(缓存)
 	http.HandleFunc("/api/skill-registries", wa(handleSkillRegistries))
 	http.HandleFunc("/api/skill-registries/", wa(handleSkillRegistries))

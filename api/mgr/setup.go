@@ -1228,6 +1228,8 @@ var preinstalledSkills = []string{
 	// Author custom cicy agents (persona + tools + model) from the CLI; backs the
 	// "build an agent like a skill" flow (~/cicy-ai/agents/<slug>/AGENT.md).
 	"agent-creator",
+	// Standard role-template authoring plus the public Agent Role Market client.
+	"cicy-agent-role",
 	// Spoken-content workspace lifecycle (install/start/open/stop/status). The
 	// w-105 koubo agent and its bright header action both call this public skill;
 	// agent-electron above is its mandatory profile-1 browser dependency.

@@ -150,6 +150,13 @@ const api = {
   deleteCustomAgent: (slug: string) =>
     http.delete(`/api/custom-agents/${encodeURIComponent(slug)}`),
 
+  listAgentRoleMarket: (q?: string) =>
+    http.get('/api/agent-role-market', { params: q ? { q } : {} }),
+  installAgentRole: (slug: string) =>
+    http.post(`/api/agent-role-market/${encodeURIComponent(slug)}/install`, {}),
+  updateAgentRole: (slug: string) =>
+    http.post(`/api/agent-role-market/${encodeURIComponent(slug)}/update`, {}),
+
   sendCommand: (winId: string, text: string, submit = true) => unwrapTmuxSend(http.post('/api/tmux/send', { win_id: winId, text, submit })),
   sendKeys: (winId: string, keys: string) => unwrapTmuxSend(http.post('/api/tmux/send-keys', { win_id: winId, keys })),
   // 打断 headless cicy 正在跑的 turn(它没有 tmux pane,send-keys 够不着,走专用端点)。

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useState } from 'react';
-import { Sparkles, Pencil, Trash2, Zap, Bot, Cpu } from 'lucide-react';
+import { Sparkles, Pencil, Trash2, Zap, Bot, Cpu, Store, Download, RefreshCw, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Spinner } from '../ui/Spinner';
 import { useDialogs } from '../ui/Modal';
@@ -15,6 +15,21 @@ interface CustomAgent {
   tools: string[];
   model: string;
   body: string;
+}
+
+interface MarketRole {
+  slug: string;
+  version: string;
+  name: string;
+  name_zh: string;
+  description: string;
+  description_zh: string;
+  tags: string[];
+  installed: boolean;
+  installed_version?: string;
+  has_update: boolean;
+  modified: boolean;
+  conflicts?: string[];
 }
 
 interface Props {
@@ -58,6 +73,11 @@ export default function CustomAgentsPanel({ paneId, onCreated, onSelectAgent }: 
   const [agents, setAgents] = useState<CustomAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingSlug, setCreatingSlug] = useState('');
+  const [view, setView] = useState<'custom' | 'market'>('custom');
+  const [marketRoles, setMarketRoles] = useState<MarketRole[]>([]);
+  const [marketLoading, setMarketLoading] = useState(false);
+  const [marketQuery, setMarketQuery] = useState('');
+  const [marketAction, setMarketAction] = useState('');
 
   const refresh = useCallback(() => {
     return apiService.listCustomAgents()
@@ -70,6 +90,30 @@ export default function CustomAgentsPanel({ paneId, onCreated, onSelectAgent }: 
   useDevRegister('CustomAgentsPanel', { count: agents.length, loading, paneId });
 
   const toolLabel = (g: string) => t(`toolGroups.${g}`, { defaultValue: g }) || g;
+
+  const refreshMarket = useCallback(async (query = marketQuery) => {
+    setMarketLoading(true);
+    try {
+      const res = await apiService.listAgentRoleMarket(query);
+      setMarketRoles(Array.isArray(res.data?.roles) ? res.data.roles : []);
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('roleMarketLoadFailed', { defaultValue: '角色市场加载失败' }) }));
+    } finally { setMarketLoading(false); }
+  }, [marketQuery, t]);
+
+  useEffect(() => { if (view === 'market') refreshMarket(); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleMarketAction = async (role: MarketRole) => {
+    setMarketAction(role.slug);
+    try {
+      if (role.installed) await apiService.updateAgentRole(role.slug);
+      else await apiService.installAgentRole(role.slug);
+      await refreshMarket();
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: role.installed ? t('roleUpdated', { defaultValue: '角色已更新' }) : t('roleInstalled', { defaultValue: '角色已安装' }) }));
+    } catch (error: any) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: error?.response?.data?.error || t('roleActionFailed', { defaultValue: '角色操作失败' }) }));
+    } finally { setMarketAction(''); }
+  };
 
   // Hand off to the active agent: it reads the agent-creator skill and drives the
   // create/edit conversation. No UI form.
@@ -128,8 +172,46 @@ export default function CustomAgentsPanel({ paneId, onCreated, onSelectAgent }: 
         </button>
       </div>
 
+      <div className="flex gap-1 border-b border-[var(--vsc-border)] px-3 py-2">
+        <button type="button" onClick={() => setView('custom')} className={`rounded-md px-2.5 py-1 text-[11px] ${view === 'custom' ? 'bg-blue-500/20 text-blue-300' : 'text-zinc-500 hover:text-zinc-300'}`}>
+          <Bot className="mr-1 inline h-3 w-3" />{t('myAgents', { defaultValue: '我的 Agent' })}
+        </button>
+        <button data-id="agent-role-market-tab" type="button" onClick={() => setView('market')} className={`rounded-md px-2.5 py-1 text-[11px] ${view === 'market' ? 'bg-emerald-500/20 text-emerald-300' : 'text-zinc-500 hover:text-zinc-300'}`}>
+          <Store className="mr-1 inline h-3 w-3" />{t('roleMarket', { defaultValue: '角色市场' })}
+        </button>
+      </div>
+
       <div data-id="custom-agents-panel-list" className="flex-1 overflow-auto p-3">
-        {loading ? (
+        {view === 'market' ? (
+          <div data-id="agent-role-market" className="space-y-2.5">
+            <form className="flex gap-1.5" onSubmit={(event) => { event.preventDefault(); refreshMarket(); }}>
+              <div className="relative min-w-0 flex-1">
+                <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-zinc-600" />
+                <input value={marketQuery} onChange={(event) => setMarketQuery(event.target.value)} placeholder={t('roleMarketSearch', { defaultValue: '搜索角色…' })} className="w-full rounded-lg border border-white/[0.08] bg-black/30 py-1.5 pl-7 pr-2 text-[12px] text-zinc-300 outline-none focus:border-emerald-500/40" />
+              </div>
+              <button type="submit" className="rounded-lg bg-white/[0.06] px-2 text-zinc-400 hover:text-zinc-200"><RefreshCw className={`h-3.5 w-3.5 ${marketLoading ? 'animate-spin' : ''}`} /></button>
+            </form>
+            {marketLoading ? <div className="flex justify-center py-8"><Spinner size="sm" /></div> : marketRoles.length === 0 ? (
+              <p className="py-8 text-center text-[12px] text-zinc-600">{t('roleMarketEmpty', { defaultValue: '没有匹配的公共角色' })}</p>
+            ) : marketRoles.map((role) => (
+              <div key={role.slug} data-id={`agent-role-market-${role.slug}`} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0"><p className="truncate text-[13px] font-medium text-zinc-200">{role.name_zh || role.name}</p><p className="text-[10px] text-zinc-600">{role.slug} · v{role.version}</p></div>
+                  {role.modified ? <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">{t('roleModified', { defaultValue: '有本地修改' })}</span> : role.installed ? <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">{t('roleInstalled', { defaultValue: '已安装' })}</span> : null}
+                </div>
+                <p className="mt-2 text-[11px] leading-5 text-zinc-500">{role.description_zh || role.description}</p>
+                <div className="mt-2 flex flex-wrap gap-1">{(role.tags || []).map(tag => <span key={tag} className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-zinc-500">{tag}</span>)}</div>
+                <div className="mt-3 flex gap-1.5">
+                  <button type="button" onClick={() => handleMarketAction(role)} disabled={marketAction === role.slug || (role.installed && !role.has_update)} className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-500/15 py-1.5 text-[11px] text-emerald-300 disabled:opacity-40">
+                    {marketAction === role.slug ? <Spinner size="sm" /> : role.installed ? <RefreshCw className="h-3 w-3" /> : <Download className="h-3 w-3" />}
+                    {role.installed ? (role.has_update ? t('updateRole', { defaultValue: '更新' }) : t('roleCurrent', { defaultValue: '已是最新版' })) : t('installRole', { defaultValue: '安装' })}
+                  </button>
+                  {role.installed ? <button type="button" onClick={() => handleCreateInstance({ slug: role.slug, name: role.name_zh || role.name, tools: [], model: '', body: '' })} className="rounded-lg bg-blue-500/15 px-2.5 text-[11px] text-blue-300">{t('createInstance')}</button> : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : loading ? (
           <div data-id="custom-agents-panel-loading" className="flex justify-center py-8"><Spinner size="sm" /></div>
         ) : agents.length === 0 ? (
           <div data-id="custom-agents-panel-empty" className="flex flex-col items-center gap-2 py-10 text-center">
