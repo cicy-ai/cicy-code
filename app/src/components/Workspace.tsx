@@ -17,7 +17,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, Folder, X, Settings, Brain, Search,
   LayoutList, Users, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen, Braces,
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen, Braces, Store,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag, isChatModel } from '../lib/modelTag';
@@ -1986,6 +1986,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           {!globalVar?.helper_mode && (
             <>
               <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} badge={publicSkillUpdate} badgeTitle={t('skillUpdateAvailable', { defaultValue: '有技能可更新' })} />
+              <SideBtn dataId="btn-agent-role-market" active={leftActive === 'customAgents'} icon={<Store className="w-5 h-5" />} title="角色市场" onClick={() => toggleLeft('customAgents')} />
               {/* Browser windows: Chrome / Electron profiles → live windows + screenshots */}
               <SideBtn dataId="btn-windows" active={leftActive === 'windows'} icon={<AppWindow className="w-5 h-5" />} title="浏览器窗口" onClick={() => toggleLeft('windows')} />
               {/* LLM providers: opens the Settings modal on the providers tab. Red
@@ -2034,8 +2035,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       <Brain className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-skills" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
                     </> : leftActive === 'customAgents' ? <>
-                      <Bot className="w-3.5 h-3.5 text-zinc-600" />
-                      <span data-id="left-panel-title-custom-agents" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelCustomAgents')}</span>
+                      <Store className="w-3.5 h-3.5 text-zinc-600" />
+                      <span data-id="left-panel-title-custom-agents" className="text-xs font-medium text-zinc-500 flex-1 ml-1">角色市场</span>
                     </> : leftActive === 'windows' ? <>
                       <AppWindow className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-windows" className="text-xs font-medium text-zinc-500 flex-1 ml-1">设备</span>
@@ -2088,7 +2089,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       </div>
                     ) : leftActive === 'customAgents' ? (
                       <div data-id="left-panel-custom-agents-view" className="absolute inset-0">
-                        <CustomAgentsPanel paneId={activeCliPaneId || paneId} onCreated={refreshPanes} onSelectAgent={onSelectAgent} />
+                        <CustomAgentsPanel paneId={activeCliPaneId || paneId} onCreated={refreshPanes} onSelectAgent={onSelectAgent} marketOnly />
                       </div>
                     ) : leftActive === 'windows' ? (
                       <div data-id="left-panel-windows-view" className="absolute inset-0">

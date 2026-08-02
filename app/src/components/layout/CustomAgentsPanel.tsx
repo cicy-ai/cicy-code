@@ -40,6 +40,8 @@ interface Props {
   onCreated?: () => void;
   /** Select the newly created agent's pane (short id). */
   onSelectAgent?: (shortId: string) => void;
+  /** Dedicated activity-bar entry: open the public role catalog directly. */
+  marketOnly?: boolean;
 }
 
 // Authoring is conversational, NOT a UI form: clicking "create" sends a prompt to
@@ -67,13 +69,13 @@ const editPrompt = (name: string) => [
   `然后用 \`agent-creator create "${name}" ...\` 覆盖保存(同名即覆盖)。`,
 ].join('\n');
 
-export default function CustomAgentsPanel({ paneId, onCreated, onSelectAgent }: Props) {
+export default function CustomAgentsPanel({ paneId, onCreated, onSelectAgent, marketOnly = false }: Props) {
   const { t } = useTranslation('createAgent');
   const { confirm } = useDialogs();
   const [agents, setAgents] = useState<CustomAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingSlug, setCreatingSlug] = useState('');
-  const [view, setView] = useState<'custom' | 'market'>('custom');
+  const [view, setView] = useState<'custom' | 'market'>(marketOnly ? 'market' : 'custom');
   const [marketRoles, setMarketRoles] = useState<MarketRole[]>([]);
   const [marketLoading, setMarketLoading] = useState(false);
   const [marketQuery, setMarketQuery] = useState('');
@@ -159,7 +161,7 @@ export default function CustomAgentsPanel({ paneId, onCreated, onSelectAgent }: 
 
   return (
     <div data-id="custom-agents-panel" className="flex h-full flex-col bg-[#0A0A0A]">
-      <div data-id="custom-agents-panel-toolbar" className="flex items-center justify-between gap-2 border-b border-[var(--vsc-border)] px-3 py-2.5">
+      {!marketOnly && <div data-id="custom-agents-panel-toolbar" className="flex items-center justify-between gap-2 border-b border-[var(--vsc-border)] px-3 py-2.5">
         <p data-id="custom-agents-panel-hint" className="text-[11px] leading-4 text-zinc-600">{t('panelHint')}</p>
         <button
           data-id="custom-agents-panel-new"
@@ -170,16 +172,16 @@ export default function CustomAgentsPanel({ paneId, onCreated, onSelectAgent }: 
         >
           <Sparkles className="h-3.5 w-3.5" /> {t('createViaAgent')}
         </button>
-      </div>
+      </div>}
 
-      <div className="flex gap-1 border-b border-[var(--vsc-border)] px-3 py-2">
+      {!marketOnly && <div className="flex gap-1 border-b border-[var(--vsc-border)] px-3 py-2">
         <button type="button" onClick={() => setView('custom')} className={`rounded-md px-2.5 py-1 text-[11px] ${view === 'custom' ? 'bg-blue-500/20 text-blue-300' : 'text-zinc-500 hover:text-zinc-300'}`}>
           <Bot className="mr-1 inline h-3 w-3" />{t('myAgents', { defaultValue: '我的 Agent' })}
         </button>
         <button data-id="agent-role-market-tab" type="button" onClick={() => setView('market')} className={`rounded-md px-2.5 py-1 text-[11px] ${view === 'market' ? 'bg-emerald-500/20 text-emerald-300' : 'text-zinc-500 hover:text-zinc-300'}`}>
           <Store className="mr-1 inline h-3 w-3" />{t('roleMarket', { defaultValue: '角色市场' })}
         </button>
-      </div>
+      </div>}
 
       <div data-id="custom-agents-panel-list" className="flex-1 overflow-auto p-3">
         {view === 'market' ? (
