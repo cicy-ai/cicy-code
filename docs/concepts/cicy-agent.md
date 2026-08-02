@@ -102,7 +102,7 @@ cicy-agent create <标题> --type cicy --role-template <slug>   # 人格选模�
 # 或走 API:PUT /api/memory/templates/agent/<paneID>
 ```
 
-role 模板可自建:在 `~/cicy-ai/memory/agents/<slug>/` 放 `system.md` + `role.md` + `meta.yaml` 即可被 `--role-template <slug>` 引用,无需注册。
+role 模板可自建:在 `~/cicy-ai/memory/agents/<slug>/` 放 `meta.yaml` + `role.md` + `role.zh.md` + `system.md` 即可被 `--role-template <slug>` 引用,无需注册。推荐安装公共 Skill `cicy-agent-role`,用 `cicy-agent-role create <slug> --spec <role.json>` 生成并校验标准结构。
 
 ## 相关
 

@@ -27,13 +27,64 @@ description: 用角色模板复用「前端/后端/测试」agent,用项目模�
 └── meta.yaml      # name / name_zh / tools 白名单 / greeting / max_tool_rounds
 ```
 
+### 用 `cicy-agent-role` 创建（推荐）
+
+公共 Skill `cicy-agent-role` 会生成并校验上面的标准四文件结构，避免把角色模板与
+`~/cicy-ai/agents/<slug>/AGENT.md` 的「自定义智能体」格式混用。
+
+安装：
+
+```sh
+cicy-code skill install cicy-agent-role
+```
+
+准备一个 JSON spec：
+
+```json
+{
+  "name": "Sales Assistant",
+  "name_zh": "销售助手",
+  "tools": ["core"],
+  "greeting": "Hi, tell me which customer needs follow-up.",
+  "greeting_zh": "你好，请告诉我需要跟进的客户。",
+  "role": "# Role\n\nYou are a sales assistant. Confirm facts and never invent prices or commitments.",
+  "role_zh": "# 角色\n\n你是销售助手。确认事实，不得编造价格或承诺。",
+  "system": "You are a conversational work agent operating inside CiCy. Follow the selected role and report outcomes faithfully."
+}
+```
+
+创建并校验：
+
+```sh
+cicy-agent-role create sales-assistant --spec ./sales-assistant.json
+cicy-agent-role validate sales-assistant
+cicy-agent-role list
+```
+
+默认输出目录：
+
+```text
+~/cicy-ai/memory/agents/sales-assistant/
+├── meta.yaml
+├── role.md
+├── role.zh.md
+└── system.md
+```
+
+`create` 默认拒绝覆盖已有模板。只有在检查现有文件并确认更新时才使用 `--force`。
+创建完成后无需注册或重启，新模板会进入「创建 Agent」的角色模板列表。
+
 `meta.yaml` 示例:
 
 ```yaml
+profile: assistant
 name: Frontend Engineer
 name_zh: 前端工程师
-tools: [agent-chrome, cicy-agent, cicy-todo]
-greeting_zh: 我负责前端组件与联调。
+tools: [core]
+greeting: |
+  I handle frontend components and integration.
+greeting_zh: |
+  我负责前端组件与联调。
 ```
 
 `role.md` 里写清**职责边界**(比如"React/Vite 组件与联调,不实现后端接口")。后端、测试同理各建一个目录。
