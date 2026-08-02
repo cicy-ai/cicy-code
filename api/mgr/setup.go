@@ -1284,6 +1284,10 @@ func ensurePreinstalledSkills() {
 	for _, e := range serrs {
 		log.Printf("[startup] skill surfacing: %v", e)
 	}
+
+	// Install the small official starter set from the Role Market. Existing
+	// role directories are user-owned and are deliberately never overwritten.
+	ensureDefaultAgentRoles()
 }
 
 func ensureFfmpegAsync() {

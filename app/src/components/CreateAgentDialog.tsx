@@ -43,6 +43,7 @@ interface Props {
   // this agent_type and shows a "继承 master 的 X.md" toggle (X is derived from
   // the master's agent_type). When unset, the toggle is hidden.
   masterAgentType?: string;
+  initialValues?: Partial<CreateAgentValues>;
 }
 
 const DEFAULT_VALUES: CreateAgentValues = {
@@ -68,6 +69,7 @@ export default function CreateAgentDialog({
   emptyTitleOnAgentSelect = '',
   dialogClassName = '',
   agentTypeGridClassName = 'grid grid-cols-1 gap-2 sm:grid-cols-2',
+  initialValues,
 }: Props) {
   const { t, i18n } = useTranslation('createAgent');
   const { t: ts } = useTranslation('settings');
@@ -100,6 +102,7 @@ export default function CreateAgentDialog({
       ...DEFAULT_VALUES,
       agent_type: agentTypeOptions[0]?.value || 'claude',
       lang: (i18n.language || '').toLowerCase().startsWith('zh') ? 'zh-CN' : 'en', // default to the current browser/UI language
+      ...initialValues,
     });
     void loadProjects();
     apiService.listMemoryTemplates()
@@ -117,7 +120,7 @@ export default function CreateAgentDialog({
         })));
       })
       .catch(() => setCustomOptions([]));
-  }, [agentTypeOptions, open]);
+  }, [agentTypeOptions, open, initialValues]);
   useDevRegister('CreateAgentDialog', {
     open,
     submitting,

@@ -53,5 +53,10 @@
   "apiStyleOpenAI": "Style OpenAI",
   "apiStyleClaude": "Style Claude",
   "apiStyleLocked": "· définitif après création",
-  "apiStyleHint": "Ce choix est définitif après la création. Le sélecteur de modèle n’affichera que ce style."
+  "apiStyleHint": "Ce choix est définitif après la création. Le sélecteur de modèle n’affichera que ce style.",
+  "viewGithub": "Voir sur GitHub",
+  "viewRelease": "Voir la version",
+  "viewLocalFiles": "Fichiers locaux",
+  "createRoleAgent": "Créer un agent de rôle",
+  "confirmCreate": "Créer"
 }

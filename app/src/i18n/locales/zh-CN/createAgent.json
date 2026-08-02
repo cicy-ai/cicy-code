@@ -53,5 +53,10 @@
   "apiStyleOpenAI": "OpenAI 风格",
   "apiStyleClaude": "Claude 风格",
   "apiStyleLocked": "· 创建后锁定",
-  "apiStyleHint": "创建后不可更改；模型选择器只显示该风格的 Provider 和模型。"
+  "apiStyleHint": "创建后不可更改；模型选择器只显示该风格的 Provider 和模型。",
+  "viewGithub": "查看 GitHub",
+  "viewRelease": "查看 Release",
+  "viewLocalFiles": "本地文件",
+  "createRoleAgent": "创建角色 Agent",
+  "confirmCreate": "确认创建"
 }

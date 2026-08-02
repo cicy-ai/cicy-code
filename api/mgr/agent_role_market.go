@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,6 +20,19 @@ import (
 // sync workflow validates and snapshots the upstream immutable role registry,
 // so desktop clients do not depend on GitHub's raw endpoint directly.
 const publicAgentRoleRegistry = "https://cicy-ai.com/agent-role-catalog.json"
+
+const publicAgentRoleRepository = "https://github.com/cicy-ai/cicy-agent-roles"
+
+// defaultAgentRoleSlugs are installed from the public Role Market after the
+// cicy-agent-role skill is available. Installation is additive: an existing
+// directory is always treated as user-owned and is never updated or replaced.
+var defaultAgentRoleSlugs = []string{
+	"assistant",
+	"audit-policy-specialist",
+	"desktop-assist",
+	"knowledge-specialist",
+	"koubo",
+}
 
 var agentRoleSlugRE = regexp.MustCompile(`^[a-z][a-z0-9-]{1,62}$`)
 
@@ -35,6 +49,9 @@ type agentRoleMarketEntry struct {
 	HasUpdate     bool     `json:"has_update"`
 	Modified      bool     `json:"modified"`
 	Conflicts     []string `json:"conflicts,omitempty"`
+	RepositoryURL string   `json:"repository_url"`
+	SourceURL     string   `json:"source_url"`
+	ReleaseURL    string   `json:"release_url"`
 }
 
 func loadAgentRoleMarket() ([]agentRoleMarketEntry, error) {
@@ -51,6 +68,9 @@ func loadAgentRoleMarket() ([]agentRoleMarketEntry, error) {
 		return nil, err
 	}
 	for i := range payload.Roles {
+		payload.Roles[i].RepositoryURL = publicAgentRoleRepository
+		payload.Roles[i].SourceURL = publicAgentRoleRepository + "/tree/main/roles/" + payload.Roles[i].Slug
+		payload.Roles[i].ReleaseURL = publicAgentRoleRepository + "/releases/tag/" + payload.Roles[i].Slug + "-v" + payload.Roles[i].Version
 		dir := filepath.Join(cicyRootDir, "memory", "agents", payload.Roles[i].Slug)
 		data, err := os.ReadFile(filepath.Join(dir, ".cicy-role.json"))
 		if err != nil {
@@ -87,6 +107,24 @@ func runtimeAgentRoleInstalled(dir string) bool {
 		}
 	}
 	return true
+}
+
+func ensureDefaultAgentRoles() {
+	for _, slug := range defaultAgentRoleSlugs {
+		dir := filepath.Join(cicyRootDir, "memory", "agents", slug)
+		if _, err := os.Stat(dir); err == nil || !os.IsNotExist(err) {
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		output, err := exec.CommandContext(ctx, "cicy-agent-role", "install", slug).CombinedOutput()
+		cancel()
+		if err != nil {
+			log.Printf("[startup] default agent role %s install failed: %v (%s)", slug, err, strings.TrimSpace(string(output)))
+			continue
+		}
+		log.Printf("[startup] default agent role %s installed", slug)
+	}
 }
 
 func handleAgentRoleMarket(w http.ResponseWriter, r *http.Request) {

@@ -53,5 +53,10 @@
   "apiStyleOpenAI": "OpenAI style",
   "apiStyleClaude": "Claude style",
   "apiStyleLocked": "· locked after creation",
-  "apiStyleHint": "This cannot be changed after creation. The model picker will only show providers and models in this style."
+  "apiStyleHint": "This cannot be changed after creation. The model picker will only show providers and models in this style.",
+  "viewGithub": "View GitHub",
+  "viewRelease": "View release",
+  "viewLocalFiles": "Local files",
+  "createRoleAgent": "Create role agent",
+  "confirmCreate": "Create"
 }

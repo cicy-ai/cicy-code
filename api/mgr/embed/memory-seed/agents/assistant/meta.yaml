@@ -1,8 +1,0 @@
-profile: assistant
-tools: [core]
-name: Assistant
-name_zh: 助理
-greeting: |
-  Hi, I'm your assistant. How can I help?
-greeting_zh: |
-  你好,我是你的助理。有什么可以帮你的?

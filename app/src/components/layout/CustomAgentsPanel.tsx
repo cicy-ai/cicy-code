@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useState } from 'react';
-import { Sparkles, Pencil, Trash2, Zap, Bot, Cpu, Store, Download, RefreshCw, Search } from 'lucide-react';
+import { Sparkles, Pencil, Trash2, Zap, Bot, Cpu, Store, Download, RefreshCw, Search, Github, ExternalLink, FolderOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Spinner } from '../ui/Spinner';
 import { useDialogs } from '../ui/Modal';
 import { useDevRegister } from '../../lib/devStore';
+import { openOrActivateElectronProfileTab } from '../../lib/speedup/rpc';
 import apiService from '../../services/api';
 
 interface CustomAgent {
@@ -30,6 +31,9 @@ interface MarketRole {
   has_update: boolean;
   modified: boolean;
   conflicts?: string[];
+  repository_url?: string;
+  source_url?: string;
+  release_url?: string;
 }
 
 interface Props {
@@ -69,12 +73,21 @@ const editPrompt = (name: string) => [
   `然后用 \`agent-creator create "${name}" ...\` 覆盖保存(同名即覆盖)。`,
 ].join('\n');
 
-export default function CustomAgentsPanel({ paneId, onCreated, onSelectAgent, marketOnly = false }: Props) {
+async function openRoleMarketLink(event: React.MouseEvent<HTMLAnchorElement>, url: string) {
+  event.preventDefault();
+  try {
+    if (await openOrActivateElectronProfileTab(url, 1)) return;
+  } catch {
+    // Fall back to the browser when the Desktop Profile RPC is unavailable.
+  }
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+export default function CustomAgentsPanel({ paneId, marketOnly = false }: Props) {
   const { t } = useTranslation('createAgent');
   const { confirm } = useDialogs();
   const [agents, setAgents] = useState<CustomAgent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creatingSlug, setCreatingSlug] = useState('');
   const [view, setView] = useState<'custom' | 'market'>(marketOnly ? 'market' : 'custom');
   const [marketRoles, setMarketRoles] = useState<MarketRole[]>([]);
   const [marketLoading, setMarketLoading] = useState(false);
@@ -117,6 +130,10 @@ export default function CustomAgentsPanel({ paneId, onCreated, onSelectAgent, ma
     } finally { setMarketAction(''); }
   };
 
+  const openLocalRole = (role: MarketRole) => {
+    window.dispatchEvent(new CustomEvent('cicy:reveal-role', { detail: { slug: role.slug } }));
+  };
+
   // Hand off to the active agent: it reads the agent-creator skill and drives the
   // create/edit conversation. No UI form.
   const dispatchToAgent = (prompt: string) => {
@@ -137,26 +154,10 @@ export default function CustomAgentsPanel({ paneId, onCreated, onSelectAgent, ma
     await refresh();
   };
 
-  const handleCreateInstance = async (ca: CustomAgent) => {
-    setCreatingSlug(ca.slug);
-    try {
-      const { data } = await apiService.createPane({
-        role: 'worker',
-        title: ca.name,
-        agent_type: 'cicy',
-        role_template: ca.slug,
-      });
-      const id = data?.pane_id || data?.id;
-      if (id) {
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: t('instanceCreated', { name: ca.name }) }));
-        onCreated?.();
-        onSelectAgent?.(String(id).split(':')[0]);
-      }
-    } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('createInstanceFailed') }));
-    } finally {
-      setCreatingSlug('');
-    }
+  const handleCreateInstance = (ca: CustomAgent) => {
+    window.dispatchEvent(new CustomEvent('cicy:request-create-agent', {
+      detail: { title: ca.name, roleTemplate: ca.slug },
+    }));
   };
 
   return (
@@ -203,6 +204,17 @@ export default function CustomAgentsPanel({ paneId, onCreated, onSelectAgent, ma
                 </div>
                 <p className="mt-2 text-[11px] leading-5 text-zinc-500">{role.description_zh || role.description}</p>
                 <div className="mt-2 flex flex-wrap gap-1">{(role.tags || []).map(tag => <span key={tag} className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-zinc-500">{tag}</span>)}</div>
+                <div data-id={`agent-role-market-links-${role.slug}`} className="mt-2 flex items-center gap-3 text-[10px]">
+                  <a data-id={`agent-role-market-github-${role.slug}`} href={role.source_url || `https://github.com/cicy-ai/cicy-agent-roles/tree/main/roles/${role.slug}`} target="_blank" rel="noopener noreferrer" onClick={(event) => { void openRoleMarketLink(event, role.source_url || `https://github.com/cicy-ai/cicy-agent-roles/tree/main/roles/${role.slug}`); }} className="inline-flex items-center gap-1 text-zinc-500 transition-colors hover:text-zinc-200">
+                    <Github className="h-3 w-3" />{t('viewGithub', { defaultValue: '查看 GitHub' })}
+                  </a>
+                  <a data-id={`agent-role-market-release-${role.slug}`} href={role.release_url || `https://github.com/cicy-ai/cicy-agent-roles/releases/tag/${role.slug}-v${role.version}`} target="_blank" rel="noopener noreferrer" onClick={(event) => { void openRoleMarketLink(event, role.release_url || `https://github.com/cicy-ai/cicy-agent-roles/releases/tag/${role.slug}-v${role.version}`); }} className="inline-flex items-center gap-1 text-zinc-600 transition-colors hover:text-zinc-300">
+                    <ExternalLink className="h-3 w-3" />{t('viewRelease', { defaultValue: '查看 Release' })}
+                  </a>
+                  {role.installed ? <button data-id={`agent-role-market-local-${role.slug}`} type="button" onClick={() => openLocalRole(role)} className="inline-flex items-center gap-1 text-zinc-500 transition-colors hover:text-zinc-200">
+                    <FolderOpen className="h-3 w-3" />{t('viewLocalFiles', { defaultValue: '本地文件' })}
+                  </button> : null}
+                </div>
                 <div className="mt-3 flex gap-1.5">
                   <button type="button" onClick={() => handleMarketAction(role)} disabled={marketAction === role.slug || (role.installed && !role.has_update)} className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-500/15 py-1.5 text-[11px] text-emerald-300 disabled:opacity-40">
                     {marketAction === role.slug ? <Spinner size="sm" /> : role.installed ? <RefreshCw className="h-3 w-3" /> : <Download className="h-3 w-3" />}
@@ -283,10 +295,9 @@ export default function CustomAgentsPanel({ paneId, onCreated, onSelectAgent, ma
                   data-id={`custom-agents-panel-create-${ca.slug}`}
                   type="button"
                   onClick={() => handleCreateInstance(ca)}
-                  disabled={creatingSlug === ca.slug}
-                  className="mt-3 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-blue-500/15 py-1.5 text-[12px] font-medium text-blue-300 transition-all hover:bg-blue-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="mt-3 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-blue-500/15 py-1.5 text-[12px] font-medium text-blue-300 transition-all hover:bg-blue-500/25"
                 >
-                  {creatingSlug === ca.slug ? <Spinner size="sm" /> : <Zap className="h-3.5 w-3.5" />}
+                  <Zap className="h-3.5 w-3.5" />
                   {t('createInstance')}
                 </button>
               </div>

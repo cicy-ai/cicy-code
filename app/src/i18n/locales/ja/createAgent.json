@@ -53,5 +53,10 @@
   "apiStyleOpenAI": "OpenAI スタイル",
   "apiStyleClaude": "Claude スタイル",
   "apiStyleLocked": "· 作成後に固定",
-  "apiStyleHint": "作成後は変更できません。モデル選択には選んだスタイルだけが表示されます。"
+  "apiStyleHint": "作成後は変更できません。モデル選択には選んだスタイルだけが表示されます。",
+  "viewGithub": "GitHub を表示",
+  "viewRelease": "リリースを表示",
+  "viewLocalFiles": "ローカルファイル",
+  "createRoleAgent": "ロール Agent を作成",
+  "confirmCreate": "作成"
 }

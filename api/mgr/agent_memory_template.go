@@ -589,8 +589,8 @@ func platformSetupGuidance() string {
 		"探测 `docker version` 确认 Docker 在跑;没装就引导装;就绪后按下面命令起容器。"
 }
 
-// composeAgentMemory builds the seed content for a new agent's guidance file:
-// global (always) + project (when projectSlug set) + role (when roleSlug set),
+// composeAgentMemory builds the seed content for a non-cicy agent's native
+// guidance file: global + the selected role's system base + project + role,
 // placeholder-substituted. Returns the default global template when nothing is
 // on disk so creation never produces an empty file.
 func composeAgentMemory(agentID, workspace, agentType, projectSlug, roleSlug, lang string) string {
@@ -601,12 +601,18 @@ func composeAgentMemory(agentID, workspace, agentType, projectSlug, roleSlug, la
 	if global := strings.TrimSpace(loadTemplateFile(globalMemoryTemplatePath())); global != "" {
 		parts = append(parts, global)
 	}
+	slug := sanitizeTemplateSlug(roleSlug)
+	if slug != "" {
+		if systemBase := strings.TrimSpace(readRoleFile(slug, "system.md")); systemBase != "" {
+			parts = append(parts, systemBase)
+		}
+	}
 	// Every agent carries a project's rules; an unassigned agent falls back to the
 	// "default" project (projectSlugOrDefault), so default.md reaches everyone.
 	if project := projectRulesBody(projectSlugOrDefault(projectSlug)); project != "" {
 		parts = append(parts, project)
 	}
-	if slug := sanitizeTemplateSlug(roleSlug); slug != "" {
+	if slug != "" {
 		if role := strings.TrimSpace(roleTemplateRaw(slug, lang)); role != "" {
 			parts = append(parts, role)
 		} else if ca, ok := customAgentFor(slug); ok && strings.TrimSpace(ca.Body) != "" {

@@ -340,6 +340,22 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const ok: LeftPanelView[] = ['team', 'skills', 'customAgents', 'agents', 'todo', 'windows'];
     return ok.includes(v) ? v : null;
   });
+  const [createAgentOpen, setCreateAgentOpen] = useState(false);
+  const [createAgentSubmitting, setCreateAgentSubmitting] = useState(false);
+  const [createAgentInitialValues, setCreateAgentInitialValues] = useState<Partial<CreateAgentValues> | undefined>();
+  useEffect(() => {
+    const requestCreateAgent = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      setCreateAgentInitialValues({
+        title: String(detail.title || '').trim(),
+        agent_type: 'cicy',
+        role_template: String(detail.roleTemplate || '').trim() || 'assistant',
+      });
+      setCreateAgentOpen(true);
+    };
+    window.addEventListener('cicy:request-create-agent', requestCreateAgent as EventListener);
+    return () => window.removeEventListener('cicy:request-create-agent', requestCreateAgent as EventListener);
+  }, []);
   const [, setInspectorOpen] = useState(false);
   const [, setInspectorRequestedTab] = useState<InspectorTab>('overview');
   const [cliContentOpen, setCliContentOpen] = useState(() => cache.get(cliContentOpenKey(paneId), false) === true);
@@ -517,6 +533,35 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [mouseMode] = useState<'on' | 'off'>('off');
   const [isRestarting] = useState(false);
   const [agents, setAgents] = useState<any[]>([]);
+  const submitCreateAgent = useCallback(async (values: CreateAgentValues) => {
+    setCreateAgentSubmitting(true);
+    try {
+      const { data } = await apiService.createPane({
+        role: 'worker',
+        title: values.title,
+        agent_type: values.agent_type,
+        allow_all_actions: values.allow_all_actions,
+        use_custom_gateway: values.use_custom_gateway,
+        use_proxy: values.use_proxy,
+        project_template: values.project_template,
+        role_template: values.role_template,
+        lang: values.lang,
+        api_style: values.api_style,
+      });
+      const id = data?.pane_id || data?.id;
+      if (id) {
+        const { data: fresh } = await apiService.getPanes();
+        setAgents(Array.isArray(fresh) ? fresh : fresh?.panes || []);
+        setCreateAgentOpen(false);
+        setCreateAgentInitialValues(undefined);
+        onSelectAgent(String(id).split(':')[0]);
+      }
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastCreateWorkerFailed') }));
+    } finally {
+      setCreateAgentSubmitting(false);
+    }
+  }, [onSelectAgent, t]);
   const [boundAgents, setBoundAgents] = useState<any[]>([]);
   const [pollStatuses, setPollStatuses] = useState<Record<string, any>>({});
   const [paneDetails, setPaneDetails] = useState<Record<string, any>>({});
@@ -1470,6 +1515,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentTab('memory');
     setCliContentOpen(true);
   }, [paneId]);
+  useEffect(() => {
+    const revealRole = (event: Event) => {
+      const slug = String((event as CustomEvent).detail?.slug || '').trim();
+      if (!slug) return;
+      openPaneMemory(paneId);
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('cicy:open-role', { detail: { slug } }));
+      }, 80);
+    };
+    window.addEventListener('cicy:reveal-role', revealRole as EventListener);
+    return () => window.removeEventListener('cicy:reveal-role', revealRole as EventListener);
+  }, [openPaneMemory, paneId]);
   // Generic opener for the agent-card header buttons that mirror cli-content-tabs
   // (knowledge / 审计日志 / 审计策略) — open the named content tab for that pane.
   const openPaneContent = useCallback((targetPaneId: string, tab: string) => {
@@ -2056,6 +2113,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                           statuses={pollStatuses}
                           onSelectAgent={onSelectAgent}
                           onAgentsChange={setAgents}
+                          onCreateAgent={() => { setCreateAgentInitialValues(undefined); setCreateAgentOpen(true); }}
                           onOpenSettings={(targetPaneId) => {
                             onSelectAgent(targetPaneId);
                             openInspectorForPane(targetPaneId, 'settings');
@@ -2365,6 +2423,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <ProxyManagerDialog open={proxyManagerOpen} onClose={() => setProxyManagerOpen(false)} paneId={activeCliPaneId || paneId} />
       {toast && <div data-id="workspace-toast" className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 text-sm rounded-lg shadow-lg ${toast.variant === 'success' ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>{toast.message}</div>}
       {dialogsNode}
+      <CreateAgentDialog
+        open={createAgentOpen}
+        submitting={createAgentSubmitting}
+        onClose={() => { if (!createAgentSubmitting) { setCreateAgentOpen(false); setCreateAgentInitialValues(undefined); } }}
+        onSubmit={submitCreateAgent}
+        title={t('drawerCreateTitle')}
+        submitLabel={t('drawerCreateSubmit')}
+        initialValues={createAgentInitialValues}
+      />
       <WeChatBindModal />
       <SettingsModal
         open={settingsOpen}
@@ -2473,16 +2540,15 @@ function buildCanvasItems({
   });
 }
 
-function AgentDrawer({ agents, paneId, statuses = {}, onSelectAgent, onAgentsChange, onOpenSettings }: {
+function AgentDrawer({ agents, paneId, statuses = {}, onSelectAgent, onAgentsChange, onOpenSettings, onCreateAgent }: {
   agents: any[]; paneId: string;
   statuses?: Record<string, any>;
   onSelectAgent: (id: string) => void; onAgentsChange: (a: any[]) => void;
   onOpenSettings: (id: string) => void;
+  onCreateAgent: () => void;
 }) {
   const { t } = useTranslation('workspace');
   const [search, setSearch] = useState('');
-  const [adding, setAdding] = useState(false);
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const { confirm, node: drawerDialogsNode } = useDialogs();
 
@@ -2495,37 +2561,8 @@ function AgentDrawer({ agents, paneId, statuses = {}, onSelectAgent, onAgentsCha
     paneId,
     search,
     filteredCount: agents.length,
-    adding,
-    createDialogOpen,
     openMenuId,
   });
-
-  const handleQuickAddMaster = async (values: CreateAgentValues) => {
-    setAdding(true);
-    try {
-      const { data } = await apiService.createPane({
-        role: 'worker',
-        title: values.title,
-        agent_type: values.agent_type,
-        allow_all_actions: values.allow_all_actions,
-        use_custom_gateway: values.use_custom_gateway,
-        use_proxy: values.use_proxy,
-        project_template: values.project_template,
-        role_template: values.role_template,
-        lang: values.lang,
-        api_style: values.api_style,
-      });
-      const id = data?.pane_id || data?.id;
-      if (id) {
-        const { data: fresh } = await apiService.getPanes();
-        onAgentsChange(Array.isArray(fresh) ? fresh : fresh?.panes || []);
-        setCreateDialogOpen(false);
-        onSelectAgent(id.split(':')[0]);
-      }
-    } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastCreateWorkerFailed') }));
-    } finally { setAdding(false); }
-  };
 
   const handleDelete = async (id: string) => {
     const sid = id.split(':')[0];
@@ -2586,7 +2623,7 @@ function AgentDrawer({ agents, paneId, statuses = {}, onSelectAgent, onAgentsCha
                 className="w-full bg-white/[0.02] border border-[var(--vsc-border)] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-white/[0.08] placeholder:text-zinc-700 text-zinc-400"
               />
             </div>
-            <button data-id="agent-drawer-add" onClick={() => setCreateDialogOpen(true)} disabled={adding}
+            <button data-id="agent-drawer-add" onClick={onCreateAgent}
               className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
               title={t('drawerAddWorker')}>
               <Plus className="w-4 h-4" />
@@ -2709,14 +2746,6 @@ function AgentDrawer({ agents, paneId, statuses = {}, onSelectAgent, onAgentsCha
           </div>
         </div>
       </div>
-      <CreateAgentDialog
-        open={createDialogOpen}
-        submitting={adding}
-        onClose={() => setCreateDialogOpen(false)}
-        onSubmit={handleQuickAddMaster}
-        title={t('drawerCreateTitle')}
-        submitLabel={t('drawerCreateSubmit')}
-      />
       {drawerDialogsNode}
     </>
   );
