@@ -54,6 +54,14 @@ func loadAgentRoleMarket() ([]agentRoleMarketEntry, error) {
 		dir := filepath.Join(cicyRootDir, "memory", "agents", payload.Roles[i].Slug)
 		data, err := os.ReadFile(filepath.Join(dir, ".cicy-role.json"))
 		if err != nil {
+			// Roles may predate the marketplace or be maintained directly in the
+			// runtime role directory. A complete standard role directory is already
+			// installed; the marketplace marker is version metadata, not the source
+			// of truth for existence. Never ask the user to reinstall or overwrite it.
+			if runtimeAgentRoleInstalled(dir) {
+				payload.Roles[i].Installed = true
+				payload.Roles[i].InstalledVer = "local"
+			}
 			continue
 		}
 		var meta struct {
@@ -69,6 +77,16 @@ func loadAgentRoleMarket() ([]agentRoleMarketEntry, error) {
 		}
 	}
 	return payload.Roles, nil
+}
+
+func runtimeAgentRoleInstalled(dir string) bool {
+	for _, name := range []string{"meta.yaml", "role.md", "system.md"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil || info.IsDir() || info.Size() == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func handleAgentRoleMarket(w http.ResponseWriter, r *http.Request) {
