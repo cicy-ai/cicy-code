@@ -382,7 +382,7 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 		}
 		msgs = append(msgs, botMsg{Text: item.Text, FromID: item.SenderInstanceID,
 			TargetPaneID: item.TargetAgentID,
-			Peer:         botPeer{ChatID: peer, ContextToken: item.TargetAgentID}})
+			Peer:         botPeer{ChatID: peer, ContextToken: item.TargetAgentID + "|" + item.ID}})
 	}
 	return msgs, strings.Join(ids, ","), nil
 }
@@ -394,12 +394,21 @@ func (t *cicyCloudTransport) Send(peer botPeer, text string) (string, error) {
 		} `json:"message"`
 	}
 	targetInstance, targetAgent := splitCiCyCloudPeer(peer.ChatID)
+	senderAgent, replyTo := splitCiCyCloudReplyContext(peer.ContextToken)
 	err := cloudJSON(http.MethodPost, "/api/code/messages", t.token, M{
 		"targetInstanceId": targetInstance, "targetAgentId": targetAgent,
-		"senderAgentId": strings.TrimSpace(peer.ContextToken), "text": text,
-		"kind": "agent_reply", "hopCount": 1,
+		"senderAgentId": senderAgent, "text": text,
+		"kind": "agent_reply", "replyTo": replyTo, "hopCount": 1,
 	}, &out)
 	return out.Message.ID, err
+}
+
+func splitCiCyCloudReplyContext(contextToken string) (string, string) {
+	parts := strings.SplitN(strings.TrimSpace(contextToken), "|", 2)
+	if len(parts) == 2 {
+		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	}
+	return strings.TrimSpace(contextToken), ""
 }
 
 func splitCiCyCloudPeer(peer string) (string, string) {

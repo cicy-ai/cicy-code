@@ -644,15 +644,18 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 		imDebugf("[im] account=%d inbound dropped (chat=%s bound=%q inbound=%t): %q", acc.ID, msg.Peer.ChatID, acc.BoundPaneID, acc.InboundToAgent, text)
 		return
 	}
+	// Headless cicy agents intentionally have no tmux session; they are delivered
+	// in-process below. Only tmux-backed agents should be rejected as offline.
+	headlessTarget := paneAgentType(pane) == "cicy"
 	// If the bound agent's tmux session isn't running (offline), fall back to the
 	// master pane w-1001 so the message still reaches an agent instead of failing.
-	if explicitTarget && !imPaneSessionOnline(pane) {
+	if explicitTarget && !headlessTarget && !imPaneSessionOnline(pane) {
 		log.Printf("[im] account=%d exact target pane=%s offline", acc.ID, shortPaneID(pane))
 		imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: msg.Peer,
 			Text: "⚠️ 目标 Agent 当前不在线: " + shortPaneID(pane), Purpose: imOutboundPurposeError})
 		return
 	}
-	if !explicitTarget && !imPaneSessionOnline(pane) {
+	if !explicitTarget && !headlessTarget && !imPaneSessionOnline(pane) {
 		fallback := normPaneID("w-1001")
 		if pane != fallback && imPaneSessionOnline(fallback) {
 			imDebugf("[im] account=%d bound pane=%s offline → fallback to %s", acc.ID, shortPaneID(pane), shortPaneID(fallback))
@@ -670,7 +673,7 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	// runtime in-process. The reply still streams back to the IM peer via the
 	// gateway reply-push hook registered just above (cicyCallGateway runs the same
 	// gateway path), so this changes only the input hop.
-	if paneAgentType(pane) == "cicy" {
+	if headlessTarget {
 		if ws := paneWorkspace(shortPaneID(pane)); ws != "" {
 			go deliverCicyMessage(shortPaneID(pane), ws, text)
 			imDebugf("[im] account=%d inbound → cicy(headless) %s: %q", acc.ID, shortPaneID(pane), text)

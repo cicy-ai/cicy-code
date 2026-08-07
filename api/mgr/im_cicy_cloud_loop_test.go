@@ -29,6 +29,9 @@ func TestCiCyCloudPollDoesNotFeedAgentRepliesBackToAgent(t *testing.T) {
 	if len(msgs) != 1 || msgs[0].Text != "hello" {
 		t.Fatalf("agent replies must be acked without triggering an agent: %#v", msgs)
 	}
+	if msgs[0].Peer.ContextToken != "|msg-user-12345678" {
+		t.Fatalf("original message id must be retained for reply correlation, got %q", msgs[0].Peer.ContextToken)
+	}
 	if cursor != "msg-user-12345678,msg-reply-12345678" {
 		t.Fatalf("both messages must advance the ACK cursor, got %q", cursor)
 	}
@@ -46,10 +49,13 @@ func TestCiCyCloudSendMarksOutputAsTerminalAgentReply(t *testing.T) {
 	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
 
 	tr := &cicyCloudTransport{token: "test"}
-	if _, err := tr.Send(botPeer{ChatID: "code-target-1234567890123456"}, "answer"); err != nil {
+	if _, err := tr.Send(botPeer{ChatID: "code-target-1234567890123456", ContextToken: "w-1001|msg-user-12345678"}, "answer"); err != nil {
 		t.Fatal(err)
 	}
 	if body["kind"] != "agent_reply" || body["hopCount"] != float64(1) {
 		t.Fatalf("unsafe reply envelope: %#v", body)
+	}
+	if body["senderAgentId"] != "w-1001" || body["replyTo"] != "msg-user-12345678" {
+		t.Fatalf("reply correlation was not preserved: %#v", body)
 	}
 }
