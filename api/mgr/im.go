@@ -176,6 +176,42 @@ type imOutboundResult struct {
 	MessageID string  `json:"message_id"`
 }
 
+const imReplyDedupeWindow = 30 * time.Second
+
+var imRecentReplies = struct {
+	sync.Mutex
+	m map[string]time.Time
+}{m: map[string]time.Time{}}
+
+func imReplyIsDuplicate(msg imOutboundMessage, platform, text string, now time.Time) bool {
+	if msg.purpose() != imOutboundPurposeReply {
+		return false
+	}
+	key := strconv.FormatInt(msg.AccountID, 10) + "|" + platform + "|" + msg.Peer.ChatID + "|" + text
+	imRecentReplies.Lock()
+	defer imRecentReplies.Unlock()
+	for candidate, seenAt := range imRecentReplies.m {
+		if now.Sub(seenAt) > imReplyDedupeWindow {
+			delete(imRecentReplies.m, candidate)
+		}
+	}
+	if seenAt, ok := imRecentReplies.m[key]; ok && now.Sub(seenAt) <= imReplyDedupeWindow {
+		return true
+	}
+	imRecentReplies.m[key] = now
+	return false
+}
+
+func imForgetReplyDedupe(msg imOutboundMessage, platform, text string) {
+	if msg.purpose() != imOutboundPurposeReply {
+		return
+	}
+	key := strconv.FormatInt(msg.AccountID, 10) + "|" + platform + "|" + msg.Peer.ChatID + "|" + text
+	imRecentReplies.Lock()
+	delete(imRecentReplies.m, key)
+	imRecentReplies.Unlock()
+}
+
 func (m imOutboundMessage) purpose() imOutboundPurpose {
 	if strings.TrimSpace(string(m.Purpose)) == "" {
 		return imOutboundPurposeUnknown
@@ -197,8 +233,14 @@ func imSendOutbound(msg imOutboundMessage) (imOutboundResult, error) {
 		return res, fmt.Errorf("no send target")
 	}
 	text := imClampMessage(msg.Text)
+	if imReplyIsDuplicate(msg, res.Platform, text, time.Now()) {
+		imDebugf("[im] duplicate reply suppressed account=%d kind=%s to=%s len=%d", msg.AccountID, res.Platform, msg.Peer.ChatID, len(text))
+		return res, nil
+	}
 	mid, err := msg.Transport.Send(msg.Peer, text)
 	if err != nil {
+		// A failed transport send was not delivered and must remain retryable.
+		imForgetReplyDedupe(msg, res.Platform, text)
 		log.Printf("[im] send FAIL account=%d kind=%s purpose=%s to=%s len=%d preview=%q err=%v", msg.AccountID, res.Platform, msg.purpose(), msg.Peer.ChatID, len(text), imLogPreview(text), err)
 		return res, err
 	}

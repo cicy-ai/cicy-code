@@ -137,16 +137,18 @@ func renderReplyItems(items []map[string]interface{}, full bool) string {
 	return b.String()
 }
 
-
 // renderReplyItemForIM 把单个 reply.json item 渲染成给 IM（TG / WeChat）推送的纯文本。
 // 每个 type 一种格式，用空格 + emoji 让用户在 IM 客户端里更容易扫读。
-//   thinking: "💭 ..."
-//   text:     "..."
-//   tool_use: skipped（内部执行细节不推送到 IM）
+//
+//	thinking: "💭 ..."
+//	text:     "..."
+//	tool_use: skipped（内部执行细节不推送到 IM）
+//
 // 长内容会截断（避免 IM 单条消息撑爆 WeChat ~4096 字符限制）：
 //   - thinking: 1500 char
 //   - text:     2500 char
 //   - tool_use input 内长字符串字段: 800 char
+//
 // 返回空字符串表示 skip（item 内容为空）。
 func renderReplyItemForIM(item map[string]interface{}) string {
 	if item == nil {
@@ -162,6 +164,12 @@ func renderReplyItemForIM(item map[string]interface{}) string {
 		txt = strings.TrimSpace(txt)
 		if txt == "" {
 			return ""
+		}
+		// Gateway/network diagnostics are useful in reply.json and local logs, but
+		// leaking localhost ports and Go socket errors into Feishu/WeChat makes a
+		// transient retry look like several separate user-facing failures.
+		if imIsTechnicalTransportFailure(txt) {
+			return "⚠️ 服务连接暂时中断，正在重试。"
 		}
 		return imTruncateLongString(txt, 2500)
 	case "tool_use":
@@ -180,11 +188,29 @@ func renderReplyItemForIM(item map[string]interface{}) string {
 		if errText == "" {
 			return "❌ " + name + " 失败"
 		}
+		if imIsTechnicalTransportFailure("生成失败 " + errText) {
+			return "❌ " + name + " 执行失败，请稍后重试。"
+		}
 		return "❌ " + name + " 失败\n" + imTruncateLongString(errText, 500)
 	}
 	return ""
 }
 
+func imIsTechnicalTransportFailure(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if !strings.Contains(lower, "生成失败") && !strings.Contains(lower, "http 5") {
+		return false
+	}
+	for _, marker := range []string{
+		"broken pipe", "closed network connection", "connection reset by peer",
+		"write tcp", "read tcp", "dial tcp", "127.0.0.1:", "localhost:",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
 
 // imTruncateLongString 把字符串截到 limit 个 rune，超出则加 "...(N chars total)" 标记。
 func imTruncateLongString(s string, limit int) string {
@@ -202,6 +228,7 @@ func imTruncateLongString(s string, limit int) string {
 // 同时兼容两种 API 的工具格式:
 //   - Claude(tool_use):input 本身就是对象(map)。
 //   - OpenAI(tool_calls):arguments 是 JSON 编码的字符串 → 先解析成对象。
+//
 // 解析后优先取最能说明"这工具在干什么"的那个字段(command / file_path / url /
 // pattern / query / prompt …),没有已知字段时退化成紧凑的 key: value 摘要。
 func summarizeToolForIM(input interface{}) string {
