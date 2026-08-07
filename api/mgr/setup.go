@@ -548,9 +548,9 @@ type builtinWorker struct {
 // The PM master anchors at w-1001; every OTHER official agent counts UP from
 // w-101 (101,102,…). User-created agents count UP from w-1002 (defaultWorkerIndex
 // =1001 → next id 1002), so the 101.. role band never collides with them.
-// ALL roster agents are created (they live in the DB) AND attached under w-1001
-// (BindToPrimary on every non-master entry), so the master's team shows the whole
-// preinstalled roster out of the box.
+// ALL roster agents are created (they live in the DB). Only entries explicitly
+// marked BindToPrimary are attached under w-1001; standalone specialists remain
+// available without appearing on the primary's team by default.
 //
 // Two flavors:
 //   - cicy lite agents: non-coding roles, each with a role template
@@ -570,7 +570,7 @@ func officialRoleRoster() []builtinWorker {
 		{Port: 102, AgentType: "codex", Title: "全栈工程师", TitleEn: "Full-stack Engineer", BindToPrimary: true},
 		{Port: 103, AgentType: "opencode", Title: "软件工程师", TitleEn: "Software Engineer"},
 		{Port: 104, AgentType: "cicy", Title: "审计策略专员", TitleEn: "Audit Policy Specialist", RoleTemplate: "audit-policy-specialist"},
-		{Port: 105, AgentType: "cicy", Title: "口播智能体", TitleEn: "Spoken Content Agent", RoleTemplate: "koubo", BindToPrimary: true},
+		{Port: 105, AgentType: "cicy", Title: "口播智能体", TitleEn: "Spoken Content Agent", RoleTemplate: "koubo"},
 	}
 	return roster
 }

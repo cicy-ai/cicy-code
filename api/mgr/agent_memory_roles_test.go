@@ -38,3 +38,15 @@ func TestOfficialRosterDefaultsToChineseTitles(t *testing.T) {
 		}
 	}
 }
+
+func TestSpokenContentAgentIsCreatedStandalone(t *testing.T) {
+	for _, worker := range officialRoleRoster() {
+		if worker.Port == 105 {
+			if worker.BindToPrimary {
+				t.Fatal("w-105 must be pre-created without binding to the primary")
+			}
+			return
+		}
+	}
+	t.Fatal("w-105 missing from official roster")
+}
