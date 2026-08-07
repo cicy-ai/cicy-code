@@ -26,6 +26,7 @@ var (
 	cicyWorkersDir         = filepath.Join(cicyRootDir, "workers")
 	cicySkillsDir          = filepath.Join(cicyRootDir, "skills")
 	cicyGlobalJSONPath     = filepath.Join(cicyRootDir, "global.json")
+	cicyCrontabPath        = filepath.Join(cicyDBDir, "crontab.txt")
 	cicyStateDir           = filepath.Join(cicyRootDir, ".cicy")
 	cicySnapshotsDir       = filepath.Join(cicyRootDir, "snapshots")
 	cicyLogsDir            = resolveCicyPathSpec("~/logs")
@@ -106,6 +107,15 @@ func bootstrapCicyPaths() {
 		if err := os.MkdirAll(path, 0755); err != nil {
 			log.Fatalf("[startup] failed to create %s: %v", path, err)
 		}
+	}
+	// Keep scheduled-task configuration in the persistent cicy-ai data tree.
+	// Create it only when missing so upgrades never overwrite user entries.
+	file, err := os.OpenFile(cicyCrontabPath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("[startup] failed to create %s: %v", cicyCrontabPath, err)
+	}
+	if err := file.Close(); err != nil {
+		log.Fatalf("[startup] failed to close %s: %v", cicyCrontabPath, err)
 	}
 }
 

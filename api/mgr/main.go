@@ -253,6 +253,11 @@ Options:
 	// agent traffic into the host instance on 8008.
 	os.Setenv("PORT", resolvePort())
 
+	bootstrapCicyPaths()
+	if err := ensureCrontabCommand(); err != nil {
+		log.Printf("[cron] setup unavailable: %v", err)
+	}
+	installConfiguredCrontab()
 	ensureRuntimeUnprivileged()
 	initKV()
 	initRedis()
