@@ -5,6 +5,11 @@
 - `cicy-agent msg <agent> <text>` — 派发任务或请求帮助
 - `cicy-agent capture <agent>` — 查看 Agent 进度
 
+跨 Instance 消息必须使用已安装 Skill 的 `bin/cicy-agent`：
+- `cicy-agent msg <team.agent> <text>` — 自动完成 Cloud 路由、发送者身份和回复关联
+- 禁止直接 `curl`/`POST /api/code/messages`
+- 禁止为发送消息而手工读取 `cloud-device.json` Token 或自行拼装消息请求
+
 ## 知识
 
 在重新制定规范、排查常见问题或重复既有决策前，先查询团队知识库（所有命令见 `cicy-knowledge help`）：
