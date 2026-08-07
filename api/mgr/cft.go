@@ -309,10 +309,7 @@ func cftRunNamed(bin, token, host, port string) {
 }
 
 func cftNamedOnce(bin, token, url, port string) error {
-	// Hosted runners and other constrained environments commonly block QUIC
-	// UDP. Keep named tunnels on HTTP/2, matching the reliable quick-tunnel
-	// path below, so a registered hostname does not sit at Cloudflare 530.
-	cmd := exec.Command(bin, "tunnel", "--protocol", "http2", "--no-autoupdate", "run")
+	cmd := exec.Command(bin, "tunnel", "run")
 	cmd.Env = append(os.Environ(), "TUNNEL_TOKEN="+token) // keep the token out of ps
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw
