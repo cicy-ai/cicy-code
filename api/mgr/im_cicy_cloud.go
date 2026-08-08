@@ -28,10 +28,13 @@ import (
 const defaultCiCyCloudOrigin = "https://cicy-ai.com"
 
 var cicyCloudEmailRE = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+var cicyCloudTeamRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
+var cicyCloudPendingLogins sync.Map // state -> requested team ID
 
 type cicyCloudCredential struct {
 	Email      string `json:"email"`
 	InstanceID string `json:"instance_id"`
+	TeamID     string `json:"team_id"`
 	Token      string `json:"token"`
 	Origin     string `json:"cloud_origin"`
 	UpdatedAt  string `json:"updated_at"`
@@ -139,7 +142,7 @@ func saveCiCyCloudCredential(cred cicyCloudCredential) error {
 }
 
 func upsertCiCyCloudIMAccount(cred cicyCloudCredential) (*imAccount, error) {
-	cfg, _ := json.Marshal(M{"email": cred.Email, "instance_id": cred.InstanceID, "cloud_origin": cred.Origin})
+	cfg, _ := json.Marshal(M{"email": cred.Email, "instance_id": cred.InstanceID, "team_id": cred.TeamID, "cloud_origin": cred.Origin})
 	var id int64
 	err := store.QueryRow("SELECT id FROM im_accounts WHERE platform=? ORDER BY id LIMIT 1", imPlatformCiCyCloud).Scan(&id)
 	if err == nil {
@@ -167,6 +170,7 @@ func ensureCiCyCloudAccountFromEnvironment() error {
 	cred := cicyCloudCredential{
 		Email:      strings.TrimSpace(os.Getenv("CICY_CLOUD_EMAIL")),
 		InstanceID: strings.TrimSpace(os.Getenv("CICY_CLOUD_INSTANCE_ID")),
+		TeamID:     strings.TrimSpace(os.Getenv("CICY_CLOUD_TEAM_ID")),
 		Token:      strings.TrimSpace(os.Getenv("CICY_CLOUD_TOKEN")),
 		Origin:     cicyCloudOrigin(),
 	}
@@ -181,6 +185,9 @@ func ensureCiCyCloudAccountFromEnvironment() error {
 			}
 			if cred.Token == "" {
 				cred.Token = saved.Token
+			}
+			if cred.TeamID == "" {
+				cred.TeamID = saved.TeamID
 			}
 			if saved.Origin != "" {
 				cred.Origin = saved.Origin
@@ -503,6 +510,14 @@ func (t *cicyCloudTransport) reportAllAgents() {
 }
 
 func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []string) {
+	if len(parts) >= 2 && parts[1] == "tunnel" && r.Method == http.MethodPost {
+		if err := enableCFT(resolvePort(), true); err != nil {
+			httpErr(w, 500, err.Error())
+			return
+		}
+		J(w, M{"success": true, "status": "starting", "url": cftCurrentURL()})
+		return
+	}
 	if len(parts) >= 2 && (parts[1] == "instances" || parts[1] == "agents") && r.Method == http.MethodGet {
 		var token string
 		_ = store.QueryRow("SELECT secret FROM im_accounts WHERE platform=? ORDER BY id LIMIT 1", imPlatformCiCyCloud).Scan(&token)
@@ -555,14 +570,20 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 	if r.Method == http.MethodPost && len(parts) == 2 {
 		var in struct {
 			Email string `json:"email"`
+			Team  string `json:"team"`
 		}
 		if readBody(r, &in) != nil {
 			httpErr(w, 400, "invalid request body")
 			return
 		}
 		email := strings.ToLower(strings.TrimSpace(in.Email))
+		team := strings.TrimSpace(in.Team)
 		if !cicyCloudEmailRE.MatchString(email) {
 			httpErr(w, 400, "invalid email")
+			return
+		}
+		if team == "" || !cicyCloudTeamRE.MatchString(team) {
+			httpErr(w, 400, "invalid team")
 			return
 		}
 		state, err := randomLoginState()
@@ -580,6 +601,7 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			"email": email, "state": state, "flow": "desktop_poll", "lang": "zh",
 			"platform": "cicy-code", "system": runtime.GOOS, "arch": runtime.GOARCH,
 			"runtime": telemetry.Runtime, "hostname": hostname, "instanceId": existing.InstanceID,
+			"teamId":        team,
 			"clientVersion": version, "cpu": fmt.Sprintf("%s · %d cores", telemetry.CPUModel, telemetry.CPUCores),
 			"memory": fmt.Sprintf("%.1f GB", float64(telemetry.MemoryTotalMB)/1024), "gpu": telemetry.GPU,
 		}, nil)
@@ -587,7 +609,8 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			httpErr(w, 502, err.Error())
 			return
 		}
-		J(w, M{"state": state, "status": "pending", "email": email})
+		cicyCloudPendingLogins.Store(state, team)
+		J(w, M{"state": state, "status": "pending", "email": email, "team": team})
 		return
 	}
 	if r.Method == http.MethodGet && len(parts) == 3 {
@@ -621,17 +644,24 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			httpErr(w, 500, "instance id failed")
 			return
 		}
+		pendingTeam, ok := cicyCloudPendingLogins.Load(state)
+		teamID := strings.TrimSpace(fmt.Sprint(pendingTeam))
+		if !ok || teamID == "" {
+			httpErr(w, 400, "login team missing")
+			return
+		}
 		if err := cloudJSON(http.MethodPost, "/api/code/instances/register", poll.Token, M{
-			"instanceId": instanceID, "platform": "native", "runtime": "native",
+			"instanceId": instanceID, "teamId": teamID, "platform": "native", "runtime": "native",
 		}, nil); err != nil {
 			httpErr(w, 502, err.Error())
 			return
 		}
-		cred := cicyCloudCredential{Email: poll.Email, InstanceID: instanceID, Token: poll.Token, Origin: cicyCloudOrigin(), UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+		cred := cicyCloudCredential{Email: poll.Email, InstanceID: instanceID, TeamID: teamID, Token: poll.Token, Origin: cicyCloudOrigin(), UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
 		if err := saveCiCyCloudCredential(cred); err != nil {
 			httpErr(w, 500, err.Error())
 			return
 		}
+		cicyCloudPendingLogins.Delete(state)
 		acc, err := upsertCiCyCloudIMAccount(cred)
 		if err != nil {
 			httpErr(w, 500, err.Error())

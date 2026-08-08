@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -37,6 +38,28 @@ import (
 // Read by handleHealth so `cicy-agent team ping` / curl show where this
 // instance is reachable.
 var cftTunnelURL atomic.Value
+var cftStartOnce sync.Once
+
+func cftEnabledPath() string { return filepath.Join(cicyDBDir, "cft-enabled") }
+
+func cftEnabledFromConfig() bool {
+	_, err := os.Stat(cftEnabledPath())
+	return err == nil
+}
+
+func enableCFT(port string, persist bool) error {
+	if persist {
+		if err := os.MkdirAll(cicyDBDir, 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(cftEnabledPath(), []byte("1\n"), 0o600); err != nil {
+			return err
+		}
+	}
+	cftMode = true
+	cftStartOnce.Do(func() { go startCFT(port) })
+	return nil
+}
 
 func cftCurrentURL() string {
 	if v, ok := cftTunnelURL.Load().(string); ok {

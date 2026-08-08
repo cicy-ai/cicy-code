@@ -290,9 +290,10 @@ const api = {
   startWeChatLogin: () => http.post('/api/im/wechat/login'),
   getWeChatLoginStatus: (sessionId: string) => http.get(`/api/im/wechat/login/${encodeURIComponent(sessionId)}`),
   cancelWeChatLogin: (sessionId: string) => http.post(`/api/im/wechat/login/${encodeURIComponent(sessionId)}/cancel`),
-  startCiCyCloudLogin: (email: string) => http.post('/api/im/cicy-cloud/login', { email }),
+  startCiCyCloudLogin: (email: string, team: string) => http.post('/api/im/cicy-cloud/login', { email, team }),
   getCiCyCloudLoginStatus: (state: string) => http.get(`/api/im/cicy-cloud/login/${encodeURIComponent(state)}`),
   getCiCyCloudInstances: () => http.get('/api/im/cicy-cloud/instances'),
+  enableCiCyCloudTunnel: () => http.post('/api/im/cicy-cloud/tunnel'),
   getCiCyCloudAgents: () => http.get('/api/im/cicy-cloud/agents'),
   sendCiCyCloudMessage: (targetInstanceId: string, targetAgentId: string, senderAgentId: string, text: string) => http.post('/api/im/cicy-cloud/send', {
     target_instance_id: targetInstanceId, target_agent_id: targetAgentId,

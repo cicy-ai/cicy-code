@@ -308,40 +308,13 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const [fsError, setFsError] = useState('');
   const [cloudModalOpen, setCloudModalOpen] = useState(false);
   const [cloudEmail, setCloudEmail] = useState('');
+  const [cloudTeam, setCloudTeam] = useState('');
   const [cloudState, setCloudState] = useState('');
   const [cloudSubmitting, setCloudSubmitting] = useState(false);
   const [cloudError, setCloudError] = useState('');
-  const [cloudAgents, setCloudAgents] = useState<Array<{ instanceId: string; agentId: string; title: string; agentType: string; role: string; status: string; platform: string; runtime: string }>>([]);
-  const [cloudTarget, setCloudTarget] = useState('');
-  const [cloudMessage, setCloudMessage] = useState('');
-  const [cloudSending, setCloudSending] = useState(false);
-
+  const [cloudInstance, setCloudInstance] = useState<{ teamId?: string; proxyHost?: string; proxyAvailable?: number | boolean } | null>(null);
+  const [cloudTunnelStarting, setCloudTunnelStarting] = useState(false);
   const selected = useMemo(() => accounts.find((a) => a.id === selectedId) || null, [accounts, selectedId]);
-
-  useEffect(() => {
-    if (selected?.platform !== 'cicy_cloud') return;
-    let stopped = false;
-    apiService.getCiCyCloudAgents().then((res) => {
-      if (stopped) return;
-      const current = String(selected.config?.instance_id || '');
-      const list = ((res?.data?.agents || []) as Array<{ instanceId: string; agentId: string; title: string; agentType: string; role: string; status: string; platform: string; runtime: string }>)
-        .filter((item) => item.instanceId !== current);
-      setCloudAgents(list);
-      setCloudTarget((value) => value && list.some((item) => `${item.instanceId}|${item.agentId}` === value) ? value : (list[0] ? `${list[0].instanceId}|${list[0].agentId}` : ''));
-    }).catch((e) => { if (!stopped) setCloudError(errText(e)); });
-    return () => { stopped = true; };
-  }, [selected]);
-
-  const sendCloudMessage = async () => {
-    if (!cloudTarget || !cloudMessage.trim()) return;
-    setCloudSending(true); setCloudError('');
-    try {
-      const [targetInstanceId, targetAgentId] = cloudTarget.split('|', 2);
-      await apiService.sendCiCyCloudMessage(targetInstanceId, targetAgentId, selected?.bound_pane_id || 'w-1001', cloudMessage.trim());
-      setCloudMessage(''); toast('消息已发送');
-    } catch (e) { setCloudError(errText(e)); }
-    finally { setCloudSending(false); }
-  };
 
   /* ---- editor sync ---- */
   // Default new accounts to w-1001 (the primary built-in pane). If acc has no
@@ -513,17 +486,52 @@ export default function IMDashboard({ leftMount, rightMount }: {
     if (platform === 'wechat') return void addWeChat();
     if (platform === 'feishu') return void addFeishu();
     if (platform === 'cicy_cloud') {
-      setCloudEmail(''); setCloudState(''); setCloudError(''); setCloudModalOpen(true);
+      setCloudEmail(''); setCloudTeam(''); setCloudState(''); setCloudError(''); setCloudModalOpen(true);
     }
   };
 
   const submitCloudEmail = async () => {
     setCloudSubmitting(true); setCloudError('');
     try {
-      const res = await apiService.startCiCyCloudLogin(cloudEmail.trim());
+      const res = await apiService.startCiCyCloudLogin(cloudEmail.trim(), cloudTeam.trim());
       setCloudState(String(res?.data?.state || ''));
     } catch (e) { setCloudError(errText(e)); }
     finally { setCloudSubmitting(false); }
+  };
+
+  const reloginCloud = () => {
+    if (!selected || selected.platform !== 'cicy_cloud') return;
+    setCloudEmail(String(selected.config?.email || selected.name || ''));
+    setCloudTeam(String(selected.config?.team_id || cloudInstance?.teamId || ''));
+    setCloudState(''); setCloudError(''); setCloudModalOpen(true);
+  };
+
+  useEffect(() => {
+    if (selected?.platform !== 'cicy_cloud') { setCloudInstance(null); return; }
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => apiService.getCiCyCloudInstances().then((res) => {
+      if (stopped) return;
+      const instanceID = String(selected.config?.instance_id || '');
+      const instances = (res?.data?.instances || []) as Array<{ instanceId?: string; teamId?: string; proxyHost?: string; proxyAvailable?: number | boolean }>;
+      const current = instances.find((item) => item.instanceId === instanceID) || null;
+      setCloudInstance(current);
+      if (current?.proxyHost) setCloudTunnelStarting(false);
+    }).catch(() => { if (!stopped) setCloudInstance(null); }).finally(() => {
+      if (!stopped) timer = setTimeout(refresh, 5000);
+    });
+    void refresh();
+    return () => { stopped = true; if (timer) clearTimeout(timer); };
+  }, [selected]);
+
+  const enableCloudTunnel = async () => {
+    setCloudTunnelStarting(true); setCloudError('');
+    try {
+      await apiService.enableCiCyCloudTunnel();
+      toast('固定域名正在启动');
+    } catch (e) {
+      setCloudTunnelStarting(false); setCloudError(errText(e));
+    }
   };
 
   useEffect(() => {
@@ -919,7 +927,8 @@ export default function IMDashboard({ leftMount, rightMount }: {
             <div data-id="im-add-dropdown" className="absolute right-0 top-[calc(100%+4px)] min-w-[160px] z-50 rounded-xl border border-white/[0.09] bg-[#141416] p-1 shadow-2xl shadow-black/60">
               {platforms.length === 0 && <div className="px-2.5 py-2 text-[11px] text-zinc-600">{t('loadingText')}</div>}
               {platforms.map((p) => {
-                const addable = p.kind === 'telegram' || p.kind === 'wechat' || p.kind === 'feishu' || p.kind === 'cicy_cloud';
+                const cloudAlreadyAdded = p.kind === 'cicy_cloud' && accounts.some((account) => account.platform === 'cicy_cloud');
+                const addable = !cloudAlreadyAdded && (p.kind === 'telegram' || p.kind === 'wechat' || p.kind === 'feishu' || p.kind === 'cicy_cloud');
                 return (
                   <button
                     key={p.kind}
@@ -932,6 +941,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
                   >
                     <PlatformIcon platform={p.kind} size={14} />
                     <span className="flex-1">{p.label}</span>
+                    {cloudAlreadyAdded && <span className="text-[10px] text-zinc-600">已添加</span>}
                     {p.needs_qr && <QrCode size={12} className="text-zinc-500" />}
                   </button>
                 );
@@ -1068,9 +1078,37 @@ export default function IMDashboard({ leftMount, rightMount }: {
             {/* Basic */}
             <section data-id="im-detail-section-connection" className="space-y-3.5">
               <SectionHeader>{t('sectionConnection')}</SectionHeader>
-              <Field label={t('fieldName')}>
+              {!isCloud && <Field label={t('fieldName')}>
                 <input data-id="im-detail-name-input" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} className={INPUT} placeholder={selected.platform} />
-              </Field>
+              </Field>}
+
+              {isCloud && (
+                <div data-id="im-detail-cloud-status" className="space-y-3 rounded-xl border border-white/[0.08] bg-white/[0.025] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[12px] text-zinc-500">连接状态</div>
+                      <div className={cn('mt-1 text-[13px] font-medium', selected.state === 'connected' ? 'text-emerald-300' : 'text-red-300')}>
+                        {selected.state === 'connected' ? '已登录' : (selected.state_detail || '未认证')}
+                      </div>
+                    </div>
+                    <Btn data-id="im-detail-cloud-relogin" variant={selected.state === 'connected' ? 'secondary' : 'primary'} size="sm" icon={<RefreshCw size={12} />} onClick={reloginCloud}>
+                      {selected.state === 'connected' ? '更改 Team' : '重新 Email 登录'}
+                    </Btn>
+                  </div>
+                  <div className="grid gap-3 border-t border-white/[0.06] pt-3 sm:grid-cols-2">
+                    <div><div className="text-[11px] text-zinc-600">Email</div><div className="mt-1 font-mono text-[12px] text-zinc-300">{selected.config?.email || selected.name || '—'}</div></div>
+                    <div><div className="text-[11px] text-zinc-600">Team</div><div className="mt-1 font-mono text-[12px] text-zinc-300">{cloudInstance?.teamId || selected.config?.team_id || '—'}</div></div>
+                    <div className="sm:col-span-2">
+                      <div className="text-[11px] text-zinc-600">固定域名</div>
+                      <div className="mt-1 flex items-center gap-3">
+                        <div className="break-all font-mono text-[12px] text-zinc-300">{cloudInstance?.proxyHost ? `https://${cloudInstance.proxyHost}` : (cloudTunnelStarting ? '正在启动…' : '尚未开启')}</div>
+                        {!cloudInstance?.proxyHost && <Btn data-id="im-detail-cloud-enable-tunnel" variant="secondary" size="sm" busy={cloudTunnelStarting} disabled={cloudTunnelStarting} onClick={() => void enableCloudTunnel()}>开启固定域名</Btn>}
+                      </div>
+                      {cloudError && <div className="mt-2 text-[11px] text-red-300">{cloudError}</div>}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {isFeishu && (
                 <>
@@ -1163,27 +1201,8 @@ export default function IMDashboard({ leftMount, rightMount }: {
               )}
             </section>
 
-            {isCloud && (
-              <section data-id="im-detail-section-cloud-message" className="space-y-3.5">
-                <SectionHeader>发送到 cicy-code Instance</SectionHeader>
-                <Field label="目标 Instance">
-                  <select value={cloudTarget} onChange={(e) => setCloudTarget(e.target.value)} className={INPUT}>
-                    {cloudAgents.length === 0 && <option value="">没有其他可用 Agent</option>}
-                    {cloudAgents.map((item) => <option key={`${item.instanceId}|${item.agentId}`} value={`${item.instanceId}|${item.agentId}`}>{item.platform}/{item.runtime} · {item.agentId} · {item.title || item.agentType} · {item.status}</option>)}
-                  </select>
-                </Field>
-                <Field label="消息" help="消息会发送到目标实例绑定的 Agent，回复会回到当前实例。">
-                  <textarea value={cloudMessage} onChange={(e) => setCloudMessage(e.target.value)} rows={4}
-                    className={cn(INPUT, 'h-auto resize-y py-2')} placeholder="输入消息或任务…" />
-                </Field>
-                {cloudError && <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[12px] text-red-300">{cloudError}</div>}
-                <Btn variant="primary" size="md" icon={<Send size={13} />} busy={cloudSending}
-                  disabled={cloudSending || !cloudTarget || !cloudMessage.trim()} onClick={() => void sendCloudMessage()}>发送消息</Btn>
-              </section>
-            )}
-
             {/* Agent binding */}
-            <section data-id="im-detail-section-binding" className="space-y-3.5">
+            {!isCloud && <section data-id="im-detail-section-binding" className="space-y-3.5">
               <SectionHeader>{t('sectionAgentBinding')}</SectionHeader>
               <Field label={t('fieldBindAgent')} help={(() => {
                 const curPane = panes.find((p) => p.pane_id === draft.boundPaneId);
@@ -1235,10 +1254,10 @@ export default function IMDashboard({ leftMount, rightMount }: {
                   );
                 })()}
               </Field>
-            </section>
+            </section>}
 
             {/* Test result */}
-            {testRes && (
+            {!isCloud && testRes && (
               <div data-id="im-detail-test-result" className={cn('relative rounded-xl border px-3.5 py-3 text-[12px]',
                 testOk ? 'border-emerald-500/25 bg-emerald-500/[0.07] text-emerald-200'
                   : testFail ? 'border-red-500/25 bg-red-500/[0.07] text-red-200'
@@ -1256,7 +1275,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
           </div>
 
           {/* footer */}
-          <div data-id="im-detail-footer" className="mt-7 flex items-center gap-2 border-t border-white/[0.06] pt-5">
+          {!isCloud && <div data-id="im-detail-footer" className="mt-7 flex items-center gap-2 border-t border-white/[0.06] pt-5">
             <Btn data-id="im-detail-save" variant="primary" size="md" icon={<Save size={14} />} busy={saving} disabled={saving || !dirty} onClick={() => void save()}>{t('save')}</Btn>
             <Btn data-id="im-detail-test" variant="secondary" size="md" icon={<Zap size={14} />} busy={testing} disabled={testing || selected.state !== 'connected'} onClick={() => void testSend()}>
               {isWeChat ? t('testSendWeChat') : t('testSend')}
@@ -1282,7 +1301,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
               </>
             )}
             <div className="flex-1" />
-          </div>
+          </div>}
         </div>
       </main>
     </div>
@@ -1327,17 +1346,27 @@ export default function IMDashboard({ leftMount, rightMount }: {
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
         <div className="absolute left-1/2 top-1/2 w-[420px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 cursor-default rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
-            <div className="flex items-center gap-2"><PlatformIcon platform="cicy_cloud" size={16} /><h2 className="text-[15px] font-semibold text-white">添加 CiCy Cloud 账号</h2></div>
+            <div className="flex items-center gap-2"><PlatformIcon platform="cicy_cloud" size={16} /><h2 className="text-[15px] font-semibold text-white">{selected?.platform === 'cicy_cloud' ? 'CiCy Cloud 登录' : '添加 CiCy Cloud 账号'}</h2></div>
             <button onClick={() => setCloudModalOpen(false)} className="rounded-lg p-1.5 text-zinc-600 hover:bg-white/[0.06] hover:text-zinc-300"><X className="h-4 w-4" /></button>
           </div>
           <div className="space-y-4 px-5 py-5">
             {!waiting ? (
-              <Field label="Email" help="点击邮件中的登录链接后，账号会自动注册或登录，并绑定当前 cicy-code 实例。">
-                <input data-id="im-cloud-email" autoFocus type="email" value={cloudEmail}
-                  onChange={(e) => { setCloudEmail(e.target.value); setCloudError(''); }}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && cloudEmail.trim()) void submitCloudEmail(); }}
-                  placeholder="you@example.com" className={cn(INPUT, 'h-10')} disabled={cloudSubmitting} />
-              </Field>
+              <>
+                <Field label="Email" help="点击邮件中的登录链接后，账号会自动注册或登录当前 cicy-code 实例。">
+                  <input data-id="im-cloud-email" autoFocus type="email" value={cloudEmail}
+                    onChange={(e) => { setCloudEmail(e.target.value); setCloudError(''); }}
+                    placeholder="you@example.com" className={cn(INPUT, 'h-10')} disabled={cloudSubmitting} />
+                </Field>
+                <Field label="Team" help="Team 是这个 Instance 的固定标识。">
+                  <input data-id="im-cloud-team" value={cloudTeam}
+                    onChange={(e) => { setCloudTeam(e.target.value); setCloudError(''); }}
+                    onKeyDown={(e) => {
+                      const composing = e.nativeEvent.isComposing || e.keyCode === 229;
+                      if (!composing && e.key === 'Enter' && cloudEmail.trim() && cloudTeam.trim()) void submitCloudEmail();
+                    }}
+                    placeholder="mac_local" className={cn(INPUT, 'h-10 font-mono')} disabled={cloudSubmitting} />
+                </Field>
+              </>
             ) : (
               <div className="rounded-xl border border-blue-500/25 bg-blue-500/[0.06] px-4 py-4 text-center">
                 <Loader2 className="mx-auto h-5 w-5 animate-spin text-blue-300" />
@@ -1348,7 +1377,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
             {cloudError && <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[12px] text-red-300">{cloudError}</div>}
             <div className="flex justify-end gap-2">
               <Btn variant="ghost" size="md" onClick={() => setCloudModalOpen(false)}>取消</Btn>
-              {!waiting && <Btn data-id="im-cloud-submit" variant="primary" size="md" onClick={() => void submitCloudEmail()} disabled={cloudSubmitting || !cloudEmail.trim()}>{cloudSubmitting ? <Spinner size="xs" /> : '发送登录邮件'}</Btn>}
+              {!waiting && <Btn data-id="im-cloud-submit" variant="primary" size="md" onClick={() => void submitCloudEmail()} disabled={cloudSubmitting || !cloudEmail.trim() || !cloudTeam.trim()}>{cloudSubmitting ? <Spinner size="xs" /> : '发送登录邮件'}</Btn>}
               {waiting && cloudError && <Btn variant="secondary" size="md" onClick={() => { setCloudState(''); setCloudError(''); }}>重新发送</Btn>}
             </div>
           </div>

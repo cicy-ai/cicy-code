@@ -49,7 +49,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.349"
+const version = "2.3.353"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -238,6 +238,9 @@ Options:
 		if token, _ := cftResolveTokenHost(); token != "" {
 			cftMode = true
 		}
+	}
+	if !cftMode && cftEnabledFromConfig() {
+		cftMode = true
 	}
 
 	// --cdn activates the baked-in R2 prefixes for the ttyd bundle (the App SPA
@@ -714,7 +717,7 @@ Options:
 	// --cft starts EARLY so the assigned URL can make it into the banner below
 	// (cloudflared retries the origin on its own, so listening later is fine).
 	if cftMode {
-		go startCFT(port)
+		_ = enableCFT(port, false)
 	}
 	openHost := bind
 	if openHost == "0.0.0.0" {

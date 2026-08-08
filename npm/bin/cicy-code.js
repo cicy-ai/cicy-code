@@ -56,7 +56,11 @@ main().catch((err) => {
 
 async function main() {
   let cloudEnv = {};
-  if (cloudEmail) cloudEnv = await cloudLogin(cloudEmail, cloudTeam);
+  if (Boolean(cloudEmail) !== Boolean(cloudTeam)) {
+    throw new Error('--email and --team must be provided together');
+  }
+  if (cloudEmail && cloudTeam) cloudEnv = await cloudLogin(cloudEmail, cloudTeam);
+  else cloudEnv = await savedCloudEnvironment();
   if (!isUtility) ensurePortFree(PORT);
   const child = spawn(binPath, args, {
     stdio: 'inherit',
@@ -66,6 +70,22 @@ async function main() {
     if (signal) process.kill(process.pid, signal);
     else process.exit(code == null ? 0 : code);
   });
+}
+
+async function savedCloudEnvironment() {
+  const saved = readJSON(cloudCredentialPath());
+  const email = String(saved.email || '').trim().toLowerCase();
+  const instanceId = String(saved.instance_id || '').trim();
+  const teamId = String(saved.team_id || '').trim();
+  const token = String(saved.token || '').trim();
+  if (!email || !instanceId || !teamId || !token) return {};
+  try {
+    await registerCloudInstance(token, instanceId, teamId);
+    console.log(`cicy-code: CiCy Cloud connected from saved login as ${email} (team ${teamId})`);
+  } catch (err) {
+    console.warn(`cicy-code: saved CiCy Cloud login needs re-authentication: ${err && err.message ? err.message : err}`);
+  }
+  return cloudEnvironment(email, instanceId, teamId, token);
 }
 
 function takeCloudArgs(input) {
@@ -102,7 +122,7 @@ async function cloudLogin(email, requestedTeam) {
   const saved = readJSON(credentialPath);
   const instanceId = String(saved.instance_id || '').trim() ||
     `code-${crypto.randomBytes(18).toString('hex')}`;
-  const teamId = requestedTeam || String(saved.team_id || '').trim() || `team-${Date.now()}`;
+  const teamId = requestedTeam;
   let token = saved.email === email ? String(saved.token || '') : '';
 
   if (token) {
