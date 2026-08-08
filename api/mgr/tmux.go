@@ -1851,7 +1851,7 @@ PY
     return 1
   fi
   echo "[cicy] 开始下载 Kiro CLI 安装包..."
-  curl -L -o "$download_dir/$filename" "$download_url" || {
+  curl -fsSL -o "$download_dir/$filename" "$download_url" || {
     rm -rf "$download_dir"
     return 1
   }
@@ -3551,7 +3551,7 @@ helper = """cicy_clone_hermes() {
     archive_file=\"$tmp_dir/hermes.tar.gz\"
     archive_url=\"https://gh-proxy.com/https://codeload.github.com/NousResearch/hermes-agent/tar.gz/refs/heads/${branch}\"
     log_info \"Downloading source archive via gh proxy...\"
-    if ! curl -L --fail --retry 3 --retry-delay 1 -o \"$archive_file\" \"$archive_url\"; then
+    if ! curl -fsSL --retry 3 --retry-delay 1 -o \"$archive_file\" \"$archive_url\"; then
         rm -rf \"$tmp_dir\"
         return 1
     fi

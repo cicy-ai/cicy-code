@@ -212,7 +212,7 @@ tmp=$(mktemp -d)
 ok=""
 for url in "$direct" "https://ghproxy.net/${direct}" "https://gh-proxy.com/${direct}"; do
   echo "codex: downloading ${url}"
-  if curl -fL --connect-timeout 8 --max-time 600 -o "$tmp/codex.tgz" "$url"; then ok=1; break; fi
+  if curl -fsSL --connect-timeout 8 --max-time 600 -o "$tmp/codex.tgz" "$url"; then ok=1; break; fi
   echo "codex: source failed, trying next mirror"
 done
 if [ -z "$ok" ]; then echo "codex: all download sources failed"; rm -rf "$tmp"; exit 1; fi
@@ -1447,7 +1447,7 @@ func downloadAndExtractFfmpeg(url, tmpDir, dst string) error {
 	// redirects, --fail to surface 4xx/5xx as non-zero exit. 300s ≈ 5m
 	// is a generous ceiling for a ~40 MB download even on slow CN
 	// links; we'd rather hit it than have an indefinite hang.
-	dl := exec.Command("curl", "-fL", "--max-time", "300", "-o", arc, url)
+	dl := exec.Command("curl", "-fsSL", "--max-time", "300", "-o", arc, url)
 	dl.Stderr = os.Stderr
 	if err := dl.Run(); err != nil {
 		return fmt.Errorf("curl: %w", err)
