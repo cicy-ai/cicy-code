@@ -1477,6 +1477,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       window.dispatchEvent(new CustomEvent('cicy:open-file', { detail: { path: relPath } }));
     }, 80);
   }, [openPaneFiles]);
+  const openPaneCrontab = useCallback((targetPaneId: string) => {
+    openAgentFile(targetPaneId, '~/cicy-ai/db/crontab.txt');
+  }, [openAgentFile]);
   // markdown history 里点击文件链接 → 揭示文件视图(FilesView 自己监听同一事件打开 tab)。
   useEffect(() => {
     const reveal = () => {
@@ -2016,6 +2019,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             showHeaderButtons={!cliContentOpen}
             onOpenPaneSettings={openPaneSettings}
             onOpenPaneFiles={openPaneFiles}
+            onOpenPaneCrontab={openPaneCrontab}
             onOpenPaneSession={handleStackOpenSession}
             onOpenPaneTodo={todoSkillInstalled ? openPaneTodo : undefined}
             onOpenPaneMemory={openPaneMemory}

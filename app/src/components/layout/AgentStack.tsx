@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { BookOpen, Braces, Brain, Check, CircleHelp, Columns2, Copy, CornerDownLeft, ExternalLink, Folder, History, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, X } from 'lucide-react'
+import { BookOpen, Braces, Brain, Check, CircleHelp, Columns2, Copy, CornerDownLeft, ExternalLink, Folder, History, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, Timer, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -524,6 +524,7 @@ function AgentStack({
   showHeaderButtons = true,
   onOpenPaneSettings,
   onOpenPaneFiles,
+  onOpenPaneCrontab,
   onOpenPaneSession,
   onOpenPaneTodo,
   onOpenPaneMemory,
@@ -540,6 +541,7 @@ function AgentStack({
   showHeaderButtons?: boolean
   onOpenPaneSettings: (paneId: string) => void
   onOpenPaneFiles: (paneId: string) => void
+  onOpenPaneCrontab?: (paneId: string) => void
   onOpenPaneSession: (paneId: string) => void
   onOpenPaneTodo?: (paneId: string) => void
   onOpenPaneMemory?: (paneId: string) => void
@@ -747,6 +749,7 @@ function AgentStack({
             showHeaderButtons={showHeaderButtons}
             onOpenPaneSettings={onOpenPaneSettings}
             onOpenPaneFiles={onOpenPaneFiles}
+            onOpenPaneCrontab={onOpenPaneCrontab}
             onOpenPaneSession={onOpenPaneSession}
             onOpenPaneTodo={onOpenPaneTodo}
             onOpenPaneMemory={onOpenPaneMemory}
@@ -800,6 +803,7 @@ function AgentStackCard({
   showHeaderButtons,
   onOpenPaneSettings,
   onOpenPaneFiles,
+  onOpenPaneCrontab,
   onOpenPaneSession,
   onOpenPaneTodo,
   onOpenPaneMemory,
@@ -826,6 +830,7 @@ function AgentStackCard({
   showHeaderButtons: boolean;
   onOpenPaneSettings: (paneId: string) => void;
   onOpenPaneFiles: (paneId: string) => void;
+  onOpenPaneCrontab?: (paneId: string) => void;
   onOpenPaneSession: (paneId: string) => void;
   onOpenPaneTodo?: (paneId: string) => void;
   onOpenPaneMemory?: (paneId: string) => void;
@@ -1052,6 +1057,11 @@ function AgentStackCard({
     onOpenPaneFiles(item.paneId)
   }, [item.paneId, onOpenPaneFiles])
 
+  const handleOpenCrontab = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onOpenPaneCrontab?.(item.paneId)
+  }, [item.paneId, onOpenPaneCrontab])
+
   const handleOpenSession = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     onOpenPaneSession(item.paneId)
@@ -1271,6 +1281,12 @@ function AgentStackCard({
                   icon: <Folder className="h-4 w-4" />,
                   onClick: handleOpenFiles,
                 },
+                ...(onOpenPaneCrontab ? [{
+                  id: 'agent-stack-card-timer',
+                  label: t('timer', { ns: 'common', defaultValue: '定时器' }),
+                  icon: <Timer className="h-4 w-4" />,
+                  onClick: handleOpenCrontab,
+                }] : []),
                 {
                   id: 'agent-stack-card-session',
                   label: t('tabSession', { ns: 'workspace' }),
