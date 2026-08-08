@@ -17,7 +17,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, Folder, X, Settings, Brain, Search,
   LayoutList, Users, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen, Braces, Store,
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen, Braces, Store, Timer,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag, isChatModel } from '../lib/modelTag';
@@ -1631,6 +1631,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     { id: 'audit', label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }), icon: <ShieldCheck className="h-3.5 w-3.5" /> },
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
+  const openCrontab = useCallback(() => {
+    setCliContentTab('files');
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('cicy:open-file', {
+        detail: { path: '~/cicy-ai/db/crontab.txt' },
+      }));
+    }, 0);
+  }, []);
   const sessionSubTabs: { id: RequestViewTab; label: string }[] = [
     { id: 'analysis', label: t('tabAnalysis', '分析') },
     { id: 'usage', label: t('tabUsage', '用量') },
@@ -1739,6 +1747,19 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               </TipBelow>
             );
           })}
+          <TipBelow label={t('timer', { ns: 'common', defaultValue: '定时器' })} className="shrink-0">
+            <button
+              data-id="cli-content-tab-timer"
+              type="button"
+              className="relative shrink-0 select-none rounded-md px-2.5 py-1.5 text-zinc-500 transition-colors hover:bg-white/[0.04] hover:text-zinc-300"
+              onClick={openCrontab}
+              aria-label={t('timer', { ns: 'common', defaultValue: '定时器' })}
+            >
+              <span className="inline-flex h-5 items-center">
+                <Timer className="h-3.5 w-3.5" />
+              </span>
+            </button>
+          </TipBelow>
         </div>
         <div data-id="cli-content-actions" className="ml-3 flex shrink-0 items-center gap-1">
           <TipBelow label={t('close', { ns: 'common' })}>
