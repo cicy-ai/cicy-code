@@ -5,12 +5,64 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
 )
+
+const maxCrontabBytes = 1024 * 1024
+
+func handleCrontab(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		data, err := os.ReadFile(cicyCrontabPath)
+		if err != nil && !os.IsNotExist(err) {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		J(w, M{"content": string(data), "path": cicyCrontabPath})
+	case http.MethodPut:
+		var body struct {
+			Content string `json:"content"`
+		}
+		dec := json.NewDecoder(io.LimitReader(r.Body, maxCrontabBytes+1))
+		if err := dec.Decode(&body); err != nil {
+			httpErr(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		if len(body.Content) > maxCrontabBytes || bytes.IndexByte([]byte(body.Content), 0) >= 0 {
+			httpErr(w, http.StatusBadRequest, "invalid_crontab")
+			return
+		}
+		if body.Content != "" && !bytes.HasSuffix([]byte(body.Content), []byte("\n")) {
+			body.Content += "\n"
+		}
+		if err := os.WriteFile(cicyCrontabPath, []byte(body.Content), 0644); err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if runtime.GOOS == "windows" {
+			httpErr(w, http.StatusBadRequest, "crontab_unavailable_on_windows")
+			return
+		}
+		if err := ensureCrontabCommand(); err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := runCrontabInstall(cicyCrontabPath); err != nil {
+			httpErr(w, http.StatusBadRequest, "invalid crontab: "+err.Error())
+			return
+		}
+		J(w, M{"ok": true, "content": body.Content})
+	default:
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+	}
+}
 
 var runCrontabInstall = func(path string) error {
 	cmd := exec.Command("crontab", path)

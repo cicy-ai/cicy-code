@@ -305,6 +305,8 @@ const api = {
 
   listGroups: () => http.get('/api/groups'),
   getSystemResources: (cfg?: any) => http.get('/api/system/resources', cfg),
+  getCrontab: () => http.get('/api/crontab'),
+  saveCrontab: (content: string) => http.put('/api/crontab', { content }),
 
   getCicyFiles: (pane: string) => http.get(`/api/cicy/files?pane=${pane}`),
   getCicyFile: (pane: string, name: string) => http.get(`/api/cicy/file?pane=${pane}&name=${name}`, { transformResponse: [(d: any) => d] }),

@@ -445,6 +445,7 @@ Options:
 
 	// Stats
 	http.HandleFunc("/api/system/resources", wa(handleSystemResources))
+	http.HandleFunc("/api/crontab", wa(handleCrontab))
 
 	// Notifications
 	http.HandleFunc("/api/notify", wa(handleNotify))

@@ -28,6 +28,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { SendingProvider } from '../contexts/SendingContext';
 // import ChatView from './chat/ChatView';
 import TodoPanel from './TodoPanel';
+import CrontabPanel from './CrontabPanel';
 // Lazy: these pull in the heavy CodeMirror editor stack. Behind tab gates, so
 // dynamic-importing them keeps codemirror off the first-paint critical path.
 const FilesView = lazy(() => import('./files/FilesView'));
@@ -291,11 +292,11 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'customAgents' | 'agents' | 'todo' | 'windows' | null;
-type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'knowledge' | 'audit' | RequestViewTab;
+type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'knowledge' | 'audit' | 'timer' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'knowledge' || value === 'todo' || value === 'audit') {
+  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'knowledge' || value === 'todo' || value === 'audit' || value === 'timer') {
     return value;
   }
   return 'files';
@@ -1478,13 +1479,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }, 80);
   }, [openPaneFiles]);
   const openPaneCrontab = useCallback((targetPaneId: string) => {
-    openPaneFiles(targetPaneId);
-    window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('cicy:open-file', {
-        detail: { path: 'db/crontab.txt', root: 'cicy-ai' },
-      }));
-    }, 120);
-  }, [openPaneFiles]);
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentMode('fixed');
+    setCliContentTab('timer');
+    setCliContentOpen(true);
+  }, [paneId]);
   // markdown history 里点击文件链接 → 揭示文件视图(FilesView 自己监听同一事件打开 tab)。
   useEffect(() => {
     const reveal = () => {
@@ -1641,12 +1642,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
   const openCrontab = useCallback(() => {
-    setCliContentTab('files');
-    window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('cicy:open-file', {
-        detail: { path: 'db/crontab.txt', root: 'cicy-ai' },
-      }));
-    }, 0);
+    setCliContentTab('timer');
   }, []);
   const sessionSubTabs: { id: RequestViewTab; label: string }[] = [
     { id: 'analysis', label: t('tabAnalysis', '分析') },
@@ -1900,6 +1896,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               onClose={() => {}}
             />
           )}
+        </div>
+        <div
+          data-id="cli-content-timer-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'timer' ? 'block' : 'none' }}
+        >
+          <CrontabPanel active={cliContentOpen && cliContentTab === 'timer'} />
         </div>
         <div
           data-id="cli-content-settings-host"
