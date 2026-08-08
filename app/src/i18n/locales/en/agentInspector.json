@@ -108,6 +108,7 @@
   "proxyManagerExportModePublic": "Public",
   "proxyManagerExportCopy": "Copy",
   "proxyManagerExportCopied": "Copied",
+  "proxyManagerExportAuthMissing": "LAN or public access requires credentials for this user in mihomo.yaml authentication.",
   "proxySshManagerTitle": "SSH SOCKS proxies",
   "proxySshManagerSubtitle": "Manage autossh-based SOCKS5 profiles — start/stop/restart and connectivity test.",
   "proxySshManagerEmpty": "No proxy_ssh profiles configured",

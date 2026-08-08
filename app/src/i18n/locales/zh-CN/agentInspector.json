@@ -108,6 +108,7 @@
   "proxyManagerExportModePublic": "公网",
   "proxyManagerExportCopy": "复制",
   "proxyManagerExportCopied": "已复制",
+  "proxyManagerExportAuthMissing": "局域网或公网访问需要先在 mihomo.yaml 的 authentication 中配置当前用户和密码。",
   "proxySshManagerTitle": "Proxy SSH 隧道",
   "proxySshManagerSubtitle": "管理基于 autossh 的 SOCKS5 代理 profile,启停/重启/连通性测试",
   "proxySshManagerEmpty": "尚未配置任何 proxy_ssh profile",

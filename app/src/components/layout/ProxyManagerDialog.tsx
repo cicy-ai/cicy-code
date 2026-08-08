@@ -105,6 +105,7 @@ export function ProxyManagerDialog({
   const [exportLoading, setExportLoading] = useState(false);
   const [exportScript, setExportScript] = useState<string>('');
   const [exportHost, setExportHost] = useState<string>('');
+  const [exportWarning, setExportWarning] = useState<string>('');
   const [exportCopied, setExportCopied] = useState(false);
 
   const loadStatus = useCallback(async () => {
@@ -170,12 +171,14 @@ export function ProxyManagerDialog({
       // defaults to.
       const user = String(activeAgentId || paneId || '').replace(/:.*$/, '') || undefined;
       const resp = await apiService.getProxyExport({ ip: mode, user });
-      const data = (resp?.data || {}) as { script?: string; host?: string };
+      const data = (resp?.data || {}) as { script?: string; host?: string; warning?: string };
       setExportScript(String(data.script || ''));
       setExportHost(String(data.host || ''));
+      setExportWarning(String(data.warning || ''));
     } catch (e: any) {
       setExportScript(`# error: ${String(e?.response?.data?.detail || e?.message || e)}`);
       setExportHost('');
+      setExportWarning('');
     } finally {
       setExportLoading(false);
     }
@@ -603,15 +606,21 @@ export function ProxyManagerDialog({
                   type="button"
                   data-id="proxy-manager-drawer-export-copy"
                   onClick={copyExport}
-                  disabled={!exportScript || exportLoading}
+                  disabled={!exportScript || exportLoading || !!exportWarning}
                   className="ml-auto inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-zinc-200 transition-colors hover:bg-white/[0.07] disabled:opacity-40"
                 >
                   {exportCopied ? <Check size={10} className="text-emerald-300" /> : <Copy size={10} />}
                   {exportCopied ? t('proxyManagerExportCopied') : t('proxyManagerExportCopy')}
                 </button>
               </div>
+              {exportWarning && (
+                <div data-id="proxy-manager-drawer-export-warning" className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-500/20 bg-amber-500/[0.08] px-2 py-1.5 text-[10px] leading-relaxed text-amber-200">
+                  <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+                  <span>{t('proxyManagerExportAuthMissing')}</span>
+                </div>
+              )}
               <pre data-id="proxy-manager-drawer-export-script" className="mt-2 max-h-48 overflow-auto rounded-md bg-black/40 px-2 py-1.5 font-mono text-[10px] leading-relaxed text-zinc-300 whitespace-pre">
-                {exportLoading ? t('proxyManagerLoading') : exportScript || '—'}
+                {exportLoading ? t('proxyManagerLoading') : exportWarning ? '—' : exportScript || '—'}
               </pre>
             </div>
           )}

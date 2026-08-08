@@ -107,6 +107,37 @@ func readMihomoGlobalPasswordFromYAML() string {
 	return ""
 }
 
+// readMihomoAuthenticationForUser reads Mihomo's native authentication list
+// (`authentication: ["user:password"]`). Passwords may contain ':' so only the
+// first separator is structural. It never invents placeholder credentials.
+func readMihomoAuthenticationForUser(user string) (string, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "", false
+	}
+	data, err := os.ReadFile(filepath.Join(home, "cicy-ai", "db", "mihomo.yaml"))
+	if err != nil {
+		return "", false
+	}
+	return mihomoAuthenticationForUser(data, user)
+}
+
+func mihomoAuthenticationForUser(data []byte, user string) (string, bool) {
+	var cfg struct {
+		Authentication []string `yaml:"authentication"`
+	}
+	if yaml.Unmarshal(data, &cfg) != nil {
+		return "", false
+	}
+	for _, entry := range cfg.Authentication {
+		parts := strings.SplitN(strings.TrimSpace(entry), ":", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[0]) == user && parts[1] != "" {
+			return parts[1], true
+		}
+	}
+	return "", false
+}
+
 // isMihomoGroupType reports whether a proxy `type` field returned by the
 // controller represents a selectable group (rather than a leaf node). Mirrors
 // mihomo's adapter classification; built-in pseudo-proxies (DIRECT/REJECT/PASS
@@ -1347,10 +1378,6 @@ func handleProxyExport(w http.ResponseWriter, r *http.Request) {
 		// at the rules stage.
 		user = "w-test"
 	}
-	password := readMihomoGlobalPasswordFromYAML()
-	if password == "" {
-		password = "<YOUR_PASSWORD_HERE>"
-	}
 	port := defaultMihomoMixedPort
 	if v := strings.TrimSpace(os.Getenv("CICY_MIHOMO_PORT")); v != "" {
 		port = v
@@ -1377,7 +1404,24 @@ func handleProxyExport(w http.ResponseWriter, r *http.Request) {
 		host = mode
 		mode = "custom"
 	}
-	proxyURL := fmt.Sprintf("http://%s:%s@%s:%s", url.QueryEscape(user), url.QueryEscape(password), host, port)
+	password := ""
+	authConfigured := false
+	proxyURL := fmt.Sprintf("http://%s:%s", host, port)
+	warning := ""
+	if mode != "local" {
+		password, authConfigured = readMihomoAuthenticationForUser(user)
+		if !authConfigured {
+			// Keep legacy global-password deployments working, but never emit a
+			// fake placeholder when neither auth format is configured.
+			password = readMihomoGlobalPasswordFromYAML()
+			authConfigured = password != ""
+		}
+		if authConfigured {
+			proxyURL = fmt.Sprintf("http://%s:%s@%s:%s", url.QueryEscape(user), url.QueryEscape(password), host, port)
+		} else {
+			warning = "局域网/公网代理尚未配置 authentication，出于安全考虑不生成 export 命令。"
+		}
+	}
 	lines := []string{
 		fmt.Sprintf("export HTTP_PROXY=\"%s\"", proxyURL),
 		fmt.Sprintf("export HTTPS_PROXY=\"%s\"", proxyURL),
@@ -1388,19 +1432,24 @@ func handleProxyExport(w http.ResponseWriter, r *http.Request) {
 		"export NO_PROXY=\"localhost,127.0.0.1,::1\"",
 		"export no_proxy=\"localhost,127.0.0.1,::1\"",
 	}
+	if warning != "" {
+		lines = nil
+	}
 	allowLAN, _ := readMihomoAllowLAN()
 	J(w, M{
-		"success":   true,
-		"ip_mode":   mode,
-		"host":      host,
-		"port":      port,
-		"user":      user,
-		"password":  password,
-		"proxy_url": proxyURL,
-		"lines":     lines,
-		"script":    strings.Join(lines, "\n"),
-		"lan_ips":   lanIPs,
-		"allow_lan": allowLAN,
+		"success":         true,
+		"ip_mode":         mode,
+		"host":            host,
+		"port":            port,
+		"user":            user,
+		"password":        password,
+		"auth_configured": authConfigured,
+		"warning":         warning,
+		"proxy_url":       proxyURL,
+		"lines":           lines,
+		"script":          strings.Join(lines, "\n"),
+		"lan_ips":         lanIPs,
+		"allow_lan":       allowLAN,
 	})
 }
 
