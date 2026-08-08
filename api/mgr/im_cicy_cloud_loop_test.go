@@ -64,6 +64,34 @@ func TestCiCyCloudAckOnlyAfterLocalAgentAcceptsMessage(t *testing.T) {
 	}
 }
 
+func TestCiCyCloudRetryDoesNotAckOrDuplicateConfirmedDelivery(t *testing.T) {
+	acker := &recordingMessageAcker{}
+	msg := botMsg{AckID: "msg-retry-12345678"}
+	before := agentTurnStartMarker{CurrentTurn: "turn-old", ReplyTurn: "turn-old"}
+
+	// Enter produced no new current/reply turn: the Cloud row must remain
+	// unacked so it can retry later.
+	if started := agentTurnStartedSince(before, before); started {
+		t.Fatal("unchanged turn marker must not confirm injection")
+	} else if err := ackDeliveredMessage(acker, msg, started); err != nil {
+		t.Fatal(err)
+	}
+	if len(acker.ids) != 0 {
+		t.Fatalf("unstarted turn was acked: %#v", acker.ids)
+	}
+
+	// A later clean retry observes one new turn and produces exactly one ACK.
+	after := agentTurnStartMarker{CurrentTurn: "turn-new", ReplyTurn: "turn-new"}
+	if started := agentTurnStartedSince(before, after); !started {
+		t.Fatal("new turn marker must confirm injection")
+	} else if err := ackDeliveredMessage(acker, msg, started); err != nil {
+		t.Fatal(err)
+	}
+	if len(acker.ids) != 1 || acker.ids[0] != msg.AckID {
+		t.Fatalf("confirmed retry must ack exactly once: %#v", acker.ids)
+	}
+}
+
 func TestCiCyCloudExactTargetBypassesGenericInboundToggle(t *testing.T) {
 	acc := &imAccount{InboundToAgent: false}
 	if imInboundEnabled(acc, false) {

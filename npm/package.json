@@ -3,7 +3,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "2.3.345",
+  "version": "2.3.346",
   "description": "CiCy Code - AI-powered development environment",
   "author": {
     "name": "cicybot",

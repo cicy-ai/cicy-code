@@ -54,12 +54,11 @@ const openClawAgentReadyTimeout = 150 * time.Second
 const submitConfirmPollInterval = 200 * time.Millisecond
 const codexSubmitConfirmPollInterval = 80 * time.Millisecond
 
-// submitConfirmTimeout caps the post-Enter "did it submit" confirm. Same logic
-// as promptConfirmTimeout: a real submit confirms fast; a large prompt that
-// can't be matched burns the whole budget then treats the already-sent Enter as
-// success. 4s → 1.5s removes the second long stall after a fork prompt.
-const submitConfirmTimeout = 1500 * time.Millisecond
-const codexSubmitConfirmTimeout = 1200 * time.Millisecond
+// submitConfirmTimeout caps the post-Enter turn-start check. Real submissions
+// return early; failures wait long enough for current/reply turn markers to be
+// persisted before the caller leaves the Cloud message unacked for retry.
+const submitConfirmTimeout = 5 * time.Second
+const codexSubmitConfirmTimeout = 5 * time.Second
 const submitEnterRetryLimit = 2
 const codexSubmitEnterRetryLimit = 0
 const startupPromptBatchWindow = 5 * time.Second
@@ -4496,6 +4495,37 @@ func promptSubmitConfirmed(after, text, agentType string) bool {
 	}
 }
 
+type agentTurnStartMarker struct {
+	CurrentTurn string
+	ReplyTurn   string
+}
+
+func readAgentTurnStartMarker(paneID string) agentTurnStartMarker {
+	readTurn := func(path string) string {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+		var doc struct {
+			TurnID string `json:"turn_id"`
+		}
+		if json.Unmarshal(body, &doc) != nil {
+			return ""
+		}
+		return strings.TrimSpace(doc.TurnID)
+	}
+	short := shortPaneID(normPaneID(paneID))
+	return agentTurnStartMarker{
+		CurrentTurn: readTurn(aiGatewayCurrentSnapshotPath(short)),
+		ReplyTurn:   readTurn(aiGatewayReplySnapshotPath(short)),
+	}
+}
+
+func agentTurnStartedSince(before, after agentTurnStartMarker) bool {
+	return (after.CurrentTurn != "" && after.CurrentTurn != before.CurrentTurn) ||
+		(after.ReplyTurn != "" && after.ReplyTurn != before.ReplyTurn)
+}
+
 func shouldRequireStablePreSubmitConfirm(agentType string) bool {
 	switch normalizeAgentType(agentType) {
 	case "codex":
@@ -4572,22 +4602,27 @@ func waitForPromptEchoBeforeEnter(paneID, agentType, text, mode, baseline string
 	return "", fmt.Errorf("prompt echo not confirmed for %s", shortPaneID(paneID))
 }
 
-func submitPromptWithConfirmation(paneID, agentType, text string, trace *tmuxSendTrace) error {
+func submitPromptWithConfirmation(paneID, agentType, text string, before agentTurnStartMarker, trace *tmuxSendTrace) error {
 	pollInterval := submitConfirmPollIntervalForAgent(agentType)
 	timeout := submitConfirmTimeoutForAgent(agentType)
-	retryLimit := submitEnterRetryLimitForAgent(agentType)
 	var lastCapture string
 	var lastErr error
-	checkConfirmed := func(attempt int) bool {
+	checkConfirmed := func() bool {
 		deadline := time.Now().Add(timeout)
 		captureAttempt := 0
 		for time.Now().Before(deadline) {
 			captureAttempt++
+			if agentTurnStartedSince(before, readAgentTurnStartMarker(paneID)) {
+				if trace != nil {
+					trace.logStep("post-submit-turn-started", map[string]any{"capture_attempt": captureAttempt}, "")
+				}
+				return true
+			}
 			out, err := capturePromptConfirmPane(paneID)
 			if err != nil {
 				lastErr = err
 				if trace != nil {
-					trace.logStep("post-submit-capture-error", map[string]any{"attempt": attempt, "capture_attempt": captureAttempt, "error": err.Error()}, "")
+					trace.logStep("post-submit-capture-error", map[string]any{"capture_attempt": captureAttempt, "error": err.Error()}, "")
 				}
 				time.Sleep(pollInterval)
 				continue
@@ -4596,7 +4631,6 @@ func submitPromptWithConfirmation(paneID, agentType, text string, trace *tmuxSen
 			confirmed := promptSubmitConfirmed(out, text, agentType)
 			if trace != nil {
 				trace.logStep("post-submit-capture", map[string]any{
-					"attempt":         attempt,
 					"capture_attempt": captureAttempt,
 					"confirmed":       confirmed,
 				}, out)
@@ -4610,50 +4644,27 @@ func submitPromptWithConfirmation(paneID, agentType, text string, trace *tmuxSen
 		}
 		return false
 	}
-	for attempt := 0; attempt <= retryLimit; attempt++ {
-		if attempt > 0 {
-			log.Printf("[tmux-send] pane=%s submit=retry attempt=%d agent=%s preview=%q",
-				shortPaneID(paneID), attempt+1, normalizeAgentType(agentType), promptPreview(text))
-		}
+	// One delivery attempt sends Enter exactly once. Repeated Enter presses can
+	// duplicate a prompt; a failed confirmation is returned to the Cloud poller,
+	// which leaves the message unacked for a later clean retry.
+	if trace != nil {
+		trace.logStep("submit-enter", map[string]any{"attempt": 1}, "")
+	}
+	if err := sendPromptEnter(paneID); err != nil {
 		if trace != nil {
-			trace.logStep("submit-enter", map[string]any{"attempt": attempt + 1}, "")
+			trace.logStep("submit-enter-error", map[string]any{"attempt": 1, "error": err.Error()}, "")
 		}
-		if err := sendPromptEnter(paneID); err != nil {
-			if trace != nil {
-				trace.logStep("submit-enter-error", map[string]any{"attempt": attempt + 1, "error": err.Error()}, "")
-			}
-			return fmt.Errorf("failed to submit text: %w", err)
-		}
-		if checkConfirmed(attempt + 1) {
-			return nil
-		}
+		return fmt.Errorf("failed to submit text: %w", err)
+	}
+	if checkConfirmed() {
+		return nil
 	}
 	if lastErr != nil {
 		return fmt.Errorf("submit confirm failed for %s: %w", shortPaneID(paneID), lastErr)
 	}
-	if normalizeAgentType(agentType) == "codex" {
-		log.Printf("[tmux-send] pane=%s submit=soft-timeout agent=%s preview=%q tail=%q",
-			shortPaneID(paneID), normalizeAgentType(agentType), promptPreview(text), promptPreview(lastCapture))
-		if trace != nil {
-			trace.logStep("submit-soft-timeout", map[string]any{}, lastCapture)
-		}
-		return nil
-	}
 	if lastCapture != "" {
 		log.Printf("[tmux-send] pane=%s submit=timeout agent=%s preview=%q tail=%q",
 			shortPaneID(paneID), normalizeAgentType(agentType), promptPreview(text), promptPreview(lastCapture))
-	}
-	log.Printf("[tmux-send] pane=%s submit=timeout-enter-fallback agent=%s preview=%q",
-		shortPaneID(paneID), normalizeAgentType(agentType), promptPreview(text))
-	if trace != nil {
-		trace.logStep("submit-timeout-enter-fallback", map[string]any{}, "")
-	}
-	if err := sendPromptEnter(paneID); err == nil {
-		if checkConfirmed(retryLimit + 2) {
-			return nil
-		}
-	} else if trace != nil {
-		trace.logStep("submit-timeout-enter-fallback-error", map[string]any{"error": err.Error()}, "")
 	}
 	return fmt.Errorf("submit not confirmed for %s", shortPaneID(paneID))
 }
@@ -5096,6 +5107,7 @@ func sendTextToPaneDirect(winID, text string) error {
 		return newTmuxSendError("text required", http.StatusBadRequest, false)
 	}
 	agentType := paneAgentType(winID)
+	turnBefore := readAgentTurnStartMarker(winID)
 	trace := newTmuxSendTrace(winID, agentType)
 	trace.logStep("request", map[string]any{
 		"line_count": promptLineCount(text),
@@ -5149,29 +5161,21 @@ func sendTextToPaneDirect(winID, text string) error {
 				trace.logStep("pre-submit-enter-fallback", map[string]any{"reason": err.Error()}, "")
 			}
 			tSub := time.Now()
-			submitErr := submitPromptWithConfirmation(winID, agentType, text, trace)
+			submitErr := submitPromptWithConfirmation(winID, agentType, text, turnBefore, trace)
 			log.Printf("[tmux-timing] pane=%s phase=submit-confirm(fallback) ms=%d ok=%t total_ms=%d", shortPaneID(winID), time.Since(tSub).Milliseconds(), submitErr == nil, time.Since(tStart).Milliseconds())
 			if submitErr != nil {
-				// submitPromptWithConfirmation already sent Enter (including its own
-				// fallback Enter at the end). We just couldn't visually verify the
-				// submission via terminal scrape. Treat as success: returning an
-				// error here confuses the client because the message almost always
-				// did go through. Do NOT clear the input — if Enter actually
-				// landed, C-u would wipe whatever the agent types next.
-				trace.logStep("submit-warn", map[string]any{"error": submitErr.Error(), "fallback": "pre-submit-enter", "treated_as": "success"}, "")
-				log.Printf("[tmux-send] pane=%s WARN submit not visually confirmed (Enter was sent); treating as success agent=%s preview=%q pre_err=%v submit_err=%v",
-					shortPaneID(winID), normalizeAgentType(agentType), promptPreview(text), err, submitErr)
+				trace.logStep("submit-error", map[string]any{"error": submitErr.Error(), "fallback": "pre-submit-enter"}, "")
+				clearPanePromptInput(winID, trace)
+				return newTmuxSendError(submitErr.Error(), http.StatusConflict, true)
 			}
 		} else {
 			tSub := time.Now()
-			submitErr := submitPromptWithConfirmation(winID, agentType, text, trace)
+			submitErr := submitPromptWithConfirmation(winID, agentType, text, turnBefore, trace)
 			log.Printf("[tmux-timing] pane=%s phase=submit-confirm ms=%d ok=%t total_ms=%d", shortPaneID(winID), time.Since(tSub).Milliseconds(), submitErr == nil, time.Since(tStart).Milliseconds())
 			if submitErr != nil {
-				// Same rationale: Enter has been sent (possibly multiple times); the
-				// visual confirm just failed. Don't surface as error, don't clear.
-				trace.logStep("submit-warn", map[string]any{"error": submitErr.Error(), "treated_as": "success"}, "")
-				log.Printf("[tmux-send] pane=%s WARN submit not visually confirmed (Enter was sent); treating as success agent=%s preview=%q err=%v",
-					shortPaneID(winID), normalizeAgentType(agentType), promptPreview(text), submitErr)
+				trace.logStep("submit-error", map[string]any{"error": submitErr.Error()}, "")
+				clearPanePromptInput(winID, trace)
+				return newTmuxSendError(submitErr.Error(), http.StatusConflict, true)
 			}
 		}
 	} else {
