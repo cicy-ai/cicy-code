@@ -331,13 +331,11 @@ func cftNamedOnce(bin, token, url, port string) error {
 			// connection is up — that's our "connected" signal.
 			if !announced && strings.Contains(low, "registered tunnel connection") {
 				announced = true
-				apitoken := getFirstToken()
 				if url != "" {
 					cftTunnelURL.Store(url)
 					cftWriteState(url, port)
 					log.Printf("[cft] ─────────────────────────────────────────────")
-					log.Printf("[cft] ✅ Public (named, stable): %s/?token=%s", url, apitoken)
-					log.Printf("[cft]   cicy-agent team add <name> %s %s", url, apitoken)
+					log.Printf("[cft] ✅ Public (named, stable): %s", url)
 					log.Printf("[cft] ─────────────────────────────────────────────")
 				} else {
 					log.Printf("[cft] ✅ named tunnel connected (hostname configured in the Cloudflare dashboard; pass --cft-host to display/publish it)")
@@ -392,11 +390,8 @@ func cftRunOnce(bin, port string) error {
 			publishedURL = pendingURL
 			cftTunnelURL.Store(pendingURL)
 			cftWriteState(pendingURL, port)
-			token := getFirstToken()
 			log.Printf("[cft] ─────────────────────────────────────────────")
-			log.Printf("[cft] ✅ Public: %s/?token=%s", pendingURL, token)
-			log.Printf("[cft] register from another team's box:")
-			log.Printf("[cft]   cicy-agent team add <name> %s %s", pendingURL, token)
+			log.Printf("[cft] ✅ Public: %s", pendingURL)
 			log.Printf("[cft] ─────────────────────────────────────────────")
 		}
 	}()
