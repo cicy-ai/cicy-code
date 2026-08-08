@@ -80,6 +80,16 @@ type botMsg struct {
 	// TargetPaneID routes machine-to-machine messages to an exact local agent.
 	// Empty keeps the normal per-chat/account binding behaviour used by other IMs.
 	TargetPaneID string
+	// AckID identifies a message that must only be acknowledged after it has
+	// been accepted by the exact local Agent. Empty for transports whose cursor
+	// already provides their delivery semantics.
+	AckID string
+}
+
+// botMessageAcker is implemented by transports that require per-message,
+// post-delivery acknowledgement instead of advancing a batch cursor first.
+type botMessageAcker interface {
+	Ack(messageID string) error
 }
 
 // botTransport abstracts a "bot-shaped" IM platform: a token, long-poll updates,
@@ -537,9 +547,20 @@ func imPaneSessionOnline(paneID string) bool {
 	return err == nil
 }
 
-func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
+func imInboundEnabled(acc *imAccount, explicitTarget bool) bool {
+	return acc != nil && (explicitTarget || acc.InboundToAgent)
+}
+
+func ackDeliveredMessage(acker botMessageAcker, msg botMsg, delivered bool) error {
+	if !delivered || acker == nil || strings.TrimSpace(msg.AckID) == "" {
+		return nil
+	}
+	return acker.Ack(msg.AckID)
+}
+
+func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) bool {
 	if acc == nil || tr == nil {
-		return
+		return false
 	}
 
 	// Voice message: try to transcribe audio → text
@@ -548,7 +569,7 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 		if err != nil {
 			log.Printf("[im] account=%d voice transcribe failed: %v", acc.ID, err)
 			imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: msg.Peer, Text: "收到语音消息，转文字失败", Purpose: imOutboundPurposeError})
-			return
+			return false
 		}
 		msg.Text = transcribed
 	}
@@ -578,7 +599,7 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {
-		return
+		return false
 	}
 	// 先记录来源,再处理命令。以前捕获在命令处理**后面**:只发过 /help 的账号
 	// 提前 return,chat_id 永远不落盘,重启后体检误报「从未收到过消息」(实测踩坑)。
@@ -604,13 +625,13 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	// Handle bot commands (/help, /start, etc.) locally without forwarding to agent.
 	if acc.Platform == imPlatformTelegram && strings.HasPrefix(text, "/") {
 		if telegramHandleCommand(acc, tr, msg, text) {
-			return
+			return true
 		}
 	}
 	// 飞书没有 inline keyboard,走纯文本命令:/agents /bind /unbind /status /help。
 	if acc.Platform == imPlatformFeishu && strings.HasPrefix(text, "/") {
 		if imHandleGenericCommand(acc, tr, msg, text) {
-			return
+			return true
 		}
 	}
 
@@ -640,9 +661,9 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	if pane == "" {
 		pane = normPaneID(strings.TrimSpace(acc.BoundPaneID))
 	}
-	if pane == "" || !acc.InboundToAgent {
+	if pane == "" || !imInboundEnabled(acc, explicitTarget) {
 		imDebugf("[im] account=%d inbound dropped (chat=%s bound=%q inbound=%t): %q", acc.ID, msg.Peer.ChatID, acc.BoundPaneID, acc.InboundToAgent, text)
-		return
+		return false
 	}
 	// Headless cicy agents intentionally have no tmux session; they are delivered
 	// in-process below. Only tmux-backed agents should be rejected as offline.
@@ -653,7 +674,7 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 		log.Printf("[im] account=%d exact target pane=%s offline", acc.ID, shortPaneID(pane))
 		imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: msg.Peer,
 			Text: "⚠️ 目标 Agent 当前不在线: " + shortPaneID(pane), Purpose: imOutboundPurposeError})
-		return
+		return false
 	}
 	if !explicitTarget && !headlessTarget && !imPaneSessionOnline(pane) {
 		fallback := normPaneID("w-1001")
@@ -677,20 +698,21 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 		if ws := paneWorkspace(shortPaneID(pane)); ws != "" {
 			go deliverCicyMessage(shortPaneID(pane), ws, text)
 			imDebugf("[im] account=%d inbound → cicy(headless) %s: %q", acc.ID, shortPaneID(pane), text)
-			return
+			return true
 		}
 		imCancelReplyPushForInbound(pane, acc.ID)
 		log.Printf("[im] account=%d cicy pane=%s has no workspace; inbound dropped", acc.ID, shortPaneID(pane))
 		imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: msg.Peer, Text: "⚠️ 发送给 agent 失败: 找不到工作区", Purpose: imOutboundPurposeError})
-		return
+		return false
 	}
 	if err := sendTextToPane(pane, text, true); err != nil {
 		imCancelReplyPushForInbound(pane, acc.ID)
 		log.Printf("[im] account=%d send to pane=%s failed: %v", acc.ID, shortPaneID(pane), err)
 		imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: msg.Peer, Text: "⚠️ 发送给 agent 失败: " + err.Error(), Purpose: imOutboundPurposeError})
-		return
+		return false
 	}
 	imDebugf("[im] account=%d inbound → pane=%s: %q", acc.ID, shortPaneID(pane), text)
+	return true
 }
 
 func imSendForPaneWithPurpose(paneID, platform, text string, purpose imOutboundPurpose) (int, error) {
@@ -1235,17 +1257,28 @@ func (w *imWorker) loop() {
 				imSetAccountState(acc.ID, "connected", "")
 				backoff = 2 * time.Second
 			}
-			if next != "" && next != cursor {
+			acker, perMessageAck := tr.(botMessageAcker)
+			if !perMessageAck && next != "" && next != cursor {
 				cursor = next
+				imSaveCursor(acc, cursor)
+			} else if perMessageAck && cursor != "" {
+				// Poll has just acknowledged the persisted pre-upgrade cursor.
+				cursor = ""
 				imSaveCursor(acc, cursor)
 			}
 			for _, msg := range msgs {
 				// reload the row so bound_pane_id / inbound flag changes take effect live
+				delivered := false
 				if fresh, ferr := imGetAccount(acc.ID); ferr == nil && fresh != nil {
 					fresh.Config = acc.Config // keep volatile cursor we just bumped
-					imHandleInbound(fresh, tr, msg)
+					delivered = imHandleInbound(fresh, tr, msg)
 				} else {
-					imHandleInbound(acc, tr, msg)
+					delivered = imHandleInbound(acc, tr, msg)
+				}
+				if perMessageAck {
+					if err := ackDeliveredMessage(acker, msg, delivered); err != nil {
+						log.Printf("[im] account=%d message ack failed id=%s: %v", acc.ID, msg.AckID, err)
+					}
 				}
 			}
 		}

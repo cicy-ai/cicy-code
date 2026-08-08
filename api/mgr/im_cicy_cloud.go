@@ -382,9 +382,24 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 		}
 		msgs = append(msgs, botMsg{Text: item.Text, FromID: item.SenderInstanceID,
 			TargetPaneID: item.TargetAgentID,
+			AckID:        item.ID,
 			Peer:         botPeer{ChatID: peer, ContextToken: item.TargetAgentID + "|" + item.ID}})
 	}
 	return msgs, strings.Join(ids, ","), nil
+}
+
+// Ack confirms one Cloud message only after imHandleInbound accepted it. The
+// poll endpoint already supports explicit ack ids; any messages returned by
+// this acknowledgement request remain unacked and are fetched by the next Poll.
+func (t *cicyCloudTransport) Ack(messageID string) error {
+	id := strings.TrimSpace(messageID)
+	if id == "" {
+		return nil
+	}
+	var out struct {
+		Messages []json.RawMessage `json:"messages"`
+	}
+	return cloudJSON(http.MethodGet, "/api/code/messages/poll?ack="+url.QueryEscape(id), t.token, nil, &out)
 }
 
 func (t *cicyCloudTransport) Send(peer botPeer, text string) (string, error) {

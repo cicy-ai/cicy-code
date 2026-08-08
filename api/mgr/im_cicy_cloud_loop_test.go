@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+type recordingMessageAcker struct{ ids []string }
+
+func (a *recordingMessageAcker) Ack(id string) error {
+	a.ids = append(a.ids, id)
+	return nil
+}
+
 func TestCiCyCloudPollDoesNotFeedAgentRepliesBackToAgent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/code/messages/poll" {
@@ -32,8 +39,56 @@ func TestCiCyCloudPollDoesNotFeedAgentRepliesBackToAgent(t *testing.T) {
 	if msgs[0].Peer.ContextToken != "|msg-user-12345678" {
 		t.Fatalf("original message id must be retained for reply correlation, got %q", msgs[0].Peer.ContextToken)
 	}
+	if msgs[0].AckID != "msg-user-12345678" {
+		t.Fatalf("user message must carry its post-delivery ack id, got %q", msgs[0].AckID)
+	}
 	if cursor != "msg-user-12345678,msg-reply-12345678" {
 		t.Fatalf("both messages must advance the ACK cursor, got %q", cursor)
+	}
+}
+
+func TestCiCyCloudAckOnlyAfterLocalAgentAcceptsMessage(t *testing.T) {
+	acker := &recordingMessageAcker{}
+	msg := botMsg{AckID: "msg-user-12345678"}
+	if err := ackDeliveredMessage(acker, msg, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(acker.ids) != 0 {
+		t.Fatalf("failed local delivery must remain unacked for retry: %#v", acker.ids)
+	}
+	if err := ackDeliveredMessage(acker, msg, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(acker.ids) != 1 || acker.ids[0] != msg.AckID {
+		t.Fatalf("successful local delivery must ack exactly once: %#v", acker.ids)
+	}
+}
+
+func TestCiCyCloudExactTargetBypassesGenericInboundToggle(t *testing.T) {
+	acc := &imAccount{InboundToAgent: false}
+	if imInboundEnabled(acc, false) {
+		t.Fatal("ordinary IM messages must still respect inbound_to_agent=false")
+	}
+	if !imInboundEnabled(acc, true) {
+		t.Fatal("authenticated Cloud exact-target messages must not be dropped by the generic IM toggle")
+	}
+}
+
+func TestCiCyCloudAckUsesExplicitMessageID(t *testing.T) {
+	var ack string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ack = r.URL.Query().Get("ack")
+		_ = json.NewEncoder(w).Encode(M{"messages": []M{}})
+	}))
+	defer server.Close()
+	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
+
+	tr := &cicyCloudTransport{token: "test", lastPresence: time.Now()}
+	if err := tr.Ack("msg-user-12345678"); err != nil {
+		t.Fatal(err)
+	}
+	if ack != "msg-user-12345678" {
+		t.Fatalf("wrong ack id %q", ack)
 	}
 }
 
