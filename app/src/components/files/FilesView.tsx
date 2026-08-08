@@ -290,12 +290,14 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
   // markdown history 里点击文件链接 → 打开到编辑器 tab(Workspace 负责揭示文件视图)。
   useEffect(() => {
     const handler = (e: Event) => {
-      let p = String((e as CustomEvent).detail?.path || '').trim();
+      const detail = (e as CustomEvent).detail || {};
+      let p = String(detail.path || '').trim();
       if (!p) return;
       if (p.startsWith('file://')) p = p.slice(7);
+      const root = String(detail.root || fsRoot).trim() || fsRoot;
       const m = p.match(/^(.*?):(\d+)(?::(\d+))?$/);
-      if (m) openFileTab(m[1], fsRoot, { line: Number(m[2]), col: m[3] ? Number(m[3]) : 1 });
-      else openFileTab(p);
+      if (m) openFileTab(m[1], root, { line: Number(m[2]), col: m[3] ? Number(m[3]) : 1 });
+      else openFileTab(p, root);
     };
     window.addEventListener('cicy:open-file', handler as EventListener);
     return () => window.removeEventListener('cicy:open-file', handler as EventListener);

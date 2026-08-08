@@ -1478,8 +1478,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }, 80);
   }, [openPaneFiles]);
   const openPaneCrontab = useCallback((targetPaneId: string) => {
-    openAgentFile(targetPaneId, '~/cicy-ai/db/crontab.txt');
-  }, [openAgentFile]);
+    openPaneFiles(targetPaneId);
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('cicy:open-file', {
+        detail: { path: 'db/crontab.txt', root: 'cicy-ai' },
+      }));
+    }, 120);
+  }, [openPaneFiles]);
   // markdown history 里点击文件链接 → 揭示文件视图(FilesView 自己监听同一事件打开 tab)。
   useEffect(() => {
     const reveal = () => {
@@ -1632,13 +1637,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     // Audit as a single security tab — opens an embedded dashboard with three
     // sub-tabs (守护 / 日志 / 策略). Always shown (no audit_enabled gate).
     { id: 'audit', label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }), icon: <ShieldCheck className="h-3.5 w-3.5" /> },
+    { id: 'timer', label: t('timer', { ns: 'common', defaultValue: '定时器' }), icon: <Timer className="h-3.5 w-3.5" /> },
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
   const openCrontab = useCallback(() => {
     setCliContentTab('files');
     window.setTimeout(() => {
       window.dispatchEvent(new CustomEvent('cicy:open-file', {
-        detail: { path: '~/cicy-ai/db/crontab.txt' },
+        detail: { path: 'db/crontab.txt', root: 'cicy-ai' },
       }));
     }, 0);
   }, []);
@@ -1716,6 +1722,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 onClick={() => {
                   if (item.id === 'session') setCliContentTab(lastSessionSubTab);
                   else if (item.id === 'request') setCliContentTab(lastRequestSubTab);
+                  else if (item.id === 'timer') openCrontab();
                   else setCliContentTab(item.id as WorkspaceCliContentTab);
                 }}
               >
@@ -1750,19 +1757,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               </TipBelow>
             );
           })}
-          <TipBelow label={t('timer', { ns: 'common', defaultValue: '定时器' })} className="shrink-0">
-            <button
-              data-id="cli-content-tab-timer"
-              type="button"
-              className="relative shrink-0 select-none rounded-md px-2.5 py-1.5 text-zinc-500 transition-colors hover:bg-white/[0.04] hover:text-zinc-300"
-              onClick={openCrontab}
-              aria-label={t('timer', { ns: 'common', defaultValue: '定时器' })}
-            >
-              <span className="inline-flex h-5 items-center">
-                <Timer className="h-3.5 w-3.5" />
-              </span>
-            </button>
-          </TipBelow>
         </div>
         <div data-id="cli-content-actions" className="ml-3 flex shrink-0 items-center gap-1">
           <TipBelow label={t('close', { ns: 'common' })}>

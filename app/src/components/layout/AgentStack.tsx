@@ -1281,12 +1281,6 @@ function AgentStackCard({
                   icon: <Folder className="h-4 w-4" />,
                   onClick: handleOpenFiles,
                 },
-                ...(onOpenPaneCrontab ? [{
-                  id: 'agent-stack-card-timer',
-                  label: t('timer', { ns: 'common', defaultValue: '定时器' }),
-                  icon: <Timer className="h-4 w-4" />,
-                  onClick: handleOpenCrontab,
-                }] : []),
                 {
                   id: 'agent-stack-card-session',
                   label: t('tabSession', { ns: 'workspace' }),
@@ -1316,6 +1310,12 @@ function AgentStackCard({
                   icon: <ShieldCheck className="h-4 w-4" />,
                   onClick: handleOpenAudit,
                   badge: auditAlertCount,
+                }] : []),
+                ...(onOpenPaneCrontab ? [{
+                  id: 'agent-stack-card-timer',
+                  label: t('timer', { ns: 'common', defaultValue: '定时器' }),
+                  icon: <Timer className="h-4 w-4" />,
+                  onClick: handleOpenCrontab,
                 }] : []),
                 {
                   id: 'agent-stack-card-settings',
