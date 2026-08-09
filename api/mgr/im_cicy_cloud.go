@@ -202,10 +202,38 @@ func ensureCiCyCloudAccountFromEnvironment() error {
 }
 
 type cicyCloudTransport struct {
-	accountID    int64
-	token        string
-	presenceMu   sync.Mutex
-	lastPresence time.Time
+	accountID     int64
+	token         string
+	presenceMu    sync.Mutex
+	lastPresence  time.Time
+	pollMu        sync.Mutex
+	idlePollDelay time.Duration
+}
+
+const (
+	cicyCloudPresenceInterval = 60 * time.Second
+	cicyCloudPollMinDelay     = 2 * time.Second
+	cicyCloudPollMaxDelay     = 15 * time.Second
+)
+
+func (t *cicyCloudTransport) nextIdlePollDelay() time.Duration {
+	t.pollMu.Lock()
+	defer t.pollMu.Unlock()
+	if t.idlePollDelay <= 0 {
+		t.idlePollDelay = cicyCloudPollMinDelay
+	} else {
+		t.idlePollDelay *= 2
+		if t.idlePollDelay > cicyCloudPollMaxDelay {
+			t.idlePollDelay = cicyCloudPollMaxDelay
+		}
+	}
+	return t.idlePollDelay
+}
+
+func (t *cicyCloudTransport) resetIdlePollDelay() {
+	t.pollMu.Lock()
+	t.idlePollDelay = 0
+	t.pollMu.Unlock()
 }
 
 type cicyCodeTelemetry struct {
@@ -371,9 +399,10 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 		return nil, cursor, err
 	}
 	if len(out.Messages) == 0 {
-		time.Sleep(2 * time.Second)
+		time.Sleep(t.nextIdlePollDelay())
 		return nil, "", nil
 	}
+	t.resetIdlePollDelay()
 	msgs := make([]botMsg, 0, len(out.Messages))
 	ids := make([]string, 0, len(out.Messages))
 	for _, item := range out.Messages {
@@ -516,7 +545,7 @@ func splitCiCyCloudPeer(peer string) (string, string) {
 func (t *cicyCloudTransport) reportAllAgents() {
 	t.presenceMu.Lock()
 	defer t.presenceMu.Unlock()
-	if time.Since(t.lastPresence) < 15*time.Second {
+	if time.Since(t.lastPresence) < cicyCloudPresenceInterval {
 		return
 	}
 	t.lastPresence = time.Now()

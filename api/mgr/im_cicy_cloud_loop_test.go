@@ -15,6 +15,26 @@ func (a *recordingMessageAcker) Ack(id string) error {
 	return nil
 }
 
+func TestCiCyCloudIdlePollBackoffAndReset(t *testing.T) {
+	tr := &cicyCloudTransport{}
+	want := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 15 * time.Second, 15 * time.Second}
+	for i, expected := range want {
+		if got := tr.nextIdlePollDelay(); got != expected {
+			t.Fatalf("backoff %d = %s, want %s", i, got, expected)
+		}
+	}
+	tr.resetIdlePollDelay()
+	if got := tr.nextIdlePollDelay(); got != 2*time.Second {
+		t.Fatalf("backoff after traffic = %s, want 2s", got)
+	}
+}
+
+func TestCiCyCloudPresenceIntervalStaysInsideOfflineWindow(t *testing.T) {
+	if cicyCloudPresenceInterval >= 90*time.Second {
+		t.Fatalf("presence interval %s must stay below the 90s offline window", cicyCloudPresenceInterval)
+	}
+}
+
 func TestCiCyCloudPollDoesNotFeedAgentRepliesBackToAgent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/code/messages/poll" {
