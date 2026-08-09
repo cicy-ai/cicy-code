@@ -17,7 +17,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, Folder, X, Settings, Brain, Search,
   LayoutList, Users, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen, Braces, Store, Timer,
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen, Braces, Store, Timer, Grid3X3,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag, isChatModel } from '../lib/modelTag';
@@ -29,6 +29,7 @@ import { SendingProvider } from '../contexts/SendingContext';
 // import ChatView from './chat/ChatView';
 import TodoPanel from './TodoPanel';
 import CrontabPanel from './CrontabPanel';
+import AccountMatrixPanel from './settings/AccountMatrixPanel';
 // Lazy: these pull in the heavy CodeMirror editor stack. Behind tab gates, so
 // dynamic-importing them keeps codemirror off the first-paint critical path.
 const FilesView = lazy(() => import('./files/FilesView'));
@@ -292,11 +293,11 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'customAgents' | 'agents' | 'todo' | 'windows' | null;
-type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'knowledge' | 'audit' | 'timer' | RequestViewTab;
+type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'knowledge' | 'audit' | 'timer' | 'github' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'knowledge' || value === 'todo' || value === 'audit' || value === 'timer') {
+  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'knowledge' || value === 'todo' || value === 'audit' || value === 'timer' || value === 'github') {
     return value;
   }
   return 'files';
@@ -1639,6 +1640,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     // sub-tabs (守护 / 日志 / 策略). Always shown (no audit_enabled gate).
     { id: 'audit', label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }), icon: <ShieldCheck className="h-3.5 w-3.5" /> },
     { id: 'timer', label: t('timer', { ns: 'common', defaultValue: '定时器' }), icon: <Timer className="h-3.5 w-3.5" /> },
+    { id: 'github', label: t('accountMatrixTitle', { defaultValue: '账号矩阵' }), icon: <Grid3X3 className="h-3.5 w-3.5" /> },
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
   const openCrontab = useCallback(() => {
@@ -1903,6 +1905,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           style={{ display: cliContentTab === 'timer' ? 'block' : 'none' }}
         >
           <CrontabPanel active={cliContentOpen && cliContentTab === 'timer'} />
+        </div>
+        <div
+          data-id="cli-content-github-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'github' ? 'block' : 'none' }}
+        >
+          <AccountMatrixPanel active={cliContentOpen && cliContentTab === 'github'} paneId={activeCliPaneId} />
         </div>
         <div
           data-id="cli-content-settings-host"

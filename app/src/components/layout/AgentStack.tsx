@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { BookOpen, Braces, Brain, Check, CircleHelp, Columns2, Copy, CornerDownLeft, ExternalLink, Folder, History, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, Timer, X } from 'lucide-react'
+import { BookOpen, Braces, Brain, Check, CircleHelp, Columns2, Copy, CornerDownLeft, ExternalLink, Folder, Grid3X3, History, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, Timer, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -1062,6 +1062,11 @@ function AgentStackCard({
     onOpenPaneCrontab?.(item.paneId)
   }, [item.paneId, onOpenPaneCrontab])
 
+  const handleOpenAccountMatrix = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onOpenPaneContent?.(item.paneId, 'github')
+  }, [item.paneId, onOpenPaneContent])
+
   const handleOpenSession = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     onOpenPaneSession(item.paneId)
@@ -1316,6 +1321,12 @@ function AgentStackCard({
                   label: t('timer', { ns: 'common', defaultValue: '定时器' }),
                   icon: <Timer className="h-4 w-4" />,
                   onClick: handleOpenCrontab,
+                }] : []),
+                ...(onOpenPaneContent ? [{
+                  id: 'agent-stack-card-account-matrix',
+                  label: t('accountMatrixTitle', { ns: 'workspace', defaultValue: '账号矩阵' }),
+                  icon: <Grid3X3 className="h-4 w-4" />,
+                  onClick: handleOpenAccountMatrix,
                 }] : []),
                 {
                   id: 'agent-stack-card-settings',

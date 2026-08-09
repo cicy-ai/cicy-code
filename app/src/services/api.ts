@@ -370,6 +370,17 @@ const api = {
 
   // desktop "apps"
   getApps: () => http.get('/api/apps'),
+
+  getGithubAccounts: () => http.get('/api/github/accounts'),
+  saveGithubAccount: (body: { name: string; old_name?: string; email?: string; api_token?: string }) => http.put('/api/github/accounts', body),
+  deleteGithubAccount: (name: string) => http.delete('/api/github/accounts', { params: { name } }),
+  testGithubAccount: (name: string) => http.post('/api/github/accounts/test', { name }),
+  getGithubAccountToken: (name: string) => http.get('/api/github/accounts', { params: { reveal_token: name } }),
+  getCloudflareAccounts: () => http.get('/api/cloudflare/accounts'),
+  saveCloudflareAccount: (body: { name: string; old_name?: string; label?: string; kind?: string; account_id?: string; api_token?: string; is_default?: boolean; details?: Record<string, string> }) => http.put('/api/cloudflare/accounts', body),
+  deleteCloudflareAccount: (name: string) => http.delete('/api/cloudflare/accounts', { params: { name } }),
+  testCloudflareAccount: (name: string) => http.post('/api/cloudflare/accounts/test', { name }),
+  getCloudflareAccountToken: (name: string) => http.get('/api/cloudflare/accounts', { params: { reveal_token: name } }),
   createApp: (prompt: string) => http.post('/api/apps/create', { prompt }),
   aiChat: (messages: Array<{ role: string; content: string }>) => http.post('/api/ai/chat/stream', { messages }),
 

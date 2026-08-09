@@ -27,6 +27,12 @@ type PromptOpts = ConfirmOpts & {
   mono?: boolean;
 };
 
+export function AppModal({ open, title, children, onClose, maxWidth = '560px' }: { open: boolean; title: React.ReactNode; children: React.ReactNode; onClose: () => void; maxWidth?: string }) {
+  useEffect(() => { if (!open) return; const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; document.addEventListener('keydown', h, true); return () => document.removeEventListener('keydown', h, true); }, [open, onClose]);
+  if (!open) return null;
+  return createPortal(<div data-id="modal-overlay" className="fixed inset-0 z-[9999999] flex items-center justify-center bg-black/55 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}><div data-id="modal-card" className="mx-4 max-h-[82vh] w-full overflow-hidden rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60" style={{ maxWidth }}><header data-id="modal-header" className="flex h-12 items-center border-b border-white/[0.07] px-5"><h2 data-id="modal-title" className="min-w-0 flex-1 truncate text-[14px] font-semibold text-white">{title}</h2><button data-id="modal-close" onClick={onClose} className="grid h-7 w-7 place-items-center rounded text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200"><X size={15} /></button></header><div data-id="modal-content" className="max-h-[calc(82vh-48px)] overflow-auto p-5">{children}</div></div></div>, document.body);
+}
+
 type DialogState =
   | { kind: 'confirm'; opts: ConfirmOpts; resolve: (v: boolean) => void }
   | { kind: 'prompt'; opts: PromptOpts; resolve: (v: string | null) => void }
