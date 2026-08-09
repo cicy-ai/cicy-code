@@ -253,6 +253,28 @@ func (d *DB) Migrate() {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_msg_to ON agent_messages(to_pane, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_msg_from ON agent_messages(from_pane, created_at)`,
+		// cicy_cloud_inbox is the durable boundary between Cloud delivery and
+		// local Agent execution. Cloud ACK means this row exists, never that a
+		// terminal screenshot happened to look submitted. The message id is the
+		// idempotency key, so retries/restarts cannot execute one Cloud message
+		// twice.
+		`CREATE TABLE IF NOT EXISTS cicy_cloud_inbox (
+			message_id TEXT PRIMARY KEY,
+			account_id INTEGER NOT NULL,
+			target_pane_id TEXT NOT NULL,
+			sender_instance_id TEXT NOT NULL DEFAULT '',
+			sender_agent_id TEXT NOT NULL DEFAULT '',
+			text TEXT NOT NULL DEFAULT '',
+			peer_chat_id TEXT NOT NULL DEFAULT '',
+			context_token TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'received',
+			attempt_count INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+			completed_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_cicy_cloud_inbox_dispatch ON cicy_cloud_inbox(account_id, status, created_at)`,
 		// NOTE: the team knowledge store is FILE-backed (~/cicy-ai/knowledge,
 		// governance = folder location), not sqlite. See knowledge_store.go.
 		fmt.Sprintf("INSERT OR IGNORE INTO global_vars (key_name, value) VALUES ('worker_index', '%d')", defaultWorkerIndex),

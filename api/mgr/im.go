@@ -665,6 +665,18 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) bool {
 		imDebugf("[im] account=%d inbound dropped (chat=%s bound=%q inbound=%t): %q", acc.ID, msg.Peer.ChatID, acc.BoundPaneID, acc.InboundToAgent, text)
 		return false
 	}
+	// Cloud delivery has a durable, idempotent inbox of its own. Persist first,
+	// then ACK the Cloud row; local dispatch happens independently and confirms
+	// CLI startup through structured turn markers. Never route this path through
+	// sendTextToPane/submitPromptWithConfirmation/capture.
+	if isCiCyCloudTransport(tr) && strings.TrimSpace(msg.AckID) != "" {
+		if err := persistCiCyCloudInbound(acc.ID, msg, pane, text); err != nil {
+			log.Printf("[im-cloud-inbox] persist failed id=%s pane=%s: %v", msg.AckID, shortPaneID(pane), err)
+			return false
+		}
+		go dispatchPendingCiCyCloudInbox(acc.ID)
+		return true
+	}
 	// Headless cicy agents intentionally have no tmux session; they are delivered
 	// in-process below. Only tmux-backed agents should be rejected as offline.
 	headlessTarget := paneAgentType(pane) == "cicy"
@@ -1228,6 +1240,10 @@ func (w *imWorker) loop() {
 		}
 		w.setTransport(tr)
 		imSetAccountState(acc.ID, "connected", "")
+		if acc.Platform == imPlatformCiCyCloud {
+			restoreCiCyCloudReplyPushes(acc.ID)
+			go dispatchPendingCiCyCloudInbox(acc.ID)
+		}
 		backoff = 2 * time.Second
 		if acc.Platform == imPlatformTelegram {
 			go telegramSyncBotCommands(acc.Secret)
@@ -1256,6 +1272,9 @@ func (w *imWorker) loop() {
 			if backoff > 2*time.Second || imAccountStateIs(acc.ID, "error") {
 				imSetAccountState(acc.ID, "connected", "")
 				backoff = 2 * time.Second
+			}
+			if acc.Platform == imPlatformCiCyCloud {
+				go dispatchPendingCiCyCloudInbox(acc.ID)
 			}
 			acker, perMessageAck := tr.(botMessageAcker)
 			if !perMessageAck && next != "" && next != cursor {

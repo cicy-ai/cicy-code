@@ -422,6 +422,9 @@ func (t *cicyCloudTransport) Send(peer botPeer, text string) (string, error) {
 		"senderAgentId": senderAgent, "text": text,
 		"kind": "agent_reply", "replyTo": replyTo, "hopCount": 1,
 	}, &out)
+	if err == nil && strings.TrimSpace(replyTo) != "" {
+		markCiCyCloudInboxReplied(replyTo)
+	}
 	return out.Message.ID, err
 }
 

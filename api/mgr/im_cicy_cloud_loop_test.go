@@ -121,6 +121,12 @@ func TestCiCyCloudAckUsesExplicitMessageID(t *testing.T) {
 }
 
 func TestCiCyCloudSendMarksOutputAsTerminalAgentReply(t *testing.T) {
+	withTestStore(t)
+	if _, err := store.Exec(`INSERT INTO cicy_cloud_inbox
+		(message_id,account_id,target_pane_id,text,peer_chat_id,context_token,status)
+		VALUES('msg-user-12345678',1,'w-1001:main.0','hello','code-source','w-1001|msg-user-12345678','running')`); err != nil {
+		t.Fatal(err)
+	}
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -140,5 +146,39 @@ func TestCiCyCloudSendMarksOutputAsTerminalAgentReply(t *testing.T) {
 	}
 	if body["senderAgentId"] != "w-1001" || body["replyTo"] != "msg-user-12345678" {
 		t.Fatalf("reply correlation was not preserved: %#v", body)
+	}
+	var status string
+	if err := store.QueryRow(`SELECT status FROM cicy_cloud_inbox WHERE message_id='msg-user-12345678'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "replied" {
+		t.Fatalf("successful agent_reply must complete durable inbox row, got %q", status)
+	}
+}
+
+func TestCiCyCloudInboxPersistsOnceBeforeAck(t *testing.T) {
+	withTestStore(t)
+	msg := botMsg{
+		AckID: "msg-durable-12345678",
+		Text:  "hello",
+		Peer: botPeer{
+			ChatID:       "code-source-1234567890123456|w-99",
+			ContextToken: "w-1001|msg-durable-12345678",
+		},
+	}
+	if err := persistCiCyCloudInbound(7, msg, "w-1001", msg.Text); err != nil {
+		t.Fatal(err)
+	}
+	if err := persistCiCyCloudInbound(7, msg, "w-1001", msg.Text); err != nil {
+		t.Fatal(err)
+	}
+	var count, attempts int
+	var status, senderAgent string
+	if err := store.QueryRow(`SELECT COUNT(*),status,attempt_count,sender_agent_id FROM cicy_cloud_inbox WHERE message_id=?`, msg.AckID).
+		Scan(&count, &status, &attempts, &senderAgent); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || status != "received" || attempts != 0 || senderAgent != "w-99" {
+		t.Fatalf("unexpected durable inbox row count=%d status=%q attempts=%d sender=%q", count, status, attempts, senderAgent)
 	}
 }
