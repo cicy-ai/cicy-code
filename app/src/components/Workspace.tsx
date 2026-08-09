@@ -358,7 +358,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         const account = (accountsRes?.data?.accounts || []).find((item: any) => item.platform === 'cicy_cloud');
         const instanceID = String(account?.config?.instance_id || '');
         const instance = (instancesRes?.data?.instances || []).find((item: any) => item.instanceId === instanceID);
-        setFixedDomain(instance?.proxyAvailable && instance?.proxyHost ? `https://${instance.proxyHost}` : '');
+        // A configured fixed domain is enough to manage ports. Tunnel
+        // availability is transient and must not make the Ports control
+        // disappear while the heartbeat is reconnecting.
+        setFixedDomain(instance?.proxyHost ? `https://${instance.proxyHost}` : '');
       } catch {
         if (!stopped) setFixedDomain('');
       } finally {
@@ -1985,21 +1988,29 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <button
             type="button"
             data-id="workspace-ports-toggle"
-            onClick={() => setPortsOpen((open) => !open)}
+            onClick={() => {
+              setPortsOpen((open) => {
+                if (!open && isShellOpen(activeCliPaneId)) toggleShellOpen(activeCliPaneId);
+                return !open;
+              });
+            }}
             aria-pressed={portsOpen}
             title={t('portsPanelToggle', { defaultValue: 'Ports 端口转发' })}
             className={`p-1 rounded border transition-colors cursor-pointer ${portsOpen ? 'text-blue-300 border-blue-400/50 bg-blue-400/10' : 'text-zinc-600 border-zinc-700/60 hover:text-zinc-300 hover:border-zinc-600'}`}
           >
             <Globe2 className="w-3.5 h-3.5" />
           </button>
-          {portsOpen && <PortsPanel fixedDomain={fixedDomain} onClose={() => setPortsOpen(false)} />}
+          {portsOpen && <PortsPanel fixedDomain={fixedDomain} paneId={activeCliPaneId} onClose={() => setPortsOpen(false)} />}
         </>
       )}
       {!globalVar?.helper_mode && (
         <button
           type="button"
           data-id="workspace-shell-toggle"
-          onClick={() => toggleShellOpen(activeCliPaneId)}
+          onClick={() => {
+            if (!isShellOpen(activeCliPaneId)) setPortsOpen(false);
+            toggleShellOpen(activeCliPaneId);
+          }}
           aria-pressed={isShellOpen(activeCliPaneId)}
           title={t('shellPanelToggle', { defaultValue: 'Shell 终端' })}
           className={`p-1 rounded border transition-colors cursor-pointer ${isShellOpen(activeCliPaneId) ? 'text-emerald-400 border-emerald-400/50 bg-emerald-400/10' : 'text-zinc-600 border-zinc-700/60 hover:text-zinc-300 hover:border-zinc-600'}`}
