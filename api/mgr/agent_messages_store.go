@@ -238,7 +238,7 @@ func handleAgentMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	open := q.Get("open")
-	rows, err := queryAgentMessages(agentMessageFilter{
+	resp, err := agentMessagesData(agentMessageFilter{
 		From:   q.Get("from"),
 		To:     q.Get("to"),
 		Status: q.Get("status"),
@@ -247,6 +247,14 @@ func handleAgentMessages(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	J(w, resp)
+}
+
+func agentMessagesData(filter agentMessageFilter) (M, error) {
+	rows, err := queryAgentMessages(filter)
+	if err != nil {
+		return nil, err
 	}
 	type outRow struct {
 		agentMessageRow
@@ -266,5 +274,5 @@ func handleAgentMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, o)
 	}
-	J(w, M{"messages": out})
+	return M{"messages": out}, nil
 }

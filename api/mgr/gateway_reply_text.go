@@ -54,14 +54,22 @@ func handleAgentReplyText(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reply := agentInspectorLoadReply(target)
-	if strings.TrimSpace(reply.TurnID) == "" {
+	resp, err := agentReplyTextData(target, req.Full)
+	if err != nil {
 		httpErr(w, http.StatusNotFound, "no reply on file for "+target)
 		return
 	}
+	J(w, resp)
+}
 
-	rendered := renderReplyItems(reply.Items, req.Full)
-	resp := map[string]interface{}{
+func agentReplyTextData(target string, full bool) (M, error) {
+	target = shortPaneID(normPaneID(strings.TrimSpace(target)))
+	reply := agentInspectorLoadReply(target)
+	if strings.TrimSpace(reply.TurnID) == "" {
+		return nil, fmt.Errorf("no reply on file for %s", target)
+	}
+	rendered := renderReplyItems(reply.Items, full)
+	resp := M{
 		"pane_id":       target,
 		"status":        reply.Status,
 		"turn_id":       reply.TurnID,
@@ -70,10 +78,10 @@ func handleAgentReplyText(w http.ResponseWriter, r *http.Request) {
 		"input_tokens":  reply.InputTokens,
 		"output_tokens": reply.OutputTokens,
 		"total_tokens":  reply.LastTotalTokens,
-		"full":          req.Full,
+		"full":          full,
 		"text":          rendered,
 	}
-	J(w, resp)
+	return resp, nil
 }
 
 // renderReplyItems turns the structured reply.json items into a single

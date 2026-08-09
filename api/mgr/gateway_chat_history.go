@@ -65,10 +65,19 @@ func handleAgentChatHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resp, err := agentChatHistoryData(target, req.Index)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, "query history: "+err.Error())
+		return
+	}
+	J(w, resp)
+}
+
+func agentChatHistoryData(target string, index int) (M, error) {
+	target = shortPaneID(normPaneID(strings.TrimSpace(target)))
 	db, err := agentHistoryOpen(target)
 	if err != nil {
-		httpErr(w, http.StatusInternalServerError, "open history: "+err.Error())
-		return
+		return nil, err
 	}
 	defer db.Close()
 
@@ -77,14 +86,14 @@ func handleAgentChatHistory(w http.ResponseWriter, r *http.Request) {
 	               WHERE agent_id = ?
 	               ORDER BY id DESC
 	               LIMIT 1 OFFSET ?`
-	row := db.QueryRow(query, target, req.Index)
+	row := db.QueryRow(query, target, index)
 
 	var convID, turnKey, q, a, thinking, model, status, qTime, aTime, createdAt string
 	switch err := row.Scan(&convID, &turnKey, &q, &a, &thinking, &model, &status, &qTime, &aTime, &createdAt); err {
 	case nil:
-		J(w, map[string]interface{}{
+		return M{
 			"pane_id":         target,
-			"index":           req.Index,
+			"index":           index,
 			"found":           true,
 			"conversation_id": convID,
 			"turn_id":         turnKey,
@@ -96,14 +105,14 @@ func handleAgentChatHistory(w http.ResponseWriter, r *http.Request) {
 			"q_time":          qTime,
 			"a_time":          aTime,
 			"created_at":      createdAt,
-		})
+		}, nil
 	case sql.ErrNoRows:
-		J(w, map[string]interface{}{
+		return M{
 			"pane_id": target,
-			"index":   req.Index,
+			"index":   index,
 			"found":   false,
-		})
+		}, nil
 	default:
-		httpErr(w, http.StatusInternalServerError, "query history: "+err.Error())
+		return nil, err
 	}
 }

@@ -364,6 +364,7 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 			TargetAgentID    string `json:"targetAgentId"`
 			Kind             string `json:"kind"`
 			Text             string `json:"text"`
+			ReplyTo          string `json:"replyTo"`
 		} `json:"messages"`
 	}
 	if err := cloudJSON(http.MethodGet, route, t.token, nil, &out); err != nil {
@@ -376,11 +377,19 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 	msgs := make([]botMsg, 0, len(out.Messages))
 	ids := make([]string, 0, len(out.Messages))
 	for _, item := range out.Messages {
+		if item.Kind == "rpc_request" {
+			if err := t.handleRPCRequest(item.ID, item.SenderInstanceID, item.SenderAgentID, item.TargetAgentID, item.Text); err != nil {
+				log.Printf("[im] cicy cloud rpc failed id=%s op_target=%s: %v", item.ID, item.TargetAgentID, err)
+				continue
+			}
+			ids = append(ids, item.ID)
+			continue
+		}
 		ids = append(ids, item.ID)
 		// Agent output is a terminal reply, not another user request. A reply is
 		// acknowledged but must never be fed back into an Agent, otherwise two
 		// connected instances automatically answer each other forever.
-		if item.Kind == "agent_reply" {
+		if item.Kind == "agent_reply" || item.Kind == "rpc_reply" {
 			continue
 		}
 		peer := item.SenderInstanceID
@@ -393,6 +402,57 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 			Peer:         botPeer{ChatID: peer, ContextToken: item.TargetAgentID + "|" + item.ID}})
 	}
 	return msgs, strings.Join(ids, ","), nil
+}
+
+func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, senderAgentID, targetAgentID, text string) error {
+	var req struct {
+		Op     string `json:"op"`
+		Full   bool   `json:"full"`
+		Index  int    `json:"index"`
+		From   string `json:"from"`
+		To     string `json:"to"`
+		Status string `json:"status"`
+		Open   bool   `json:"open"`
+	}
+	var result M
+	var rpcErr error
+	if err := json.Unmarshal([]byte(text), &req); err != nil {
+		rpcErr = fmt.Errorf("invalid rpc request: %w", err)
+	} else {
+		target := shortPaneID(normPaneID(targetAgentID))
+		switch strings.TrimSpace(req.Op) {
+		case "reply":
+			result, rpcErr = agentReplyTextData(target, req.Full)
+		case "history":
+			if req.Index < 0 {
+				rpcErr = fmt.Errorf("index must be >= 0")
+			} else {
+				result, rpcErr = agentChatHistoryData(target, req.Index)
+			}
+		case "msgs":
+			from, to := strings.TrimSpace(req.From), strings.TrimSpace(req.To)
+			if from == "" && to == "" {
+				to = target
+			}
+			result, rpcErr = agentMessagesData(agentMessageFilter{From: from, To: to, Status: req.Status, Open: req.Open})
+		default:
+			rpcErr = fmt.Errorf("unsupported rpc operation %q", req.Op)
+		}
+	}
+	envelope := M{"ok": rpcErr == nil, "data": result}
+	if rpcErr != nil {
+		envelope["error"] = rpcErr.Error()
+	}
+	body, err := json.Marshal(envelope)
+	if err != nil {
+		return err
+	}
+	payload := M{
+		"targetInstanceId": senderInstanceID, "targetAgentId": senderAgentID,
+		"senderAgentId": targetAgentID, "text": string(body),
+		"kind": "rpc_reply", "replyTo": messageID, "hopCount": 1,
+	}
+	return cloudJSON(http.MethodPost, "/api/code/messages", t.token, payload, nil)
 }
 
 // Ack confirms one Cloud message only after imHandleInbound accepted it. The

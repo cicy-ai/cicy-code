@@ -156,6 +156,37 @@ func TestCiCyCloudSendMarksOutputAsTerminalAgentReply(t *testing.T) {
 	}
 }
 
+func TestCiCyCloudRPCReadsStructuredDataWithoutAgentDispatch(t *testing.T) {
+	withTestStore(t)
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(M{"message": M{"id": "msg-rpc-reply-12345678"}})
+	}))
+	defer server.Close()
+	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
+
+	tr := &cicyCloudTransport{token: "test"}
+	if err := tr.handleRPCRequest("msg-rpc-12345678", "code-source-1234567890123456", "w-9", "w-102", `{"op":"msgs"}`); err != nil {
+		t.Fatal(err)
+	}
+	if body["kind"] != "rpc_reply" || body["replyTo"] != "msg-rpc-12345678" || body["hopCount"] != float64(1) {
+		t.Fatalf("invalid rpc reply envelope: %#v", body)
+	}
+	if body["targetInstanceId"] != "code-source-1234567890123456" || body["targetAgentId"] != "w-9" || body["senderAgentId"] != "w-102" {
+		t.Fatalf("rpc correlation lost: %#v", body)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(body["text"].(string)), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope["ok"] != true {
+		t.Fatalf("structured rpc failed: %#v", envelope)
+	}
+}
+
 func TestCiCyCloudInboxPersistsOnceBeforeAck(t *testing.T) {
 	withTestStore(t)
 	msg := botMsg{
