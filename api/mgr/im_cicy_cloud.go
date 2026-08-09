@@ -205,15 +205,17 @@ type cicyCloudTransport struct {
 	accountID     int64
 	token         string
 	presenceMu    sync.Mutex
+	lastHeartbeat time.Time
 	lastPresence  time.Time
 	pollMu        sync.Mutex
 	idlePollDelay time.Duration
 }
 
 const (
-	cicyCloudPresenceInterval = 60 * time.Second
-	cicyCloudPollMinDelay     = 2 * time.Second
-	cicyCloudPollMaxDelay     = 15 * time.Second
+	cicyCloudHeartbeatInterval = 30 * time.Second
+	cicyCloudPresenceInterval  = 120 * time.Second
+	cicyCloudPollMinDelay      = 2 * time.Second
+	cicyCloudPollMaxDelay      = 15 * time.Second
 )
 
 func (t *cicyCloudTransport) nextIdlePollDelay() time.Duration {
@@ -396,6 +398,11 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 		} `json:"messages"`
 	}
 	if err := cloudJSON(http.MethodGet, route, t.token, nil, &out); err != nil {
+		// The outer IM loop adds a fixed 3s delay on errors. Apply the same
+		// bounded adaptive delay used for an empty inbox as well, otherwise a
+		// Cloud outage makes every instance retry every three seconds and can
+		// exhaust the daily Worker quota before the service recovers.
+		time.Sleep(t.nextIdlePollDelay())
 		return nil, cursor, err
 	}
 	if len(out.Messages) == 0 {
@@ -421,13 +428,16 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 			}
 			continue
 		}
-		ids = append(ids, item.ID)
 		// Agent output is a terminal reply, not another user request. A reply is
 		// acknowledged but must never be fed back into an Agent, otherwise two
 		// connected instances automatically answer each other forever.
 		if item.Kind == "agent_reply" || item.Kind == "rpc_reply" {
+			if err := t.Ack(item.ID); err != nil {
+				log.Printf("[im] cicy cloud terminal reply ack failed id=%s kind=%s: %v", item.ID, item.Kind, err)
+			}
 			continue
 		}
+		ids = append(ids, item.ID)
 		peer := item.SenderInstanceID
 		if item.SenderAgentID != "" {
 			peer += "|" + item.SenderAgentID
@@ -545,23 +555,34 @@ func splitCiCyCloudPeer(peer string) (string, string) {
 func (t *cicyCloudTransport) reportAllAgents() {
 	t.presenceMu.Lock()
 	defer t.presenceMu.Unlock()
-	if time.Since(t.lastPresence) < cicyCloudPresenceInterval {
+	now := time.Now()
+	heartbeatDue := now.Sub(t.lastHeartbeat) >= cicyCloudHeartbeatInterval
+	presenceDue := now.Sub(t.lastPresence) >= cicyCloudPresenceInterval
+	if !heartbeatDue && !presenceDue {
 		return
 	}
-	t.lastPresence = time.Now()
-	telemetry := collectCiCyCodeTelemetry()
-	heartbeat := M{"platform": telemetry.Platform, "arch": telemetry.Arch,
-		"runtime": telemetry.Runtime, "cpuModel": telemetry.CPUModel,
-		"cpuCores": telemetry.CPUCores, "memoryTotalMB": telemetry.MemoryTotalMB,
-		"gpu": telemetry.GPU}
-	heartbeat["ports"] = portMaps(loadPublishedPorts())
-	if tunnelURL := cftCurrentURL(); tunnelURL != "" {
-		heartbeat["tunnelUrl"] = tunnelURL
-		heartbeat["tunnelToken"] = loadAPIToken()
+	if heartbeatDue {
+		// Record the attempt before I/O. A failing Cloud endpoint must not turn
+		// the heartbeat path itself into a quota-exhausting retry loop.
+		t.lastHeartbeat = now
+		telemetry := collectCiCyCodeTelemetry()
+		heartbeat := M{"platform": telemetry.Platform, "arch": telemetry.Arch,
+			"runtime": telemetry.Runtime, "cpuModel": telemetry.CPUModel,
+			"cpuCores": telemetry.CPUCores, "memoryTotalMB": telemetry.MemoryTotalMB,
+			"gpu": telemetry.GPU}
+		heartbeat["ports"] = portMaps(loadPublishedPorts())
+		if tunnelURL := cftCurrentURL(); tunnelURL != "" {
+			heartbeat["tunnelUrl"] = tunnelURL
+			heartbeat["tunnelToken"] = loadAPIToken()
+		}
+		if err := cloudJSON(http.MethodPost, "/api/code/instances/heartbeat", t.token, heartbeat, nil); err != nil {
+			log.Printf("[im] cicy cloud heartbeat failed: %v", err)
+		}
 	}
-	if err := cloudJSON(http.MethodPost, "/api/code/instances/heartbeat", t.token, heartbeat, nil); err != nil {
-		log.Printf("[im] cicy cloud heartbeat failed: %v", err)
+	if !presenceDue {
+		return
 	}
+	t.lastPresence = now
 	t.syncAgentConfigs()
 	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {

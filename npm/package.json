@@ -3,7 +3,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "2.3.373",
+  "version": "2.3.374",
   "description": "CiCy Code - AI-powered development environment",
   "author": {
     "name": "cicybot",
@@ -16,10 +16,10 @@
     "bin/cicy-code.js"
   ],
   "optionalDependencies": {
-    "cicy-code-darwin-arm64": "2.3.373",
-    "cicy-code-darwin-x64": "2.3.373",
-    "cicy-code-linux-arm64": "2.3.373",
-    "cicy-code-linux-x64": "2.3.373"
+    "cicy-code-darwin-arm64": "2.3.374",
+    "cicy-code-darwin-x64": "2.3.374",
+    "cicy-code-linux-arm64": "2.3.374",
+    "cicy-code-linux-x64": "2.3.374"
   },
   "repository": {
     "type": "git",

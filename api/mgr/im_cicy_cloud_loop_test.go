@@ -30,15 +30,34 @@ func TestCiCyCloudIdlePollBackoffAndReset(t *testing.T) {
 }
 
 func TestCiCyCloudPresenceIntervalStaysInsideOfflineWindow(t *testing.T) {
-	if cicyCloudPresenceInterval >= 90*time.Second {
-		t.Fatalf("presence interval %s must stay below the 90s offline window", cicyCloudPresenceInterval)
+	if cicyCloudHeartbeatInterval >= 90*time.Second {
+		t.Fatalf("heartbeat interval %s must stay below the 90s offline window", cicyCloudHeartbeatInterval)
+	}
+	if cicyCloudPresenceInterval <= cicyCloudHeartbeatInterval {
+		t.Fatalf("roster interval %s must be less frequent than heartbeat %s", cicyCloudPresenceInterval, cicyCloudHeartbeatInterval)
+	}
+}
+
+func TestCiCyCloudErrorRetryDelayRemainsQuotaSafe(t *testing.T) {
+	// Poll sleeps this adaptive delay before the generic IM loop adds its 3s
+	// error delay. At the steady-state maximum, four continuously failing
+	// instances stay below the free 100k Worker requests/day ceiling.
+	requestsPerDay := 4 * int((24*time.Hour)/(cicyCloudPollMaxDelay+3*time.Second))
+	if requestsPerDay >= 100_000 {
+		t.Fatalf("error retry load = %d requests/day, must stay below 100000", requestsPerDay)
 	}
 }
 
 func TestCiCyCloudPollDoesNotFeedAgentRepliesBackToAgent(t *testing.T) {
+	terminalAcks := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/code/messages/poll" {
 			t.Fatalf("unexpected route %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("ack") == "msg-reply-12345678" {
+			terminalAcks++
+			_ = json.NewEncoder(w).Encode(M{"messages": []M{}})
+			return
 		}
 		_ = json.NewEncoder(w).Encode(M{"messages": []M{
 			{"id": "msg-user-12345678", "senderInstanceId": "code-source-1234567890123456", "kind": "user_message", "text": "hello"},
@@ -48,7 +67,8 @@ func TestCiCyCloudPollDoesNotFeedAgentRepliesBackToAgent(t *testing.T) {
 	defer server.Close()
 	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
 
-	tr := &cicyCloudTransport{token: "test", lastPresence: time.Now()}
+	now := time.Now()
+	tr := &cicyCloudTransport{token: "test", lastHeartbeat: now, lastPresence: now}
 	msgs, cursor, err := tr.Poll("")
 	if err != nil {
 		t.Fatal(err)
@@ -62,8 +82,8 @@ func TestCiCyCloudPollDoesNotFeedAgentRepliesBackToAgent(t *testing.T) {
 	if msgs[0].AckID != "msg-user-12345678" {
 		t.Fatalf("user message must carry its post-delivery ack id, got %q", msgs[0].AckID)
 	}
-	if cursor != "msg-user-12345678,msg-reply-12345678" {
-		t.Fatalf("both messages must advance the ACK cursor, got %q", cursor)
+	if cursor != "msg-user-12345678" || terminalAcks != 1 {
+		t.Fatalf("user cursor=%q terminal acks=%d, want user-only cursor and one terminal ACK", cursor, terminalAcks)
 	}
 }
 
@@ -131,7 +151,8 @@ func TestCiCyCloudAckUsesExplicitMessageID(t *testing.T) {
 	defer server.Close()
 	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
 
-	tr := &cicyCloudTransport{token: "test", lastPresence: time.Now()}
+	now := time.Now()
+	tr := &cicyCloudTransport{token: "test", lastHeartbeat: now, lastPresence: now}
 	if err := tr.Ack("msg-user-12345678"); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +251,8 @@ func TestCiCyCloudRPCRepliesAndAcknowledgesExactlyOnce(t *testing.T) {
 	defer server.Close()
 	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
 
-	tr := &cicyCloudTransport{token: "test", lastPresence: time.Now()}
+	now := time.Now()
+	tr := &cicyCloudTransport{token: "test", lastHeartbeat: now, lastPresence: now}
 	msgs, cursor, err := tr.Poll("")
 	if err != nil {
 		t.Fatal(err)
