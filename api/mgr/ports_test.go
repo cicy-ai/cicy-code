@@ -91,7 +91,10 @@ func TestClosedPortCannotBeProxied(t *testing.T) {
 }
 
 func TestHTTPPortProbeDistinguishesHTTPFromRawTCP(t *testing.T) {
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }))
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<!doctype html><title>Test app</title>"))
+	}))
 	defer httpServer.Close()
 	u, _ := url.Parse(httpServer.URL)
 	httpPort, _ := strconv.Atoi(u.Port())
@@ -113,5 +116,33 @@ func TestHTTPPortProbeDistinguishesHTTPFromRawTCP(t *testing.T) {
 	}()
 	if isLoopbackHTTP(rawPort) {
 		t.Fatalf("raw TCP listener on %d must not be reported as HTTP", rawPort)
+	}
+}
+
+func TestHTTPPortProbeRejectsAPIsErrorsAndDevTools(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      int
+		contentType string
+		body        string
+	}{
+		{name: "json api", status: 200, contentType: "application/json", body: `{"ok":true}`},
+		{name: "root not found", status: 404, contentType: "text/html", body: "<html>not found</html>"},
+		{name: "electron devtools", status: 200, contentType: "text/html", body: "<html>Content shell remote debugging</html>"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("content-type", tt.contentType)
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+			u, _ := url.Parse(server.URL)
+			port, _ := strconv.Atoi(u.Port())
+			if isLoopbackHTTP(port) {
+				t.Fatalf("%s must not be auto-detected", tt.name)
+			}
+		})
 	}
 }

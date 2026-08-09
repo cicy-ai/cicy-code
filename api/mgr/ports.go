@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -170,12 +171,32 @@ func isLoopbackHTTP(port int) bool {
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 		Transport:     &http.Transport{Proxy: nil, DialContext: dialer.DialContext, DisableKeepAlives: true},
 	}
-	req, _ := http.NewRequest(http.MethodHead, "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return false
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<10))
+	if err != nil || len(strings.TrimSpace(string(body))) == 0 {
+		return false
+	}
+	contentType := strings.ToLower(resp.Header.Get("content-type"))
+	lowerBody := strings.ToLower(string(body))
+	isHTML := strings.Contains(contentType, "text/html") || strings.Contains(lowerBody, "<!doctype html") || strings.Contains(lowerBody, "<html")
+	if !isHTML {
+		return false
+	}
+	// Chromium/Electron debugging endpoints are HTML too, but they are not
+	// user web applications and must never pollute the automatic Ports list.
+	for _, marker := range []string{"devtools://", "chrome-devtools", "content shell remote debugging", "inspectable webcontents"} {
+		if strings.Contains(lowerBody, marker) {
+			return false
+		}
+	}
 	return true
 }
 
