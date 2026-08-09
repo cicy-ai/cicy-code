@@ -75,6 +75,9 @@ func handleAgentChatHistory(w http.ResponseWriter, r *http.Request) {
 
 func agentChatHistoryData(target string, index int) (M, error) {
 	target = shortPaneID(normPaneID(strings.TrimSpace(target)))
+	if normalizeAgentType(paneAgentType(target+":main.0")) == "cicy" {
+		return cicyChatHistoryData(target, index)
+	}
 	db, err := agentHistoryOpen(target)
 	if err != nil {
 		return nil, err
@@ -115,4 +118,53 @@ func agentChatHistoryData(target string, index int) (M, error) {
 	default:
 		return nil, err
 	}
+}
+
+func cicyChatHistoryData(target string, index int) (M, error) {
+	workspace := paneWorkspace(target)
+	if workspace == "" {
+		return M{"pane_id": target, "index": index, "found": false}, nil
+	}
+	session := getCicySession(target, workspace)
+	session.mu.Lock()
+	messages := append([]M{}, session.messages...)
+	session.mu.Unlock()
+	type turn struct{ q, a string }
+	turns := make([]turn, 0)
+	for i := 0; i < len(messages); i++ {
+		if role, _ := messages[i]["role"].(string); role != "user" {
+			continue
+		}
+		q := cicyHistoryPlainText(messages[i]["content"])
+		if q == "" { // tool_result user blocks are part of the active turn, not a new question
+			continue
+		}
+		var answers []string
+		for j := i + 1; j < len(messages); j++ {
+			role, _ := messages[j]["role"].(string)
+			if role == "user" && cicyHistoryPlainText(messages[j]["content"]) != "" {
+				break
+			}
+			if role == "assistant" {
+				if text := cicyHistoryPlainText(messages[j]["content"]); text != "" && cicyOutcomeKindFromText(text) == "" {
+					answers = append(answers, text)
+				}
+			}
+		}
+		turns = append(turns, turn{q: q, a: strings.Join(answers, "\n")})
+	}
+	pos := len(turns) - 1 - index
+	if pos < 0 || pos >= len(turns) {
+		return M{"pane_id": target, "index": index, "found": false}, nil
+	}
+	selected := turns[pos]
+	return M{"pane_id": target, "index": index, "found": true, "q": selected.q, "a": selected.a,
+		"status": map[bool]string{true: "completed", false: "pending"}[selected.a != ""]}, nil
+}
+
+func cicyHistoryPlainText(content interface{}) string {
+	if text, ok := content.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return strings.TrimSpace(cicyTextFromBlocks(content))
 }
