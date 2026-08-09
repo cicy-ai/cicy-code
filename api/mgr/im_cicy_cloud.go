@@ -382,7 +382,14 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 				log.Printf("[im] cicy cloud rpc failed id=%s op_target=%s: %v", item.ID, item.TargetAgentID, err)
 				continue
 			}
-			ids = append(ids, item.ID)
+			// RPC is handled synchronously without entering the Agent dispatcher,
+			// so it must ACK itself. Returning only the legacy cursor leaves the
+			// row pending in loops that use per-message ACK and causes one reply on
+			// every poll.
+			if err := t.Ack(item.ID); err != nil {
+				log.Printf("[im] cicy cloud rpc ack failed id=%s: %v", item.ID, err)
+				continue
+			}
 			continue
 		}
 		ids = append(ids, item.ID)

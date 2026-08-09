@@ -187,6 +187,39 @@ func TestCiCyCloudRPCReadsStructuredDataWithoutAgentDispatch(t *testing.T) {
 	}
 }
 
+func TestCiCyCloudRPCRepliesAndAcknowledgesExactlyOnce(t *testing.T) {
+	withTestStore(t)
+	var replies, acks int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/code/messages/poll" && r.URL.Query().Get("ack") != "":
+			acks++
+			_ = json.NewEncoder(w).Encode(M{"messages": []M{}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/code/messages/poll":
+			_ = json.NewEncoder(w).Encode(M{"messages": []M{{
+				"id": "msg-rpc-12345678", "senderInstanceId": "code-source-1234567890123456",
+				"senderAgentId": "w-9", "targetAgentId": "w-102", "kind": "rpc_request", "text": `{"op":"msgs"}`,
+			}}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/code/messages":
+			replies++
+			_ = json.NewEncoder(w).Encode(M{"message": M{"id": "msg-rpc-reply-12345678"}})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
+
+	tr := &cicyCloudTransport{token: "test", lastPresence: time.Now()}
+	msgs, cursor, err := tr.Poll("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 0 || cursor != "" || replies != 1 || acks != 1 {
+		t.Fatalf("rpc must reply+ack once without agent dispatch: msgs=%#v cursor=%q replies=%d acks=%d", msgs, cursor, replies, acks)
+	}
+}
+
 func TestCiCyCloudInboxPersistsOnceBeforeAck(t *testing.T) {
 	withTestStore(t)
 	msg := botMsg{
