@@ -91,7 +91,7 @@ func restoreCiCyCloudReplyPushes(accID int64) {
 		return
 	}
 	rows, err := store.Query(`SELECT target_pane_id,peer_chat_id,context_token FROM cicy_cloud_inbox
-		WHERE account_id=? AND status IN ('received','dispatching','running','uncertain')`, accID)
+		WHERE account_id=? AND status IN ('dispatching','running','uncertain') ORDER BY created_at`, accID)
 	if err != nil {
 		return
 	}
@@ -114,6 +114,11 @@ func dispatchPendingCiCyCloudInbox(accID int64) {
 
 func dispatchCiCyCloudInboxItem(item cicyCloudInboxItem) {
 	pane := normPaneID(item.TargetPaneID)
+	var active int
+	if err := store.QueryRow(`SELECT COUNT(*) FROM cicy_cloud_inbox WHERE target_pane_id=?
+		AND message_id<>? AND status IN ('dispatching','running','uncertain')`, pane, item.MessageID).Scan(&active); err != nil || active > 0 {
+		return // one structured turn at a time per Agent; preserves reply_to ordering
+	}
 	peer := botPeer{ChatID: item.PeerChatID, ContextToken: item.ContextToken}
 	imRegisterReplyPushForInbound(pane, item.AccountID, peer)
 
@@ -174,11 +179,13 @@ func markCiCyCloudInboxReplied(messageID string) {
 		return
 	}
 	var status string
-	if err := store.QueryRow(`SELECT status FROM cicy_cloud_inbox WHERE message_id=?`, messageID).Scan(&status); err != nil {
+	var accountID int64
+	if err := store.QueryRow(`SELECT status,account_id FROM cicy_cloud_inbox WHERE message_id=?`, messageID).Scan(&status, &accountID); err != nil {
 		if err != sql.ErrNoRows {
 			log.Printf("[im-cloud-inbox] reply lookup failed id=%s: %v", messageID, err)
 		}
 		return
 	}
 	updateCiCyCloudInbox(messageID, "replied", "", true)
+	go dispatchPendingCiCyCloudInbox(accountID)
 }

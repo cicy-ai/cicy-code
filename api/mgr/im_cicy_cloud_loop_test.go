@@ -182,3 +182,25 @@ func TestCiCyCloudInboxPersistsOnceBeforeAck(t *testing.T) {
 		t.Fatalf("unexpected durable inbox row count=%d status=%q attempts=%d sender=%q", count, status, attempts, senderAgent)
 	}
 }
+
+func TestCiCyCloudInboxSerializesMessagesPerAgent(t *testing.T) {
+	withTestStore(t)
+	if _, err := store.Exec(`INSERT INTO cicy_cloud_inbox
+		(message_id,account_id,target_pane_id,text,peer_chat_id,context_token,status)
+		VALUES
+		('msg-first-12345678',1,'w-102:main.0','first','source','w-102|msg-first-12345678','running'),
+		('msg-second-12345678',1,'w-102:main.0','second','source','w-102|msg-second-12345678','received')`); err != nil {
+		t.Fatal(err)
+	}
+	dispatchCiCyCloudInboxItem(cicyCloudInboxItem{
+		MessageID: "msg-second-12345678", AccountID: 1, TargetPaneID: "w-102:main.0",
+		Text: "second", PeerChatID: "source", ContextToken: "w-102|msg-second-12345678", Status: "received",
+	})
+	var status string
+	if err := store.QueryRow(`SELECT status FROM cicy_cloud_inbox WHERE message_id='msg-second-12345678'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "received" {
+		t.Fatalf("second message dispatched while first turn is active: %q", status)
+	}
+}
