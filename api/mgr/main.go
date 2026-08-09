@@ -49,7 +49,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.365"
+const version = "2.3.368"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -452,6 +452,7 @@ Options:
 
 	// Stats
 	http.HandleFunc("/api/system/resources", wa(handleSystemResources))
+	http.HandleFunc("/api/ports", wa(handlePorts))
 	http.HandleFunc("/api/crontab", wa(handleCrontab))
 
 	// Notifications
@@ -641,6 +642,9 @@ Options:
 	// member's terminal read as /agent/<pane_id>/?token=… (same handler).
 	http.HandleFunc("/agent/", handleTtydProxy)
 	http.HandleFunc("/ttyd-shell/", handleTtydShellProxy)
+	// Only the authenticated CiCy Instance proxy can reach explicitly published
+	// loopback HTTP ports. The handler independently rejects the management port.
+	http.HandleFunc("/_cicy/ports/", authM(handlePublishedPortProxy))
 
 	// UI (SPA)
 	http.Handle("/", serveUI())

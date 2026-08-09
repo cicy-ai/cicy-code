@@ -17,7 +17,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, Folder, X, Settings, Brain, Search,
   LayoutList, Users, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen, Braces, Store, Timer, Grid3X3,
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen, Braces, Store, Timer, Grid3X3, Globe2,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag, isChatModel } from '../lib/modelTag';
@@ -68,6 +68,7 @@ import { ApiSwitchDialog } from './layout/ApiSwitchDialog';
 import CreateAgentDialog, { CreateAgentValues } from './CreateAgentDialog';
 import { lockPointer, unlockPointer, clearPointerLock } from '../lib/pointerLock';
 import { emitWebFrameMaskEvent } from '../lib/webFrameMask';
+import PortsPanel from './layout/PortsPanel';
 
 const cache = {
   get: (k: string, def: any) => { try { const v = JSON.parse(localStorage.getItem(k)!); return v ?? def; } catch { return def; } },
@@ -343,6 +344,30 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     return ok.includes(v) ? v : null;
   });
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
+  const [portsOpen, setPortsOpen] = useState(false);
+  const [fixedDomain, setFixedDomain] = useState('');
+  useEffect(() => {
+    let stopped = false;
+    let timer: number | undefined;
+    const refresh = async () => {
+      try {
+        const [accountsRes, instancesRes] = await Promise.all([
+          apiService.getIMAccounts(), apiService.getCiCyCloudInstances(),
+        ]);
+        if (stopped) return;
+        const account = (accountsRes?.data?.accounts || []).find((item: any) => item.platform === 'cicy_cloud');
+        const instanceID = String(account?.config?.instance_id || '');
+        const instance = (instancesRes?.data?.instances || []).find((item: any) => item.instanceId === instanceID);
+        setFixedDomain(instance?.proxyAvailable && instance?.proxyHost ? `https://${instance.proxyHost}` : '');
+      } catch {
+        if (!stopped) setFixedDomain('');
+      } finally {
+        if (!stopped) timer = window.setTimeout(refresh, 15000);
+      }
+    };
+    void refresh();
+    return () => { stopped = true; if (timer) window.clearTimeout(timer); };
+  }, []);
   const [createAgentSubmitting, setCreateAgentSubmitting] = useState(false);
   const [createAgentInitialValues, setCreateAgentInitialValues] = useState<Partial<CreateAgentValues> | undefined>();
   useEffect(() => {
@@ -1955,6 +1980,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           non-cicy attach button just before it); the spacer pushes the remaining
           controls to the right. */}
       <div data-id="stack-controls-model-spacer" className="flex-1" />
+      {fixedDomain && !globalVar?.helper_mode && (
+        <>
+          <button
+            type="button"
+            data-id="workspace-ports-toggle"
+            onClick={() => setPortsOpen((open) => !open)}
+            aria-pressed={portsOpen}
+            title={t('portsPanelToggle', { defaultValue: 'Ports 端口转发' })}
+            className={`p-1 rounded border transition-colors cursor-pointer ${portsOpen ? 'text-blue-300 border-blue-400/50 bg-blue-400/10' : 'text-zinc-600 border-zinc-700/60 hover:text-zinc-300 hover:border-zinc-600'}`}
+          >
+            <Globe2 className="w-3.5 h-3.5" />
+          </button>
+          {portsOpen && <PortsPanel fixedDomain={fixedDomain} onClose={() => setPortsOpen(false)} />}
+        </>
+      )}
       {!globalVar?.helper_mode && (
         <button
           type="button"
@@ -1981,7 +2021,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
       )}
     </>
-  ) : null, [activeCliPaneId, paneId, paneDetails, agentDetail, applyPanePatch, refreshPaneDetail, netLatency, chatWsConnected, chatWsClientId, handleSendPageClientIdToAgent, handleOpenProxyManager, contextUsage, isShellOpen, toggleShellOpen, t]);
+  ) : null, [activeCliPaneId, paneId, paneDetails, agentDetail, applyPanePatch, refreshPaneDetail, netLatency, chatWsConnected, chatWsClientId, handleSendPageClientIdToAgent, handleOpenProxyManager, contextUsage, isShellOpen, toggleShellOpen, t, fixedDomain, portsOpen, globalVar?.helper_mode]);
   // Memoized so the stack's `items` keeps a stable identity across the
   // per-token Workspace re-renders a live conversation triggers (those tokens
   // touch chat-live state the stack never reads). Combined with React.memo on

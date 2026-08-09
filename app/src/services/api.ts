@@ -294,6 +294,10 @@ const api = {
   getCiCyCloudLoginStatus: (state: string) => http.get(`/api/im/cicy-cloud/login/${encodeURIComponent(state)}`),
   getCiCyCloudInstances: () => http.get('/api/im/cicy-cloud/instances'),
   enableCiCyCloudTunnel: () => http.post('/api/im/cicy-cloud/tunnel'),
+  getPublishedPorts: () => http.get('/api/ports'),
+  savePublishedPort: (port: number, name: string, visibility: 'private' | 'public' | 'closed') =>
+    http.post('/api/ports', { port, name, visibility }),
+  deletePublishedPort: (port: number) => http.delete('/api/ports', { params: { port } }),
   getCiCyCloudAgents: () => http.get('/api/im/cicy-cloud/agents'),
   sendCiCyCloudMessage: (targetInstanceId: string, targetAgentId: string, senderAgentId: string, text: string) => http.post('/api/im/cicy-cloud/send', {
     target_instance_id: targetInstanceId, target_agent_id: targetAgentId,
