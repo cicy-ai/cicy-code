@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type recordingMessageAcker struct{ ids []string }
@@ -26,6 +29,78 @@ func TestCiCyCloudIdlePollBackoffAndReset(t *testing.T) {
 	tr.resetIdlePollDelay()
 	if got := tr.nextIdlePollDelay(); got != 2*time.Second {
 		t.Fatalf("backoff after traffic = %s, want 2s", got)
+	}
+}
+
+func TestCiCyCloudStreamURLAndReconnectBackoff(t *testing.T) {
+	t.Setenv("CICY_CLOUD_ORIGIN", "https://cloud.example.test/base/")
+	got, err := cicyCloudStreamURL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "wss://cloud.example.test/base/api/code/messages/stream" {
+		t.Fatalf("stream URL = %q", got)
+	}
+
+	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second, 30 * time.Second}
+	var delay time.Duration
+	for i, expected := range want {
+		delay = nextCiCyCloudStreamBackoff(delay)
+		if delay != expected {
+			t.Fatalf("backoff %d = %s, want %s", i, delay, expected)
+		}
+	}
+}
+
+func TestCiCyCloudStreamConnectWakesD1PollImmediately(t *testing.T) {
+	var pollCount, streamCount atomic.Int32
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/code/messages/poll":
+			pollCount.Add(1)
+			_ = json.NewEncoder(w).Encode(M{"messages": []M{}})
+		case "/api/code/messages/stream":
+			if r.Header.Get("Authorization") != "Bearer test" {
+				t.Errorf("stream authorization header missing")
+			}
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				t.Errorf("upgrade: %v", err)
+				return
+			}
+			streamCount.Add(1)
+			defer conn.Close()
+			_, _, _ = conn.ReadMessage()
+		default:
+			t.Errorf("unexpected route %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
+
+	now := time.Now()
+	tr := &cicyCloudTransport{token: "test", lastHeartbeat: now, lastPresence: now}
+	defer tr.Close()
+	started := time.Now()
+	if _, _, err := tr.Poll(""); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed >= cicyCloudPollMinDelay {
+		t.Fatalf("stream connection did not wake poll immediately: %s", elapsed)
+	}
+	if polls, streams := pollCount.Load(), streamCount.Load(); polls != 1 || streams != 1 {
+		t.Fatalf("polls=%d streams=%d, want 1 each", polls, streams)
+	}
+
+	// Poll remains the fact source: the wake-up itself carries no message, so
+	// the worker's next iteration performs the compensating D1 poll.
+	tr.signalStreamWake()
+	if _, _, err := tr.Poll(""); err != nil {
+		t.Fatal(err)
+	}
+	if polls := pollCount.Load(); polls != 2 {
+		t.Fatalf("compensating D1 polls=%d, want 2", polls)
 	}
 }
 

@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 const defaultCiCyCloudOrigin = "https://cicy-ai.com"
@@ -209,6 +211,12 @@ type cicyCloudTransport struct {
 	lastPresence  time.Time
 	pollMu        sync.Mutex
 	idlePollDelay time.Duration
+	streamOnce    sync.Once
+	streamWake    chan struct{}
+	streamStop    chan struct{}
+	streamClose   sync.Once
+	streamConnMu  sync.Mutex
+	streamConn    *websocket.Conn
 }
 
 const (
@@ -216,7 +224,133 @@ const (
 	cicyCloudPresenceInterval  = 120 * time.Second
 	cicyCloudPollMinDelay      = 2 * time.Second
 	cicyCloudPollMaxDelay      = 15 * time.Second
+	cicyCloudStreamMinBackoff  = time.Second
+	cicyCloudStreamMaxBackoff  = 30 * time.Second
 )
+
+func (t *cicyCloudTransport) initStream() {
+	t.streamOnce.Do(func() {
+		t.streamWake = make(chan struct{}, 1)
+		t.streamStop = make(chan struct{})
+		go t.runMessageStream()
+	})
+}
+
+func (t *cicyCloudTransport) signalStreamWake() {
+	select {
+	case t.streamWake <- struct{}{}:
+	default:
+	}
+}
+
+func (t *cicyCloudTransport) waitForNextPoll(delay time.Duration) {
+	t.initStream()
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-t.streamWake:
+	case <-timer.C:
+	case <-t.streamStop:
+	}
+}
+
+func cicyCloudStreamURL() (string, error) {
+	u, err := url.Parse(cicyCloudOrigin())
+	if err != nil {
+		return "", err
+	}
+	switch u.Scheme {
+	case "http":
+		u.Scheme = "ws"
+	case "https":
+		u.Scheme = "wss"
+	default:
+		return "", fmt.Errorf("unsupported cloud stream scheme %q", u.Scheme)
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/api/code/messages/stream"
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String(), nil
+}
+
+func nextCiCyCloudStreamBackoff(current time.Duration) time.Duration {
+	if current < cicyCloudStreamMinBackoff {
+		return cicyCloudStreamMinBackoff
+	}
+	next := current * 2
+	if next > cicyCloudStreamMaxBackoff {
+		return cicyCloudStreamMaxBackoff
+	}
+	return next
+}
+
+func (t *cicyCloudTransport) runMessageStream() {
+	backoff := time.Duration(0)
+	for {
+		select {
+		case <-t.streamStop:
+			return
+		default:
+		}
+
+		streamURL, err := cicyCloudStreamURL()
+		if err == nil {
+			headers := http.Header{}
+			headers.Set("Authorization", "Bearer "+t.token)
+			headers.Set("User-Agent", fmt.Sprintf("cicy-code/%s (%s; %s)", version, runtime.GOOS, runtime.GOARCH))
+			connectedAt := time.Now()
+			conn, _, dialErr := websocket.DefaultDialer.Dial(streamURL, headers)
+			if dialErr == nil {
+				t.streamConnMu.Lock()
+				t.streamConn = conn
+				t.streamConnMu.Unlock()
+				// The stream is only a wake-up hint. Every connection/reconnection
+				// immediately triggers the existing D1-backed poll for compensation.
+				t.signalStreamWake()
+				for {
+					if _, _, readErr := conn.ReadMessage(); readErr != nil {
+						_ = conn.Close()
+						t.streamConnMu.Lock()
+						if t.streamConn == conn {
+							t.streamConn = nil
+						}
+						t.streamConnMu.Unlock()
+						break
+					}
+					t.signalStreamWake()
+				}
+				if time.Since(connectedAt) >= cicyCloudStreamMaxBackoff {
+					backoff = 0
+				}
+			}
+		}
+
+		backoff = nextCiCyCloudStreamBackoff(backoff)
+		timer := time.NewTimer(backoff)
+		select {
+		case <-timer.C:
+		case <-t.streamStop:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		}
+	}
+}
+
+func (t *cicyCloudTransport) Close() error {
+	t.streamClose.Do(func() {
+		t.initStream()
+		close(t.streamStop)
+		t.streamConnMu.Lock()
+		if t.streamConn != nil {
+			_ = t.streamConn.Close()
+			t.streamConn = nil
+		}
+		t.streamConnMu.Unlock()
+	})
+	return nil
+}
 
 func (t *cicyCloudTransport) nextIdlePollDelay() time.Duration {
 	t.pollMu.Lock()
@@ -402,11 +536,11 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 		// bounded adaptive delay used for an empty inbox as well, otherwise a
 		// Cloud outage makes every instance retry every three seconds and can
 		// exhaust the daily Worker quota before the service recovers.
-		time.Sleep(t.nextIdlePollDelay())
+		t.waitForNextPoll(t.nextIdlePollDelay())
 		return nil, cursor, err
 	}
 	if len(out.Messages) == 0 {
-		time.Sleep(t.nextIdlePollDelay())
+		t.waitForNextPoll(t.nextIdlePollDelay())
 		return nil, "", nil
 	}
 	t.resetIdlePollDelay()

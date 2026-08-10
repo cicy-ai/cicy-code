@@ -92,6 +92,10 @@ type botMessageAcker interface {
 	Ack(messageID string) error
 }
 
+type botTransportCloser interface {
+	Close() error
+}
+
 // botTransport abstracts a "bot-shaped" IM platform: a token, long-poll updates,
 // send/edit message, typing indicator.
 type botTransport interface {
@@ -1300,6 +1304,9 @@ func (w *imWorker) loop() {
 					}
 				}
 			}
+		}
+		if closer, ok := tr.(botTransportCloser); ok {
+			_ = closer.Close()
 		}
 		w.setTransport(nil)
 	}
