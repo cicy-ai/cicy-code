@@ -4,8 +4,10 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Check,
+  Copy,
   Eye,
   EyeOff,
+  ExternalLink,
   Github,
   Loader2,
   Pencil,
@@ -18,12 +20,15 @@ import {
 import { useTranslation } from "react-i18next";
 import apiService from "../../services/api";
 import { AppModal, useDialogs } from "../ui/Modal";
+import { openChromeProfile } from "./GoogleAccountsPanel";
 
 type GithubAccount = {
   name: string;
   email: string;
   token_set: boolean;
   token_tail?: string;
+  "2fa_set": boolean;
+  profile: string;
 };
 
 export default function GithubAccountsPanel({
@@ -38,10 +43,16 @@ export default function GithubAccountsPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", email: "", api_token: "" });
+  const [form, setForm] = useState({ name: "", email: "", api_token: "", "2fa": "", profile: "" });
+  const [profiles, setProfiles] = useState<string[]>([]);
   const [showToken, setShowToken] = useState(false);
+  const [show2FA, setShow2FA] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState("");
+  const [generating2FA, setGenerating2FA] = useState("");
+  const [totp, setTotp] = useState<Record<string, { code: string; capture: string; expiresAt: number }>>({});
+  const [totpModal, setTotpModal] = useState<string | null>(null);
+  const [clock, setClock] = useState(Date.now());
   const [testResult, setTestResult] = useState<Record<string, string>>({});
   const { confirm, node: dialogsNode } = useDialogs();
   const [sending, setSending] = useState("");
@@ -50,8 +61,9 @@ export default function GithubAccountsPanel({
     setLoading(true);
     setError("");
     try {
-      const r = await apiService.getGithubAccounts();
+      const [r, profileResponse] = await Promise.all([apiService.getGithubAccounts(), apiService.getGoogleAccounts()]);
       setAccounts(r.data?.accounts || []);
+      setProfiles((profileResponse.data?.accounts || []).map((item: any) => String(item.profile)));
     } catch (e: any) {
       setError(String(e?.response?.data?.detail || e?.message || e));
     } finally {
@@ -61,25 +73,31 @@ export default function GithubAccountsPanel({
   useEffect(() => {
     if (active) void load();
   }, [active, load]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const beginNew = () => {
     setEditing("");
-    setForm({ name: "", email: "", api_token: "" });
+    setForm({ name: "", email: "", api_token: "", "2fa": "", profile: "" });
     setShowToken(false);
+    setShow2FA(false);
     setError("");
   };
   const beginEdit = async (account: GithubAccount) => {
     setEditing(account.name);
     setShowToken(false);
+    setShow2FA(false);
     setError("");
     try {
       const r = await apiService.getGithubAccountToken(account.name);
-      setForm({ name: account.name, email: account.email || "", api_token: r.data?.api_token || "" });
+      setForm({ name: account.name, email: account.email || "", api_token: r.data?.api_token || "", "2fa": r.data?.["2fa"] || "", profile: account.profile || "" });
     } catch { setError(t("tokenRevealFailed", { defaultValue: "Token 读取失败" })); }
   };
   const cancel = () => {
     setEditing(null);
-    setForm({ name: "", email: "", api_token: "" });
+    setForm({ name: "", email: "", api_token: "", "2fa": "", profile: "" });
   };
   const save = async () => {
     setSaving(true);
@@ -90,6 +108,8 @@ export default function GithubAccountsPanel({
         old_name: editing || undefined,
         email: form.email.trim(),
         api_token: form.api_token.trim() || undefined,
+        "2fa": form["2fa"].trim(),
+        profile: form.profile,
       });
       cancel();
       await load();
@@ -131,6 +151,19 @@ export default function GithubAccountsPanel({
       }));
     } finally {
       setTesting("");
+    }
+  };
+  const generate2FA = async (name: string) => {
+    setGenerating2FA(name);
+    setTotpModal(name);
+    try {
+      const response = await apiService.getGithubAccountTOTP(name);
+      const countdown = Number(response.data?.countdown || 0);
+      setTotp((v) => ({ ...v, [name]: { code: String(response.data?.code || ""), capture: String(response.data?.capture || response.data?.code || ""), expiresAt: Date.now() + countdown * 1000 } }));
+    } catch {
+      setError(t("github2FAGenerateFailed"));
+    } finally {
+      setGenerating2FA("");
     }
   };
   const sendToCurrentAgent = async (name: string) => {
@@ -273,6 +306,32 @@ export default function GithubAccountsPanel({
                 </button>
               </div>
             </div>
+            <div className="mt-3">
+              <label className="mb-1 block text-[11px] text-zinc-500">Chrome Profile</label>
+              <div className="flex gap-2"><select data-id="github-account-profile-select" value={form.profile} onChange={(e) => setForm((v) => ({ ...v, profile: e.target.value }))} className={inputClass}><option value="">{t("selectChromeProfile")}</option>{profiles.map((profile) => <option key={profile} value={profile}>{profile}</option>)}</select><button data-id="github-account-open-chrome" type="button" disabled={!form.profile} onClick={() => void openChromeProfile(form.profile).catch((e) => setError(String(e?.message || e)))} className="rounded-lg border border-white/[0.08] px-3 text-zinc-400 disabled:opacity-30" title={t("openInChrome")}><ExternalLink className="h-4 w-4" /></button></div>
+            </div>
+            <div className="mt-3">
+              <label className="mb-1 block text-[11px] text-zinc-500">2FA</label>
+              <div className="relative">
+                <input
+                  data-id="github-account-2fa-input"
+                  type={show2FA ? "text" : "password"}
+                  value={form["2fa"]}
+                  onChange={(e) => setForm((v) => ({ ...v, "2fa": e.target.value }))}
+                  className={`${inputClass} pr-10`}
+                  autoComplete="new-password"
+                />
+                <button
+                  data-id="github-account-2fa-toggle"
+                  type="button"
+                  onClick={() => setShow2FA((v) => !v)}
+                  className="absolute inset-y-0 right-0 px-3 text-zinc-500 hover:text-zinc-300"
+                  aria-label={show2FA ? t("hideToken", { defaultValue: "隐藏" }) : t("showToken", { defaultValue: "显示" })}
+                >
+                  {show2FA ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
             <div className="mt-4 flex gap-2">
               <button
                 data-id="github-account-save"
@@ -354,6 +413,12 @@ export default function GithubAccountsPanel({
                     </div>
                   )}
                 </div>
+                {account["2fa_set"] && (
+                  <button data-id="github-account-generate-2fa" type="button" onClick={() => void generate2FA(account.name)} disabled={generating2FA === account.name} className="shrink-0 rounded-md border border-amber-500/20 bg-amber-500/[0.08] px-2.5 py-1.5 text-[11px] text-amber-300 disabled:opacity-40">
+                    {generating2FA === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "2FA"}
+                  </button>
+                )}
+                {account.profile && <button data-id="github-account-open-chrome" type="button" onClick={() => void openChromeProfile(account.profile).catch((e) => setError(String(e?.message || e)))} className="shrink-0 rounded-md p-2 text-zinc-500 hover:text-zinc-200" title={t("openInChrome")}><ExternalLink className="h-3.5 w-3.5" /></button>}
                 <button
                   data-id="github-account-test"
                   type="button"
@@ -403,6 +468,22 @@ export default function GithubAccountsPanel({
             ))
           )}
         </div>
+        <AppModal open={totpModal !== null} title={t("github2FAModalTitle", { name: totpModal || "" })} onClose={() => setTotpModal(null)} maxWidth="400px">
+          <section data-id="github-account-2fa-modal" className="py-3 text-center">
+            {totpModal && generating2FA === totpModal ? (
+              <Loader2 className="mx-auto h-6 w-6 animate-spin text-amber-300" />
+            ) : totpModal && totp[totpModal] ? (
+              <>
+                <button data-id="github-account-2fa-copy" type="button" onClick={() => void navigator.clipboard.writeText(totp[totpModal].capture)} className="group mx-auto flex items-center gap-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.08] px-5 py-4 font-mono text-3xl tracking-[0.28em] text-amber-200">
+                  {totp[totpModal].capture}<Copy className="h-4 w-4 tracking-normal text-amber-500 group-hover:text-amber-300" />
+                </button>
+                <div data-id="github-account-2fa-countdown" className="mt-3 text-[12px] text-zinc-500">{t("github2FAExpiresIn", { seconds: Math.max(0, Math.ceil((totp[totpModal].expiresAt - clock) / 1000)) })}</div>
+              </>
+            ) : (
+              <div className="text-[12px] text-rose-300">{t("github2FAGenerateFailed")}</div>
+            )}
+          </section>
+        </AppModal>
         <div
           data-id="github-accounts-security-note"
           className="mt-5 flex items-start gap-2 text-[11px] leading-5 text-zinc-600"

@@ -80,18 +80,23 @@ func handleCloudflareAccounts(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			token, _ := a["api_token"].(string)
-			J(w, M{"api_token": token})
+			password, _ := a["password"].(string)
+			J(w, M{"api_token": token, "password": password})
 			return
 		}
 		type item struct {
-			Name      string            `json:"name"`
-			Label     string            `json:"label"`
-			Kind      string            `json:"kind"`
-			AccountID string            `json:"account_id"`
-			Target    string            `json:"target"`
-			TokenSet  bool              `json:"token_set"`
-			IsDefault bool              `json:"is_default"`
-			Details   map[string]string `json:"details"`
+			Name        string            `json:"name"`
+			Label       string            `json:"label"`
+			Kind        string            `json:"kind"`
+			AccountID   string            `json:"account_id"`
+			Target      string            `json:"target"`
+			TokenSet    bool              `json:"token_set"`
+			Username    string            `json:"username"`
+			Email       string            `json:"email"`
+			PasswordSet bool              `json:"password_set"`
+			Profile     string            `json:"profile"`
+			IsDefault   bool              `json:"is_default"`
+			Details     map[string]string `json:"details"`
 		}
 		items := make([]item, 0, len(c.Accounts))
 		for name, a := range c.Accounts {
@@ -105,13 +110,17 @@ func handleCloudflareAccounts(w http.ResponseWriter, r *http.Request) {
 			}
 			details := map[string]string{}
 			for k, v := range a {
-				if k != "api_token" {
+				if k != "api_token" && k != "password" {
 					if s, ok := v.(string); ok {
 						details[k] = s
 					}
 				}
 			}
-			items = append(items, item{Name: name, Label: str("label"), Kind: str("kind"), AccountID: str("account_id"), Target: target, TokenSet: str("api_token") != "", IsDefault: name == c.Default, Details: details})
+			kind := "workers"
+			if str("bucket") != "" || str("public_url") != "" {
+				kind = "r2"
+			}
+			items = append(items, item{Name: name, Label: str("label"), Kind: kind, AccountID: str("account_id"), Target: target, TokenSet: str("api_token") != "", Username: str("username"), Email: str("email"), PasswordSet: str("password") != "", Profile: str("profile"), IsDefault: name == c.Default, Details: details})
 		}
 		sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 		J(w, M{"accounts": items})
@@ -122,9 +131,12 @@ func handleCloudflareAccounts(w http.ResponseWriter, r *http.Request) {
 			Name      string            `json:"name"`
 			OldName   string            `json:"old_name"`
 			Label     string            `json:"label"`
-			Kind      string            `json:"kind"`
 			AccountID string            `json:"account_id"`
 			APIToken  string            `json:"api_token"`
+			Username  string            `json:"username"`
+			Email     string            `json:"email"`
+			Password  string            `json:"password"`
+			Profile   string            `json:"profile"`
 			IsDefault bool              `json:"is_default"`
 			Details   map[string]string `json:"details"`
 		}
@@ -134,6 +146,10 @@ func handleCloudflareAccounts(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Name = strings.TrimSpace(req.Name)
 		req.OldName = strings.TrimSpace(req.OldName)
+		req.Email = strings.TrimSpace(req.Email)
+		if at := strings.Index(req.Email, "@"); at > 0 {
+			req.Name = strings.TrimSpace(req.Email[:at])
+		}
 		if !githubAccountNameRE.MatchString(req.Name) {
 			httpErr(w, 400, "invalid Cloudflare account name")
 			return
@@ -150,12 +166,27 @@ func handleCloudflareAccounts(w http.ResponseWriter, r *http.Request) {
 		if a == nil {
 			a = map[string]any{}
 		}
-		a["label"] = strings.TrimSpace(req.Label)
-		a["kind"] = strings.TrimSpace(req.Kind)
-		a["account_id"] = strings.TrimSpace(req.AccountID)
-		for _, key := range []string{"domain", "hostname", "service", "tunnel_name", "zone", "zone_id", "bucket", "public_url"} {
+		setOptional := func(key, value string) {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				delete(a, key)
+			} else {
+				a[key] = value
+			}
+		}
+		setOptional("label", req.Label)
+		delete(a, "kind")
+		delete(a, "note")
+		setOptional("account_id", req.AccountID)
+		setOptional("username", req.Username)
+		setOptional("email", req.Email)
+		setOptional("password", req.Password)
+		setOptional("profile", req.Profile)
+		delete(a, "domain")
+		delete(a, "service")
+		for _, key := range []string{"zone", "zone_id", "bucket", "public_url"} {
 			if value, ok := req.Details[key]; ok {
-				a[key] = strings.TrimSpace(value)
+				setOptional(key, value)
 			}
 		}
 		if strings.TrimSpace(req.APIToken) != "" {

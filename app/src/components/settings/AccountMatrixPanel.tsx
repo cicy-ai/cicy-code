@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import {
   Cloud,
+  Bot,
   Eye,
   EyeOff,
+  ExternalLink,
   Github,
   Loader2,
   Pencil,
@@ -15,20 +17,26 @@ import {
 import { useTranslation } from "react-i18next";
 import apiService from "../../services/api";
 import GithubAccountsPanel from "./GithubAccountsPanel";
+import GoogleAccountsPanel, { GoogleIcon, openChromeProfile } from "./GoogleAccountsPanel";
+import ChatGPTAccountsPanel from "./ChatGPTAccountsPanel";
 import { AppModal, useDialogs } from "../ui/Modal";
 
-type Platform = "github" | "cloudflare";
+type Platform = "github" | "cloudflare" | "google" | "chatgpt";
 type CFAccount = {
   name: string;
   label: string;
   kind: string;
+  username: string;
+  email: string;
+  password_set: boolean;
+  profile: string;
   account_id: string;
   target: string;
   token_set: boolean;
   is_default: boolean;
   details?: Record<string, string>;
 };
-const workerDetailKeys = ["domain", "hostname", "service", "tunnel_name", "zone", "zone_id"] as const;
+const workerDetailKeys = ["zone", "zone_id"] as const;
 const r2DetailKeys = ["bucket", "public_url"] as const;
 
 export default function AccountMatrixPanel({
@@ -48,6 +56,10 @@ export default function AccountMatrixPanel({
     name: "",
     label: "",
     kind: "",
+    username: "",
+    email: "",
+    password: "",
+    profile: "",
     account_id: "",
     api_token: "",
     is_default: false,
@@ -55,12 +67,13 @@ export default function AccountMatrixPanel({
   });
   const [testing, setTesting] = useState("");
   const [showToken, setShowToken] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [profiles, setProfiles] = useState<string[]>([]);
   const { confirm, node: dialogsNode } = useDialogs();
   const load = () => {
     setLoading(true);
-    return apiService
-      .getCloudflareAccounts()
-      .then((r) => setAccounts(r.data?.accounts || []))
+    return Promise.all([apiService.getCloudflareAccounts(), apiService.getGoogleAccounts()])
+      .then(([r, profileResponse]) => { setAccounts(r.data?.accounts || []); setProfiles((profileResponse.data?.accounts || []).map((item: any) => String(item.profile))); })
       .finally(() => setLoading(false));
   };
   useEffect(() => {
@@ -86,10 +99,15 @@ export default function AccountMatrixPanel({
   const beginNew = () => {
     setEditing("");
     setShowToken(false);
+    setShowPassword(false);
     setForm({
       name: "",
       label: "",
-      kind: "",
+      kind: "workers",
+      username: "",
+      email: "",
+      password: "",
+      profile: "",
       account_id: "",
       api_token: "",
       is_default: false,
@@ -99,20 +117,33 @@ export default function AccountMatrixPanel({
   const beginEdit = async (a: CFAccount) => {
     setEditing(a.name);
     setShowToken(false);
-    const token = await apiService.getCloudflareAccountToken(a.name);
+    setShowPassword(false);
+    const secrets = await apiService.getCloudflareAccountToken(a.name);
     setForm({
       name: a.name,
       label: a.label || "",
       kind: a.kind || "",
+      username: a.username || "",
+      email: a.email || "",
+      password: secrets.data?.password || "",
+      profile: a.profile || "",
       account_id: a.account_id || "",
-      api_token: token.data?.api_token || "",
+      api_token: secrets.data?.api_token || "",
       is_default: a.is_default,
       details: a.details || {},
     });
   };
   const save = async () => {
     await apiService.saveCloudflareAccount({
-      ...form,
+      name: form.name,
+      label: form.label,
+      username: form.username,
+      email: form.email,
+      password: form.password,
+      profile: form.profile,
+      account_id: form.account_id,
+      is_default: form.is_default,
+      details: form.details,
       old_name: editing || undefined,
       api_token: form.api_token || undefined,
     });
@@ -152,6 +183,24 @@ export default function AccountMatrixPanel({
           className="flex w-14 shrink-0 flex-col items-center gap-1.5 border-r border-white/[0.06] py-3"
         >
           <button
+            data-id="account-matrix-platform-chatgpt"
+            title="ChatGPT"
+            aria-label="ChatGPT"
+            onClick={() => setPlatform("chatgpt")}
+            className={`grid h-9 w-9 place-items-center rounded-lg border ${platform === "chatgpt" ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300" : "border-transparent text-zinc-500 hover:bg-white/[0.04]"}`}
+          >
+            <Bot className="h-4 w-4" />
+          </button>
+          <button
+            data-id="account-matrix-platform-google"
+            title="Google"
+            aria-label="Google"
+            onClick={() => setPlatform("google")}
+            className={`grid h-9 w-9 place-items-center rounded-lg border ${platform === "google" ? "border-blue-400/30 bg-blue-400/10 text-blue-300" : "border-transparent text-zinc-500 hover:bg-white/[0.04]"}`}
+          >
+            <GoogleIcon className="h-4 w-4" />
+          </button>
+          <button
             data-id="account-matrix-platform-github"
             title="GitHub"
             aria-label="GitHub"
@@ -184,6 +233,12 @@ export default function AccountMatrixPanel({
               paneId={paneId}
             />
           </div>
+          <div data-id="account-matrix-google" className="h-full" style={{ display: platform === "google" ? "block" : "none" }}>
+            <GoogleAccountsPanel active={active && platform === "google"} />
+          </div>
+          <div data-id="account-matrix-chatgpt" className="h-full" style={{ display: platform === "chatgpt" ? "block" : "none" }}>
+            <ChatGPTAccountsPanel active={active && platform === "chatgpt"} />
+          </div>
           {platform === "cloudflare" && (
             <div data-id="account-matrix-cloudflare" className="p-4">
               <header
@@ -210,11 +265,20 @@ export default function AccountMatrixPanel({
               </header>
               <AppModal open={editing !== null} title={editing ? t("cloudflareAccountEditTitle", { name: editing }) : t("githubAccountAdd")} onClose={() => setEditing(null)} maxWidth="620px">
                 <section data-id="cloudflare-account-form">
+                  <div className="mb-2 text-[11px] font-medium text-zinc-400">{t("cloudflareSectionBasic")}</div>
                   <div className="grid grid-cols-2 gap-3">
-                    {(["name", "label", "account_id"] as const).map((key) => <label key={key} className={key === "account_id" ? "col-span-2" : ""}><span className="mb-1 block text-[11px] text-zinc-500">{t(`cloudflareField_${key}`)}</span><input data-id={`cloudflare-account-${key}-input`} value={form[key]} onChange={(e) => setForm((v) => ({ ...v, [key]: e.target.value }))} className="w-full rounded-md border border-white/[0.08] bg-black/30 px-3 py-2 text-[12px] text-zinc-200 outline-none focus:border-orange-500/40" /></label>)}
-                    <label className="col-span-2"><span className="mb-1 block text-[11px] text-zinc-500">{t("cloudflareField_kind")}</span><select data-id="cloudflare-account-kind-input" value={form.kind} onChange={(e) => setForm((v) => ({ ...v, kind: e.target.value }))} className="w-full rounded-md border border-white/[0.08] bg-[#111113] px-3 py-2 text-[12px] text-zinc-200 outline-none"><option value="workers">Workers / Tunnel</option><option value="r2">R2</option><option value="general">General</option></select></label>
+                    {(["name", "label"] as const).map((key) => <label key={key}><span className="mb-1 block text-[11px] text-zinc-500">{t(`cloudflareField_${key}`)}</span><input data-id={`cloudflare-account-${key}-input`} value={form[key]} readOnly={key === "name" && form.email.includes("@")} onChange={(e) => setForm((v) => ({ ...v, [key]: e.target.value }))} className="w-full rounded-md border border-white/[0.08] bg-black/30 px-3 py-2 text-[12px] text-zinc-200 outline-none focus:border-orange-500/40 read-only:cursor-not-allowed read-only:text-zinc-500" /></label>)}
                   </div>
                   <div className="my-4 border-t border-white/[0.06]" />
+                  <label className="mb-3 block"><span className="mb-1 block text-[11px] text-zinc-500">Chrome Profile</span><div className="flex gap-2"><select data-id="cloudflare-account-profile-select" value={form.profile} onChange={(e) => setForm((v) => ({ ...v, profile: e.target.value }))} className="w-full rounded-md border border-white/[0.08] bg-[#111113] px-3 py-2 text-[12px] text-zinc-200 outline-none"><option value="">{t("selectChromeProfile")}</option>{profiles.map((profile) => <option key={profile} value={profile}>{profile}</option>)}</select><button data-id="cloudflare-account-open-chrome" type="button" disabled={!form.profile} onClick={() => void openChromeProfile(form.profile)} className="rounded-md border border-white/[0.08] px-3 text-zinc-400 disabled:opacity-30" title={t("openInChrome")}><ExternalLink className="h-4 w-4" /></button></div></label>
+                  <div className="mb-2 text-[11px] font-medium text-zinc-400">{t("cloudflareSectionLogin")}</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {(["username", "email"] as const).map((key) => <label key={key}><span className="mb-1 block text-[11px] text-zinc-500">{t(`cloudflareField_${key}`)}</span><input data-id={`cloudflare-account-${key}-input`} value={form[key]} onChange={(e) => { const value = e.target.value; setForm((v) => ({ ...v, [key]: value, ...(key === "email" && value.includes("@") ? { name: value.split("@")[0] } : {}) })) }} className="w-full rounded-md border border-white/[0.08] bg-black/30 px-3 py-2 text-[12px] text-zinc-200 outline-none focus:border-orange-500/40" /></label>)}
+                    <label className="col-span-2"><span className="mb-1 block text-[11px] text-zinc-500">{t("cloudflareField_password")}</span><div className="relative"><input data-id="cloudflare-account-password-input" type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => setForm((v) => ({ ...v, password: e.target.value }))} className="w-full rounded-md border border-white/[0.08] bg-black/30 px-3 py-2 pr-10 text-[12px] text-zinc-200 outline-none focus:border-orange-500/40" /><button data-id="cloudflare-account-password-toggle" type="button" onClick={() => setShowPassword((v) => !v)} className="absolute inset-y-0 right-0 px-3 text-zinc-500 hover:text-zinc-300">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></label>
+                  </div>
+                  <div className="my-4 border-t border-white/[0.06]" />
+                  <div className="mb-2 flex items-center justify-between"><span className="text-[11px] font-medium text-zinc-400">{t("cloudflareSectionCloudflare")}</span><select data-id="cloudflare-account-template" value={form.kind} onChange={(e) => setForm((v) => ({ ...v, kind: e.target.value }))} className="rounded-md border border-white/[0.08] bg-[#111113] px-2 py-1 text-[11px] text-zinc-300 outline-none"><option value="workers">Workers</option><option value="r2">R2</option></select></div>
+                  <label className="mb-3 block"><span className="mb-1 block text-[11px] text-zinc-500">{t("cloudflareField_account_id")}</span><input data-id="cloudflare-account-account_id-input" value={form.account_id} onChange={(e) => setForm((v) => ({ ...v, account_id: e.target.value }))} className="w-full rounded-md border border-white/[0.08] bg-black/30 px-3 py-2 text-[12px] text-zinc-200 outline-none focus:border-orange-500/40" /></label>
                   <div data-id="cloudflare-account-details" className="grid grid-cols-2 gap-3">
                     {(form.kind === "r2" ? r2DetailKeys : form.kind === "general" ? [] : workerDetailKeys).map((key) => <label key={key}><span className="mb-1 block text-[11px] text-zinc-500">{t(`cloudflareField_${key}`)}</span><input data-id={`cloudflare-account-${key}-input`} value={form.details[key] || ""} onChange={(e) => setForm((v) => ({ ...v, details: { ...v.details, [key]: e.target.value } }))} className="w-full rounded-md border border-white/[0.08] bg-black/30 px-3 py-2 text-[12px] text-zinc-200 outline-none focus:border-orange-500/40" /></label>)}
                   </div>
@@ -328,6 +392,15 @@ export default function AccountMatrixPanel({
                         ) : (
                           <Send className="h-3.5 w-3.5" />
                         )}
+                      </button>
+                      <button
+                        data-id="cloudflare-account-open-chrome"
+                        onClick={() => void openChromeProfile(a.profile)}
+                        disabled={!a.profile}
+                        className="p-2 text-zinc-500 disabled:opacity-20"
+                        title={t("openInChrome")}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
                       </button>
                       <button
                         data-id="cloudflare-account-edit"

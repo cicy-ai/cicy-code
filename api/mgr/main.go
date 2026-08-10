@@ -49,7 +49,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.368"
+const version = "2.3.379"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -393,6 +393,11 @@ Options:
 	http.HandleFunc("/api/knowledge/", authM(handleKnowledgeByID))                 // GET one / PATCH promote|reject|supersede
 	http.HandleFunc("/api/github/accounts", authM(handleGithubAccounts))
 	http.HandleFunc("/api/github/accounts/test", authM(handleGithubAccountTest))
+	http.HandleFunc("/api/github/accounts/totp", authM(handleGithubAccountTOTP))
+	http.HandleFunc("/api/google/accounts", authM(handleGoogleAccounts))
+	http.HandleFunc("/api/google/accounts/totp", authM(handleGoogleAccountTOTP))
+	http.HandleFunc("/api/chatgpt/accounts", authM(handleChatGPTAccounts))
+	http.HandleFunc("/api/chatgpt/accounts/totp", authM(handleChatGPTAccountTOTP))
 	http.HandleFunc("/api/cloudflare/accounts", authM(handleCloudflareAccounts))
 	http.HandleFunc("/api/cloudflare/accounts/test", authM(handleCloudflareAccountTest))
 	http.HandleFunc("/api/tmux/client-trace", authM(handleTmuxClientTrace))

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,61 @@ import (
 type githubAccountConfig struct {
 	APIToken string `json:"api_token"`
 	Email    string `json:"email"`
+	TwoFA    string `json:"2fa"`
+	Profile  string `json:"profile"`
+}
+
+func handleGithubAccountTOTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if readBody(r, &req) != nil {
+		httpErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	accounts, err := readGithubAccounts()
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	account, ok := accounts[strings.TrimSpace(req.Name)]
+	if !ok {
+		httpErr(w, http.StatusNotFound, "GitHub account not found")
+		return
+	}
+	if strings.TrimSpace(account.TwoFA) == "" {
+		httpErr(w, http.StatusBadRequest, "2fa not configured")
+		return
+	}
+	payload, _ := json.Marshal(M{"twoFactor": account.TwoFA})
+	httpReq, _ := http.NewRequest(http.MethodPost, "https://otp.cicy-ai.com/api/totp", bytes.NewReader(payload))
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 12 * time.Second}).Do(httpReq)
+	if err != nil {
+		httpErr(w, http.StatusBadGateway, "TOTP service request failed")
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		httpErr(w, http.StatusBadGateway, "TOTP service rejected the key")
+		return
+	}
+	var result struct {
+		Capture   string `json:"capture"`
+		Code      string `json:"code"`
+		Countdown int    `json:"countdown"`
+		Period    int    `json:"period"`
+	}
+	if json.Unmarshal(body, &result) != nil || result.Code == "" {
+		httpErr(w, http.StatusBadGateway, "invalid TOTP service response")
+		return
+	}
+	J(w, result)
 }
 
 var githubAccountNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$`)
@@ -108,7 +164,7 @@ func handleGithubAccounts(w http.ResponseWriter, r *http.Request) {
 				httpErr(w, http.StatusNotFound, "GitHub account not found")
 				return
 			}
-			J(w, M{"api_token": account.APIToken})
+			J(w, M{"api_token": account.APIToken, "2fa": account.TwoFA})
 			return
 		}
 		type item struct {
@@ -116,10 +172,12 @@ func handleGithubAccounts(w http.ResponseWriter, r *http.Request) {
 			Email     string `json:"email"`
 			TokenSet  bool   `json:"token_set"`
 			TokenTail string `json:"token_tail,omitempty"`
+			TwoFASet  bool   `json:"2fa_set"`
+			Profile   string `json:"profile"`
 		}
 		items := make([]item, 0, len(accounts))
 		for name, account := range accounts {
-			items = append(items, item{Name: name, Email: account.Email, TokenSet: strings.TrimSpace(account.APIToken) != "", TokenTail: githubTokenTail(account.APIToken)})
+			items = append(items, item{Name: name, Email: account.Email, TokenSet: strings.TrimSpace(account.APIToken) != "", TokenTail: githubTokenTail(account.APIToken), TwoFASet: strings.TrimSpace(account.TwoFA) != "", Profile: account.Profile})
 		}
 		sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 		J(w, M{"accounts": items})
@@ -129,6 +187,8 @@ func handleGithubAccounts(w http.ResponseWriter, r *http.Request) {
 			OldName  string `json:"old_name"`
 			Email    string `json:"email"`
 			APIToken string `json:"api_token"`
+			TwoFA    string `json:"2fa"`
+			Profile  string `json:"profile"`
 		}
 		if err := readBody(r, &req); err != nil {
 			httpErr(w, http.StatusBadRequest, "invalid body")
@@ -150,6 +210,8 @@ func handleGithubAccounts(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		current.Email = strings.TrimSpace(req.Email)
+		current.TwoFA = strings.TrimSpace(req.TwoFA)
+		current.Profile = strings.TrimSpace(req.Profile)
 		if strings.TrimSpace(req.APIToken) != "" {
 			current.APIToken = strings.TrimSpace(req.APIToken)
 		}
