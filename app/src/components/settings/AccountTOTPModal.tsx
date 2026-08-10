@@ -1,15 +1,22 @@
 import { Check, Copy, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AppModal } from "../ui/Modal";
 
 export type TOTPValue = { capture: string; expiresAt: number };
 
-export default function AccountTOTPModal({ name, value, loading, onClose }: { name: string | null; value?: TOTPValue; loading: boolean; onClose: () => void }) {
+export default function AccountTOTPModal({ name, value, loading, onClose, onRefresh }: { name: string | null; value?: TOTPValue; loading: boolean; onClose: () => void; onRefresh: () => void }) {
   const { t } = useTranslation("workspace");
   const [clock, setClock] = useState(Date.now());
   const [copied, setCopied] = useState(false);
+  const refreshRef = useRef(onRefresh);
+  useEffect(() => { refreshRef.current = onRefresh; }, [onRefresh]);
   useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => {
+    if (!name || !value || loading) return;
+    const timer = window.setTimeout(() => refreshRef.current(), Math.max(0, value.expiresAt - Date.now()) + 150);
+    return () => window.clearTimeout(timer);
+  }, [name, value?.expiresAt, loading]);
   useEffect(() => { setCopied(false); }, [name, value?.capture]);
   const copy = async () => {
     if (!value) return;

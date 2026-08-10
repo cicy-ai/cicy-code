@@ -128,7 +128,7 @@ export default function GoogleAccountsPanel({ active }: { active: boolean }) {
           </article>
         ))}
       </div>
-      <AccountTOTPModal name={totpName} value={totpValue} loading={totpLoading} onClose={() => setTotpName(null)} />
+      <AccountTOTPModal name={totpName} value={totpValue} loading={totpLoading} onClose={() => setTotpName(null)} onRefresh={() => { if (totpName) void showTOTP(totpName); }} />
     </div>
   );
 }

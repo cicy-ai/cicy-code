@@ -4,7 +4,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Check,
-  Copy,
   Eye,
   EyeOff,
   ExternalLink,
@@ -21,6 +20,7 @@ import { useTranslation } from "react-i18next";
 import apiService from "../../services/api";
 import { AppModal, useDialogs } from "../ui/Modal";
 import { openChromeProfile } from "./GoogleAccountsPanel";
+import AccountTOTPModal, { type TOTPValue } from "./AccountTOTPModal";
 
 type GithubAccount = {
   name: string;
@@ -50,9 +50,8 @@ export default function GithubAccountsPanel({
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState("");
   const [generating2FA, setGenerating2FA] = useState("");
-  const [totp, setTotp] = useState<Record<string, { code: string; capture: string; expiresAt: number }>>({});
+  const [totp, setTotp] = useState<Record<string, TOTPValue>>({});
   const [totpModal, setTotpModal] = useState<string | null>(null);
-  const [clock, setClock] = useState(Date.now());
   const [testResult, setTestResult] = useState<Record<string, string>>({});
   const { confirm, node: dialogsNode } = useDialogs();
   const [sending, setSending] = useState("");
@@ -73,10 +72,6 @@ export default function GithubAccountsPanel({
   useEffect(() => {
     if (active) void load();
   }, [active, load]);
-  useEffect(() => {
-    const timer = window.setInterval(() => setClock(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   const beginNew = () => {
     setEditing("");
@@ -159,7 +154,7 @@ export default function GithubAccountsPanel({
     try {
       const response = await apiService.getGithubAccountTOTP(name);
       const countdown = Number(response.data?.countdown || 0);
-      setTotp((v) => ({ ...v, [name]: { code: String(response.data?.code || ""), capture: String(response.data?.capture || response.data?.code || ""), expiresAt: Date.now() + countdown * 1000 } }));
+      setTotp((v) => ({ ...v, [name]: { capture: String(response.data?.capture || response.data?.code || ""), expiresAt: Date.now() + countdown * 1000 } }));
     } catch {
       setError(t("github2FAGenerateFailed"));
     } finally {
@@ -468,22 +463,7 @@ export default function GithubAccountsPanel({
             ))
           )}
         </div>
-        <AppModal open={totpModal !== null} title={t("github2FAModalTitle", { name: totpModal || "" })} onClose={() => setTotpModal(null)} maxWidth="400px">
-          <section data-id="github-account-2fa-modal" className="py-3 text-center">
-            {totpModal && generating2FA === totpModal ? (
-              <Loader2 className="mx-auto h-6 w-6 animate-spin text-amber-300" />
-            ) : totpModal && totp[totpModal] ? (
-              <>
-                <button data-id="github-account-2fa-copy" type="button" onClick={() => void navigator.clipboard.writeText(totp[totpModal].capture)} className="group mx-auto flex items-center gap-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.08] px-5 py-4 font-mono text-3xl tracking-[0.28em] text-amber-200">
-                  {totp[totpModal].capture}<Copy className="h-4 w-4 tracking-normal text-amber-500 group-hover:text-amber-300" />
-                </button>
-                <div data-id="github-account-2fa-countdown" className="mt-3 text-[12px] text-zinc-500">{t("github2FAExpiresIn", { seconds: Math.max(0, Math.ceil((totp[totpModal].expiresAt - clock) / 1000)) })}</div>
-              </>
-            ) : (
-              <div className="text-[12px] text-rose-300">{t("github2FAGenerateFailed")}</div>
-            )}
-          </section>
-        </AppModal>
+        <AccountTOTPModal name={totpModal} value={totpModal ? totp[totpModal] : undefined} loading={Boolean(totpModal && generating2FA === totpModal)} onClose={() => setTotpModal(null)} onRefresh={() => { if (totpModal) void generate2FA(totpModal); }} />
         <div
           data-id="github-accounts-security-note"
           className="mt-5 flex items-start gap-2 text-[11px] leading-5 text-zinc-600"
