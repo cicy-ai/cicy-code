@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +21,23 @@ func TestMain(m *testing.M) {
 }
 
 type recordingMessageAcker struct{ ids []string }
+
+type lockedLogBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (b *lockedLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *lockedLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
 
 func (a *recordingMessageAcker) Ack(id string) error {
 	a.ids = append(a.ids, id)
@@ -132,6 +152,52 @@ func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("ack not sent over websocket")
+	}
+}
+
+func TestCiCyCloudWebSocketDialLogDoesNotLeakCredentials(t *testing.T) {
+	t.Setenv("CICY_CLOUD_DISABLE_WS", "0")
+	const token = "token-must-never-appear"
+	const ticket = "ticket-must-never-appear"
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/code/ws-ticket":
+			wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+			_ = json.NewEncoder(w).Encode(M{"ticket": ticket, "wsUrl": wsURL})
+		case "/ws":
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
+
+	var logs lockedLogBuffer
+	previousWriter, previousFlags := log.Writer(), log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(previousWriter)
+		log.SetFlags(previousFlags)
+	})
+
+	tr := &cicyCloudTransport{accountID: 17, token: token}
+	defer tr.Close()
+	tr.initStream()
+	deadline := time.Now().Add(3 * time.Second)
+	for !strings.Contains(logs.String(), "websocket dial failed") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	got := logs.String()
+	if !strings.Contains(got, "account=17 status=401") {
+		t.Fatalf("missing actionable dial diagnostics: %q", got)
+	}
+	for _, secret := range []string{token, ticket, "/ws?ticket=", server.URL} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("websocket diagnostics leaked %q: %q", secret, got)
+		}
 	}
 }
 

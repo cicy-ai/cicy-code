@@ -221,6 +221,9 @@ type cicyCloudTransport struct {
 	streamInbox   chan cicyCloudStreamMessage
 	streamWaiters map[string]chan cicyCloudServerFrame
 	streamCursor  int64
+	streamLogMu   sync.Mutex
+	streamLogKey  string
+	streamLogAt   time.Time
 }
 
 type cicyCloudStreamMessage struct {
@@ -249,7 +252,36 @@ const (
 	cicyCloudPollMaxDelay      = 15 * time.Second
 	cicyCloudStreamMinBackoff  = time.Second
 	cicyCloudStreamMaxBackoff  = 30 * time.Second
+	cicyCloudStreamLogInterval = 5 * time.Minute
 )
+
+func (t *cicyCloudTransport) logStreamFailure(stage string, status int, err error) {
+	key := fmt.Sprintf("%s:%d:%T", stage, status, err)
+	now := time.Now()
+	t.streamLogMu.Lock()
+	if key == t.streamLogKey && now.Sub(t.streamLogAt) < cicyCloudStreamLogInterval {
+		t.streamLogMu.Unlock()
+		return
+	}
+	t.streamLogKey = key
+	t.streamLogAt = now
+	t.streamLogMu.Unlock()
+	// Do not include err.Error() for websocket dial/read failures: library
+	// errors may embed the request URL, whose query contains the signed ticket.
+	if status > 0 {
+		log.Printf("[im-cloud] websocket %s failed account=%d status=%d error_type=%T", stage, t.accountID, status, err)
+		return
+	}
+	log.Printf("[im-cloud] websocket %s failed account=%d error_type=%T", stage, t.accountID, err)
+}
+
+func (t *cicyCloudTransport) logStreamConnected(host string) {
+	t.streamLogMu.Lock()
+	t.streamLogKey = ""
+	t.streamLogAt = time.Time{}
+	t.streamLogMu.Unlock()
+	log.Printf("[im-cloud] websocket connected account=%d host=%s", t.accountID, host)
+}
 
 func (t *cicyCloudTransport) initStream() {
 	t.streamOnce.Do(func() {
@@ -323,12 +355,19 @@ func (t *cicyCloudTransport) runMessageStream() {
 		}
 
 		streamURL, err := t.cicyCloudStreamURL()
-		if err == nil {
+		if err != nil {
+			t.logStreamFailure("ticket", 0, err)
+		} else {
 			headers := http.Header{}
 			headers.Set("User-Agent", fmt.Sprintf("cicy-code/%s (%s; %s)", version, runtime.GOOS, runtime.GOARCH))
 			connectedAt := time.Now()
-			conn, _, dialErr := websocket.DefaultDialer.Dial(streamURL, headers)
+			conn, resp, dialErr := websocket.DefaultDialer.Dial(streamURL, headers)
 			if dialErr == nil {
+				host := "unknown"
+				if parsed, parseErr := url.Parse(streamURL); parseErr == nil && parsed.Host != "" {
+					host = parsed.Host
+				}
+				t.logStreamConnected(host)
 				t.streamConnMu.Lock()
 				t.streamConn = conn
 				t.streamConnMu.Unlock()
@@ -338,6 +377,7 @@ func (t *cicyCloudTransport) runMessageStream() {
 				for {
 					var frame cicyCloudServerFrame
 					if readErr := conn.ReadJSON(&frame); readErr != nil {
+						t.logStreamFailure("read", 0, readErr)
 						close(heartbeatStop)
 						_ = conn.Close()
 						t.streamConnMu.Lock()
@@ -356,6 +396,15 @@ func (t *cicyCloudTransport) runMessageStream() {
 				if time.Since(connectedAt) >= cicyCloudStreamMaxBackoff {
 					backoff = 0
 				}
+			} else {
+				status := 0
+				if resp != nil {
+					status = resp.StatusCode
+					if resp.Body != nil {
+						_ = resp.Body.Close()
+					}
+				}
+				t.logStreamFailure("dial", status, dialErr)
 			}
 		}
 
