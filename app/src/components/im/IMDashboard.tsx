@@ -528,7 +528,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
     setCloudTunnelStarting(true); setCloudError('');
     try {
       await apiService.enableCiCyCloudTunnel();
-      toast('固定域名正在启动');
+      toast('临时 CFT 正在启动，固定代理域名将自动可用');
     } catch (e) {
       setCloudTunnelStarting(false); setCloudError(errText(e));
     }
@@ -1099,10 +1099,10 @@ export default function IMDashboard({ leftMount, rightMount }: {
                     <div><div className="text-[11px] text-zinc-600">Email</div><div className="mt-1 font-mono text-[12px] text-zinc-300">{selected.config?.email || selected.name || '—'}</div></div>
                     <div><div className="text-[11px] text-zinc-600">Team</div><div className="mt-1 font-mono text-[12px] text-zinc-300">{cloudInstance?.teamId || selected.config?.team_id || '—'}</div></div>
                     <div className="sm:col-span-2">
-                      <div className="text-[11px] text-zinc-600">固定域名</div>
+                      <div className="text-[11px] text-zinc-600">固定代理域名</div>
                       <div className="mt-1 flex items-center gap-3">
-                        <div className="break-all font-mono text-[12px] text-zinc-300">{cloudInstance?.proxyHost ? `https://${cloudInstance.proxyHost}` : (cloudTunnelStarting ? '正在启动…' : '尚未开启')}</div>
-                        {!cloudInstance?.proxyHost && <Btn data-id="im-detail-cloud-enable-tunnel" variant="secondary" size="sm" busy={cloudTunnelStarting} disabled={cloudTunnelStarting} onClick={() => void enableCloudTunnel()}>开启固定域名</Btn>}
+                        <div className="break-all font-mono text-[12px] text-zinc-300">{cloudInstance?.proxyHost ? `https://${cloudInstance.proxyHost}` : (cloudTunnelStarting ? '正在等待临时 CFT…' : '临时 CFT 未连接')}</div>
+                        {!cloudInstance?.proxyHost && <Btn data-id="im-detail-cloud-enable-tunnel" variant="secondary" size="sm" busy={cloudTunnelStarting} disabled={cloudTunnelStarting} onClick={() => void enableCloudTunnel()}>启动临时 CFT</Btn>}
                       </div>
                       {cloudError && <div className="mt-2 text-[11px] text-red-300">{cloudError}</div>}
                     </div>
