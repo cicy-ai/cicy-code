@@ -52,11 +52,9 @@ export default function GithubAccountsPanel({
   const [show2FA, setShow2FA] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState("");
   const [generating2FA, setGenerating2FA] = useState("");
   const [totp, setTotp] = useState<Record<string, TOTPValue>>({});
   const [totpModal, setTotpModal] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<Record<string, string>>({});
   const { confirm, node: dialogsNode } = useDialogs();
   const [sending, setSending] = useState("");
   const [usage, setUsage] = useState<Record<string, GithubUsage>>({});
@@ -155,21 +153,6 @@ export default function GithubAccountsPanel({
       await load();
     } catch (e: any) {
       setError(String(e?.response?.data?.detail || e?.message || e));
-    }
-  };
-  const test = async (name: string) => {
-    setTesting(name);
-    setTestResult((v) => ({ ...v, [name]: "" }));
-    try {
-      const r = await apiService.testGithubAccount(name);
-      setTestResult((v) => ({ ...v, [name]: `✓ ${r.data?.login || name}` }));
-    } catch {
-      setTestResult((v) => ({
-        ...v,
-        [name]: t("githubAccountTestFailed", { defaultValue: "连接失败" }),
-      }));
-    } finally {
-      setTesting("");
     }
   };
   const generate2FA = async (name: string) => {
@@ -424,14 +407,6 @@ export default function GithubAccountsPanel({
                           defaultValue: "未设置 Token",
                         })}
                   </div>
-                  {testResult[account.name] && (
-                    <div
-                      data-id="github-account-test-result"
-                      className={`mt-1 text-[11px] ${testResult[account.name].startsWith("✓") ? "text-emerald-400" : "text-rose-400"}`}
-                    >
-                      {testResult[account.name]}
-                    </div>
-                  )}
                   {usage[account.name] && !usage[account.name].error && (
                     <div data-id="github-account-usage" className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-zinc-500">
                       <span>{t("githubUsageUsed", { minutes: Math.round(usage[account.name].actions_minutes) })}</span>
@@ -452,19 +427,6 @@ export default function GithubAccountsPanel({
                   </button>
                 )}
                 {account.profile && <button data-id="github-account-open-chrome" type="button" onClick={() => void openChromeProfile(account.profile).catch((e) => setError(String(e?.message || e)))} className="shrink-0 rounded-md p-2 text-zinc-500 hover:text-zinc-200" title={t("openInChrome")}><ExternalLink className="h-3.5 w-3.5" /></button>}
-                <button
-                  data-id="github-account-test"
-                  type="button"
-                  onClick={() => void test(account.name)}
-                  disabled={testing === account.name}
-                  className="shrink-0 whitespace-nowrap rounded-md border border-white/[0.08] px-2.5 py-1.5 text-[11px] text-zinc-300"
-                >
-                  {testing === account.name ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    t("githubAccountTest", { defaultValue: "测试" })
-                  )}
-                </button>
                 <button
                   data-id="github-account-send-to-agent"
                   type="button"
