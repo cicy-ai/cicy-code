@@ -18,10 +18,13 @@ import (
 	"archive/tar"
 	"bufio"
 	"compress/gzip"
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -371,13 +374,106 @@ func cftNamedOnce(bin, token, url, port string) error {
 	return err
 }
 
+type cftQuickResult struct {
+	Success bool `json:"success"`
+	Result  struct {
+		AccountTag string `json:"account_tag"`
+		Hostname   string `json:"hostname"`
+		ID         string `json:"id"`
+		Secret     string `json:"secret"`
+	} `json:"result"`
+}
+
+// cftQuickCredentials creates an anonymous Quick Tunnel while trying every
+// address returned for api.trycloudflare.com. Cloudflare occasionally leaves
+// one anycast address accepting TCP but stalling/resetting TLS; cloudflared's
+// built-in request only tries the first address and can then fail forever.
+func cftQuickCredentials() (hostname, token string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, "api.trycloudflare.com")
+	if err != nil {
+		return "", "", err
+	}
+	var lastErr error
+	for _, addr := range addrs {
+		if addr.IP.To4() == nil {
+			continue
+		}
+		ip := addr.IP.String()
+		transport := &http.Transport{
+			Proxy: nil,
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{Timeout: 6 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ip, "443"))
+			},
+			TLSHandshakeTimeout: 6 * time.Second,
+		}
+		client := &http.Client{Transport: transport, Timeout: 12 * time.Second}
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.trycloudflare.com/tunnel", nil)
+		if reqErr != nil {
+			transport.CloseIdleConnections()
+			return "", "", reqErr
+		}
+		resp, reqErr := client.Do(req)
+		if reqErr != nil {
+			transport.CloseIdleConnections()
+			lastErr = reqErr
+			continue
+		}
+		var payload cftQuickResult
+		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload)
+		resp.Body.Close()
+		transport.CloseIdleConnections()
+		if decodeErr != nil || resp.StatusCode != http.StatusOK || !payload.Success {
+			lastErr = fmt.Errorf("quick tunnel API %s: status %d", ip, resp.StatusCode)
+			continue
+		}
+		host := strings.ToLower(strings.TrimSpace(payload.Result.Hostname))
+		if !regexp.MustCompile(`^[a-z0-9-]+\.trycloudflare\.com$`).MatchString(host) ||
+			payload.Result.AccountTag == "" || payload.Result.ID == "" || payload.Result.Secret == "" {
+			lastErr = fmt.Errorf("quick tunnel API %s returned invalid credentials", ip)
+			continue
+		}
+		raw, marshalErr := json.Marshal(map[string]string{
+			"a": payload.Result.AccountTag, "t": payload.Result.ID, "s": payload.Result.Secret,
+		})
+		if marshalErr != nil {
+			return "", "", marshalErr
+		}
+		return "https://" + host, base64.StdEncoding.EncodeToString(raw), nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("quick tunnel API has no IPv4 address")
+	}
+	return "", "", lastErr
+}
+
 func cftRunOnce(bin, port string) error {
+	if url, token, err := cftQuickCredentials(); err == nil {
+		return cftRunTokenOnce(bin, port, url, token)
+	} else {
+		log.Printf("[cft] direct Quick Tunnel bootstrap failed, falling back to cloudflared: %v", err)
+	}
+	return cftRunLegacyOnce(bin, port)
+}
+
+func cftRunTokenOnce(bin, port, url, token string) error {
+	cmd := exec.Command(bin, "tunnel", "--url", "http://127.0.0.1:"+port,
+		"--protocol", "http2", "--no-autoupdate", "run", "--token", token)
+	return cftRunCommand(cmd, port, url)
+}
+
+func cftRunLegacyOnce(bin, port string) error {
 	// HTTP/2 is substantially more reliable in Colab and other constrained
 	// containers where QUIC cannot raise the UDP receive buffer. Without this,
 	// cloudflared can print a Quick Tunnel URL before it has any registered edge
 	// connection, leaving the Cloud dashboard with a link that only returns 530.
 	cmd := exec.Command(bin, "tunnel", "--url", "http://127.0.0.1:"+port,
 		"--protocol", "http2", "--no-autoupdate")
+	return cftRunCommand(cmd, port, "")
+}
+
+func cftRunCommand(cmd *exec.Cmd, port, initialURL string) error {
 	// cloudflared logs the assigned URL on stderr; merge both to be safe.
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw
@@ -388,7 +484,7 @@ func cftRunOnce(bin, port string) error {
 	go func() {
 		sc := bufio.NewScanner(pr)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		pendingURL := ""
+		pendingURL := initialURL
 		publishedURL := ""
 		for sc.Scan() {
 			line := sc.Text()
