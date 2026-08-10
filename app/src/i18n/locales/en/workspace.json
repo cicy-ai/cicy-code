@@ -229,7 +229,7 @@
   "githubUsageRefresh": "Refresh usage",
   "githubUsageReset": "Resets {{date}}",
   "githubUsageUsed": "{{minutes}} minutes used",
-  "githubUsageRemaining": "{{minutes}} minutes remaining",
+  "githubUsageRemaining": "{{hours}} hours remaining",
   "githubUsagePercent": "{{percent}}% used",
   "github2FAGenerateFailed": "Failed to generate the 2FA code",
   "github2FAModalTitle": "2FA code for {{name}}",

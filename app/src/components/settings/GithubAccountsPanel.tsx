@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Check,
   Eye,
@@ -9,6 +10,7 @@ import {
   ExternalLink,
   Github,
   Loader2,
+  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
@@ -59,6 +61,7 @@ export default function GithubAccountsPanel({
   const [sending, setSending] = useState("");
   const [usage, setUsage] = useState<Record<string, GithubUsage>>({});
   const [usageLoading, setUsageLoading] = useState<Record<string, boolean>>({});
+  const [actionMenu, setActionMenu] = useState<{ name: string; top: number; right: number } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -410,59 +413,51 @@ export default function GithubAccountsPanel({
                   {usage[account.name] && !usage[account.name].error && (
                     <div data-id="github-account-usage" className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-zinc-500">
                       <span>{t("githubUsageUsed", { minutes: Math.round(usage[account.name].actions_minutes) })}</span>
-                      {usage[account.name].included_available && <span>{t("githubUsageRemaining", { minutes: Math.max(0, Math.round(usage[account.name].included_minutes - usage[account.name].actions_minutes)) })}</span>}
+                      {usage[account.name].included_available && <span>{t("githubUsageRemaining", { hours: (Math.max(0, usage[account.name].included_minutes - usage[account.name].actions_minutes) / 60).toFixed(1).replace(/\.0$/, "") })}</span>}
                       {usage[account.name].included_available && usage[account.name].included_minutes > 0 && <span>{t("githubUsagePercent", { percent: Math.min(100, Math.round(usage[account.name].actions_minutes / usage[account.name].included_minutes * 100)) })}</span>}
                       <span>${Number(usage[account.name].net_amount || 0).toFixed(2)}</span>
-                      {usage[account.name].reset_at && <span>{t("githubUsageReset", { date: new Date(usage[account.name].reset_at).toLocaleDateString() })}</span>}
                       {usage[account.name].included_available && usage[account.name].included_minutes > 0 && <span data-id="github-account-usage-progress" className="mt-1 h-1 w-full overflow-hidden rounded-full bg-white/[0.06]"><span className="block h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, usage[account.name].actions_minutes / usage[account.name].included_minutes * 100)}%` }} /></span>}
                     </div>
                   )}
                   {usageLoading[account.name] && !usage[account.name] && <div data-id="github-account-usage-skeleton" className="mt-2 flex animate-pulse gap-2"><span className="h-2.5 w-20 rounded bg-white/[0.07]" /><span className="h-2.5 w-20 rounded bg-white/[0.07]" /><span className="h-2.5 w-12 rounded bg-white/[0.07]" /></div>}
                   {usage[account.name]?.error && <div data-id="github-account-usage-error" className="mt-1 truncate text-[10px] text-amber-500" title={usage[account.name].error}>{usage[account.name].error}</div>}
                 </div>
-                <button data-id="github-account-refresh-usage" type="button" onClick={() => void fetchUsage(account.name)} disabled={usageLoading[account.name]} className="shrink-0 rounded-md p-2 text-zinc-500 hover:text-zinc-200" title={t("githubUsageRefresh")}>{<RefreshCw className={`h-3.5 w-3.5 ${usageLoading[account.name] ? "animate-spin" : ""}`} />}</button>
-                {account["2fa_set"] && (
-                  <button data-id="github-account-generate-2fa" type="button" onClick={() => void generate2FA(account.name)} disabled={generating2FA === account.name} className="shrink-0 rounded-md border border-amber-500/20 bg-amber-500/[0.08] px-2.5 py-1.5 text-[11px] text-amber-300 disabled:opacity-40">
-                    {generating2FA === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "2FA"}
-                  </button>
-                )}
-                {account.profile && <button data-id="github-account-open-chrome" type="button" onClick={() => void openChromeProfile(account.profile).catch((e) => setError(String(e?.message || e)))} className="shrink-0 rounded-md p-2 text-zinc-500 hover:text-zinc-200" title={t("openInChrome")}><ExternalLink className="h-3.5 w-3.5" /></button>}
                 <button
-                  data-id="github-account-send-to-agent"
+                  data-id="github-account-more"
                   type="button"
-                  onClick={() => void sendToCurrentAgent(account.name)}
-                  disabled={!paneId || sending === account.name}
-                  title={t("githubAccountSendToAgent", {
-                    defaultValue: "发送给当前 Agent",
-                  })}
-                  className="shrink-0 rounded-md border border-sky-500/20 bg-sky-500/[0.08] p-2 text-sky-400 hover:bg-sky-500/[0.15] disabled:opacity-40"
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setActionMenu(actionMenu?.name === account.name ? null : { name: account.name, top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                  }}
+                  title={t("rosterMore", { defaultValue: "更多" })}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/[0.08] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
                 >
-                  {sending === account.name ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Send className="h-3.5 w-3.5" />
-                  )}
-                </button>
-                <button
-                  data-id="github-account-edit"
-                  type="button"
-                  onClick={() => void beginEdit(account)}
-                  className="shrink-0 rounded-md p-2 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  data-id="github-account-delete"
-                  type="button"
-                  onClick={() => void remove(account.name)}
-                  className="shrink-0 rounded-md p-2 text-zinc-500 hover:bg-white/[0.06] hover:text-rose-300"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <MoreHorizontal className="h-4 w-4" />
                 </button>
               </article>
             ))
           )}
         </div>
+        {actionMenu && (() => {
+          const account = accounts.find((item) => item.name === actionMenu.name);
+          if (!account) return null;
+          const itemClass = "flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06] hover:text-white disabled:opacity-40";
+          return createPortal(
+            <>
+              <button data-id="github-account-more-backdrop" type="button" aria-label={t("cancel", { defaultValue: "关闭" })} className="fixed inset-0 z-[100] cursor-default" onClick={() => setActionMenu(null)} />
+              <div data-id="github-account-more-menu" className="fixed z-[101] min-w-[180px] overflow-hidden rounded-lg border border-white/[0.1] bg-[#181818] py-1 shadow-2xl" style={{ top: actionMenu.top, right: actionMenu.right }}>
+                <button data-id="github-account-refresh-usage" type="button" disabled={usageLoading[account.name]} className={itemClass} onClick={() => { setActionMenu(null); void fetchUsage(account.name); }}><RefreshCw className={`h-3.5 w-3.5 ${usageLoading[account.name] ? "animate-spin" : ""}`} />{t("githubUsageRefresh")}</button>
+                {account["2fa_set"] && <button data-id="github-account-generate-2fa" type="button" disabled={generating2FA === account.name} className={itemClass} onClick={() => { setActionMenu(null); void generate2FA(account.name); }}>{generating2FA === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <span className="w-3.5 text-center text-[10px] font-semibold text-amber-300">2F</span>}{t("github2FAModalTitle", { name: account.name })}</button>}
+                {account.profile && <button data-id="github-account-open-chrome" type="button" className={itemClass} onClick={() => { setActionMenu(null); void openChromeProfile(account.profile).catch((e) => setError(String(e?.message || e))); }}><ExternalLink className="h-3.5 w-3.5" />{t("openInChrome")}</button>}
+                <button data-id="github-account-send-to-agent" type="button" disabled={!paneId || sending === account.name} className={itemClass} onClick={() => { setActionMenu(null); void sendToCurrentAgent(account.name); }}>{sending === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}{t("githubAccountSendToAgent", { defaultValue: "发送给当前 Agent" })}</button>
+                <button data-id="github-account-edit" type="button" className={itemClass} onClick={() => { setActionMenu(null); void beginEdit(account); }}><Pencil className="h-3.5 w-3.5" />{t("settingsEdit", { defaultValue: "编辑" })}</button>
+                <div className="my-1 border-t border-white/[0.07]" />
+                <button data-id="github-account-delete" type="button" className={`${itemClass} text-rose-400 hover:text-rose-300`} onClick={() => { setActionMenu(null); void remove(account.name); }}><Trash2 className="h-3.5 w-3.5" />{t("settingsDelete", { defaultValue: "删除" })}</button>
+              </div>
+            </>,
+            document.body,
+          );
+        })()}
         <AccountTOTPModal name={totpModal} value={totpModal ? totp[totpModal] : undefined} loading={Boolean(totpModal && generating2FA === totpModal)} onClose={() => setTotpModal(null)} onRefresh={() => { if (totpModal) void generate2FA(totpModal); }} />
         <div
           data-id="github-accounts-security-note"

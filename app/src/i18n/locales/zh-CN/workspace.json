@@ -229,7 +229,7 @@
   "githubUsageRefresh": "刷新用量",
   "githubUsageReset": "{{date}} 重置",
   "githubUsageUsed": "已用 {{minutes}} 分钟",
-  "githubUsageRemaining": "剩余 {{minutes}} 分钟",
+  "githubUsageRemaining": "剩余 {{hours}} 小时",
   "githubUsagePercent": "已用 {{percent}}%",
   "github2FAGenerateFailed": "2FA 验证码生成失败",
   "github2FAModalTitle": "{{name}} 的 2FA 验证码",
