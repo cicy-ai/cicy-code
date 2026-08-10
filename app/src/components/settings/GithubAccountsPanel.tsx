@@ -436,8 +436,10 @@ export default function GithubAccountsPanel({
                     <div data-id="github-account-usage" className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-zinc-500">
                       <span>{t("githubUsageUsed", { minutes: Math.round(usage[account.name].actions_minutes) })}</span>
                       {usage[account.name].included_available && <span>{t("githubUsageRemaining", { minutes: Math.max(0, Math.round(usage[account.name].included_minutes - usage[account.name].actions_minutes)) })}</span>}
+                      {usage[account.name].included_available && usage[account.name].included_minutes > 0 && <span>{t("githubUsagePercent", { percent: Math.min(100, Math.round(usage[account.name].actions_minutes / usage[account.name].included_minutes * 100)) })}</span>}
                       <span>${Number(usage[account.name].net_amount || 0).toFixed(2)}</span>
                       {usage[account.name].reset_at && <span>{t("githubUsageReset", { date: new Date(usage[account.name].reset_at).toLocaleDateString() })}</span>}
+                      {usage[account.name].included_available && usage[account.name].included_minutes > 0 && <span data-id="github-account-usage-progress" className="mt-1 h-1 w-full overflow-hidden rounded-full bg-white/[0.06]"><span className="block h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, usage[account.name].actions_minutes / usage[account.name].included_minutes * 100)}%` }} /></span>}
                     </div>
                   )}
                   {usageLoading[account.name] && !usage[account.name] && <div data-id="github-account-usage-skeleton" className="mt-2 flex animate-pulse gap-2"><span className="h-2.5 w-20 rounded bg-white/[0.07]" /><span className="h-2.5 w-20 rounded bg-white/[0.07]" /><span className="h-2.5 w-12 rounded bg-white/[0.07]" /></div>}
