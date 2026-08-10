@@ -16,7 +16,7 @@ function portURL(fixedDomain: string, port: number): string {
   return `https://${label}-p${port}${suffix}`;
 }
 
-export default function PortsPanel({ fixedDomain, paneId, onClose }: { fixedDomain: string; paneId: string; onClose: () => void }) {
+export default function PortsPanel({ fixedDomain, proxyAvailable, paneId, onClose }: { fixedDomain: string; proxyAvailable: boolean; paneId: string; onClose: () => void }) {
   const [ports, setPorts] = useState<PortRow[]>([]);
   const [port, setPort] = useState('3000');
   const [name, setName] = useState('');
@@ -92,8 +92,8 @@ export default function PortsPanel({ fixedDomain, paneId, onClose }: { fixedDoma
               {sorted.map((item) => (
                 <div key={item.port} data-id={`ports-row-${item.port}`} className="grid grid-cols-[64px_minmax(120px,0.7fr)_minmax(220px,1.3fr)_110px_28px] items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.02] px-2.5 py-2">
                   <span className="font-mono text-[12px] text-zinc-200">{item.port}</span>
-                  <div className="min-w-0"><div className="flex items-center gap-1.5"><span className="truncate text-[11px] text-zinc-300">{item.name || `Port ${item.port}`}</span>{item.detected && <span className="rounded bg-blue-400/10 px-1 py-px text-[9px] text-blue-300">自动检测</span>}</div><div className={`mt-0.5 text-[10px] ${item.online ? 'text-emerald-400' : 'text-zinc-600'}`}>{item.online ? '在线' : '未监听'}</div></div>
-                  <button type="button" disabled={item.visibility === 'closed'} onClick={() => window.open(portURL(fixedDomain, item.port), '_blank', 'noopener,noreferrer')} title={portURL(fixedDomain, item.port)} className="min-w-0 truncate text-left font-mono text-[10px] text-blue-400 hover:text-blue-300 disabled:text-zinc-600">{portURL(fixedDomain, item.port)}</button>
+                  <div className="min-w-0"><div className="flex items-center gap-1.5"><span className="truncate text-[11px] text-zinc-300">{item.name || `Port ${item.port}`}</span>{item.detected && <span className="rounded bg-blue-400/10 px-1 py-px text-[9px] text-blue-300">自动检测</span>}</div><div className={`mt-0.5 text-[10px] ${item.online && proxyAvailable ? 'text-emerald-400' : 'text-zinc-600'}`}>{!item.online ? '本地未监听' : proxyAvailable ? '本地在线 · 公网在线' : '本地在线 · 公网离线'}</div></div>
+                  <button type="button" disabled={item.visibility === 'closed' || !item.online || !proxyAvailable} onClick={() => window.open(portURL(fixedDomain, item.port), '_blank', 'noopener,noreferrer')} title={proxyAvailable ? portURL(fixedDomain, item.port) : '临时 CFT 未连接'} className="min-w-0 truncate text-left font-mono text-[10px] text-blue-400 hover:text-blue-300 disabled:text-zinc-600">{portURL(fixedDomain, item.port)}</button>
                   <select aria-label={`${item.port} visibility`} value={item.visibility} disabled={saving} onChange={(e) => void save(item.port, item.name, e.target.value as Visibility)} className="h-7 rounded border border-white/[0.08] bg-[#111113] px-1.5 text-[11px] text-zinc-300 outline-none">
                     <option value="private">Private</option><option value="public">Public</option><option value="closed">Closed</option>
                   </select>

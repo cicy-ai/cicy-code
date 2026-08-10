@@ -346,6 +346,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
   const [portsOpen, setPortsOpen] = useState(false);
   const [fixedDomain, setFixedDomain] = useState('');
+  const [proxyAvailable, setProxyAvailable] = useState(false);
   useEffect(() => {
     let stopped = false;
     let timer: number | undefined;
@@ -362,8 +363,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         // availability is transient and must not make the Ports control
         // disappear while the heartbeat is reconnecting.
         setFixedDomain(instance?.proxyHost ? `https://${instance.proxyHost}` : '');
+        setProxyAvailable(Boolean(instance?.proxyAvailable));
       } catch {
-        if (!stopped) setFixedDomain('');
+        if (!stopped) { setFixedDomain(''); setProxyAvailable(false); }
       } finally {
         if (!stopped) timer = window.setTimeout(refresh, 15000);
       }
@@ -2000,7 +2002,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           >
             <Globe2 className="w-3.5 h-3.5" />
           </button>
-          {portsOpen && <PortsPanel fixedDomain={fixedDomain} paneId={activeCliPaneId} onClose={() => setPortsOpen(false)} />}
+          {portsOpen && <PortsPanel fixedDomain={fixedDomain} proxyAvailable={proxyAvailable} paneId={activeCliPaneId} onClose={() => setPortsOpen(false)} />}
         </>
       )}
       {!globalVar?.helper_mode && (
@@ -2032,7 +2034,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
       )}
     </>
-  ) : null, [activeCliPaneId, paneId, paneDetails, agentDetail, applyPanePatch, refreshPaneDetail, netLatency, chatWsConnected, chatWsClientId, handleSendPageClientIdToAgent, handleOpenProxyManager, contextUsage, isShellOpen, toggleShellOpen, t, fixedDomain, portsOpen, globalVar?.helper_mode]);
+  ) : null, [activeCliPaneId, paneId, paneDetails, agentDetail, applyPanePatch, refreshPaneDetail, netLatency, chatWsConnected, chatWsClientId, handleSendPageClientIdToAgent, handleOpenProxyManager, contextUsage, isShellOpen, toggleShellOpen, t, fixedDomain, proxyAvailable, portsOpen, globalVar?.helper_mode]);
   // Memoized so the stack's `items` keeps a stable identity across the
   // per-token Workspace re-renders a live conversation triggers (those tokens
   // touch chat-live state the stack never reads). Combined with React.memo on
