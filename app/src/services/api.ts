@@ -376,7 +376,7 @@ const api = {
   getApps: () => http.get('/api/apps'),
 
   getGithubAccounts: () => http.get('/api/github/accounts'),
-  saveGithubAccount: (body: { name: string; old_name?: string; email?: string; api_token?: string; "2fa"?: string; profile?: string }) => http.put('/api/github/accounts', body),
+  saveGithubAccount: (body: { name: string; old_name?: string; email?: string; api_token?: string; "2fa"?: string; profile?: string; password?: string }) => http.put('/api/github/accounts', body),
   deleteGithubAccount: (name: string) => http.delete('/api/github/accounts', { params: { name } }),
   testGithubAccount: (name: string) => http.post('/api/github/accounts/test', { name }),
   getGithubAccountTOTP: (name: string) => http.post('/api/github/accounts/totp', { name }),

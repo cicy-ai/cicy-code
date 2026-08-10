@@ -29,6 +29,7 @@ type GithubAccount = {
   token_tail?: string;
   "2fa_set": boolean;
   profile: string;
+  password_set: boolean;
 };
 
 export default function GithubAccountsPanel({
@@ -43,10 +44,11 @@ export default function GithubAccountsPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", email: "", api_token: "", "2fa": "", profile: "" });
+  const [form, setForm] = useState({ name: "", email: "", api_token: "", "2fa": "", profile: "", password: "" });
   const [profiles, setProfiles] = useState<string[]>([]);
   const [showToken, setShowToken] = useState(false);
   const [show2FA, setShow2FA] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState("");
   const [generating2FA, setGenerating2FA] = useState("");
@@ -75,9 +77,10 @@ export default function GithubAccountsPanel({
 
   const beginNew = () => {
     setEditing("");
-    setForm({ name: "", email: "", api_token: "", "2fa": "", profile: "" });
+    setForm({ name: "", email: "", api_token: "", "2fa": "", profile: "", password: "" });
     setShowToken(false);
     setShow2FA(false);
+    setShowPassword(false);
     setError("");
   };
   const beginEdit = async (account: GithubAccount) => {
@@ -87,12 +90,12 @@ export default function GithubAccountsPanel({
     setError("");
     try {
       const r = await apiService.getGithubAccountToken(account.name);
-      setForm({ name: account.name, email: account.email || "", api_token: r.data?.api_token || "", "2fa": r.data?.["2fa"] || "", profile: account.profile || "" });
+      setForm({ name: account.name, email: account.email || "", api_token: r.data?.api_token || "", "2fa": r.data?.["2fa"] || "", profile: account.profile || "", password: r.data?.password || "" });
     } catch { setError(t("tokenRevealFailed", { defaultValue: "Token 读取失败" })); }
   };
   const cancel = () => {
     setEditing(null);
-    setForm({ name: "", email: "", api_token: "", "2fa": "", profile: "" });
+    setForm({ name: "", email: "", api_token: "", "2fa": "", profile: "", password: "" });
   };
   const save = async () => {
     setSaving(true);
@@ -105,6 +108,7 @@ export default function GithubAccountsPanel({
         api_token: form.api_token.trim() || undefined,
         "2fa": form["2fa"].trim(),
         profile: form.profile,
+        password: form.password.trim(),
       });
       cancel();
       await load();
@@ -326,6 +330,10 @@ export default function GithubAccountsPanel({
                   {show2FA ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+            </div>
+            <div className="mt-3">
+              <label className="mb-1 block text-[11px] text-zinc-500">Password</label>
+              <div className="relative"><input data-id="github-account-password-input" type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => setForm((v) => ({ ...v, password: e.target.value }))} className={`${inputClass} pr-10`} autoComplete="new-password" /><button data-id="github-account-password-toggle" type="button" onClick={() => setShowPassword((v) => !v)} className="absolute inset-y-0 right-0 px-3 text-zinc-500 hover:text-zinc-300">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
             </div>
             <div className="mt-4 flex gap-2">
               <button

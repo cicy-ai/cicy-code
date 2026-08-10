@@ -22,6 +22,7 @@ type githubAccountConfig struct {
 	Email    string `json:"email"`
 	TwoFA    string `json:"2fa"`
 	Profile  string `json:"profile"`
+	Password string `json:"password"`
 }
 
 func handleGithubAccountTOTP(w http.ResponseWriter, r *http.Request) {
@@ -164,20 +165,21 @@ func handleGithubAccounts(w http.ResponseWriter, r *http.Request) {
 				httpErr(w, http.StatusNotFound, "GitHub account not found")
 				return
 			}
-			J(w, M{"api_token": account.APIToken, "2fa": account.TwoFA})
+			J(w, M{"api_token": account.APIToken, "2fa": account.TwoFA, "password": account.Password})
 			return
 		}
 		type item struct {
-			Name      string `json:"name"`
-			Email     string `json:"email"`
-			TokenSet  bool   `json:"token_set"`
-			TokenTail string `json:"token_tail,omitempty"`
-			TwoFASet  bool   `json:"2fa_set"`
-			Profile   string `json:"profile"`
+			Name        string `json:"name"`
+			Email       string `json:"email"`
+			TokenSet    bool   `json:"token_set"`
+			TokenTail   string `json:"token_tail,omitempty"`
+			TwoFASet    bool   `json:"2fa_set"`
+			Profile     string `json:"profile"`
+			PasswordSet bool   `json:"password_set"`
 		}
 		items := make([]item, 0, len(accounts))
 		for name, account := range accounts {
-			items = append(items, item{Name: name, Email: account.Email, TokenSet: strings.TrimSpace(account.APIToken) != "", TokenTail: githubTokenTail(account.APIToken), TwoFASet: strings.TrimSpace(account.TwoFA) != "", Profile: account.Profile})
+			items = append(items, item{Name: name, Email: account.Email, TokenSet: strings.TrimSpace(account.APIToken) != "", TokenTail: githubTokenTail(account.APIToken), TwoFASet: strings.TrimSpace(account.TwoFA) != "", Profile: account.Profile, PasswordSet: strings.TrimSpace(account.Password) != ""})
 		}
 		sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 		J(w, M{"accounts": items})
@@ -189,6 +191,7 @@ func handleGithubAccounts(w http.ResponseWriter, r *http.Request) {
 			APIToken string `json:"api_token"`
 			TwoFA    string `json:"2fa"`
 			Profile  string `json:"profile"`
+			Password string `json:"password"`
 		}
 		if err := readBody(r, &req); err != nil {
 			httpErr(w, http.StatusBadRequest, "invalid body")
@@ -212,6 +215,7 @@ func handleGithubAccounts(w http.ResponseWriter, r *http.Request) {
 		current.Email = strings.TrimSpace(req.Email)
 		current.TwoFA = strings.TrimSpace(req.TwoFA)
 		current.Profile = strings.TrimSpace(req.Profile)
+		current.Password = strings.TrimSpace(req.Password)
 		if strings.TrimSpace(req.APIToken) != "" {
 			current.APIToken = strings.TrimSpace(req.APIToken)
 		}
