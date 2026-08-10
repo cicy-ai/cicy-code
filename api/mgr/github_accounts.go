@@ -334,6 +334,9 @@ func handleGithubAccountUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	var profile struct {
 		Login string `json:"login"`
+		Plan  struct {
+			Name string `json:"name"`
+		} `json:"plan"`
 	}
 	if githubGet("https://api.github.com/user", &profile) != http.StatusOK || profile.Login == "" {
 		httpErr(w, http.StatusBadGateway, "GitHub authentication failed")
@@ -382,6 +385,18 @@ func handleGithubAccountUsage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	included := legacy.IncludedMinutes
+	includedAvailable := legacyStatus >= 200 && legacyStatus < 300
+	if !includedAvailable {
+		switch strings.ToLower(strings.TrimSpace(profile.Plan.Name)) {
+		case "free":
+			included = 2000
+			includedAvailable = true
+		case "pro":
+			included = 3000
+			includedAvailable = true
+		}
+	}
 	reset := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
-	J(w, M{"login": profile.Login, "actions_minutes": minutes, "included_minutes": legacy.IncludedMinutes, "paid_minutes": legacy.TotalPaidMinutesUsed, "gross_amount": gross, "discount_amount": discount, "net_amount": net, "reset_at": reset.Format(time.RFC3339), "included_available": legacyStatus >= 200 && legacyStatus < 300})
+	J(w, M{"login": profile.Login, "actions_minutes": minutes, "included_minutes": included, "paid_minutes": legacy.TotalPaidMinutesUsed, "gross_amount": gross, "discount_amount": discount, "net_amount": net, "reset_at": reset.Format(time.RFC3339), "included_available": includedAvailable, "plan": profile.Plan.Name})
 }
