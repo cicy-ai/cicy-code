@@ -217,6 +217,29 @@ type cicyCloudTransport struct {
 	streamClose   sync.Once
 	streamConnMu  sync.Mutex
 	streamConn    *websocket.Conn
+	streamWriteMu sync.Mutex
+	streamInbox   chan cicyCloudStreamMessage
+	streamWaiters map[string]chan cicyCloudServerFrame
+	streamCursor  int64
+}
+
+type cicyCloudStreamMessage struct {
+	ID               string `json:"id"`
+	SenderInstanceID string `json:"senderInstanceId"`
+	SenderAgentID    string `json:"senderAgentId"`
+	TargetAgentID    string `json:"targetAgentId"`
+	Kind             string `json:"kind"`
+	Text             string `json:"text"`
+	ReplyTo          string `json:"replyTo"`
+}
+
+type cicyCloudServerFrame struct {
+	Type      string                 `json:"type"`
+	RequestID string                 `json:"requestId"`
+	Cursor    int64                  `json:"cursor"`
+	ID        string                 `json:"id"`
+	Error     string                 `json:"error"`
+	Message   cicyCloudStreamMessage `json:"message"`
 }
 
 const (
@@ -232,7 +255,11 @@ func (t *cicyCloudTransport) initStream() {
 	t.streamOnce.Do(func() {
 		t.streamWake = make(chan struct{}, 1)
 		t.streamStop = make(chan struct{})
-		go t.runMessageStream()
+		t.streamInbox = make(chan cicyCloudStreamMessage, 256)
+		t.streamWaiters = make(map[string]chan cicyCloudServerFrame)
+		if os.Getenv("CICY_CLOUD_DISABLE_WS") != "1" {
+			go t.runMessageStream()
+		}
 	})
 }
 
@@ -254,22 +281,24 @@ func (t *cicyCloudTransport) waitForNextPoll(delay time.Duration) {
 	}
 }
 
-func cicyCloudStreamURL() (string, error) {
-	u, err := url.Parse(cicyCloudOrigin())
-	if err != nil {
+func (t *cicyCloudTransport) cicyCloudStreamURL() (string, error) {
+	var ticket struct {
+		Ticket string `json:"ticket"`
+		WSURL  string `json:"wsUrl"`
+	}
+	if err := cloudJSON(http.MethodPost, "/api/code/ws-ticket", t.token, M{}, &ticket); err != nil {
 		return "", err
 	}
-	switch u.Scheme {
-	case "http":
-		u.Scheme = "ws"
-	case "https":
-		u.Scheme = "wss"
-	default:
-		return "", fmt.Errorf("unsupported cloud stream scheme %q", u.Scheme)
+	u, err := url.Parse(strings.TrimSpace(ticket.WSURL))
+	if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || strings.TrimSpace(ticket.Ticket) == "" {
+		return "", fmt.Errorf("invalid cloud websocket ticket")
 	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/api/code/messages/stream"
-	u.RawQuery = ""
-	u.Fragment = ""
+	q := u.Query()
+	q.Set("ticket", ticket.Ticket)
+	t.streamConnMu.Lock()
+	q.Set("cursor", strconv.FormatInt(t.streamCursor, 10))
+	t.streamConnMu.Unlock()
+	u.RawQuery = q.Encode()
 	return u.String(), nil
 }
 
@@ -293,10 +322,9 @@ func (t *cicyCloudTransport) runMessageStream() {
 		default:
 		}
 
-		streamURL, err := cicyCloudStreamURL()
+		streamURL, err := t.cicyCloudStreamURL()
 		if err == nil {
 			headers := http.Header{}
-			headers.Set("Authorization", "Bearer "+t.token)
 			headers.Set("User-Agent", fmt.Sprintf("cicy-code/%s (%s; %s)", version, runtime.GOOS, runtime.GOARCH))
 			connectedAt := time.Now()
 			conn, _, dialErr := websocket.DefaultDialer.Dial(streamURL, headers)
@@ -304,20 +332,26 @@ func (t *cicyCloudTransport) runMessageStream() {
 				t.streamConnMu.Lock()
 				t.streamConn = conn
 				t.streamConnMu.Unlock()
-				// The stream is only a wake-up hint. Every connection/reconnection
-				// immediately triggers the existing D1-backed poll for compensation.
 				t.signalStreamWake()
+				heartbeatStop := make(chan struct{})
+				go t.runStreamHeartbeat(conn, heartbeatStop)
 				for {
-					if _, _, readErr := conn.ReadMessage(); readErr != nil {
+					var frame cicyCloudServerFrame
+					if readErr := conn.ReadJSON(&frame); readErr != nil {
+						close(heartbeatStop)
 						_ = conn.Close()
 						t.streamConnMu.Lock()
 						if t.streamConn == conn {
 							t.streamConn = nil
 						}
+						for id, waiter := range t.streamWaiters {
+							delete(t.streamWaiters, id)
+							close(waiter)
+						}
 						t.streamConnMu.Unlock()
 						break
 					}
-					t.signalStreamWake()
+					t.handleStreamFrame(frame)
 				}
 				if time.Since(connectedAt) >= cicyCloudStreamMaxBackoff {
 					backoff = 0
@@ -335,6 +369,107 @@ func (t *cicyCloudTransport) runMessageStream() {
 			}
 			return
 		}
+	}
+}
+
+func (t *cicyCloudTransport) runStreamHeartbeat(conn *websocket.Conn, stop <-chan struct{}) {
+	ticker := time.NewTicker(cicyCloudHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			t.streamWriteMu.Lock()
+			_ = conn.WriteJSON(M{"type": "heartbeat"})
+			t.streamWriteMu.Unlock()
+		case <-stop:
+			return
+		case <-t.streamStop:
+			return
+		}
+	}
+}
+
+func (t *cicyCloudTransport) handleStreamFrame(frame cicyCloudServerFrame) {
+	if frame.Type == "message" && frame.Message.ID != "" {
+		t.streamConnMu.Lock()
+		if frame.Cursor > t.streamCursor {
+			t.streamCursor = frame.Cursor
+		}
+		t.streamConnMu.Unlock()
+		select {
+		case t.streamInbox <- frame.Message:
+		case <-t.streamStop:
+		}
+		return
+	}
+	if frame.RequestID != "" {
+		t.streamConnMu.Lock()
+		waiter := t.streamWaiters[frame.RequestID]
+		if waiter != nil {
+			delete(t.streamWaiters, frame.RequestID)
+		}
+		t.streamConnMu.Unlock()
+		if waiter != nil {
+			select {
+			case waiter <- frame:
+			default:
+			}
+		}
+	}
+}
+
+func (t *cicyCloudTransport) writeStream(frame M) error {
+	t.initStream()
+	t.streamConnMu.Lock()
+	conn := t.streamConn
+	t.streamConnMu.Unlock()
+	if conn == nil {
+		return fmt.Errorf("cloud websocket disconnected")
+	}
+	t.streamWriteMu.Lock()
+	err := conn.WriteJSON(frame)
+	t.streamWriteMu.Unlock()
+	return err
+}
+
+func (t *cicyCloudTransport) requestStream(frame M) (cicyCloudServerFrame, error) {
+	t.initStream()
+	if t.streamWaiters == nil {
+		return cicyCloudServerFrame{}, fmt.Errorf("cloud websocket disconnected")
+	}
+	requestID, err := randomCodeInstanceID()
+	if err != nil {
+		return cicyCloudServerFrame{}, err
+	}
+	frame["requestId"] = requestID
+	waiter := make(chan cicyCloudServerFrame, 1)
+	t.streamConnMu.Lock()
+	if t.streamConn == nil {
+		t.streamConnMu.Unlock()
+		return cicyCloudServerFrame{}, fmt.Errorf("cloud websocket disconnected")
+	}
+	t.streamWaiters[requestID] = waiter
+	t.streamConnMu.Unlock()
+	if err := t.writeStream(frame); err != nil {
+		t.streamConnMu.Lock()
+		delete(t.streamWaiters, requestID)
+		t.streamConnMu.Unlock()
+		return cicyCloudServerFrame{}, err
+	}
+	select {
+	case response, ok := <-waiter:
+		if !ok {
+			return cicyCloudServerFrame{}, fmt.Errorf("cloud websocket disconnected")
+		}
+		if response.Type == "error" {
+			return response, fmt.Errorf("cloud websocket: %s", response.Error)
+		}
+		return response, nil
+	case <-time.After(10 * time.Second):
+		t.streamConnMu.Lock()
+		delete(t.streamWaiters, requestID)
+		t.streamConnMu.Unlock()
+		return cicyCloudServerFrame{}, fmt.Errorf("cloud websocket timeout")
 	}
 }
 
@@ -515,21 +650,28 @@ func (t *cicyCloudTransport) Edit(botPeer, string, string) error { return errBot
 func (t *cicyCloudTransport) Typing(botPeer) error               { return nil }
 
 func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
+	t.initStream()
 	t.reportAllAgents()
+	t.streamConnMu.Lock()
+	connected := t.streamConn != nil
+	t.streamConnMu.Unlock()
+	if connected {
+		select {
+		case item := <-t.streamInbox:
+			return t.processCloudMessages([]cicyCloudStreamMessage{item})
+		case <-time.After(cicyCloudPollMaxDelay):
+			// Compatibility compensation: old Worker/web clients still enqueue in
+			// D1. Check it infrequently while the Go Hub stream is healthy.
+		case <-t.streamStop:
+			return nil, "", nil
+		}
+	}
 	route := "/api/code/messages/poll"
 	if strings.TrimSpace(cursor) != "" {
 		route += "?ack=" + strings.TrimSpace(cursor)
 	}
 	var out struct {
-		Messages []struct {
-			ID               string `json:"id"`
-			SenderInstanceID string `json:"senderInstanceId"`
-			SenderAgentID    string `json:"senderAgentId"`
-			TargetAgentID    string `json:"targetAgentId"`
-			Kind             string `json:"kind"`
-			Text             string `json:"text"`
-			ReplyTo          string `json:"replyTo"`
-		} `json:"messages"`
+		Messages []cicyCloudStreamMessage `json:"messages"`
 	}
 	if err := cloudJSON(http.MethodGet, route, t.token, nil, &out); err != nil {
 		// The outer IM loop adds a fixed 3s delay on errors. Apply the same
@@ -544,9 +686,13 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 		return nil, "", nil
 	}
 	t.resetIdlePollDelay()
-	msgs := make([]botMsg, 0, len(out.Messages))
-	ids := make([]string, 0, len(out.Messages))
-	for _, item := range out.Messages {
+	return t.processCloudMessages(out.Messages)
+}
+
+func (t *cicyCloudTransport) processCloudMessages(items []cicyCloudStreamMessage) ([]botMsg, string, error) {
+	msgs := make([]botMsg, 0, len(items))
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
 		if item.Kind == "rpc_request" {
 			if err := t.handleRPCRequest(item.ID, item.SenderInstanceID, item.SenderAgentID, item.TargetAgentID, item.Text); err != nil {
 				log.Printf("[im] cicy cloud rpc failed id=%s op_target=%s: %v", item.ID, item.TargetAgentID, err)
@@ -632,7 +778,8 @@ func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, sende
 		"senderAgentId": targetAgentID, "text": string(body),
 		"kind": "rpc_reply", "replyTo": messageID, "hopCount": 1,
 	}
-	return cloudJSON(http.MethodPost, "/api/code/messages", t.token, payload, nil)
+	_, err = t.sendCloudMessage(payload)
+	return err
 }
 
 // Ack confirms one Cloud message only after imHandleInbound accepted it. The
@@ -643,6 +790,9 @@ func (t *cicyCloudTransport) Ack(messageID string) error {
 	if id == "" {
 		return nil
 	}
+	if response, err := t.requestStream(M{"type": "ack", "ids": []string{id}}); err == nil && response.Type == "acked" {
+		return nil
+	}
 	var out struct {
 		Messages []json.RawMessage `json:"messages"`
 	}
@@ -650,22 +800,37 @@ func (t *cicyCloudTransport) Ack(messageID string) error {
 }
 
 func (t *cicyCloudTransport) Send(peer botPeer, text string) (string, error) {
+	targetInstance, targetAgent := splitCiCyCloudPeer(peer.ChatID)
+	senderAgent, replyTo := splitCiCyCloudReplyContext(peer.ContextToken)
+	payload := M{
+		"targetInstanceId": targetInstance, "targetAgentId": targetAgent,
+		"senderAgentId": senderAgent, "text": text,
+		"kind": "agent_reply", "replyTo": replyTo, "hopCount": 1,
+	}
+	id, err := t.sendCloudMessage(payload)
+	if err == nil && strings.TrimSpace(replyTo) != "" {
+		markCiCyCloudInboxReplied(replyTo)
+	}
+	return id, err
+}
+
+func (t *cicyCloudTransport) sendCloudMessage(payload M) (string, error) {
+	frame := M{"type": "send"}
+	for key, value := range payload {
+		frame[key] = value
+	}
+	if response, err := t.requestStream(frame); err == nil && response.Type == "sent" {
+		return response.ID, nil
+	}
 	var out struct {
 		Message struct {
 			ID string `json:"id"`
 		} `json:"message"`
 	}
-	targetInstance, targetAgent := splitCiCyCloudPeer(peer.ChatID)
-	senderAgent, replyTo := splitCiCyCloudReplyContext(peer.ContextToken)
-	err := cloudJSON(http.MethodPost, "/api/code/messages", t.token, M{
-		"targetInstanceId": targetInstance, "targetAgentId": targetAgent,
-		"senderAgentId": senderAgent, "text": text,
-		"kind": "agent_reply", "replyTo": replyTo, "hopCount": 1,
-	}, &out)
-	if err == nil && strings.TrimSpace(replyTo) != "" {
-		markCiCyCloudInboxReplied(replyTo)
+	if err := cloudJSON(http.MethodPost, "/api/code/messages", t.token, payload, &out); err != nil {
+		return "", err
 	}
-	return out.Message.ID, err
+	return out.Message.ID, nil
 }
 
 func splitCiCyCloudReplyContext(contextToken string) (string, string) {
@@ -803,18 +968,32 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			httpErr(w, 400, "target_instance_id and text required")
 			return
 		}
+		var accountID int64
 		var token string
-		_ = store.QueryRow("SELECT secret FROM im_accounts WHERE platform=? ORDER BY id LIMIT 1", imPlatformCiCyCloud).Scan(&token)
-		var out any
-		if err := cloudJSON(http.MethodPost, "/api/code/messages", token, M{
+		_ = store.QueryRow("SELECT id,secret FROM im_accounts WHERE platform=? ORDER BY id LIMIT 1", imPlatformCiCyCloud).Scan(&accountID, &token)
+		payload := M{
 			"targetInstanceId": strings.TrimSpace(in.TargetInstanceID),
 			"targetAgentId":    strings.TrimSpace(in.TargetAgentID),
 			"senderAgentId":    strings.TrimSpace(in.SenderAgentID), "text": strings.TrimSpace(in.Text),
-		}, &out); err != nil {
-			httpErr(w, 502, err.Error())
+		}
+		var messageID string
+		var sendErr error
+		if transport, ok := imTransportFor(accountID).(*cicyCloudTransport); ok {
+			messageID, sendErr = transport.sendCloudMessage(payload)
+		} else {
+			var out struct {
+				Message struct {
+					ID string `json:"id"`
+				} `json:"message"`
+			}
+			sendErr = cloudJSON(http.MethodPost, "/api/code/messages", token, payload, &out)
+			messageID = out.Message.ID
+		}
+		if sendErr != nil {
+			httpErr(w, 502, sendErr.Error())
 			return
 		}
-		J(w, out)
+		J(w, M{"success": true, "message": M{"id": messageID}})
 		return
 	}
 	// POST /api/im/cicy-cloud/login; GET /api/im/cicy-cloud/login/{state}

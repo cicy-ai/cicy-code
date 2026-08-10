@@ -4,12 +4,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+func TestMain(m *testing.M) {
+	_ = os.Setenv("CICY_CLOUD_DISABLE_WS", "1")
+	os.Exit(m.Run())
+}
 
 type recordingMessageAcker struct{ ids []string }
 
@@ -32,16 +38,7 @@ func TestCiCyCloudIdlePollBackoffAndReset(t *testing.T) {
 	}
 }
 
-func TestCiCyCloudStreamURLAndReconnectBackoff(t *testing.T) {
-	t.Setenv("CICY_CLOUD_ORIGIN", "https://cloud.example.test/base/")
-	got, err := cicyCloudStreamURL()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "wss://cloud.example.test/base/api/code/messages/stream" {
-		t.Fatalf("stream URL = %q", got)
-	}
-
+func TestCiCyCloudStreamReconnectBackoff(t *testing.T) {
 	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second, 30 * time.Second}
 	var delay time.Duration
 	for i, expected := range want {
@@ -52,55 +49,89 @@ func TestCiCyCloudStreamURLAndReconnectBackoff(t *testing.T) {
 	}
 }
 
-func TestCiCyCloudStreamConnectWakesD1PollImmediately(t *testing.T) {
-	var pollCount, streamCount atomic.Int32
+func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
+	t.Setenv("CICY_CLOUD_DISABLE_WS", "0")
+	connected := make(chan struct{}, 1)
+	acked := make(chan string, 1)
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/code/messages/poll":
-			pollCount.Add(1)
-			_ = json.NewEncoder(w).Encode(M{"messages": []M{}})
-		case "/api/code/messages/stream":
-			if r.Header.Get("Authorization") != "Bearer test" {
-				t.Errorf("stream authorization header missing")
+		case "/api/code/ws-ticket":
+			wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+			_ = json.NewEncoder(w).Encode(M{"ticket": "signed", "wsUrl": wsURL})
+		case "/ws":
+			if r.URL.Query().Get("ticket") != "signed" {
+				t.Errorf("ticket missing")
 			}
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
 				t.Errorf("upgrade: %v", err)
 				return
 			}
-			streamCount.Add(1)
 			defer conn.Close()
-			_, _, _ = conn.ReadMessage()
+			connected <- struct{}{}
+			_ = conn.WriteJSON(M{"type": "message", "cursor": 42, "message": M{
+				"id": "msg-websocket-12345678", "senderInstanceId": "code-remote-1234567890",
+				"senderAgentId": "w-remote", "targetAgentId": "w-local", "kind": "user_message", "text": "over ws"}})
+			for {
+				var frame struct {
+					Type, RequestID string
+					IDs             []string `json:"ids"`
+				}
+				if conn.ReadJSON(&frame) != nil {
+					return
+				}
+				if frame.Type == "ack" && len(frame.IDs) == 1 {
+					acked <- frame.IDs[0]
+					_ = conn.WriteJSON(M{"type": "acked", "requestId": frame.RequestID})
+				}
+			}
 		default:
 			t.Errorf("unexpected route %s", r.URL.Path)
 		}
 	}))
 	defer server.Close()
 	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
-
 	now := time.Now()
 	tr := &cicyCloudTransport{token: "test", lastHeartbeat: now, lastPresence: now}
 	defer tr.Close()
-	started := time.Now()
-	if _, _, err := tr.Poll(""); err != nil {
+	tr.initStream()
+	select {
+	case <-connected:
+	case <-time.After(3 * time.Second):
+		t.Fatal("websocket did not connect")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		tr.streamConnMu.Lock()
+		ready := tr.streamConn != nil
+		tr.streamConnMu.Unlock()
+		if ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("websocket was not installed on transport")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	msgs, _, err := tr.Poll("")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(started); elapsed >= cicyCloudPollMinDelay {
-		t.Fatalf("stream connection did not wake poll immediately: %s", elapsed)
+	if len(msgs) != 1 || msgs[0].Text != "over ws" || msgs[0].TargetPaneID != "w-local" {
+		t.Fatalf("unexpected messages: %#v", msgs)
 	}
-	if polls, streams := pollCount.Load(), streamCount.Load(); polls != 1 || streams != 1 {
-		t.Fatalf("polls=%d streams=%d, want 1 each", polls, streams)
-	}
-
-	// Poll remains the fact source: the wake-up itself carries no message, so
-	// the worker's next iteration performs the compensating D1 poll.
-	tr.signalStreamWake()
-	if _, _, err := tr.Poll(""); err != nil {
+	if err := tr.Ack(msgs[0].AckID); err != nil {
 		t.Fatal(err)
 	}
-	if polls := pollCount.Load(); polls != 2 {
-		t.Fatalf("compensating D1 polls=%d, want 2", polls)
+	select {
+	case id := <-acked:
+		if id != msgs[0].AckID {
+			t.Fatalf("ack=%q", id)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ack not sent over websocket")
 	}
 }
 
