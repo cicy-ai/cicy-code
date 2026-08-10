@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   Cloud,
-  Bot,
   Eye,
   EyeOff,
   ExternalLink,
@@ -18,7 +17,7 @@ import { useTranslation } from "react-i18next";
 import apiService from "../../services/api";
 import GithubAccountsPanel from "./GithubAccountsPanel";
 import GoogleAccountsPanel, { GoogleIcon, openChromeProfile } from "./GoogleAccountsPanel";
-import ChatGPTAccountsPanel from "./ChatGPTAccountsPanel";
+import ChatGPTAccountsPanel, { ChatGPTIcon } from "./ChatGPTAccountsPanel";
 import { AppModal, useDialogs } from "../ui/Modal";
 
 type Platform = "github" | "cloudflare" | "google" | "chatgpt";
@@ -189,7 +188,7 @@ export default function AccountMatrixPanel({
             onClick={() => setPlatform("chatgpt")}
             className={`grid h-9 w-9 place-items-center rounded-lg border ${platform === "chatgpt" ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300" : "border-transparent text-zinc-500 hover:bg-white/[0.04]"}`}
           >
-            <Bot className="h-4 w-4" />
+            <ChatGPTIcon className="h-4 w-4" />
           </button>
           <button
             data-id="account-matrix-platform-google"

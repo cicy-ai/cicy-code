@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useState } from "react";
-import { Bot, ExternalLink, Eye, EyeOff, Loader2, Pencil, Plus, Save, Trash2, X } from "lucide-react";
+import { ExternalLink, Eye, EyeOff, Loader2, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import apiService from "../../services/api";
 import { AppModal, useDialogs } from "../ui/Modal";
 import { openChromeProfile } from "./GoogleAccountsPanel";
 import AccountTOTPModal, { type TOTPValue } from "./AccountTOTPModal";
+import { assetUrl } from "../../lib/assets";
 
 type ChatGPTAccount = { name: string; email: string; mobile: string; profile: string; password_set: boolean; "2fa_set": boolean };
 const emptyForm = { name: "", email: "", password: "", mobile: "", "2fa": "", profile: "" };
@@ -84,6 +85,12 @@ export default function ChatGPTAccountsPanel({ active }: { active: boolean }) {
     {dialogsNode}
   </div>;
 }
+
+export function ChatGPTIcon({ className = "" }: { className?: string }) {
+  return <img data-id="chatgpt-icon" src={assetUrl("/assets/logos/openai.svg")} className={`${className} brightness-0 invert`} alt="" />;
+}
+
+const Bot = ChatGPTIcon;
 
 function Secret({ dataId, label, value, visible, toggle, change, inputClass }: { dataId: string; label: string; value: string; visible: boolean; toggle: () => void; change: (value: string) => void; inputClass: string }) {
   return <label data-id={`${dataId}-field`}><span className="mb-1 block text-[11px] text-zinc-500">{label}</span><div className="relative"><input data-id={`${dataId}-input`} type={visible ? "text" : "password"} value={value} onChange={(e) => change(e.target.value)} className={`${inputClass} pr-10`} autoComplete="new-password" /><button data-id={`${dataId}-toggle`} type="button" onClick={toggle} className="absolute inset-y-0 right-0 px-3 text-zinc-500">{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></label>;
