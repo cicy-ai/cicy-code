@@ -380,6 +380,7 @@ const api = {
   deleteGithubAccount: (name: string) => http.delete('/api/github/accounts', { params: { name } }),
   testGithubAccount: (name: string) => http.post('/api/github/accounts/test', { name }),
   getGithubAccountTOTP: (name: string) => http.post('/api/github/accounts/totp', { name }),
+  getGithubAccountUsage: (name: string) => http.post('/api/github/accounts/usage', { name }),
   getGithubAccountToken: (name: string) => http.get('/api/github/accounts', { params: { reveal_token: name } }),
   getCloudflareAccounts: () => http.get('/api/cloudflare/accounts'),
   saveCloudflareAccount: (body: { name: string; old_name?: string; label?: string; account_id?: string; api_token?: string; username?: string; email?: string; password?: string; profile?: string; is_default?: boolean; details?: Record<string, string> }) => http.put('/api/cloudflare/accounts', body),

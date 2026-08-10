@@ -49,7 +49,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.383"
+const version = "2.3.384"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -394,6 +394,7 @@ Options:
 	http.HandleFunc("/api/github/accounts", authM(handleGithubAccounts))
 	http.HandleFunc("/api/github/accounts/test", authM(handleGithubAccountTest))
 	http.HandleFunc("/api/github/accounts/totp", authM(handleGithubAccountTOTP))
+	http.HandleFunc("/api/github/accounts/usage", authM(handleGithubAccountUsage))
 	http.HandleFunc("/api/google/accounts", authM(handleGoogleAccounts))
 	http.HandleFunc("/api/google/accounts/totp", authM(handleGoogleAccountTOTP))
 	http.HandleFunc("/api/chatgpt/accounts", authM(handleChatGPTAccounts))

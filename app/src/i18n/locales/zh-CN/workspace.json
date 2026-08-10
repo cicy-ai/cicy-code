@@ -226,6 +226,8 @@
   "settingsNavLanguage": "语言",
   "settingsNavGithub": "GitHub 账号",
   "githubAccountsTitle": "GitHub 账号",
+  "githubUsageRefresh": "刷新用量",
+  "githubUsageReset": "{{date}} 重置",
   "github2FAGenerateFailed": "2FA 验证码生成失败",
   "github2FAModalTitle": "{{name}} 的 2FA 验证码",
   "github2FAExpiresIn": "{{seconds}} 秒后过期，点击验证码可复制",

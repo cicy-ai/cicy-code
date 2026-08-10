@@ -11,6 +11,7 @@ import {
   Loader2,
   Pencil,
   Plus,
+  RefreshCw,
   Save,
   Send,
   Trash2,
@@ -31,6 +32,7 @@ type GithubAccount = {
   profile: string;
   password_set: boolean;
 };
+type GithubUsage = { actions_minutes: number; included_minutes: number; paid_minutes: number; gross_amount: number; discount_amount: number; net_amount: number; reset_at: string; included_available: boolean; error?: string };
 
 export default function GithubAccountsPanel({
   active,
@@ -57,6 +59,8 @@ export default function GithubAccountsPanel({
   const [testResult, setTestResult] = useState<Record<string, string>>({});
   const { confirm, node: dialogsNode } = useDialogs();
   const [sending, setSending] = useState("");
+  const [usage, setUsage] = useState<Record<string, GithubUsage>>({});
+  const [usageLoading, setUsageLoading] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,6 +78,22 @@ export default function GithubAccountsPanel({
   useEffect(() => {
     if (active) void load();
   }, [active, load]);
+  useEffect(() => {
+    if (!active) return;
+    accounts.forEach((account) => void fetchUsage(account.name));
+  }, [active, accounts]);
+
+  async function fetchUsage(name: string) {
+    setUsageLoading((v) => ({ ...v, [name]: true }));
+    try {
+      const response = await apiService.getGithubAccountUsage(name);
+      setUsage((v) => ({ ...v, [name]: response.data }));
+    } catch (e: any) {
+      setUsage((v) => ({ ...v, [name]: { actions_minutes: 0, included_minutes: 0, paid_minutes: 0, gross_amount: 0, discount_amount: 0, net_amount: 0, reset_at: "", included_available: false, error: String(e?.response?.data?.detail || e?.message || e) } }));
+    } finally {
+      setUsageLoading((v) => ({ ...v, [name]: false }));
+    }
+  }
 
   const beginNew = () => {
     setEditing("");
@@ -415,7 +435,16 @@ export default function GithubAccountsPanel({
                       {testResult[account.name]}
                     </div>
                   )}
+                  {usage[account.name] && !usage[account.name].error && (
+                    <div data-id="github-account-usage" className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-zinc-500">
+                      <span>Actions {Math.round(usage[account.name].actions_minutes)} min{usage[account.name].included_available ? ` / ${Math.round(usage[account.name].included_minutes)} min` : ""}</span>
+                      <span>${Number(usage[account.name].net_amount || 0).toFixed(2)}</span>
+                      {usage[account.name].reset_at && <span>{t("githubUsageReset", { date: new Date(usage[account.name].reset_at).toLocaleDateString() })}</span>}
+                    </div>
+                  )}
+                  {usage[account.name]?.error && <div data-id="github-account-usage-error" className="mt-1 text-[10px] text-amber-500">{usage[account.name].error}</div>}
                 </div>
+                <button data-id="github-account-refresh-usage" type="button" onClick={() => void fetchUsage(account.name)} disabled={usageLoading[account.name]} className="shrink-0 rounded-md p-2 text-zinc-500 hover:text-zinc-200" title={t("githubUsageRefresh")}>{<RefreshCw className={`h-3.5 w-3.5 ${usageLoading[account.name] ? "animate-spin" : ""}`} />}</button>
                 {account["2fa_set"] && (
                   <button data-id="github-account-generate-2fa" type="button" onClick={() => void generate2FA(account.name)} disabled={generating2FA === account.name} className="shrink-0 rounded-md border border-amber-500/20 bg-amber-500/[0.08] px-2.5 py-1.5 text-[11px] text-amber-300 disabled:opacity-40">
                     {generating2FA === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "2FA"}

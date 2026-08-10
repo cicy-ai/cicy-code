@@ -291,3 +291,97 @@ func handleGithubAccountTest(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(body, &profile)
 	J(w, M{"success": true, "login": profile.Login, "display_name": profile.Name})
 }
+
+func handleGithubAccountUsage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if readBody(r, &req) != nil {
+		httpErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	accounts, err := readGithubAccounts()
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	account, ok := accounts[strings.TrimSpace(req.Name)]
+	if !ok || strings.TrimSpace(account.APIToken) == "" {
+		httpErr(w, http.StatusNotFound, "GitHub account not found")
+		return
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	githubGet := func(url string, out any) int {
+		httpReq, _ := http.NewRequest(http.MethodGet, url, nil)
+		httpReq.Header.Set("Authorization", "Bearer "+account.APIToken)
+		httpReq.Header.Set("Accept", "application/vnd.github+json")
+		httpReq.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+		httpReq.Header.Set("User-Agent", "cicy-code")
+		resp, requestErr := client.Do(httpReq)
+		if requestErr != nil {
+			return 0
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			_ = json.Unmarshal(body, out)
+		}
+		return resp.StatusCode
+	}
+	var profile struct {
+		Login string `json:"login"`
+	}
+	if githubGet("https://api.github.com/user", &profile) != http.StatusOK || profile.Login == "" {
+		httpErr(w, http.StatusBadGateway, "GitHub authentication failed")
+		return
+	}
+	now := time.Now().UTC()
+	var enhanced struct {
+		UsageItems []struct {
+			Product        string  `json:"product"`
+			SKU            string  `json:"sku"`
+			Quantity       float64 `json:"quantity"`
+			UnitType       string  `json:"unitType"`
+			GrossAmount    float64 `json:"grossAmount"`
+			DiscountAmount float64 `json:"discountAmount"`
+			NetAmount      float64 `json:"netAmount"`
+		} `json:"usageItems"`
+	}
+	enhancedURL := fmt.Sprintf("https://api.github.com/users/%s/settings/billing/usage?year=%d&month=%d", profile.Login, now.Year(), int(now.Month()))
+	enhancedStatus := githubGet(enhancedURL, &enhanced)
+	var legacy struct {
+		TotalMinutesUsed     float64 `json:"total_minutes_used"`
+		TotalPaidMinutesUsed float64 `json:"total_paid_minutes_used"`
+		IncludedMinutes      float64 `json:"included_minutes"`
+	}
+	legacyStatus := githubGet("https://api.github.com/users/"+profile.Login+"/settings/billing/actions", &legacy)
+	minutes := legacy.TotalMinutesUsed
+	enhancedMinutes := 0.0
+	gross, discount, net := 0.0, 0.0, 0.0
+	for _, item := range enhanced.UsageItems {
+		if !strings.EqualFold(item.Product, "Actions") {
+			continue
+		}
+		gross += item.GrossAmount
+		discount += item.DiscountAmount
+		net += item.NetAmount
+		if strings.Contains(strings.ToLower(item.UnitType), "minute") {
+			enhancedMinutes += item.Quantity
+		}
+	}
+	if legacyStatus < 200 || legacyStatus >= 300 {
+		minutes = enhancedMinutes
+	}
+	if enhancedStatus < 200 || enhancedStatus >= 300 {
+		if legacyStatus < 200 || legacyStatus >= 300 {
+			httpErr(w, http.StatusForbidden, "GitHub Token lacks Billing read permission")
+			return
+		}
+	}
+	reset := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+	J(w, M{"login": profile.Login, "actions_minutes": minutes, "included_minutes": legacy.IncludedMinutes, "paid_minutes": legacy.TotalPaidMinutesUsed, "gross_amount": gross, "discount_amount": discount, "net_amount": net, "reset_at": reset.Format(time.RFC3339), "included_available": legacyStatus >= 200 && legacyStatus < 300})
+}
