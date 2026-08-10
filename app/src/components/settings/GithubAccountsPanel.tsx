@@ -386,11 +386,8 @@ export default function GithubAccountsPanel({
         </AppModal>
         <div data-id="github-account-list" className="space-y-2">
           {loading ? (
-            <div
-              data-id="github-accounts-loading"
-              className="flex justify-center py-12 text-zinc-500"
-            >
-              <Loader2 className="h-5 w-5 animate-spin" />
+            <div data-id="github-accounts-loading" className="space-y-2">
+              {[0, 1, 2].map((item) => <div key={item} data-id="github-account-skeleton" className="flex h-[92px] animate-pulse items-center gap-3 rounded-lg border border-white/[0.07] bg-white/[0.02] p-3"><div className="h-8 w-8 rounded-md bg-white/[0.07]" /><div className="flex-1"><div className="h-3 w-24 rounded bg-white/[0.08]" /><div className="mt-2 h-2.5 w-48 rounded bg-white/[0.05]" /><div className="mt-2 h-2.5 w-36 rounded bg-white/[0.05]" /></div><div className="h-7 w-16 rounded bg-white/[0.05]" /></div>)}
             </div>
           ) : accounts.length === 0 ? (
             <div
@@ -404,7 +401,7 @@ export default function GithubAccountsPanel({
               <article
                 key={account.name}
                 data-id={`github-account-${account.name}`}
-                className="flex items-center gap-3 rounded-lg border border-white/[0.07] bg-white/[0.02] p-3"
+                className="flex h-[92px] items-center gap-3 overflow-hidden rounded-lg border border-white/[0.07] bg-white/[0.02] p-3"
               >
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white/[0.06] text-zinc-300">
                   <Github className="h-4 w-4" />
@@ -437,12 +434,14 @@ export default function GithubAccountsPanel({
                   )}
                   {usage[account.name] && !usage[account.name].error && (
                     <div data-id="github-account-usage" className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-zinc-500">
-                      <span>Actions {Math.round(usage[account.name].actions_minutes)} min{usage[account.name].included_available ? ` / ${Math.round(usage[account.name].included_minutes)} min` : ""}</span>
+                      <span>{t("githubUsageUsed", { minutes: Math.round(usage[account.name].actions_minutes) })}</span>
+                      {usage[account.name].included_available && <span>{t("githubUsageRemaining", { minutes: Math.max(0, Math.round(usage[account.name].included_minutes - usage[account.name].actions_minutes)) })}</span>}
                       <span>${Number(usage[account.name].net_amount || 0).toFixed(2)}</span>
                       {usage[account.name].reset_at && <span>{t("githubUsageReset", { date: new Date(usage[account.name].reset_at).toLocaleDateString() })}</span>}
                     </div>
                   )}
-                  {usage[account.name]?.error && <div data-id="github-account-usage-error" className="mt-1 text-[10px] text-amber-500">{usage[account.name].error}</div>}
+                  {usageLoading[account.name] && !usage[account.name] && <div data-id="github-account-usage-skeleton" className="mt-2 flex animate-pulse gap-2"><span className="h-2.5 w-20 rounded bg-white/[0.07]" /><span className="h-2.5 w-20 rounded bg-white/[0.07]" /><span className="h-2.5 w-12 rounded bg-white/[0.07]" /></div>}
+                  {usage[account.name]?.error && <div data-id="github-account-usage-error" className="mt-1 truncate text-[10px] text-amber-500" title={usage[account.name].error}>{usage[account.name].error}</div>}
                 </div>
                 <button data-id="github-account-refresh-usage" type="button" onClick={() => void fetchUsage(account.name)} disabled={usageLoading[account.name]} className="shrink-0 rounded-md p-2 text-zinc-500 hover:text-zinc-200" title={t("githubUsageRefresh")}>{<RefreshCw className={`h-3.5 w-3.5 ${usageLoading[account.name] ? "animate-spin" : ""}`} />}</button>
                 {account["2fa_set"] && (
