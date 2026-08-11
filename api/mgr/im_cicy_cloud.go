@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,15 @@ const defaultCiCyCloudOrigin = "https://cicy-ai.com"
 var cicyCloudEmailRE = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 var cicyCloudTeamRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 var cicyCloudPendingLogins sync.Map // state -> requested team ID
+
+func cicyCloudTraceID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:6])
+}
 
 type cicyCloudCredential struct {
 	Email      string `json:"email"`
@@ -440,6 +450,8 @@ func (t *cicyCloudTransport) runStreamHeartbeat(conn *websocket.Conn, stop <-cha
 
 func (t *cicyCloudTransport) handleStreamFrame(frame cicyCloudServerFrame) {
 	if frame.Type == "message" && frame.Message.ID != "" {
+		log.Printf("[im-cloud] deliver.received transport=ws account=%d id=%s kind=%s src_hash=%s target_agent=%s cursor=%d",
+			t.accountID, frame.Message.ID, frame.Message.Kind, cicyCloudTraceID(frame.Message.SenderInstanceID), frame.Message.TargetAgentID, frame.Cursor)
 		t.streamConnMu.Lock()
 		if frame.Cursor > t.streamCursor {
 			t.streamCursor = frame.Cursor
@@ -735,6 +747,10 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 		return nil, "", nil
 	}
 	t.resetIdlePollDelay()
+	for _, item := range out.Messages {
+		log.Printf("[im-cloud] deliver.received transport=http account=%d id=%s kind=%s src_hash=%s target_agent=%s",
+			t.accountID, item.ID, item.Kind, cicyCloudTraceID(item.SenderInstanceID), item.TargetAgentID)
+	}
 	return t.processCloudMessages(out.Messages)
 }
 
@@ -840,12 +856,17 @@ func (t *cicyCloudTransport) Ack(messageID string) error {
 		return nil
 	}
 	if response, err := t.requestStream(M{"type": "ack", "ids": []string{id}}); err == nil && response.Type == "acked" {
+		log.Printf("[im-cloud] ack.sent transport=ws account=%d id=%s", t.accountID, id)
 		return nil
 	}
 	var out struct {
 		Messages []json.RawMessage `json:"messages"`
 	}
-	return cloudJSON(http.MethodGet, "/api/code/messages/poll?ack="+url.QueryEscape(id), t.token, nil, &out)
+	if err := cloudJSON(http.MethodGet, "/api/code/messages/poll?ack="+url.QueryEscape(id), t.token, nil, &out); err != nil {
+		return err
+	}
+	log.Printf("[im-cloud] ack.sent transport=http account=%d id=%s", t.accountID, id)
+	return nil
 }
 
 func (t *cicyCloudTransport) Send(peer botPeer, text string) (string, error) {
@@ -869,7 +890,15 @@ func (t *cicyCloudTransport) sendCloudMessage(payload M) (string, error) {
 		frame[key] = value
 	}
 	if response, err := t.requestStream(frame); err == nil && response.Type == "sent" {
+		log.Printf("[im-cloud] send.stored transport=ws account=%d id=%s kind=%v dst_hash=%s target_agent=%v cursor=%d",
+			t.accountID, response.ID, payload["kind"], cicyCloudTraceID(fmt.Sprint(payload["targetInstanceId"])), payload["targetAgentId"], response.Cursor)
 		return response.ID, nil
+	} else if err != nil {
+		log.Printf("[im-cloud] send.fallback transport=ws account=%d kind=%v dst_hash=%s target_agent=%v error_code=stream_unavailable",
+			t.accountID, payload["kind"], cicyCloudTraceID(fmt.Sprint(payload["targetInstanceId"])), payload["targetAgentId"])
+	} else {
+		log.Printf("[im-cloud] send.fallback transport=ws account=%d kind=%v dst_hash=%s target_agent=%v error_code=unexpected_response",
+			t.accountID, payload["kind"], cicyCloudTraceID(fmt.Sprint(payload["targetInstanceId"])), payload["targetAgentId"])
 	}
 	var out struct {
 		Message struct {
@@ -879,6 +908,8 @@ func (t *cicyCloudTransport) sendCloudMessage(payload M) (string, error) {
 	if err := cloudJSON(http.MethodPost, "/api/code/messages", t.token, payload, &out); err != nil {
 		return "", err
 	}
+	log.Printf("[im-cloud] send.stored transport=http account=%d id=%s kind=%v dst_hash=%s target_agent=%v",
+		t.accountID, out.Message.ID, payload["kind"], cicyCloudTraceID(fmt.Sprint(payload["targetInstanceId"])), payload["targetAgentId"])
 	return out.Message.ID, nil
 }
 
