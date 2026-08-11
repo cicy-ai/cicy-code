@@ -105,6 +105,8 @@ func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
 				if frame.Type == "ack" && len(frame.IDs) == 1 {
 					acked <- frame.IDs[0]
 					_ = conn.WriteJSON(M{"type": "acked", "requestId": frame.RequestID})
+				} else if frame.Type == "send" {
+					_ = conn.WriteJSON(M{"type": "sent", "requestId": frame.RequestID, "id": "msg-ws-send-12345678", "cursor": 43})
 				}
 			}
 		case "/api/code/messages/poll":
@@ -157,6 +159,17 @@ func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("ack not sent over websocket")
+	}
+	sentID, transport, err := tr.sendCloudMessageWithTransport(M{
+		"targetInstanceId": "code-target-1234567890123456", "targetAgentId": "w-102", "text": "hello", "kind": "user_message",
+	})
+	if err != nil || sentID != "msg-ws-send-12345678" || transport != "ws" {
+		t.Fatalf("send = id %q transport %q err %v", sentID, transport, err)
+	}
+	tr.recordCloudReply(cicyCloudStreamMessage{ID: "msg-ws-reply-12345678", ReplyTo: sentID, Text: "answer", EnqueuedAtMS: 1234})
+	state, ok := tr.cloudMessageState(sentID)
+	if !ok || state.Transport != "ws" || state.Reply.ID != "msg-ws-reply-12345678" || state.ReceivedMS == 0 {
+		t.Fatalf("local websocket message state = %#v, ok=%v", state, ok)
 	}
 }
 

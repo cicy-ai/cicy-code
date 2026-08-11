@@ -32,6 +32,7 @@ const defaultCiCyCloudOrigin = "https://cicy-ai.com"
 
 var cicyCloudEmailRE = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 var cicyCloudTeamRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
+var cicyCloudMessageRE = regexp.MustCompile(`^msg-[A-Za-z0-9_-]{8,96}$`)
 var cicyCloudPendingLogins sync.Map // state -> requested team ID
 
 func cicyCloudTraceID(value string) string {
@@ -234,6 +235,15 @@ type cicyCloudTransport struct {
 	streamLogMu   sync.Mutex
 	streamLogKey  string
 	streamLogAt   time.Time
+	messageMu     sync.Mutex
+	sentMessages  map[string]cicyCloudLocalMessageState
+}
+
+type cicyCloudLocalMessageState struct {
+	Transport  string
+	SentAtMS   int64
+	Reply      cicyCloudStreamMessage
+	ReceivedMS int64
 }
 
 type cicyCloudStreamMessage struct {
@@ -244,6 +254,7 @@ type cicyCloudStreamMessage struct {
 	Kind             string `json:"kind"`
 	Text             string `json:"text"`
 	ReplyTo          string `json:"replyTo"`
+	EnqueuedAtMS     int64  `json:"enqueuedAtMs"`
 }
 
 type cicyCloudServerFrame struct {
@@ -777,6 +788,7 @@ func (t *cicyCloudTransport) processCloudMessages(items []cicyCloudStreamMessage
 		// acknowledged but must never be fed back into an Agent, otherwise two
 		// connected instances automatically answer each other forever.
 		if item.Kind == "agent_reply" || item.Kind == "rpc_reply" {
+			t.recordCloudReply(item)
 			if err := t.Ack(item.ID); err != nil {
 				log.Printf("[im] cicy cloud terminal reply ack failed id=%s kind=%s: %v", item.ID, item.Kind, err)
 			}
@@ -793,6 +805,59 @@ func (t *cicyCloudTransport) processCloudMessages(items []cicyCloudStreamMessage
 			Peer:         botPeer{ChatID: peer, ContextToken: item.TargetAgentID + "|" + item.ID + "|" + source}})
 	}
 	return msgs, strings.Join(ids, ","), nil
+}
+
+func (t *cicyCloudTransport) recordCloudSend(id, transport string) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return
+	}
+	t.messageMu.Lock()
+	defer t.messageMu.Unlock()
+	if t.sentMessages == nil {
+		t.sentMessages = make(map[string]cicyCloudLocalMessageState)
+	}
+	state := t.sentMessages[id]
+	state.Transport = transport
+	state.SentAtMS = time.Now().UnixMilli()
+	t.sentMessages[id] = state
+	t.pruneCloudMessagesLocked()
+}
+
+func (t *cicyCloudTransport) recordCloudReply(reply cicyCloudStreamMessage) {
+	replyTo := strings.TrimSpace(reply.ReplyTo)
+	if replyTo == "" {
+		return
+	}
+	t.messageMu.Lock()
+	defer t.messageMu.Unlock()
+	if t.sentMessages == nil {
+		t.sentMessages = make(map[string]cicyCloudLocalMessageState)
+	}
+	state := t.sentMessages[replyTo]
+	state.Reply = reply
+	state.ReceivedMS = time.Now().UnixMilli()
+	t.sentMessages[replyTo] = state
+	t.pruneCloudMessagesLocked()
+}
+
+func (t *cicyCloudTransport) cloudMessageState(id string) (cicyCloudLocalMessageState, bool) {
+	t.messageMu.Lock()
+	defer t.messageMu.Unlock()
+	state, ok := t.sentMessages[strings.TrimSpace(id)]
+	return state, ok
+}
+
+func (t *cicyCloudTransport) pruneCloudMessagesLocked() {
+	if len(t.sentMessages) <= 256 {
+		return
+	}
+	cutoff := time.Now().Add(-time.Hour).UnixMilli()
+	for id, state := range t.sentMessages {
+		if state.SentAtMS > 0 && state.SentAtMS < cutoff {
+			delete(t.sentMessages, id)
+		}
+	}
 }
 
 func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, senderAgentID, targetAgentID, text, source string) error {
@@ -894,6 +959,11 @@ func (t *cicyCloudTransport) Send(peer botPeer, text string) (string, error) {
 }
 
 func (t *cicyCloudTransport) sendCloudMessage(payload M) (string, error) {
+	id, _, err := t.sendCloudMessageWithTransport(payload)
+	return id, err
+}
+
+func (t *cicyCloudTransport) sendCloudMessageWithTransport(payload M) (string, string, error) {
 	frame := M{"type": "send"}
 	for key, value := range payload {
 		frame[key] = value
@@ -901,7 +971,8 @@ func (t *cicyCloudTransport) sendCloudMessage(payload M) (string, error) {
 	if response, err := t.requestStream(frame); err == nil && response.Type == "sent" {
 		log.Printf("[im-cloud] send.stored transport=ws account=%d id=%s kind=%v dst_hash=%s target_agent=%v cursor=%d",
 			t.accountID, response.ID, payload["kind"], cicyCloudTraceID(fmt.Sprint(payload["targetInstanceId"])), payload["targetAgentId"], response.Cursor)
-		return response.ID, nil
+		t.recordCloudSend(response.ID, "ws")
+		return response.ID, "ws", nil
 	} else if err != nil {
 		log.Printf("[im-cloud] send.fallback transport=ws account=%d kind=%v dst_hash=%s target_agent=%v error_code=stream_unavailable",
 			t.accountID, payload["kind"], cicyCloudTraceID(fmt.Sprint(payload["targetInstanceId"])), payload["targetAgentId"])
@@ -909,7 +980,12 @@ func (t *cicyCloudTransport) sendCloudMessage(payload M) (string, error) {
 		log.Printf("[im-cloud] send.fallback transport=ws account=%d kind=%v dst_hash=%s target_agent=%v error_code=unexpected_response",
 			t.accountID, payload["kind"], cicyCloudTraceID(fmt.Sprint(payload["targetInstanceId"])), payload["targetAgentId"])
 	}
-	return t.sendCloudMessageHTTP(payload)
+	id, err := t.sendCloudMessageHTTP(payload)
+	if err != nil {
+		return "", "http", err
+	}
+	t.recordCloudSend(id, "http")
+	return id, "http", nil
 }
 
 func (t *cicyCloudTransport) sendCloudMessageHTTP(payload M) (string, error) {
@@ -1054,12 +1130,44 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 		J(w, out)
 		return
 	}
+	if len(parts) >= 2 && parts[1] == "status" && r.Method == http.MethodGet {
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if !cicyCloudMessageRE.MatchString(id) {
+			httpErr(w, 400, "invalid message id")
+			return
+		}
+		var accountID int64
+		_ = store.QueryRow("SELECT id FROM im_accounts WHERE platform=? ORDER BY id LIMIT 1", imPlatformCiCyCloud).Scan(&accountID)
+		transport, ok := imTransportFor(accountID).(*cicyCloudTransport)
+		if !ok {
+			httpErr(w, 404, "cloud transport unavailable")
+			return
+		}
+		state, ok := transport.cloudMessageState(id)
+		if !ok {
+			httpErr(w, 404, "message not found")
+			return
+		}
+		status := "pending"
+		var reply any
+		if state.Reply.ID != "" {
+			status = "replied"
+			reply = M{"id": state.Reply.ID, "senderInstanceId": state.Reply.SenderInstanceID,
+				"senderAgentId": state.Reply.SenderAgentID, "text": state.Reply.Text,
+				"replyTo": state.Reply.ReplyTo, "enqueuedAtMs": state.Reply.EnqueuedAtMS,
+				"receivedAtMs": state.ReceivedMS}
+		}
+		J(w, M{"success": true, "status": status, "transport": state.Transport,
+			"message": M{"id": id, "sentAtMs": state.SentAtMS}, "reply": reply})
+		return
+	}
 	if len(parts) >= 2 && parts[1] == "send" && r.Method == http.MethodPost {
 		var in struct {
 			TargetInstanceID string `json:"target_instance_id"`
 			TargetAgentID    string `json:"target_agent_id"`
 			SenderAgentID    string `json:"sender_agent_id"`
 			Text             string `json:"text"`
+			Kind             string `json:"kind"`
 		}
 		if readBody(r, &in) != nil || strings.TrimSpace(in.TargetInstanceID) == "" || strings.TrimSpace(in.Text) == "" {
 			httpErr(w, 400, "target_instance_id and text required")
@@ -1072,11 +1180,16 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			"targetInstanceId": strings.TrimSpace(in.TargetInstanceID),
 			"targetAgentId":    strings.TrimSpace(in.TargetAgentID),
 			"senderAgentId":    strings.TrimSpace(in.SenderAgentID), "text": strings.TrimSpace(in.Text),
+			"kind": strings.TrimSpace(in.Kind),
+		}
+		if payload["kind"] == "" {
+			payload["kind"] = "user_message"
 		}
 		var messageID string
 		var sendErr error
+		messageTransport := "http"
 		if transport, ok := imTransportFor(accountID).(*cicyCloudTransport); ok {
-			messageID, sendErr = transport.sendCloudMessage(payload)
+			messageID, messageTransport, sendErr = transport.sendCloudMessageWithTransport(payload)
 		} else {
 			var out struct {
 				Message struct {
@@ -1090,7 +1203,7 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			httpErr(w, 502, sendErr.Error())
 			return
 		}
-		J(w, M{"success": true, "message": M{"id": messageID}})
+		J(w, M{"success": true, "transport": messageTransport, "message": M{"id": messageID}})
 		return
 	}
 	// POST /api/im/cicy-cloud/login; GET /api/im/cicy-cloud/login/{state}
