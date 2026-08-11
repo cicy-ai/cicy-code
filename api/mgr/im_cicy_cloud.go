@@ -719,7 +719,7 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 	if connected {
 		select {
 		case item := <-t.streamInbox:
-			return t.processCloudMessages([]cicyCloudStreamMessage{item})
+			return t.processCloudMessages([]cicyCloudStreamMessage{item}, "ws")
 		case <-time.After(cicyCloudPollMaxDelay):
 			// Compatibility compensation: old Worker/web clients still enqueue in
 			// D1. Check it infrequently while the Go Hub stream is healthy.
@@ -751,15 +751,15 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 		log.Printf("[im-cloud] deliver.received transport=http account=%d id=%s kind=%s src_hash=%s target_agent=%s",
 			t.accountID, item.ID, item.Kind, cicyCloudTraceID(item.SenderInstanceID), item.TargetAgentID)
 	}
-	return t.processCloudMessages(out.Messages)
+	return t.processCloudMessages(out.Messages, "http")
 }
 
-func (t *cicyCloudTransport) processCloudMessages(items []cicyCloudStreamMessage) ([]botMsg, string, error) {
+func (t *cicyCloudTransport) processCloudMessages(items []cicyCloudStreamMessage, source string) ([]botMsg, string, error) {
 	msgs := make([]botMsg, 0, len(items))
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		if item.Kind == "rpc_request" {
-			if err := t.handleRPCRequest(item.ID, item.SenderInstanceID, item.SenderAgentID, item.TargetAgentID, item.Text); err != nil {
+			if err := t.handleRPCRequest(item.ID, item.SenderInstanceID, item.SenderAgentID, item.TargetAgentID, item.Text, source); err != nil {
 				log.Printf("[im] cicy cloud rpc failed id=%s op_target=%s: %v", item.ID, item.TargetAgentID, err)
 				continue
 			}
@@ -790,12 +790,12 @@ func (t *cicyCloudTransport) processCloudMessages(items []cicyCloudStreamMessage
 		msgs = append(msgs, botMsg{Text: item.Text, FromID: item.SenderInstanceID,
 			TargetPaneID: item.TargetAgentID,
 			AckID:        item.ID,
-			Peer:         botPeer{ChatID: peer, ContextToken: item.TargetAgentID + "|" + item.ID}})
+			Peer:         botPeer{ChatID: peer, ContextToken: item.TargetAgentID + "|" + item.ID + "|" + source}})
 	}
 	return msgs, strings.Join(ids, ","), nil
 }
 
-func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, senderAgentID, targetAgentID, text string) error {
+func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, senderAgentID, targetAgentID, text, source string) error {
 	var req struct {
 		Op     string `json:"op"`
 		Full   bool   `json:"full"`
@@ -843,7 +843,11 @@ func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, sende
 		"senderAgentId": targetAgentID, "text": string(body),
 		"kind": "rpc_reply", "replyTo": messageID, "hopCount": 1,
 	}
-	_, err = t.sendCloudMessage(payload)
+	if source == "http" {
+		_, err = t.sendCloudMessageHTTP(payload)
+	} else {
+		_, err = t.sendCloudMessage(payload)
+	}
 	return err
 }
 
@@ -857,7 +861,6 @@ func (t *cicyCloudTransport) Ack(messageID string) error {
 	}
 	if response, err := t.requestStream(M{"type": "ack", "ids": []string{id}}); err == nil && response.Type == "acked" {
 		log.Printf("[im-cloud] ack.sent transport=ws account=%d id=%s", t.accountID, id)
-		return nil
 	}
 	var out struct {
 		Messages []json.RawMessage `json:"messages"`
@@ -871,13 +874,19 @@ func (t *cicyCloudTransport) Ack(messageID string) error {
 
 func (t *cicyCloudTransport) Send(peer botPeer, text string) (string, error) {
 	targetInstance, targetAgent := splitCiCyCloudPeer(peer.ChatID)
-	senderAgent, replyTo := splitCiCyCloudReplyContext(peer.ContextToken)
+	senderAgent, replyTo, source := splitCiCyCloudReplyContext(peer.ContextToken)
 	payload := M{
 		"targetInstanceId": targetInstance, "targetAgentId": targetAgent,
 		"senderAgentId": senderAgent, "text": text,
 		"kind": "agent_reply", "replyTo": replyTo, "hopCount": 1,
 	}
-	id, err := t.sendCloudMessage(payload)
+	var id string
+	var err error
+	if source == "http" {
+		id, err = t.sendCloudMessageHTTP(payload)
+	} else {
+		id, err = t.sendCloudMessage(payload)
+	}
 	if err == nil && strings.TrimSpace(replyTo) != "" {
 		markCiCyCloudInboxReplied(replyTo)
 	}
@@ -900,6 +909,10 @@ func (t *cicyCloudTransport) sendCloudMessage(payload M) (string, error) {
 		log.Printf("[im-cloud] send.fallback transport=ws account=%d kind=%v dst_hash=%s target_agent=%v error_code=unexpected_response",
 			t.accountID, payload["kind"], cicyCloudTraceID(fmt.Sprint(payload["targetInstanceId"])), payload["targetAgentId"])
 	}
+	return t.sendCloudMessageHTTP(payload)
+}
+
+func (t *cicyCloudTransport) sendCloudMessageHTTP(payload M) (string, error) {
 	var out struct {
 		Message struct {
 			ID string `json:"id"`
@@ -913,12 +926,16 @@ func (t *cicyCloudTransport) sendCloudMessage(payload M) (string, error) {
 	return out.Message.ID, nil
 }
 
-func splitCiCyCloudReplyContext(contextToken string) (string, string) {
-	parts := strings.SplitN(strings.TrimSpace(contextToken), "|", 2)
-	if len(parts) == 2 {
-		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+func splitCiCyCloudReplyContext(contextToken string) (string, string, string) {
+	parts := strings.SplitN(strings.TrimSpace(contextToken), "|", 3)
+	if len(parts) >= 2 {
+		source := ""
+		if len(parts) == 3 {
+			source = strings.TrimSpace(parts[2])
+		}
+		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), source
 	}
-	return strings.TrimSpace(contextToken), ""
+	return strings.TrimSpace(contextToken), "", ""
 }
 
 func splitCiCyCloudPeer(peer string) (string, string) {

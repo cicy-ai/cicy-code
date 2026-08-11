@@ -107,6 +107,8 @@ func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
 					_ = conn.WriteJSON(M{"type": "acked", "requestId": frame.RequestID})
 				}
 			}
+		case "/api/code/messages/poll":
+			_ = json.NewEncoder(w).Encode(M{"messages": []M{}})
 		default:
 			t.Errorf("unexpected route %s", r.URL.Path)
 		}
@@ -141,6 +143,9 @@ func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
 	}
 	if len(msgs) != 1 || msgs[0].Text != "over ws" || msgs[0].TargetPaneID != "w-local" {
 		t.Fatalf("unexpected messages: %#v", msgs)
+	}
+	if !strings.HasSuffix(msgs[0].Peer.ContextToken, "|ws") {
+		t.Fatalf("websocket source not preserved: %q", msgs[0].Peer.ContextToken)
 	}
 	if err := tr.Ack(msgs[0].AckID); err != nil {
 		t.Fatal(err)
@@ -248,7 +253,7 @@ func TestCiCyCloudPollDoesNotFeedAgentRepliesBackToAgent(t *testing.T) {
 	if len(msgs) != 1 || msgs[0].Text != "hello" {
 		t.Fatalf("agent replies must be acked without triggering an agent: %#v", msgs)
 	}
-	if msgs[0].Peer.ContextToken != "|msg-user-12345678" {
+	if msgs[0].Peer.ContextToken != "|msg-user-12345678|http" {
 		t.Fatalf("original message id must be retained for reply correlation, got %q", msgs[0].Peer.ContextToken)
 	}
 	if msgs[0].AckID != "msg-user-12345678" {
@@ -351,7 +356,7 @@ func TestCiCyCloudSendMarksOutputAsTerminalAgentReply(t *testing.T) {
 	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
 
 	tr := &cicyCloudTransport{token: "test"}
-	if _, err := tr.Send(botPeer{ChatID: "code-target-1234567890123456", ContextToken: "w-1001|msg-user-12345678"}, "answer"); err != nil {
+	if _, err := tr.Send(botPeer{ChatID: "code-target-1234567890123456", ContextToken: "w-1001|msg-user-12345678|http"}, "answer"); err != nil {
 		t.Fatal(err)
 	}
 	if body["kind"] != "agent_reply" || body["hopCount"] != float64(1) {
@@ -382,7 +387,7 @@ func TestCiCyCloudRPCReadsStructuredDataWithoutAgentDispatch(t *testing.T) {
 	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
 
 	tr := &cicyCloudTransport{token: "test"}
-	if err := tr.handleRPCRequest("msg-rpc-12345678", "code-source-1234567890123456", "w-9", "w-102", `{"op":"msgs"}`); err != nil {
+	if err := tr.handleRPCRequest("msg-rpc-12345678", "code-source-1234567890123456", "w-9", "w-102", `{"op":"msgs"}`, "ws"); err != nil {
 		t.Fatal(err)
 	}
 	if body["kind"] != "rpc_reply" || body["replyTo"] != "msg-rpc-12345678" || body["hopCount"] != float64(1) {
