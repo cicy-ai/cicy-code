@@ -143,3 +143,12 @@ func anyString(value any) string {
 		return ""
 	}
 }
+
+func TestSubmitEnterRetryLimitKeepsCodexRecoveryBounded(t *testing.T) {
+	if got := submitEnterRetryLimitForAgent("codex"); got != 1 {
+		t.Fatalf("codex retry limit = %d, want one visibility-guarded retry", got)
+	}
+	if got := submitEnterRetryLimitForAgent("claude"); got != submitEnterRetryLimit {
+		t.Fatalf("claude retry limit = %d, want %d", got, submitEnterRetryLimit)
+	}
+}

@@ -144,34 +144,18 @@ func dispatchCiCyCloudInboxItem(item cicyCloudInboxItem) {
 		return
 	}
 
-	before := readAgentTurnStartMarker(pane)
-	// This is the only terminal hop for Cloud messages. It intentionally does
-	// not call ensurePaneReadyForSend, submitPromptWithConfirmation, capture-pane,
-	// OCR, or any other visual confirmation path.
-	if _, err := runTmux("send-keys", "-t", pane, "C-u"); err != nil {
-		updateCiCyCloudInbox(item.MessageID, "received", "clear input: "+err.Error(), false)
-		return
-	}
-	if _, err := runTmux("send-keys", "-t", pane, "-l", "--", item.Text); err != nil {
-		updateCiCyCloudInbox(item.MessageID, "received", "write prompt: "+err.Error(), false)
-		return
-	}
-	if _, err := runTmux("send-keys", "-t", pane, "Enter"); err != nil {
-		// The prompt may already be visible. Never auto-retry an uncertain submit,
-		// because duplicate execution is worse than an explicit failed state.
-		updateCiCyCloudInbox(item.MessageID, "uncertain", "submit prompt: "+err.Error(), false)
-		return
-	}
-
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if agentTurnStartedSince(before, readAgentTurnStartMarker(pane)) {
-			updateCiCyCloudInbox(item.MessageID, "running", "", false)
-			return
+	// Terminal agents use the same serialized, echo-confirmed submission path as
+	// cicy-agent msg. Headless cicy agents remain on deliverCicyMessage above and
+	// never pass through tmux or synthetic Enter keys.
+	if err := sendTextToPane(pane, item.Text, true); err != nil {
+		if sendErr, ok := err.(*tmuxSendError); ok && !sendErr.PaneUpdated {
+			updateCiCyCloudInbox(item.MessageID, "received", sendErr.Message, false)
+		} else {
+			updateCiCyCloudInbox(item.MessageID, "uncertain", err.Error(), false)
 		}
-		time.Sleep(250 * time.Millisecond)
+		return
 	}
-	updateCiCyCloudInbox(item.MessageID, "uncertain", "no structured turn-start event within 30s", false)
+	updateCiCyCloudInbox(item.MessageID, "running", "", false)
 }
 
 func markCiCyCloudInboxReplied(messageID string) {

@@ -60,7 +60,7 @@ const codexSubmitConfirmPollInterval = 80 * time.Millisecond
 const submitConfirmTimeout = 5 * time.Second
 const codexSubmitConfirmTimeout = 5 * time.Second
 const submitEnterRetryLimit = 2
-const codexSubmitEnterRetryLimit = 0
+const codexSubmitEnterRetryLimit = 1
 const startupPromptBatchWindow = 5 * time.Second
 const startupPromptCooldown = 15 * time.Second
 const directPromptRuneThreshold = 600
@@ -4644,20 +4644,30 @@ func submitPromptWithConfirmation(paneID, agentType, text string, before agentTu
 		}
 		return false
 	}
-	// One delivery attempt sends Enter exactly once. Repeated Enter presses can
-	// duplicate a prompt; a failed confirmation is returned to the Cloud poller,
-	// which leaves the message unacked for a later clean retry.
-	if trace != nil {
-		trace.logStep("submit-enter", map[string]any{"attempt": 1}, "")
-	}
-	if err := sendPromptEnter(paneID); err != nil {
-		if trace != nil {
-			trace.logStep("submit-enter-error", map[string]any{"attempt": 1, "error": err.Error()}, "")
+	// Retry Enter only while the original text is still visibly present in the
+	// prompt. tmux accepting a key only proves that it reached the PTY; a TUI can
+	// drop it while finishing a paste or redraw. The visibility guard prevents a
+	// second Enter after an uncertain/hidden submission from duplicating a turn.
+	maxAttempts := 1 + submitEnterRetryLimitForAgent(agentType)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 && !lineContainsPromptFragment(lastCapture, text) {
+			if trace != nil {
+				trace.logStep("submit-enter-retry-skipped", map[string]any{"attempt": attempt, "reason": "prompt-text-not-visible"}, lastCapture)
+			}
+			break
 		}
-		return fmt.Errorf("failed to submit text: %w", err)
-	}
-	if checkConfirmed() {
-		return nil
+		if trace != nil {
+			trace.logStep("submit-enter", map[string]any{"attempt": attempt}, "")
+		}
+		if err := sendPromptEnter(paneID); err != nil {
+			if trace != nil {
+				trace.logStep("submit-enter-error", map[string]any{"attempt": attempt, "error": err.Error()}, "")
+			}
+			return fmt.Errorf("failed to submit text: %w", err)
+		}
+		if checkConfirmed() {
+			return nil
+		}
 	}
 	if lastErr != nil {
 		return fmt.Errorf("submit confirm failed for %s: %w", shortPaneID(paneID), lastErr)
