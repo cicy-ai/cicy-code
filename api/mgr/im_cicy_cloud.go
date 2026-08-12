@@ -862,13 +862,17 @@ func (t *cicyCloudTransport) pruneCloudMessagesLocked() {
 
 func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, senderAgentID, targetAgentID, text, source string) error {
 	var req struct {
-		Op     string `json:"op"`
-		Full   bool   `json:"full"`
-		Index  int    `json:"index"`
-		From   string `json:"from"`
-		To     string `json:"to"`
-		Status string `json:"status"`
-		Open   bool   `json:"open"`
+		Op           string  `json:"op"`
+		Full         bool    `json:"full"`
+		Index        int     `json:"index"`
+		From         string  `json:"from"`
+		To           string  `json:"to"`
+		Status       string  `json:"status"`
+		Open         bool    `json:"open"`
+		Title        *string `json:"title"`
+		Guidance     *string `json:"guidance"`
+		SystemPrompt *string `json:"systemPrompt"`
+		Meta         *string `json:"meta"`
 	}
 	var result M
 	var rpcErr error
@@ -893,6 +897,8 @@ func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, sende
 			result, rpcErr = agentMessagesData(agentMessageFilter{From: from, To: to, Status: req.Status, Open: req.Open})
 		case "persona":
 			result, rpcErr = agentPersonaData(target)
+		case "persona_save":
+			result, rpcErr = saveAgentPersonaData(target, req.Title, req.Guidance, req.SystemPrompt, req.Meta)
 		default:
 			rpcErr = fmt.Errorf("unsupported rpc operation %q", req.Op)
 		}
@@ -916,6 +922,44 @@ func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, sende
 		_, err = t.sendCloudMessage(payload)
 	}
 	return err
+}
+
+func saveAgentPersonaData(paneID string, title, guidance, systemPrompt, meta *string) (M, error) {
+	guidancePath, _, ok := agentGuidancePath(paneID)
+	if !ok {
+		return nil, fmt.Errorf("agent guidance file not available")
+	}
+	if title != nil {
+		value := strings.TrimSpace(*title)
+		if value == "" {
+			return nil, fmt.Errorf("title required")
+		}
+		if _, err := store.Exec(fmt.Sprintf("UPDATE agent_config SET title=?,updated_at=%s WHERE pane_id=?", store.Now()), value, normPaneID(paneID)); err != nil {
+			return nil, fmt.Errorf("rename agent: %w", err)
+		}
+	}
+	if guidance != nil {
+		if err := os.WriteFile(guidancePath, []byte(*guidance), 0644); err != nil {
+			return nil, fmt.Errorf("write guidance: %w", err)
+		}
+	}
+	dir := filepath.Join(filepath.Dir(guidancePath), ".cicy")
+	if systemPrompt != nil || meta != nil {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("create persona directory: %w", err)
+		}
+	}
+	if systemPrompt != nil {
+		if err := os.WriteFile(filepath.Join(dir, "system.md"), []byte(*systemPrompt), 0644); err != nil {
+			return nil, fmt.Errorf("write system prompt: %w", err)
+		}
+	}
+	if meta != nil {
+		if err := os.WriteFile(filepath.Join(dir, "meta.yaml"), []byte(*meta), 0644); err != nil {
+			return nil, fmt.Errorf("write meta: %w", err)
+		}
+	}
+	return agentPersonaData(paneID)
 }
 
 func agentPersonaData(paneID string) (M, error) {
