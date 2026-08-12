@@ -2227,7 +2227,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       </div>
                     ) : leftActive === 'skills' ? (
                       <div data-id="left-panel-skills-view" className="absolute inset-0">
-                        <SkillMarketplacePanel paneId={activeCliPaneId || paneId} />
+                        <SkillMarketplacePanel
+                          paneId={activeCliPaneId || paneId}
+                          onOpenDetail={() => setCliContentOpen(true)}
+                        />
                       </div>
                     ) : leftActive === 'customAgents' ? (
                       <div data-id="left-panel-custom-agents-view" className="absolute inset-0">

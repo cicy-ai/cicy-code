@@ -141,7 +141,7 @@ function SkillAvatar({ skill, size = 'md' }: { skill: MarketSkill; size?: 'sm' |
   );
 }
 
-export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
+export default function SkillMarketplacePanel({ paneId, onOpenDetail }: { paneId: string; onOpenDetail?: () => void }) {
   const { t } = useTranslation('workspace');
   const [skills, setSkills] = useState<MarketSkill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -165,6 +165,10 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   // and forces the rendered markdown DOM to be replaced — wiping any text
   // selection the user has in the help/tools tab.
   const handleDetailClose = useCallback(() => setSelectedName(null), []);
+  const openDetail = useCallback((name: string) => {
+    onOpenDetail?.();
+    setSelectedName(name);
+  }, [onOpenDetail]);
   const handleOpenProxyManager = useCallback(() => { setSelectedName(null); setProxyManagerOpen(true); }, []);
   const handleOpenProxySshManager = useCallback(() => { setSelectedName(null); setProxySshManagerOpen(true); }, []);
   const handleOpenFrpServerManager = useCallback(() => { setSelectedName(null); setFrpServerManagerOpen(true); }, []);
@@ -368,14 +372,14 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
                   className="w-full pl-7 pr-2 py-1.5 text-xs bg-[#0e0e0e] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
                 />
               </div>
-              <div data-id="skill-market-filters" className="flex items-center gap-1 text-[11px]">
+              <div data-id="skill-market-filters" className="flex items-center gap-1 overflow-x-auto whitespace-nowrap text-[11px] scrollbar-hairline">
                 {(['all','installed','available'] as Filter[]).map(f => (
                   <button
                     key={f}
                     data-id={`skill-market-filter-${f}`}
                     onClick={() => setFilter(f)}
                     className={cn(
-                      'px-2 py-0.5 rounded transition-colors',
+                      'shrink-0 whitespace-nowrap px-2 py-0.5 rounded transition-colors',
                       filter === f ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
                     )}
                   >
@@ -388,7 +392,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
                   data-id="skill-market-update-all"
                   onClick={() => { void updateAll(); }}
                   disabled={bulkUpdating || counts.updates === 0}
-                  className="ml-auto inline-flex items-center gap-1 rounded px-2 py-0.5 text-amber-300 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:text-zinc-600"
+                  className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-2 py-0.5 text-amber-300 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:text-zinc-600"
                   title={t('marketplaceUpdateAll')}
                 >
                   <RefreshCw className={cn('h-3 w-3', bulkUpdating && 'animate-spin')} />
@@ -396,7 +400,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
                     ? t('marketplaceUpdatingAll')
                     : t('marketplaceUpdateAllCount', { count: counts.updates })}
                 </button>
-                <button data-id="skill-market-refresh" onClick={load} className="p-1 text-zinc-500 hover:text-zinc-300 rounded" title={t('marketplaceRetry')}>
+                <button data-id="skill-market-refresh" onClick={load} className="shrink-0 p-1 text-zinc-500 hover:text-zinc-300 rounded" title={t('marketplaceRetry')}>
                   <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
                 </button>
               </div>
@@ -429,7 +433,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
                           key={skill.name}
                           skill={skill}
                           selected={selectedName === skill.name}
-                          onClick={() => setSelectedName(skill.name)}
+                          onClick={() => openDetail(skill.name)}
                         />
                       ))}
                     </div>
@@ -442,13 +446,13 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
 
         {hubTab === 'publish' && (
           <div className="flex-1 overflow-y-auto p-4" data-id="skill-hub-publish">
-            <PublishPanel onChanged={load} onOpenDetail={(n) => setSelectedName(n)} />
+            <PublishPanel onChanged={load} onOpenDetail={openDetail} />
           </div>
         )}
 
         {hubTab === 'subscribe' && (
           <div className="flex-1 overflow-y-auto p-4" data-id="skill-hub-subscribe">
-            <SubscribePanel onChanged={load} skills={skills} onOpenDetail={(n) => setSelectedName(n)} selectedName={selectedName} />
+            <SubscribePanel onChanged={load} skills={skills} onOpenDetail={openDetail} selectedName={selectedName} />
           </div>
         )}
       </div>
@@ -1129,7 +1133,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
 
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   useEffect(() => {
-    setPortalTarget(document.querySelector('[data-testid="mid-panel"]') as HTMLElement | null);
+    setPortalTarget(document.querySelector('[data-id="right-panel"]') as HTMLElement | null);
   }, []);
   if (!portalTarget) return null;
 
