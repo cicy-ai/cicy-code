@@ -891,6 +891,8 @@ func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, sende
 				to = target
 			}
 			result, rpcErr = agentMessagesData(agentMessageFilter{From: from, To: to, Status: req.Status, Open: req.Open})
+		case "persona":
+			result, rpcErr = agentPersonaData(target)
 		default:
 			rpcErr = fmt.Errorf("unsupported rpc operation %q", req.Op)
 		}
@@ -914,6 +916,21 @@ func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, sende
 		_, err = t.sendCloudMessage(payload)
 	}
 	return err
+}
+
+func agentPersonaData(paneID string) (M, error) {
+	guidancePath, filename, ok := agentGuidancePath(paneID)
+	if !ok {
+		return nil, fmt.Errorf("agent guidance file not available")
+	}
+	guidance, _ := os.ReadFile(guidancePath)
+	workspace := filepath.Dir(guidancePath)
+	if filename != "AGENTS.md" && filename != "CLAUDE.md" {
+		workspace = filepath.Dir(guidancePath)
+	}
+	system, _ := os.ReadFile(filepath.Join(workspace, ".cicy", "system.md"))
+	meta, _ := os.ReadFile(filepath.Join(workspace, ".cicy", "meta.yaml"))
+	return M{"filename": filename, "guidance": string(guidance), "systemPrompt": string(system), "meta": string(meta)}, nil
 }
 
 // Ack confirms one Cloud message only after imHandleInbound accepted it. The
@@ -1094,9 +1111,16 @@ func (t *cicyCloudTransport) reportAllAgents() {
 		if id == "" {
 			continue
 		}
+		status, model, contextUsedPct, cost := p.Status, p.Model, p.ContextUsedPct, float64(0)
+		if metrics := agentInspectorLiteMetrics(shortPaneID(id)); metrics != nil {
+			status = aiGatewayString(metrics["status"])
+			model = aiGatewayString(metrics["model"])
+			contextUsedPct = int(aiGatewayFloat(metrics["context_used_pct"]))
+			cost = aiGatewayFloat(metrics["cost_credit"])
+		}
 		agents = append(agents, M{"agentId": shortPaneID(id), "title": p.Title,
-			"agentType": p.AgentType, "role": p.Role, "status": p.Status,
-			"model": p.Model, "contextUsedPct": p.ContextUsedPct, "useCustomGateway": p.UseCustomGateway})
+			"agentType": p.AgentType, "role": p.Role, "status": status,
+			"model": model, "contextUsedPct": contextUsedPct, "cost": cost, "useCustomGateway": p.UseCustomGateway})
 	}
 	if err := cloudJSON(http.MethodPost, "/api/code/agents", t.token, M{"agents": agents}, nil); err != nil {
 		log.Printf("[im] cicy cloud presence failed: %v", err)
