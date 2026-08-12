@@ -822,6 +822,11 @@ func buildPollData(paneID string) M {
 func broadcastPollData(paneID string) {
 	data := buildPollData(paneID)
 	hub.broadcast(paneID, ChatEvent{Type: "poll_data", Data: data})
+	if statuses, ok := data["statuses"].(M); ok {
+		for key := range statuses {
+			reportCiCyCloudAgentState(strings.TrimSuffix(key, ":main.0"))
+		}
+	}
 }
 
 // ── HTTP handlers ──

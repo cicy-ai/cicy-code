@@ -1102,6 +1102,37 @@ func (t *cicyCloudTransport) reportAllAgents() {
 	}
 }
 
+// reportAgentState sends the same live snapshot used by TeamPanel. Unlike the
+// roster POST this is an incremental update and therefore cannot remove peers.
+func (t *cicyCloudTransport) reportAgentState(paneID string) {
+	metrics := agentInspectorLiteMetrics(shortPaneID(paneID))
+	if metrics == nil {
+		return
+	}
+	payload := M{"agentId": shortPaneID(paneID), "status": metrics["status"],
+		"model": metrics["model"], "contextUsedPct": metrics["context_used_pct"],
+		"cost": metrics["cost_credit"]}
+	if err := cloudJSON(http.MethodPatch, "/api/code/agents", t.token, payload, nil); err != nil {
+		log.Printf("[im] cicy cloud live agent state failed: %v", err)
+	}
+}
+
+func reportCiCyCloudAgentState(paneID string) {
+	accounts, err := imListAccounts()
+	if err != nil {
+		return
+	}
+	for _, account := range accounts {
+		if !account.Enabled || account.Platform != imPlatformCiCyCloud || strings.TrimSpace(account.Secret) == "" {
+			continue
+		}
+		transport, err := newCiCyCloudTransport(account)
+		if err == nil {
+			go transport.(*cicyCloudTransport).reportAgentState(paneID)
+		}
+	}
+}
+
 func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []string) {
 	if len(parts) >= 2 && parts[1] == "tunnel" && r.Method == http.MethodPost {
 		if err := enableCFT(resolvePort(), true); err != nil {

@@ -678,6 +678,7 @@ Options:
 
 	// Hook: thinking → idle
 	RegisterHook(func(paneID string, old, new paneSt) {
+		reportCiCyCloudAgentState(paneID)
 		if old.Status != nil && *old.Status == "thinking" && new.Status != nil && *new.Status == "idle" {
 			go dispatchQueue(paneID)
 
