@@ -208,9 +208,6 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	//     leading context block in `messages`, NOT concatenated into `system`.
 	// Both stay byte-stable across turns (cache prefix) — no timestamps.
 	systemBase := cicySystemBase(roleSlug)
-	if raw, err := os.ReadFile(filepath.Join(workspace, ".cicy", "system.md")); err == nil {
-		systemBase = strings.TrimSpace(string(raw))
-	}
 	roleContext := strings.TrimSpace(fm.body)
 
 	return liteConfig{

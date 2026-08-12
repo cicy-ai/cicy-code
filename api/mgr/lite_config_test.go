@@ -57,7 +57,7 @@ func TestLiteNoRoleNoTools(t *testing.T) {
 	}
 }
 
-func TestLiteUsesPerAgentCloudSystemOverride(t *testing.T) {
+func TestLiteIgnoresPerAgentCloudSystemOverride(t *testing.T) {
 	prev := cicyRootDir
 	cicyRootDir = t.TempDir()
 	resetLiteConfigCache()
@@ -70,7 +70,7 @@ func TestLiteUsesPerAgentCloudSystemOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := resolveLiteConfig("w-1", ws)
-	if cfg.systemPrompt != "cloud system" {
+	if cfg.systemPrompt != "" {
 		t.Fatalf("systemPrompt=%q", cfg.systemPrompt)
 	}
 	if cfg.roleContext != "agent guidance" {

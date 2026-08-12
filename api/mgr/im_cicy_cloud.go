@@ -682,20 +682,18 @@ func (t *cicyCloudTransport) syncAgentConfigs() {
 					errText = "guidance_write_failed"
 				}
 			}
-			if errText == "" && (cfg.SystemPrompt != nil || cfg.Meta != nil) {
+			if errText == "" && cfg.SystemPrompt != nil {
+				if err := writeAgentRoleFile(paneID, "system.md", *cfg.SystemPrompt); err != nil {
+					errText = "system_write_failed"
+				}
+			}
+			if errText == "" && cfg.Meta != nil {
 				dir := filepath.Join(workspace, ".cicy")
 				if err := os.MkdirAll(dir, 0755); err != nil {
 					errText = "override_mkdir_failed"
 				} else {
-					if cfg.SystemPrompt != nil {
-						if err := os.WriteFile(filepath.Join(dir, "system.md"), []byte(*cfg.SystemPrompt), 0644); err != nil {
-							errText = "system_write_failed"
-						}
-					}
-					if errText == "" && cfg.Meta != nil {
-						if err := os.WriteFile(filepath.Join(dir, "meta.yaml"), []byte(*cfg.Meta), 0644); err != nil {
-							errText = "meta_write_failed"
-						}
+					if err := os.WriteFile(filepath.Join(dir, "meta.yaml"), []byte(*cfg.Meta), 0644); err != nil {
+						errText = "meta_write_failed"
 					}
 				}
 			}
@@ -943,15 +941,15 @@ func saveAgentPersonaData(paneID string, title, guidance, systemPrompt, meta *st
 			return nil, fmt.Errorf("write guidance: %w", err)
 		}
 	}
-	dir := filepath.Join(filepath.Dir(guidancePath), ".cicy")
-	if systemPrompt != nil || meta != nil {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return nil, fmt.Errorf("create persona directory: %w", err)
+	if systemPrompt != nil {
+		if err := writeAgentRoleFile(paneID, "system.md", *systemPrompt); err != nil {
+			return nil, fmt.Errorf("write role system prompt: %w", err)
 		}
 	}
-	if systemPrompt != nil {
-		if err := os.WriteFile(filepath.Join(dir, "system.md"), []byte(*systemPrompt), 0644); err != nil {
-			return nil, fmt.Errorf("write system prompt: %w", err)
+	dir := filepath.Join(filepath.Dir(guidancePath), ".cicy")
+	if meta != nil {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("create persona directory: %w", err)
 		}
 	}
 	if meta != nil {
@@ -972,9 +970,21 @@ func agentPersonaData(paneID string) (M, error) {
 	if filename != "AGENTS.md" && filename != "CLAUDE.md" {
 		workspace = filepath.Dir(guidancePath)
 	}
-	system, _ := os.ReadFile(filepath.Join(workspace, ".cicy", "system.md"))
 	meta, _ := os.ReadFile(filepath.Join(workspace, ".cicy", "meta.yaml"))
-	return M{"filename": filename, "guidance": string(guidance), "systemPrompt": string(system), "meta": string(meta)}, nil
+	system := cicySystemBase(employeeRoleSlug(shortPaneID(normPaneID(paneID))))
+	return M{"filename": filename, "guidance": string(guidance), "systemPrompt": system, "meta": string(meta)}, nil
+}
+
+func writeAgentRoleFile(paneID, name, content string) error {
+	slug := employeeRoleSlug(shortPaneID(normPaneID(paneID)))
+	if slug == "" {
+		return fmt.Errorf("agent role not available")
+	}
+	dir := filepath.Join(agentTemplatesDir(), slug)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, name), []byte(content), 0644)
 }
 
 // Ack confirms one Cloud message only after imHandleInbound accepted it. The
