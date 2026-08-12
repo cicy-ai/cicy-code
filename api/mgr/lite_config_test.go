@@ -78,6 +78,24 @@ func TestLiteIgnoresPerAgentCloudSystemOverride(t *testing.T) {
 	}
 }
 
+func TestLiteIgnoresPerAgentCloudMetaOverride(t *testing.T) {
+	prev := cicyRootDir
+	cicyRootDir = t.TempDir()
+	resetLiteConfigCache()
+	defer func() { cicyRootDir = prev; resetLiteConfigCache() }()
+	ws := writeAgentsMD(t, "agent guidance")
+	if err := os.MkdirAll(filepath.Join(ws, ".cicy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".cicy", "meta.yaml"), []byte("tools: [workspace-only]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := resolveLiteConfig("w-1", ws)
+	if cfg.enabledTools["workspace-only"] {
+		t.Fatalf("workspace meta override must be ignored: %#v", cfg.enabledTools)
+	}
+}
+
 // ── custom-tool runner: argv fill-in safety + guardrails ─────────────────────
 
 func TestLiteCustomToolArgvNoShellInjection(t *testing.T) {

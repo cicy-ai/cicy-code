@@ -107,7 +107,9 @@ func readRoleFile(slug, name string) string {
 	if clean == "" {
 		return ""
 	}
-	if b, err := os.ReadFile(filepath.Join(agentTemplatesDir(), clean, name)); err == nil && strings.TrimSpace(string(b)) != "" {
+	// An on-disk file is authoritative even when empty. This lets an explicit
+	// role edit clear a packaged seed instead of silently restoring it.
+	if b, err := os.ReadFile(filepath.Join(agentTemplatesDir(), clean, name)); err == nil {
 		return string(b)
 	}
 	// Fall back to the packaged seed (embed/memory-seed/agents/…).

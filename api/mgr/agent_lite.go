@@ -4,11 +4,8 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // Lightweight customizable agent runtime.
@@ -159,12 +156,6 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	// 以 role 为主. enabled = expand(the role's selected groups).
 	roleSlug := employeeRoleSlug(shortID) // this agent's role-template slug
 	rm := loadRoleMeta(roleSlug)
-	if raw, err := os.ReadFile(filepath.Join(workspace, ".cicy", "meta.yaml")); err == nil {
-		var override roleMeta
-		if yaml.Unmarshal(raw, &override) == nil {
-			rm = override
-		}
-	}
 	selectGroups := rm.Tools
 	if len(selectGroups) == 0 {
 		if ca, ok := customAgentFor(roleSlug); ok {
