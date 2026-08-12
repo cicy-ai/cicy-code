@@ -1079,6 +1079,7 @@ func (t *cicyCloudTransport) reportAllAgents() {
 			Status         string `json:"status"`
 			Model          string `json:"model"`
 			ContextUsedPct int    `json:"context_used_pct"`
+			UseCustomGateway bool `json:"use_custom_gateway"`
 		} `json:"panes"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&doc) != nil {
@@ -1095,7 +1096,7 @@ func (t *cicyCloudTransport) reportAllAgents() {
 		}
 		agents = append(agents, M{"agentId": shortPaneID(id), "title": p.Title,
 			"agentType": p.AgentType, "role": p.Role, "status": p.Status,
-			"model": p.Model, "contextUsedPct": p.ContextUsedPct})
+			"model": p.Model, "contextUsedPct": p.ContextUsedPct, "useCustomGateway": p.UseCustomGateway})
 	}
 	if err := cloudJSON(http.MethodPost, "/api/code/agents", t.token, M{"agents": agents}, nil); err != nil {
 		log.Printf("[im] cicy cloud presence failed: %v", err)
