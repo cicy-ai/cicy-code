@@ -1404,6 +1404,9 @@ func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 	dropOutboundSnapshot(shortID)
 	dropRuntimeEventsForSession(shortID)
 	dropAgentEventSeq(shortID)
+	// Deletion cannot be represented by an incremental agent-state patch.
+	// Push a full roster now so Cloud canvases and pickers remove it immediately.
+	reportCiCyCloudAgentRosterNow()
 	for _, parentPaneID := range affectedParents {
 		go broadcastPollData(parentPaneID)
 	}

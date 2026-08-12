@@ -1196,6 +1196,26 @@ func reportCiCyCloudAgentState(paneID string) {
 	}
 }
 
+// reportCiCyCloudAgentRosterNow pushes a full snapshot immediately. A fresh
+// transport has no presence timestamps, so reportAllAgents bypasses the normal
+// polling interval. This is used after deletion where an incremental state
+// update cannot express that an agent disappeared.
+func reportCiCyCloudAgentRosterNow() {
+	accounts, err := imListAccounts()
+	if err != nil {
+		return
+	}
+	for _, account := range accounts {
+		if !account.Enabled || account.Platform != imPlatformCiCyCloud || strings.TrimSpace(account.Secret) == "" {
+			continue
+		}
+		transport, err := newCiCyCloudTransport(account)
+		if err == nil {
+			go transport.(*cicyCloudTransport).reportAllAgents()
+		}
+	}
+}
+
 func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []string) {
 	if len(parts) >= 2 && parts[1] == "tunnel" && r.Method == http.MethodPost {
 		if err := enableCFT(resolvePort(), true); err != nil {
