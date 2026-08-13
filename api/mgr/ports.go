@@ -50,7 +50,7 @@ func validPublishedPort(port int) bool {
 
 func normalizePortVisibility(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "private", "public", "closed":
+	case "private", "public":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return ""
@@ -136,6 +136,23 @@ func portMaps(ports []publishedPort) []M {
 	return out
 }
 
+// pruneOfflinePublishedPorts removes stale publication rules as soon as their
+// loopback listener disappears. Ports are live resources, not historical
+// configuration: restarting a service requires publishing it again.
+func pruneOfflinePublishedPorts() []publishedPort {
+	ports := loadPublishedPorts()
+	online := make([]publishedPort, 0, len(ports))
+	for _, item := range ports {
+		if portOnline(item.Port) {
+			online = append(online, item)
+		}
+	}
+	if len(online) != len(ports) {
+		_ = savePublishedPorts(online)
+	}
+	return online
+}
+
 func listeningPortCandidates() []int {
 	var command *exec.Cmd
 	switch runtime.GOOS {
@@ -218,7 +235,7 @@ func discoverHTTPPorts() []int {
 }
 
 func listPortsForUI() []M {
-	configured := loadPublishedPorts()
+	configured := pruneOfflinePublishedPorts()
 	out := portMaps(configured)
 	seen := map[int]bool{}
 	for _, item := range configured {
@@ -229,7 +246,7 @@ func listPortsForUI() []M {
 			continue
 		}
 		out = append(out, M{"port": port, "name": "HTTP " + strconv.Itoa(port),
-			"visibility": "closed", "online": true, "detected": true})
+			"visibility": "private", "online": true, "detected": true})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i]["port"].(int) < out[j]["port"].(int) })
 	return out
@@ -252,7 +269,7 @@ func handlePorts(w http.ResponseWriter, r *http.Request) {
 		}
 		input.Visibility = normalizePortVisibility(input.Visibility)
 		if input.Visibility == "" {
-			httpErr(w, 400, "visibility must be private, public or closed")
+			httpErr(w, 400, "visibility must be private or public")
 			return
 		}
 		ports := loadPublishedPorts()
@@ -302,7 +319,7 @@ func handlePorts(w http.ResponseWriter, r *http.Request) {
 
 func publishedPortByNumber(port int) (publishedPort, error) {
 	for _, item := range loadPublishedPorts() {
-		if item.Port == port && item.Visibility != "closed" {
+		if item.Port == port {
 			return item, nil
 		}
 	}

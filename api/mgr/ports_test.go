@@ -76,17 +76,23 @@ func TestPublishedPortProxyRequiresInstanceProxyAndStripsCredentials(t *testing.
 	}
 }
 
-func TestClosedPortCannotBeProxied(t *testing.T) {
+func TestClosedPortIsRejected(t *testing.T) {
 	withPortsTestDB(t)
-	if err := savePublishedPorts([]publishedPort{{Port: 34568, Visibility: "closed"}}); err != nil {
+	if got := normalizePortVisibility("closed"); got != "" {
+		t.Fatalf("closed visibility must be rejected, got %q", got)
+	}
+}
+
+func TestOfflinePublishedPortIsPruned(t *testing.T) {
+	withPortsTestDB(t)
+	if err := savePublishedPorts([]publishedPort{{Port: 34569, Name: "Stopped", Visibility: "private"}}); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodGet, "http://local/_cicy/ports/34568/", nil)
-	req.Header.Set("x-cicy-instance-proxy", "1")
-	rec := httptest.NewRecorder()
-	handlePublishedPortProxy(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("closed port status=%d", rec.Code)
+	if got := pruneOfflinePublishedPorts(); len(got) != 0 {
+		t.Fatalf("offline ports were not pruned: %#v", got)
+	}
+	if got := loadPublishedPorts(); len(got) != 0 {
+		t.Fatalf("offline ports remain on disk: %#v", got)
 	}
 }
 

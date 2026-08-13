@@ -295,7 +295,7 @@ const api = {
   getCiCyCloudInstances: () => http.get('/api/im/cicy-cloud/instances'),
   enableCiCyCloudTunnel: () => http.post('/api/im/cicy-cloud/tunnel'),
   getPublishedPorts: () => http.get('/api/ports'),
-  savePublishedPort: (port: number, name: string, visibility: 'private' | 'public' | 'closed') =>
+  savePublishedPort: (port: number, name: string, visibility: 'private' | 'public') =>
     http.post('/api/ports', { port, name, visibility }),
   deletePublishedPort: (port: number) => http.delete('/api/ports', { params: { port } }),
   getCiCyCloudAgents: () => http.get('/api/im/cicy-cloud/agents'),

@@ -1192,7 +1192,7 @@ func (t *cicyCloudTransport) reportAllAgents() {
 			"runtime": telemetry.Runtime, "cpuModel": telemetry.CPUModel,
 			"cpuCores": telemetry.CPUCores, "memoryTotalMB": telemetry.MemoryTotalMB,
 			"gpu": telemetry.GPU}
-		heartbeat["ports"] = portMaps(loadPublishedPorts())
+		heartbeat["ports"] = portMaps(pruneOfflinePublishedPorts())
 		if tunnelURL := cftCurrentURL(); tunnelURL != "" {
 			heartbeat["tunnelUrl"] = tunnelURL
 			heartbeat["tunnelToken"] = loadAPIToken()
