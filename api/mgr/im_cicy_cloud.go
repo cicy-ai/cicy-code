@@ -218,6 +218,7 @@ type cicyCloudTransport struct {
 	accountID     int64
 	token         string
 	presenceMu    sync.Mutex
+	stateMu       sync.Mutex
 	lastHeartbeat time.Time
 	lastPresence  time.Time
 	pollMu        sync.Mutex
@@ -228,6 +229,7 @@ type cicyCloudTransport struct {
 	streamClose   sync.Once
 	streamConnMu  sync.Mutex
 	streamConn    *websocket.Conn
+	streamEpoch   uint64
 	streamWriteMu sync.Mutex
 	streamInbox   chan cicyCloudStreamMessage
 	streamWaiters map[string]chan cicyCloudServerFrame
@@ -263,6 +265,7 @@ type cicyCloudServerFrame struct {
 	Cursor    int64                  `json:"cursor"`
 	ID        string                 `json:"id"`
 	Error     string                 `json:"error"`
+	Revision  uint64                 `json:"revision"`
 	Message   cicyCloudStreamMessage `json:"message"`
 }
 
@@ -391,8 +394,11 @@ func (t *cicyCloudTransport) runMessageStream() {
 				t.logStreamConnected(host)
 				t.streamConnMu.Lock()
 				t.streamConn = conn
+				t.streamEpoch++
+				epoch := t.streamEpoch
 				t.streamConnMu.Unlock()
 				t.signalStreamWake()
+				go t.reportAgentDirectoryAndState(epoch)
 				heartbeatStop := make(chan struct{})
 				go t.runStreamHeartbeat(conn, heartbeatStop)
 				for {
@@ -505,6 +511,10 @@ func (t *cicyCloudTransport) writeStream(frame M) error {
 }
 
 func (t *cicyCloudTransport) requestStream(frame M) (cicyCloudServerFrame, error) {
+	return t.requestStreamAtEpoch(frame, 0)
+}
+
+func (t *cicyCloudTransport) requestStreamAtEpoch(frame M, expectedEpoch uint64) (cicyCloudServerFrame, error) {
 	t.initStream()
 	if t.streamWaiters == nil {
 		return cicyCloudServerFrame{}, fmt.Errorf("cloud websocket disconnected")
@@ -516,13 +526,17 @@ func (t *cicyCloudTransport) requestStream(frame M) (cicyCloudServerFrame, error
 	frame["requestId"] = requestID
 	waiter := make(chan cicyCloudServerFrame, 1)
 	t.streamConnMu.Lock()
-	if t.streamConn == nil {
+	if t.streamConn == nil || expectedEpoch != 0 && t.streamEpoch != expectedEpoch {
 		t.streamConnMu.Unlock()
-		return cicyCloudServerFrame{}, fmt.Errorf("cloud websocket disconnected")
+		return cicyCloudServerFrame{}, fmt.Errorf("cloud websocket changed")
 	}
+	conn := t.streamConn
 	t.streamWaiters[requestID] = waiter
 	t.streamConnMu.Unlock()
-	if err := t.writeStream(frame); err != nil {
+	t.streamWriteMu.Lock()
+	err = conn.WriteJSON(frame)
+	t.streamWriteMu.Unlock()
+	if err != nil {
 		t.streamConnMu.Lock()
 		delete(t.streamWaiters, requestID)
 		t.streamConnMu.Unlock()
@@ -1077,8 +1091,89 @@ func splitCiCyCloudPeer(peer string) (string, string) {
 	return parts[0], ""
 }
 
-// reportAllAgents follows cicy-hub's full-snapshot presence model: every report
-// replaces this instance's directory, so deleted agents disappear naturally.
+func collectCiCyCloudAgents() ([]M, []M, error) {
+	if store == nil {
+		return nil, nil, fmt.Errorf("agent store unavailable")
+	}
+	rows, err := store.Query(`SELECT pane_id,COALESCE(title,''),COALESCE(agent_type,''),COALESCE(role,''),
+		COALESCE(default_model,''),COALESCE(use_custom_gateway,0)
+		FROM agent_config WHERE active=1 ORDER BY created_at,pane_id`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	directory, states := []M{}, []M{}
+	for rows.Next() {
+		var paneID, title, agentType, role, defaultModel string
+		var useCustomGateway bool
+		if err := rows.Scan(&paneID, &title, &agentType, &role, &defaultModel, &useCustomGateway); err != nil {
+			return nil, nil, err
+		}
+		if isBuiltinAgent(paneID) {
+			continue
+		}
+		agentID := shortPaneID(paneID)
+		directory = append(directory, M{"agentId": agentID, "title": title,
+			"agentType": agentType, "role": role, "useCustomGateway": useCustomGateway})
+		status, model, contextUsedPct, cost := "idle", defaultModel, 0, float64(0)
+		if metrics := agentInspectorLiteMetrics(agentID); metrics != nil {
+			if value := strings.TrimSpace(aiGatewayString(metrics["status"])); value != "" {
+				status = value
+			}
+			if value := strings.TrimSpace(aiGatewayString(metrics["model"])); value != "" {
+				model = value
+			}
+			contextUsedPct = int(aiGatewayFloat(metrics["context_used_pct"]))
+			cost = aiGatewayFloat(metrics["cost_credit"])
+		}
+		states = append(states, M{"agentId": agentID, "status": status, "model": model,
+			"contextUsedPct": contextUsedPct, "cost": cost, "online": true})
+	}
+	return directory, states, rows.Err()
+}
+
+func (t *cicyCloudTransport) currentStreamEpoch() uint64 {
+	t.streamConnMu.Lock()
+	defer t.streamConnMu.Unlock()
+	return t.streamEpoch
+}
+
+func (t *cicyCloudTransport) publishAgentState(states []M, epoch uint64) error {
+	response, err := t.requestStreamAtEpoch(M{"type": "agent_state_publish", "fullSnapshot": true, "agents": states}, epoch)
+	if err != nil {
+		return err
+	}
+	if response.Type != "agent_state_published" || response.Revision == 0 {
+		return fmt.Errorf("unexpected agent state response")
+	}
+	log.Printf("[im-cloud] agent_state.published transport=ws account=%d revision=%d agents=%d",
+		t.accountID, response.Revision, len(states))
+	return nil
+}
+
+func (t *cicyCloudTransport) reportAgentDirectoryAndState(epoch uint64) {
+	t.stateMu.Lock()
+	directory, states, err := collectCiCyCloudAgents()
+	if err != nil {
+		t.stateMu.Unlock()
+		log.Printf("[im] cicy cloud agent snapshot failed: %v", err)
+		return
+	}
+	if epoch == 0 {
+		log.Printf("[im-cloud] agent_state.publish skipped transport=ws account=%d reason=disconnected", t.accountID)
+	} else if err := t.publishAgentState(states, epoch); err != nil {
+		log.Printf("[im-cloud] agent_state.publish failed transport=ws account=%d error_type=%T", t.accountID, err)
+	}
+	t.stateMu.Unlock()
+	// This HTTP call synchronizes directory/config metadata only. Runtime state
+	// is published exclusively over the already-authenticated WebSocket above.
+	if err := cloudJSON(http.MethodPost, "/api/code/agents", t.token, M{"agents": directory}, nil); err != nil {
+		log.Printf("[im] cicy cloud agent directory failed: %v", err)
+	}
+}
+
+// reportAllAgents keeps instance liveness and static Agent directory metadata
+// fresh. Agent runtime state itself is never sent over HTTP; it uses the Hub WS.
 func (t *cicyCloudTransport) reportAllAgents() {
 	t.presenceMu.Lock()
 	defer t.presenceMu.Unlock()
@@ -1111,72 +1206,21 @@ func (t *cicyCloudTransport) reportAllAgents() {
 	}
 	t.lastPresence = now
 	t.syncAgentConfigs()
-	port := strings.TrimSpace(os.Getenv("PORT"))
-	if port == "" {
-		port = "8008"
-	}
-	u := "http://127.0.0.1:" + port + "/api/panes?token=" + url.QueryEscape(loadAPIToken())
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Get(u)
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return
-	}
-	var doc struct {
-		Panes []struct {
-			PaneID         string `json:"pane_id"`
-			ID             string `json:"id"`
-			Title          string `json:"title"`
-			AgentType      string `json:"agent_type"`
-			Role           string `json:"role"`
-			Status         string `json:"status"`
-			Model          string `json:"model"`
-			ContextUsedPct int    `json:"context_used_pct"`
-			UseCustomGateway bool `json:"use_custom_gateway"`
-		} `json:"panes"`
-	}
-	if json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&doc) != nil {
-		return
-	}
-	agents := make([]M, 0, len(doc.Panes))
-	for _, p := range doc.Panes {
-		id := strings.TrimSpace(p.PaneID)
-		if id == "" {
-			id = strings.TrimSpace(p.ID)
-		}
-		if id == "" {
-			continue
-		}
-		status, model, contextUsedPct, cost := p.Status, p.Model, p.ContextUsedPct, float64(0)
-		if metrics := agentInspectorLiteMetrics(shortPaneID(id)); metrics != nil {
-			status = aiGatewayString(metrics["status"])
-			model = aiGatewayString(metrics["model"])
-			contextUsedPct = int(aiGatewayFloat(metrics["context_used_pct"]))
-			cost = aiGatewayFloat(metrics["cost_credit"])
-		}
-		agents = append(agents, M{"agentId": shortPaneID(id), "title": p.Title,
-			"agentType": p.AgentType, "role": p.Role, "status": status,
-			"model": model, "contextUsedPct": contextUsedPct, "cost": cost, "useCustomGateway": p.UseCustomGateway})
-	}
-	if err := cloudJSON(http.MethodPost, "/api/code/agents", t.token, M{"agents": agents}, nil); err != nil {
-		log.Printf("[im] cicy cloud presence failed: %v", err)
-	}
+	t.reportAgentDirectoryAndState(t.currentStreamEpoch())
 }
 
-// reportAgentState sends the same live snapshot used by TeamPanel. Unlike the
-// roster POST this is an incremental update and therefore cannot remove peers.
-func (t *cicyCloudTransport) reportAgentState(paneID string) {
-	metrics := agentInspectorLiteMetrics(shortPaneID(paneID))
-	if metrics == nil {
+// reportAgentState publishes a complete current snapshot on every local state
+// transition. Full snapshots make deletion and reconnect semantics unambiguous.
+func (t *cicyCloudTransport) reportAgentState(_ string) {
+	t.stateMu.Lock()
+	defer t.stateMu.Unlock()
+	_, states, err := collectCiCyCloudAgents()
+	if err != nil {
+		log.Printf("[im] cicy cloud agent snapshot failed: %v", err)
 		return
 	}
-	payload := M{"agentId": shortPaneID(paneID), "status": metrics["status"],
-		"model": metrics["model"], "contextUsedPct": metrics["context_used_pct"],
-		"cost": metrics["cost_credit"]}
-	if err := cloudJSON(http.MethodPatch, "/api/code/agents", t.token, payload, nil); err != nil {
-		log.Printf("[im] cicy cloud live agent state failed: %v", err)
+	if err := t.publishAgentState(states, t.currentStreamEpoch()); err != nil {
+		log.Printf("[im-cloud] agent_state.publish failed transport=ws account=%d error_type=%T", t.accountID, err)
 	}
 }
 
@@ -1189,17 +1233,14 @@ func reportCiCyCloudAgentState(paneID string) {
 		if !account.Enabled || account.Platform != imPlatformCiCyCloud || strings.TrimSpace(account.Secret) == "" {
 			continue
 		}
-		transport, err := newCiCyCloudTransport(account)
-		if err == nil {
-			go transport.(*cicyCloudTransport).reportAgentState(paneID)
+		if transport, ok := imTransportFor(account.ID).(*cicyCloudTransport); ok {
+			go transport.reportAgentState(paneID)
 		}
 	}
 }
 
-// reportCiCyCloudAgentRosterNow pushes a full snapshot immediately. A fresh
-// transport has no presence timestamps, so reportAllAgents bypasses the normal
-// polling interval. This is used after deletion where an incremental state
-// update cannot express that an agent disappeared.
+// reportCiCyCloudAgentRosterNow pushes static directory metadata and a full WS
+// state snapshot immediately, including after deletion.
 func reportCiCyCloudAgentRosterNow() {
 	accounts, err := imListAccounts()
 	if err != nil {
@@ -1209,9 +1250,8 @@ func reportCiCyCloudAgentRosterNow() {
 		if !account.Enabled || account.Platform != imPlatformCiCyCloud || strings.TrimSpace(account.Secret) == "" {
 			continue
 		}
-		transport, err := newCiCyCloudTransport(account)
-		if err == nil {
-			go transport.(*cicyCloudTransport).reportAllAgents()
+		if transport, ok := imTransportFor(account.ID).(*cicyCloudTransport); ok {
+			go transport.reportAgentDirectoryAndState(transport.currentStreamEpoch())
 		}
 	}
 }

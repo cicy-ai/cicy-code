@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,8 +72,18 @@ func TestCiCyCloudStreamReconnectBackoff(t *testing.T) {
 
 func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
 	t.Setenv("CICY_CLOUD_DISABLE_WS", "0")
-	connected := make(chan struct{}, 1)
+	withTempCicyRoot(t)
+	withTestStore(t)
+	if _, err := store.Exec(`INSERT INTO agent_config
+		(pane_id,title,agent_type,role,default_model,use_custom_gateway,active)
+		VALUES ('w-local:main.0','Local Agent','codex','worker','gpt-local',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	connected := make(chan *websocket.Conn, 4)
 	acked := make(chan string, 1)
+	directories := make(chan M, 4)
+	states := make(chan M, 8)
+	var patchRequests atomic.Int32
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,25 +101,43 @@ func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
 				return
 			}
 			defer conn.Close()
-			connected <- struct{}{}
+			connected <- conn
 			_ = conn.WriteJSON(M{"type": "message", "cursor": 42, "message": M{
 				"id": "msg-websocket-12345678", "senderInstanceId": "code-remote-1234567890",
 				"senderAgentId": "w-remote", "targetAgentId": "w-local", "kind": "user_message", "text": "over ws"}})
 			for {
-				var frame struct {
-					Type, RequestID string
-					IDs             []string `json:"ids"`
-				}
+				var frame M
 				if conn.ReadJSON(&frame) != nil {
 					return
 				}
-				if frame.Type == "ack" && len(frame.IDs) == 1 {
-					acked <- frame.IDs[0]
-					_ = conn.WriteJSON(M{"type": "acked", "requestId": frame.RequestID})
-				} else if frame.Type == "send" {
-					_ = conn.WriteJSON(M{"type": "sent", "requestId": frame.RequestID, "id": "msg-ws-send-12345678", "cursor": 43})
+				typeName, requestID := anyString(frame["type"]), anyString(frame["requestId"])
+				if ids, ok := frame["ids"].([]interface{}); typeName == "ack" && ok && len(ids) == 1 {
+					acked <- anyString(ids[0])
+					_ = conn.WriteJSON(M{"type": "acked", "requestId": requestID})
+				} else if typeName == "send" {
+					_ = conn.WriteJSON(M{"type": "sent", "requestId": requestID, "id": "msg-ws-send-12345678", "cursor": 43})
+				} else if typeName == "agent_state_publish" {
+					states <- frame
+					_ = conn.WriteJSON(M{"type": "agent_state_published", "requestId": requestID, "revision": 1})
 				}
 			}
+		case "/api/code/agents":
+			if r.Method == http.MethodPatch {
+				patchRequests.Add(1)
+				http.Error(w, "PATCH forbidden", http.StatusMethodNotAllowed)
+				return
+			}
+			if r.Method != http.MethodPost {
+				t.Errorf("unexpected agent directory method %s", r.Method)
+				http.Error(w, "method", http.StatusMethodNotAllowed)
+				return
+			}
+			var body M
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("directory decode: %v", err)
+			}
+			directories <- body
+			_ = json.NewEncoder(w).Encode(M{"success": true})
 		case "/api/code/messages/poll":
 			_ = json.NewEncoder(w).Encode(M{"messages": []M{}})
 		default:
@@ -121,10 +150,37 @@ func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
 	tr := &cicyCloudTransport{token: "test", lastHeartbeat: now, lastPresence: now}
 	defer tr.Close()
 	tr.initStream()
+	var firstConn *websocket.Conn
 	select {
-	case <-connected:
+	case firstConn = <-connected:
 	case <-time.After(3 * time.Second):
 		t.Fatal("websocket did not connect")
+	}
+	var directory, stateFrame M
+	select {
+	case directory = <-directories:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent directory was not synchronized")
+	}
+	select {
+	case stateFrame = <-states:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent state was not published over websocket")
+	}
+	encodedDirectory, _ := json.Marshal(directory)
+	for _, forbidden := range []string{"status", "model", "contextUsedPct", "context_used_pct", "cost", "online"} {
+		if bytes.Contains(encodedDirectory, []byte(`"`+forbidden+`"`)) {
+			t.Fatalf("runtime field %q leaked into directory HTTP body: %s", forbidden, encodedDirectory)
+		}
+	}
+	if anyString(stateFrame["type"]) != "agent_state_publish" || stateFrame["fullSnapshot"] != true {
+		t.Fatalf("unexpected state frame: %#v", stateFrame)
+	}
+	encodedState, _ := json.Marshal(stateFrame)
+	for _, required := range []string{`"agentId":"w-local"`, `"status":"idle"`, `"model":"gpt-local"`, `"online":true`} {
+		if !bytes.Contains(encodedState, []byte(required)) {
+			t.Fatalf("state frame missing %s: %s", required, encodedState)
+		}
 	}
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -170,6 +226,37 @@ func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
 	state, ok := tr.cloudMessageState(sentID)
 	if !ok || state.Transport != "ws" || state.Reply.ID != "msg-ws-reply-12345678" || state.ReceivedMS == 0 {
 		t.Fatalf("local websocket message state = %#v, ok=%v", state, ok)
+	}
+	go tr.reportAgentState("w-local")
+	select {
+	case frame := <-states:
+		if anyString(frame["type"]) != "agent_state_publish" || frame["fullSnapshot"] != true {
+			t.Fatalf("state transition did not publish a full websocket snapshot: %#v", frame)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("state transition was not published over websocket")
+	}
+	if got := patchRequests.Load(); got != 0 {
+		t.Fatalf("agent runtime state made %d HTTP PATCH requests", got)
+	}
+	_ = firstConn.Close()
+	select {
+	case <-connected:
+	case <-time.After(4 * time.Second):
+		t.Fatal("websocket did not reconnect")
+	}
+	select {
+	case <-directories:
+	case <-time.After(3 * time.Second):
+		t.Fatal("reconnect did not synchronize agent directory")
+	}
+	select {
+	case frame := <-states:
+		if frame["fullSnapshot"] != true {
+			t.Fatalf("reconnect state was not a full snapshot: %#v", frame)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("reconnect did not publish agent state over websocket")
 	}
 }
 
