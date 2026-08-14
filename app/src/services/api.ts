@@ -309,6 +309,13 @@ const api = {
   deleteToken: (id: number) => http.delete(`/api/auth/tokens/${id}`),
 
   listGroups: () => http.get('/api/groups'),
+  getGroup: (id: number | string) => http.get(`/api/groups/${encodeURIComponent(String(id))}`),
+  createGroup: (data: { name: string; description?: string }) => http.post('/api/groups', data),
+  updateGroup: (id: number | string, data: { name?: string; description?: string }) => http.patch(`/api/groups/${encodeURIComponent(String(id))}`, data),
+  deleteGroup: (id: number | string) => http.delete(`/api/groups/${encodeURIComponent(String(id))}`),
+  addGroupPane: (id: number | string, paneId: string) => http.post(`/api/groups/${encodeURIComponent(String(id))}/panes/${encodeURIComponent(paneId)}`),
+  removeGroupPane: (id: number | string, paneId: string) => http.delete(`/api/groups/${encodeURIComponent(String(id))}/panes/${encodeURIComponent(paneId)}`),
+  updateGroupPaneLayout: (id: number | string, paneId: string, data: { pos_x: number; pos_y: number; width?: number; height?: number; z_index?: number }) => http.patch(`/api/groups/${encodeURIComponent(String(id))}/panes/${encodeURIComponent(paneId)}/layout`, data),
   getSystemResources: (cfg?: any) => http.get('/api/system/resources', cfg),
   getCrontab: () => http.get('/api/crontab'),
   saveCrontab: (content: string) => http.put('/api/crontab', { content }),

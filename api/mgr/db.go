@@ -144,6 +144,7 @@ func (d *DB) Migrate() {
 		`CREATE TABLE IF NOT EXISTS agent_groups (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL, description TEXT DEFAULT '',
+			is_default INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT DEFAULT (datetime('now')),
 			updated_at TEXT DEFAULT (datetime('now'))
 		)`,
@@ -283,6 +284,43 @@ func (d *DB) Migrate() {
 		if _, err := d.Exec(s); err != nil {
 			log.Printf("[db] migrate error: %v\nSQL: %s", err, s[:minInt(len(s), 100)])
 		}
+	}
+
+	// Projects use a real, persisted default group rather than a frontend-only
+	// pseudo project. Seed it exactly once with setup.go's two preinstalled coding
+	// agents; after creation its membership is user-managed like every other
+	// project and is therefore never re-seeded on restart.
+	d.ensureColumn("agent_groups", "is_default", "INTEGER NOT NULL DEFAULT 0")
+	_, _ = d.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_groups_single_default ON agent_groups(is_default) WHERE is_default=1")
+	if res, err := d.Exec(`INSERT INTO agent_groups (name, description, is_default)
+		SELECT 'Default project', 'Preinstalled Codex and Claude agents', 1
+		WHERE NOT EXISTS (SELECT 1 FROM agent_groups WHERE is_default=1)`); err != nil {
+		log.Printf("[db] ensure default project: %v", err)
+	} else if inserted, _ := res.RowsAffected(); inserted > 0 {
+		var defaultGroupID int64
+		if err := d.QueryRow("SELECT id FROM agent_groups WHERE is_default=1").Scan(&defaultGroupID); err == nil {
+			for _, paneID := range []string{"w-101:main.0", "w-102:main.0"} {
+				_, _ = d.Exec(d.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), defaultGroupID, paneID, "agent_ttyd", paneID)
+			}
+		}
+	}
+	// An Agent belongs to at most one Project. Older builds allowed duplicate
+	// memberships, so collapse them deterministically before adding the unique
+	// index: keep the default-project membership first, otherwise the oldest.
+	if _, err := d.Exec(`DELETE FROM group_windows WHERE id IN (
+		SELECT id FROM (
+			SELECT gw.id, ROW_NUMBER() OVER (
+				PARTITION BY gw.win_id
+				ORDER BY COALESCE(ag.is_default, 0) DESC, gw.id
+			) AS project_rank
+			FROM group_windows gw
+			JOIN agent_groups ag ON ag.id=gw.group_id
+		) ranked WHERE project_rank > 1
+	)`); err != nil {
+		log.Printf("[db] deduplicate project agents: %v", err)
+	}
+	if _, err := d.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_group_windows_one_project_per_agent ON group_windows(win_id)"); err != nil {
+		log.Printf("[db] enforce one project per agent: %v", err)
 	}
 
 	d.ensureColumn("agent_config", "machine_id", "INTEGER")

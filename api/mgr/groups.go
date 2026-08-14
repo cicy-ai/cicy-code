@@ -5,6 +5,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -12,7 +13,7 @@ import (
 func handleGroups(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		rows, err := store.Query("SELECT id, name, description, created_at, updated_at FROM agent_groups ORDER BY id")
+		rows, err := store.Query("SELECT id, name, description, created_at, updated_at, COALESCE(is_default, 0) FROM agent_groups ORDER BY is_default DESC, id")
 		if err != nil {
 			httpErr(w, 500, err.Error())
 			return
@@ -22,14 +23,18 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var id int
 			var name, desc string
-			var createdAt, updatedAt sql.NullTime
-			rows.Scan(&id, &name, &desc, &createdAt, &updatedAt)
-			g := M{"id": id, "name": name, "description": desc}
+			var createdAt, updatedAt sql.NullString
+			var isDefault int
+			if err := rows.Scan(&id, &name, &desc, &createdAt, &updatedAt, &isDefault); err != nil {
+				httpErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			g := M{"id": id, "name": name, "description": desc, "is_default": isDefault == 1}
 			if createdAt.Valid {
-				g["created_at"] = createdAt.Time.Format("2006-01-02T15:04:05")
+				g["created_at"] = createdAt.String
 			}
 			if updatedAt.Valid {
-				g["updated_at"] = updatedAt.Time.Format("2006-01-02T15:04:05")
+				g["updated_at"] = updatedAt.String
 			}
 			// Get pane_ids
 			wrows, _ := store.Query("SELECT win_id FROM group_windows WHERE group_id=?", id)
@@ -37,7 +42,11 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 			if wrows != nil {
 				for wrows.Next() {
 					var wid string
-					wrows.Scan(&wid)
+					if err := wrows.Scan(&wid); err != nil {
+						wrows.Close()
+						httpErr(w, http.StatusInternalServerError, err.Error())
+						return
+					}
 					pids = append(pids, wid)
 				}
 				wrows.Close()
@@ -64,7 +73,7 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id, _ := res.LastInsertId()
-		J(w, M{"id": id, "name": name, "description": desc, "pane_ids": []string{}, "pane_count": 0})
+		J(w, M{"id": id, "name": name, "description": desc, "is_default": false, "pane_ids": []string{}, "pane_count": 0})
 	}
 }
 
@@ -91,19 +100,25 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
+		var id int
 		var name, desc string
-		var createdAt, updatedAt sql.NullTime
-		err := store.QueryRow("SELECT name, description, created_at, updated_at FROM agent_groups WHERE id=?", groupID).Scan(&name, &desc, &createdAt, &updatedAt)
-		if err != nil {
+		var createdAt, updatedAt sql.NullString
+		var isDefault int
+		err := store.QueryRow("SELECT id, name, description, created_at, updated_at, COALESCE(is_default, 0) FROM agent_groups WHERE id=?", groupID).Scan(&id, &name, &desc, &createdAt, &updatedAt, &isDefault)
+		if err == sql.ErrNoRows {
 			httpErr(w, 404, "Group not found")
 			return
 		}
-		g := M{"id": groupID, "name": name, "description": desc}
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		g := M{"id": id, "name": name, "description": desc, "is_default": isDefault == 1}
 		if createdAt.Valid {
-			g["created_at"] = createdAt.Time.Format("2006-01-02T15:04:05")
+			g["created_at"] = createdAt.String
 		}
 		if updatedAt.Valid {
-			g["updated_at"] = updatedAt.Time.Format("2006-01-02T15:04:05")
+			g["updated_at"] = updatedAt.String
 		}
 		// Windows
 		rows, _ := store.Query("SELECT id, win_id, win_type, ref_id, pos_x, pos_y, width, height, z_index FROM group_windows WHERE group_id=? ORDER BY z_index", groupID)
@@ -114,7 +129,11 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 				var winID, winType, refID string
 				var posX, posY, width, height float64
 				var zIndex int
-				rows.Scan(&id, &winID, &winType, &refID, &posX, &posY, &width, &height, &zIndex)
+				if err := rows.Scan(&id, &winID, &winType, &refID, &posX, &posY, &width, &height, &zIndex); err != nil {
+					rows.Close()
+					httpErr(w, http.StatusInternalServerError, err.Error())
+					return
+				}
 				wm := M{"id": id, "win_id": winID, "win_type": winType, "ref_id": refID, "pos_x": posX, "pos_y": posY, "width": width, "height": height, "z_index": zIndex}
 				windows = append(windows, wm)
 				if winType == "agent_ttyd" {
@@ -150,11 +169,36 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 400, "No fields to update")
 			return
 		}
+		sets = append(sets, "updated_at=datetime('now')")
 		vals = append(vals, groupID)
-		store.Exec("UPDATE agent_groups SET "+strings.Join(sets, ", ")+" WHERE id=?", vals...)
+		res, err := store.Exec("UPDATE agent_groups SET "+strings.Join(sets, ", ")+" WHERE id=?", vals...)
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			httpErr(w, http.StatusNotFound, "Group not found")
+			return
+		}
 		J(w, M{"success": true, "group_id": groupID, "updated": req})
 	case "DELETE":
-		res, _ := store.Exec("DELETE FROM agent_groups WHERE id=?", groupID)
+		var isDefault int
+		if err := store.QueryRow("SELECT COALESCE(is_default, 0) FROM agent_groups WHERE id=?", groupID).Scan(&isDefault); err == sql.ErrNoRows {
+			httpErr(w, http.StatusNotFound, "Group not found")
+			return
+		} else if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if isDefault == 1 {
+			httpErr(w, http.StatusBadRequest, "Default project cannot be deleted")
+			return
+		}
+		res, err := store.Exec("DELETE FROM agent_groups WHERE id=?", groupID)
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		n, _ := res.RowsAffected()
 		if n == 0 {
 			httpErr(w, 404, "Group not found")
@@ -178,8 +222,7 @@ func handleGroupWindows(w http.ResponseWriter, r *http.Request, groupID, sub str
 		if refID == "" {
 			refID = winID
 		}
-		store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), groupID, winID, winType, refID)
-		J(w, M{"success": true, "group_id": groupID, "win_id": winID})
+		addWindowToGroup(w, groupID, winID, winType, refID, "win_id")
 	case "DELETE":
 		winID := strings.TrimPrefix(sub, "/")
 		store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)
@@ -210,8 +253,7 @@ func handleGroupPanesCompat(w http.ResponseWriter, r *http.Request, groupID, sub
 	paneID := strings.TrimSuffix(sub, "/layout")
 	switch r.Method {
 	case "POST":
-		store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), groupID, paneID, "agent_ttyd", paneID)
-		J(w, M{"success": true, "group_id": groupID, "pane_id": paneID})
+		addWindowToGroup(w, groupID, paneID, "agent_ttyd", paneID, "pane_id")
 	case "DELETE":
 		store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, paneID)
 		J(w, M{"success": true, "group_id": groupID, "pane_id": paneID})
@@ -232,6 +274,33 @@ func handleGroupPanesCompat(w http.ResponseWriter, r *http.Request, groupID, sub
 		}
 		J(w, M{"success": true, "group_id": groupID, "pane_id": paneID})
 	}
+}
+
+func addWindowToGroup(w http.ResponseWriter, groupID, winID, winType, refID, responseKey string) {
+	winID = strings.TrimSpace(winID)
+	if winID == "" {
+		httpErr(w, http.StatusBadRequest, "Agent id is required")
+		return
+	}
+	var existingGroupID int64
+	err := store.QueryRow("SELECT group_id FROM group_windows WHERE win_id=? LIMIT 1", winID).Scan(&existingGroupID)
+	if err == nil {
+		if groupID == fmt.Sprint(existingGroupID) {
+			J(w, M{"success": true, "already_added": true, "group_id": groupID, responseKey: winID})
+			return
+		}
+		httpErr(w, http.StatusConflict, "Agent already belongs to another project")
+		return
+	}
+	if err != sql.ErrNoRows {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if _, err := store.Exec("INSERT INTO group_windows (group_id, win_id, win_type, ref_id) VALUES (?,?,?,?)", groupID, winID, winType, refID); err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	J(w, M{"success": true, "group_id": groupID, responseKey: winID})
 }
 
 func handleGroupBatchLayout(w http.ResponseWriter, r *http.Request, groupID string) {

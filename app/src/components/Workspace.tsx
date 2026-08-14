@@ -17,7 +17,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, Folder, X, Settings, Brain, Search,
   LayoutList, Users, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Bot, BookOpen, Store, Timer, Grid3X3, Globe2, Smartphone,
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Bot, BookOpen, Store, Timer, Grid3X3, Globe2, Smartphone, FolderKanban,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag, isChatModel } from '../lib/modelTag';
@@ -65,6 +65,7 @@ import CreateAgentDialog, { CreateAgentValues } from './CreateAgentDialog';
 import { lockPointer, unlockPointer, clearPointerLock } from '../lib/pointerLock';
 import { emitWebFrameMaskEvent } from '../lib/webFrameMask';
 import PortsPanel from './layout/PortsPanel';
+import ProjectsPanel, { type ProjectAgent } from './projects/ProjectsPanel';
 
 const cache = {
   get: (k: string, def: any) => { try { const v = JSON.parse(localStorage.getItem(k)!); return v ?? def; } catch { return def; } },
@@ -341,6 +342,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   });
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const [projectsOpen, setProjectsOpen] = useState(false);
   const [portsOpen, setPortsOpen] = useState(false);
   const [fixedDomain, setFixedDomain] = useState('');
   const [proxyAvailable, setProxyAvailable] = useState(false);
@@ -951,6 +953,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, []);
 
   const toggleLeft = (p: 'team' | 'skills' | 'customAgents' | 'todo') => {
+    setProjectsOpen(false);
     setLeftPanelView(prev => prev === p ? null : p);
   };
 
@@ -1995,6 +1998,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     agentDetail,
     lang: currentLang,
   }), [paneId, token, canvasPaneIds, agents, boundAgents, paneDetails, pollStatuses, agentDetail, currentLang]);
+  const projectAgents = useMemo<ProjectAgent[]>(() => agents.map((agent: any) => {
+    const fullPaneId = String(agent?.pane_id || agent?.id || '');
+    const shortId = fullPaneId.replace(/:.*$/, '');
+    const detail = paneDetails[shortId] || paneDetails[fullPaneId] || {};
+    const live = pollStatuses[shortId] || pollStatuses[fullPaneId] || {};
+    return {
+      paneId: fullPaneId,
+      title: String(agent?.title || detail?.title || shortId),
+      agentType: String(agent?.agent_type || detail?.agent_type || ''),
+      status: String(live?.status || agent?.status || 'idle'),
+      defaultModel: String(agent?.default_model || detail?.default_model || ''),
+      workspace: String(agent?.workspace || detail?.workspace || ''),
+      machineLabel: String(agent?.machine_label || detail?.machine_label || ''),
+    };
+  }).filter((agent) => agent.paneId), [agents, paneDetails, pollStatuses]);
   const handleStackOpenSession = useCallback((targetPaneId: string) => {
     openPaneRequestView(targetPaneId, lastSessionSubTab);
   }, [openPaneRequestView, lastSessionSubTab]);
@@ -2064,6 +2082,24 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               (2026-06-11) — the dispatcher (PM) chat now lives directly in the
               team agent card (DispatcherChat). */}
           <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} disabled={!!globalVar?.helper_mode} />
+          <SideBtn
+            dataId="btn-projects"
+            active={projectsOpen}
+            icon={<FolderKanban className="w-5 h-5" />}
+            title={t('projectsTitle')}
+            onClick={() => {
+              setProjectsOpen((open) => {
+                const next = !open;
+                if (next) {
+                  setLeftPanelView(null);
+                  setKnowledgeOpen(false);
+                  setCliContentOpen(false);
+                }
+                return next;
+              });
+            }}
+            disabled={!!globalVar?.helper_mode}
+          />
           {/* Helper-mode trial container hides Skills / Providers (gateway) /
               IM / Audit from the activity bar — the drawer should stay
               laser-focused on the install chat. See helperMode in cicy-code
@@ -2077,7 +2113,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 active={knowledgeOpen}
                 icon={<BookOpen className="w-5 h-5" />}
                 title={t('tabKnowledge', { defaultValue: '知识库' })}
-                onClick={() => setKnowledgeOpen(true)}
+                onClick={() => { setProjectsOpen(false); setKnowledgeOpen(true); }}
                 badge={knowledgePendingCount > 0}
                 badgeTitle={t('knowledgePendingBadge', { defaultValue: '{{count}} 条知识待审核', count: knowledgePendingCount })}
               />
@@ -2107,6 +2143,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         {/* Content */}
         <main data-id="content-area" className="flex-1 relative overflow-hidden">
           <div data-id="main-layout" className="flex h-full min-w-0">
+            {projectsOpen ? (
+              <ProjectsPanel
+                agents={projectAgents}
+                onOpenAgent={(targetPaneId) => {
+                  setProjectsOpen(false);
+                  onSelectAgent(targetPaneId.replace(/:.*$/, ''));
+                }}
+              />
+            ) : (
+            <>
             {leftActive && !globalVar?.helper_mode ? (
               <div
                 data-testid="left-panel"
@@ -2186,6 +2232,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               {rightContent}
             </div>
             {cliFixedContent}
+            </>
+            )}
           </div>
         </main>
       </div>

@@ -115,7 +115,13 @@ export function useDialogs() {
                 ref={inputRef}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
+                onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    submit();
+                  }
+                }}
                 placeholder={state.opts.placeholder}
                 autoComplete="off"
                 spellCheck={false}
