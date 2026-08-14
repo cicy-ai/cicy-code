@@ -40,14 +40,6 @@ interface ProjectAgentLayout {
 const DEFAULT_PROJECT_ID = 'default';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
 
-function machineName(agent: ProjectAgent): string {
-  if (agent.machineLabel) return agent.machineLabel;
-  const workspace = String(agent.workspace || '');
-  if (workspace.startsWith('/Users/')) return 'mac_local';
-  if (workspace.startsWith('/root/') || workspace.startsWith('/home/')) return 'linux';
-  return 'local';
-}
-
 function ProjectAgentCard({ agent, teamId, selected, removable, onSelect, onOpen, onRemove }: {
   agent: ProjectAgent;
   teamId?: string;
@@ -92,7 +84,7 @@ function ProjectAgentCard({ agent, teamId, selected, removable, onSelect, onOpen
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <h3 data-id="project-agent-card-title" className="truncate text-[17px] font-semibold text-zinc-100">{agent.title || agent.paneId}</h3>
           <p data-id="project-agent-card-identity" className="mt-0.5 truncate font-mono text-[12px] text-zinc-500">
-            {teamId || shortPaneId(agent.paneId)}
+            {[teamId, shortPaneId(agent.paneId), agent.agentType].filter(Boolean).join(' · ')}
           </p>
         </div>
         {selected ? <span data-id="project-agent-card-selected" className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-500 text-white"><Check className="h-3.5 w-3.5" /></span> : null}
@@ -138,10 +130,6 @@ function ProjectAgentCard({ agent, teamId, selected, removable, onSelect, onOpen
         </div>
       </div>
 
-      <div data-id="project-agent-card-meta" className="mt-auto flex items-center gap-3 border-t border-white/[0.06] pt-4 text-[12px]">
-        <span data-id="project-agent-card-machine" className="truncate text-zinc-500">{machineName(agent)} · {agent.agentType || 'agent'}</span>
-        <span data-id="project-agent-card-model" className="truncate text-zinc-500">{agent.defaultModel || t('projectModelUnset')}</span>
-      </div>
     </article>
   );
 }
