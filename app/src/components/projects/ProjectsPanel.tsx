@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Bot, Check, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, Trash2, UserPlus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
@@ -63,12 +63,13 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, teamId, selected, removable, onSelect, onOpen, onRemove }: {
+function ProjectAgentCard({ agent, metrics, teamId, selected, removable, footer, onSelect, onOpen, onRemove }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   teamId?: string;
   selected: boolean;
   removable: boolean;
+  footer?: ReactNode;
   onSelect: () => void;
   onOpen: () => void;
   onRemove: () => void;
@@ -100,11 +101,11 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, onSelec
       onClick={onSelect}
       aria-pressed={selected}
       className={cn(
-        'relative flex min-h-[148px] w-[300px] cursor-pointer flex-col border bg-[#111216] p-5 shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
-        selected ? 'rounded-t-2xl border-blue-500 ring-1 ring-blue-500/60' : 'rounded-2xl border-white/[0.08]',
+        'relative flex min-h-[148px] w-[300px] cursor-pointer flex-col rounded-2xl border bg-[#111216] shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
+        selected ? 'border-blue-500 ring-1 ring-blue-500/60' : 'border-white/[0.08]',
       )}
     >
-      <div data-id="project-agent-card-body" className="flex flex-1 flex-col">
+      <div data-id="project-agent-card-body" className="flex flex-1 flex-col p-5">
       <div data-id="project-agent-card-header" className="flex items-start gap-3">
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <h3 data-id="project-agent-card-title" className="truncate text-[17px] font-semibold text-zinc-100">{agent.title || agent.paneId}</h3>
@@ -159,6 +160,7 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, onSelec
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
       </div>
+      {footer}
     </article>
   );
 }
@@ -183,6 +185,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   const [creating, setCreating] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [addSearch, setAddSearch] = useState('');
+  const [addError, setAddError] = useState('');
   const [selectedToAdd, setSelectedToAdd] = useState<Set<string>>(new Set());
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
@@ -322,6 +325,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     setSelectedId(project.id);
     setSelectedToAdd(new Set());
     setAddSearch('');
+    setAddError('');
     setAddOpen(true);
   };
 
@@ -369,6 +373,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     const name = String(value || '').trim();
     if (!name || name === project.name) return;
     setBusy(true);
+    setAddError('');
     try {
       await apiService.updateGroup(project.id, { name });
       await load();
@@ -414,15 +419,17 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
       for (const [offset, paneId] of paneIds.entries()) {
         await apiService.addGroupPane(selectedProject.api_id, paneId);
         const index = visibleAgents.length + offset;
-        await apiService.updateGroupPaneLayout(selectedProject.api_id, paneId, {
+        void apiService.updateGroupPaneLayout(selectedProject.api_id, paneId, {
           pos_x: 40 + (index % 4) * 340,
           pos_y: 40 + Math.floor(index / 4) * 260,
           z_index: index + 1,
-        });
+        }).catch(() => undefined);
       }
       setAddOpen(false);
       setSelectedToAdd(new Set());
       await load();
+    } catch (cause: any) {
+      setAddError(cause?.response?.data?.error || cause?.message || t('projectAddAgentFailed'));
     } finally {
       setBusy(false);
     }
@@ -666,36 +673,40 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
                 removable={Boolean(selectedProject.api_id)}
+                footer={selectedAgentIds.has(shortPaneId(agent.paneId)) ? (
+                  <footer
+                    data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`}
+                    onClick={(event) => event.stopPropagation()}
+                    className="flex h-11 items-center border-t border-blue-500/60 bg-[#15161b] px-3 rounded-b-2xl"
+                  >
+                    {sendingAgentIds.has(shortPaneId(agent.paneId)) ? <Loader2 data-id={`project-agent-prompt-sending-${shortPaneId(agent.paneId)}`} className="mr-2 h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" /> : null}
+                    <input
+                      data-id={`project-agent-prompt-input-${shortPaneId(agent.paneId)}`}
+                      value={agentMessages[shortPaneId(agent.paneId)] || ''}
+                      onChange={(event) => {
+                        const id = shortPaneId(agent.paneId);
+                        setAgentMessages((current) => ({ ...current, [id]: event.target.value }));
+                        setSendFeedbackByAgent((current) => ({ ...current, [id]: '' }));
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          void sendAgentMessage(agent);
+                        }
+                      }}
+                      placeholder={t('projectMessagePlaceholder')}
+                      autoFocus
+                      disabled={sendingAgentIds.has(shortPaneId(agent.paneId))}
+                      className="min-w-0 flex-1 bg-transparent text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 disabled:opacity-60"
+                    />
+                    {sendFeedbackByAgent[shortPaneId(agent.paneId)] ? <span data-id={`project-agent-prompt-feedback-${shortPaneId(agent.paneId)}`} className="ml-2 max-w-20 truncate text-[10px] text-zinc-500" title={sendFeedbackByAgent[shortPaneId(agent.paneId)]}>{sendFeedbackByAgent[shortPaneId(agent.paneId)]}</span> : null}
+                  </footer>
+                ) : null}
                 onSelect={() => toggleAgentSelection(agent)}
                 onOpen={() => onOpenAgent(agent.paneId)}
                 onRemove={() => { void removeAgent(agent); }}
               />
-              {selectedAgentIds.has(shortPaneId(agent.paneId)) ? (
-                <footer data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`} className="flex h-11 w-[300px] items-center border border-t-0 border-blue-500/60 bg-[#15161b] px-3 shadow-[0_14px_30px_rgba(0,0,0,0.3)] rounded-b-2xl">
-                  {sendingAgentIds.has(shortPaneId(agent.paneId)) ? <Loader2 data-id={`project-agent-prompt-sending-${shortPaneId(agent.paneId)}`} className="mr-2 h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" /> : null}
-                  <input
-                    data-id={`project-agent-prompt-input-${shortPaneId(agent.paneId)}`}
-                    value={agentMessages[shortPaneId(agent.paneId)] || ''}
-                    onChange={(event) => {
-                      const id = shortPaneId(agent.paneId);
-                      setAgentMessages((current) => ({ ...current, [id]: event.target.value }));
-                      setSendFeedbackByAgent((current) => ({ ...current, [id]: '' }));
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        void sendAgentMessage(agent);
-                      }
-                    }}
-                    placeholder={t('projectMessagePlaceholder')}
-                    autoFocus
-                    disabled={sendingAgentIds.has(shortPaneId(agent.paneId))}
-                    className="min-w-0 flex-1 bg-transparent text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 disabled:opacity-60"
-                  />
-                  {sendFeedbackByAgent[shortPaneId(agent.paneId)] ? <span data-id={`project-agent-prompt-feedback-${shortPaneId(agent.paneId)}`} className="ml-2 max-w-20 truncate text-[10px] text-zinc-500" title={sendFeedbackByAgent[shortPaneId(agent.paneId)]}>{sendFeedbackByAgent[shortPaneId(agent.paneId)]}</span> : null}
-                </footer>
-              ) : null}
               </div>
             );})}
           </div>
@@ -808,6 +819,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
             );
           }) : <div data-id="project-add-agent-empty" className="py-10 text-center text-sm text-zinc-600">{t('projectNoAvailableAgents')}</div>}
           </div>
+          {addError ? <p data-id="project-add-agent-error" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{addError}</p> : null}
           <div data-id="project-add-agent-actions" className="flex justify-end gap-2 pt-4">
             <button type="button" data-id="project-add-agent-cancel" onClick={() => setAddOpen(false)} className="h-8 rounded-lg px-3 text-[12px] text-zinc-400 hover:bg-white/[0.05]">{t('cancel', { ns: 'common' })}</button>
             <button type="button" data-id="project-add-agent-confirm" onClick={() => { void addSelectedAgents(); }} disabled={selectedToAdd.size === 0 || busy} className="h-8 rounded-lg bg-blue-500 px-3 text-[12px] font-medium text-white hover:bg-blue-400 disabled:opacity-40">{busy ? t('projectSaving') : t('projectAddSelected', { count: selectedToAdd.size })}</button>
