@@ -13,7 +13,7 @@ import (
 func handleGroups(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		rows, err := store.Query("SELECT id, name, description, created_at, updated_at, COALESCE(is_default, 0) FROM agent_groups ORDER BY is_default DESC, id")
+		rows, err := store.Query("SELECT id, name, description, created_at, updated_at, COALESCE(is_default, 0), COALESCE(is_pinned, 0), COALESCE(name_customized, 0) FROM agent_groups ORDER BY is_pinned DESC, is_default DESC, id")
 		if err != nil {
 			httpErr(w, 500, err.Error())
 			return
@@ -24,12 +24,12 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 			var id int
 			var name, desc string
 			var createdAt, updatedAt sql.NullString
-			var isDefault int
-			if err := rows.Scan(&id, &name, &desc, &createdAt, &updatedAt, &isDefault); err != nil {
+			var isDefault, isPinned, nameCustomized int
+			if err := rows.Scan(&id, &name, &desc, &createdAt, &updatedAt, &isDefault, &isPinned, &nameCustomized); err != nil {
 				httpErr(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			g := M{"id": id, "name": name, "description": desc, "is_default": isDefault == 1}
+			g := M{"id": id, "name": name, "description": desc, "is_default": isDefault == 1, "is_pinned": isPinned == 1, "name_customized": nameCustomized == 1}
 			if createdAt.Valid {
 				g["created_at"] = createdAt.String
 			}
@@ -73,7 +73,7 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id, _ := res.LastInsertId()
-		J(w, M{"id": id, "name": name, "description": desc, "is_default": false, "pane_ids": []string{}, "pane_count": 0})
+		J(w, M{"id": id, "name": name, "description": desc, "is_default": false, "is_pinned": false, "name_customized": true, "pane_ids": []string{}, "pane_count": 0})
 	}
 }
 
@@ -103,8 +103,8 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 		var id int
 		var name, desc string
 		var createdAt, updatedAt sql.NullString
-		var isDefault int
-		err := store.QueryRow("SELECT id, name, description, created_at, updated_at, COALESCE(is_default, 0) FROM agent_groups WHERE id=?", groupID).Scan(&id, &name, &desc, &createdAt, &updatedAt, &isDefault)
+		var isDefault, isPinned, nameCustomized int
+		err := store.QueryRow("SELECT id, name, description, created_at, updated_at, COALESCE(is_default, 0), COALESCE(is_pinned, 0), COALESCE(name_customized, 0) FROM agent_groups WHERE id=?", groupID).Scan(&id, &name, &desc, &createdAt, &updatedAt, &isDefault, &isPinned, &nameCustomized)
 		if err == sql.ErrNoRows {
 			httpErr(w, 404, "Group not found")
 			return
@@ -113,7 +113,7 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		g := M{"id": id, "name": name, "description": desc, "is_default": isDefault == 1}
+		g := M{"id": id, "name": name, "description": desc, "is_default": isDefault == 1, "is_pinned": isPinned == 1, "name_customized": nameCustomized == 1}
 		if createdAt.Valid {
 			g["created_at"] = createdAt.String
 		}
@@ -158,12 +158,20 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 		var sets []string
 		var vals []interface{}
 		if n, ok := req["name"].(string); ok {
-			sets = append(sets, "name=?")
+			sets = append(sets, "name=?", "name_customized=1")
 			vals = append(vals, n)
 		}
 		if d, ok := req["description"].(string); ok {
 			sets = append(sets, "description=?")
 			vals = append(vals, d)
+		}
+		if pinned, ok := req["is_pinned"].(bool); ok {
+			sets = append(sets, "is_pinned=?")
+			if pinned {
+				vals = append(vals, 1)
+			} else {
+				vals = append(vals, 0)
+			}
 		}
 		if len(sets) == 0 {
 			httpErr(w, 400, "No fields to update")

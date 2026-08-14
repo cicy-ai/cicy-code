@@ -558,6 +558,8 @@
   "projectDescriptionLabel": "项目说明（可选）",
   "projectDescriptionPlaceholder": "简单说明这个项目的目标或用途",
   "projectRename": "重命名",
+  "projectPin": "置顶项目",
+  "projectUnpin": "取消置顶",
   "projectRenameTitle": "重命名项目",
   "projectSave": "保存",
   "projectDelete": "删除",

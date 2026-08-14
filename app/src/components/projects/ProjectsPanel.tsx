@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Bot, Check, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Pencil, Plus, Search, Trash2, UserPlus, X } from 'lucide-react';
+import { Bot, Check, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, Trash2, UserPlus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -28,6 +28,7 @@ interface AgentProject {
   pane_ids: string[];
   pane_count: number;
   builtin?: boolean;
+  pinned?: boolean;
 }
 
 interface ProjectAgentLayout {
@@ -47,8 +48,9 @@ function machineName(agent: ProjectAgent): string {
   return 'local';
 }
 
-function ProjectAgentCard({ agent, selected, removable, onSelect, onOpen, onRemove }: {
+function ProjectAgentCard({ agent, teamId, selected, removable, onSelect, onOpen, onRemove }: {
   agent: ProjectAgent;
+  teamId?: string;
   selected: boolean;
   removable: boolean;
   onSelect: () => void;
@@ -87,11 +89,10 @@ function ProjectAgentCard({ agent, selected, removable, onSelect, onOpen, onRemo
       )}
     >
       <div data-id="project-agent-card-header" className="flex items-start gap-3">
-        <AgentAvatar agentType={agent.agentType} title={agent.title || agent.paneId} dataId="project-agent-card-avatar" variant="stack" />
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <h3 data-id="project-agent-card-title" className="truncate text-[17px] font-semibold text-zinc-100">{agent.title || agent.paneId}</h3>
-          <p data-id="project-agent-card-machine" className="mt-0.5 truncate text-[12px] text-zinc-500">
-            {machineName(agent)} · {agent.agentType || 'agent'}
+          <p data-id="project-agent-card-identity" className="mt-0.5 truncate font-mono text-[12px] text-zinc-500">
+            {teamId || shortPaneId(agent.paneId)}
           </p>
         </div>
         {selected ? <span data-id="project-agent-card-selected" className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-500 text-white"><Check className="h-3.5 w-3.5" /></span> : null}
@@ -138,7 +139,7 @@ function ProjectAgentCard({ agent, selected, removable, onSelect, onOpen, onRemo
       </div>
 
       <div data-id="project-agent-card-meta" className="mt-auto flex items-center gap-3 border-t border-white/[0.06] pt-4 text-[12px]">
-        <span data-id="project-agent-card-pane" className="font-mono italic text-sky-400">{shortPaneId(agent.paneId)}</span>
+        <span data-id="project-agent-card-machine" className="truncate text-zinc-500">{machineName(agent)} · {agent.agentType || 'agent'}</span>
         <span data-id="project-agent-card-model" className="truncate text-zinc-500">{agent.defaultModel || t('projectModelUnset')}</span>
       </div>
     </article>
@@ -152,6 +153,7 @@ export default function ProjectsPanel({ agents, onOpenAgent }: {
   const { t } = useTranslation('workspace');
   const { confirm, prompt, node: dialogsNode } = useDialogs();
   const [groups, setGroups] = useState<AgentProject[]>([]);
+  const [teamId, setTeamId] = useState('');
   const [selectedId, setSelectedId] = useState<number | string>(DEFAULT_PROJECT_ID);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -187,11 +189,12 @@ export default function ProjectsPanel({ agents, onOpenAgent }: {
         return {
           id: isDefault ? DEFAULT_PROJECT_ID : group.id,
           api_id: group.id,
-          name: isDefault ? t('projectDefault') : String(group.name || ''),
+          name: isDefault && !group.name_customized ? t('projectDefault') : String(group.name || ''),
           description: isDefault ? t('projectDefaultDescription') : String(group.description || ''),
           pane_ids: Array.isArray(group.pane_ids) ? group.pane_ids.map(String) : [],
           pane_count: Number(group.pane_count || 0),
           builtin: isDefault,
+          pinned: Boolean(group.is_pinned),
         };
       }));
     } catch (cause: any) {
@@ -202,6 +205,17 @@ export default function ProjectsPanel({ agents, onOpenAgent }: {
   }, [t]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiService.getIMAccounts().then((response) => {
+      if (cancelled) return;
+      const rows = Array.isArray(response?.data?.accounts) ? response.data.accounts : [];
+      const cloud = rows.find((account: any) => account?.platform === 'cicy_cloud');
+      setTeamId(String(cloud?.config?.team_id || ''));
+    }).catch(() => { if (!cancelled) setTeamId(''); });
+    return () => { cancelled = true; };
+  }, []);
 
   const projects = groups;
 
@@ -322,13 +336,22 @@ export default function ProjectsPanel({ agents, onOpenAgent }: {
   };
 
   const renameProject = async (project: AgentProject) => {
-    if (project.builtin) return;
     const value = await prompt({ title: t('projectRenameTitle'), defaultValue: project.name, required: true, confirmLabel: t('projectSave') });
     const name = String(value || '').trim();
     if (!name || name === project.name) return;
     setBusy(true);
     try {
       await apiService.updateGroup(project.id, { name });
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleProjectPinned = async (project: AgentProject) => {
+    setBusy(true);
+    try {
+      await apiService.updateGroup(project.api_id, { is_pinned: !project.pinned });
       await load();
     } finally {
       setBusy(false);
@@ -521,16 +544,17 @@ export default function ProjectsPanel({ agents, onOpenAgent }: {
                 tabIndex={0}
                 onClick={() => setSelectedId(project.id)}
                 onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedId(project.id); }}
-                className={cn('group mb-1 flex cursor-pointer items-center gap-2 rounded-xl px-3 py-3 transition-colors', active ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200')}
+                className={cn('group mb-1 flex h-12 cursor-pointer items-center gap-2 rounded-xl px-3 transition-colors', active ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200')}
               >
+                {project.pinned ? <Pin data-id="project-list-item-pinned" className="h-3 w-3 shrink-0 text-amber-400" /> : null}
                 <span data-id="project-list-item-name" className="min-w-0 flex-1 truncate text-[13px] font-medium">{project.name}</span>
-                <span data-id="project-list-item-count" className="text-[10px] text-zinc-600">{project.pane_count}</span>
-                {!project.builtin ? (
-                  <div data-id="project-list-item-actions" className="hidden items-center gap-0.5 group-hover:flex">
+                <div data-id="project-list-item-actions" className="flex w-[78px] shrink-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                    <button type="button" data-id="project-pin" onClick={(event) => { event.stopPropagation(); void toggleProjectPinned(project); }} className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-white/[0.08] hover:text-amber-300" title={project.pinned ? t('projectUnpin') : t('projectPin')}>{project.pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}</button>
                     <button type="button" data-id="project-rename" onClick={(event) => { event.stopPropagation(); void renameProject(project); }} className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-white/[0.08] hover:text-zinc-200" title={t('projectRename')}><Pencil className="h-3 w-3" /></button>
+                    {!project.builtin ? (
                     <button type="button" data-id="project-delete" onClick={(event) => { event.stopPropagation(); void deleteProject(project); }} className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-red-500/10 hover:text-red-300" title={t('projectDelete')}><Trash2 className="h-3 w-3" /></button>
-                  </div>
-                ) : null}
+                    ) : <span className="h-6 w-6" aria-hidden="true" />}
+                </div>
               </div>
             );
           })}
@@ -598,8 +622,9 @@ export default function ProjectsPanel({ agents, onOpenAgent }: {
                 onPointerUp={(event) => endAgentDrag(event, agent)}
                 onPointerCancel={(event) => endAgentDrag(event, agent)}
               >
-              <ProjectAgentCard
-                agent={agent}
+                  <ProjectAgentCard
+                    agent={agent}
+                    teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
                 removable={Boolean(selectedProject.api_id)}
                 onSelect={() => toggleAgentSelection(agent)}

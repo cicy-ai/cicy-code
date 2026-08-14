@@ -558,6 +558,8 @@
   "projectDescriptionLabel": "Description (optional)",
   "projectDescriptionPlaceholder": "Briefly describe the goal or purpose of this project",
   "projectRename": "Rename",
+  "projectPin": "Pin project",
+  "projectUnpin": "Unpin project",
   "projectRenameTitle": "Rename project",
   "projectSave": "Save",
   "projectDelete": "Delete",

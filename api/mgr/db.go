@@ -291,6 +291,8 @@ func (d *DB) Migrate() {
 	// agents; after creation its membership is user-managed like every other
 	// project and is therefore never re-seeded on restart.
 	d.ensureColumn("agent_groups", "is_default", "INTEGER NOT NULL DEFAULT 0")
+	d.ensureColumn("agent_groups", "is_pinned", "INTEGER NOT NULL DEFAULT 0")
+	d.ensureColumn("agent_groups", "name_customized", "INTEGER NOT NULL DEFAULT 0")
 	_, _ = d.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_groups_single_default ON agent_groups(is_default) WHERE is_default=1")
 	if res, err := d.Exec(`INSERT INTO agent_groups (name, description, is_default)
 		SELECT 'Default project', 'Preinstalled Codex and Claude agents', 1

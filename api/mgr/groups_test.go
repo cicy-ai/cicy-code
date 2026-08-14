@@ -56,6 +56,11 @@ func TestDefaultGroupIsPersistedAndCanManageAgents(t *testing.T) {
 	}
 
 	groupID := int(defaultGroup["id"].(float64))
+	decodeGroupResponse(t, callGroupsHandler(t, "PATCH", fmt.Sprintf("/api/groups/%d", groupID), `{"name":"My default","is_pinned":true}`))
+	renamed := decodeGroupResponse(t, callGroupsHandler(t, "GET", fmt.Sprintf("/api/groups/%d", groupID), ""))
+	if renamed["name"] != "My default" || renamed["name_customized"] != true || renamed["is_pinned"] != true {
+		t.Fatalf("default project rename/pin = %#v", renamed)
+	}
 	decodeGroupResponse(t, callGroupsHandler(t, "POST", fmt.Sprintf("/api/groups/%d/panes/w-123:main.0", groupID), ""))
 	detail := decodeGroupResponse(t, callGroupsHandler(t, "GET", fmt.Sprintf("/api/groups/%d", groupID), ""))
 	panes := detail["panes"].([]interface{})
@@ -114,5 +119,23 @@ func TestGroupsCRUD(t *testing.T) {
 	missing := callGroupsHandler(t, "GET", fmt.Sprintf("/api/groups/%d", groupID), "")
 	if missing.Code != 404 {
 		t.Fatalf("deleted group status = %d body=%s", missing.Code, missing.Body.String())
+	}
+}
+
+func TestPinnedGroupsSortBeforeUnpinnedGroups(t *testing.T) {
+	withTestStore(t)
+
+	first := decodeGroupResponse(t, callGroupsHandler(t, "POST", "/api/groups", `{"name":"First"}`))
+	second := decodeGroupResponse(t, callGroupsHandler(t, "POST", "/api/groups", `{"name":"Second"}`))
+	secondID := int(second["id"].(float64))
+	decodeGroupResponse(t, callGroupsHandler(t, "PATCH", fmt.Sprintf("/api/groups/%d", secondID), `{"is_pinned":true}`))
+
+	listed := decodeGroupResponse(t, callGroupsHandler(t, "GET", "/api/groups", ""))
+	groups := listed["groups"].([]interface{})
+	if groups[0].(map[string]interface{})["id"] != second["id"] || groups[0].(map[string]interface{})["is_pinned"] != true {
+		t.Fatalf("pinned project was not first: %#v", groups)
+	}
+	if first["is_pinned"] != false {
+		t.Fatalf("new project should be unpinned: %#v", first)
 	}
 }
