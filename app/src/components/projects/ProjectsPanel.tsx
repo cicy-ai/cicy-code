@@ -65,9 +65,10 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, teamId, selected, removable, footer, width, height, onSelect, onOpen, onRemove, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable, footer, width, height, onSelect, onOpen, onRemove, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
+  latest?: any;
   teamId?: string;
   selected: boolean;
   removable: boolean;
@@ -111,7 +112,7 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, footer,
       aria-pressed={selected}
       style={{ width, height }}
       className={cn(
-        'relative flex min-h-[140px] min-w-[260px] cursor-pointer flex-col rounded-2xl border bg-[#111216] shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
+        'relative flex min-h-[240px] min-w-[260px] cursor-pointer flex-col rounded-2xl border bg-[#111216] shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
         selected ? 'border-blue-500 ring-1 ring-blue-500/60' : 'border-white/[0.08]',
       )}
     >
@@ -183,6 +184,22 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, footer,
           </span>
         ) : null}
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
+      </div>
+      <div data-id="project-agent-card-live-body" className="mt-3 min-h-0 flex-1 space-y-2 overflow-hidden text-[11px] leading-4">
+        <div data-id="project-agent-card-latest-question" className="grid grid-cols-[52px_minmax(0,1fr)] gap-2">
+          <span className="font-mono text-zinc-600">1. Q</span>
+          <span className="line-clamp-2 whitespace-pre-wrap text-zinc-300">{String(latest?.latest_question || '—')}</span>
+        </div>
+        <div data-id="project-agent-card-latest-response" className="grid grid-cols-[52px_minmax(0,1fr)] gap-2">
+          <span className="font-mono text-zinc-600">2. {latest?.latest_response_type === 'thinking' ? 'THINK' : 'REPLY'}</span>
+          <span className="line-clamp-3 whitespace-pre-wrap text-zinc-400">{String(latest?.latest_response || '—')}</span>
+        </div>
+        <div data-id="project-agent-card-latest-tool" className="grid grid-cols-[52px_minmax(0,1fr)] gap-2">
+          <span className="font-mono text-zinc-600">3. TOOL</span>
+          <span className="min-w-0 line-clamp-2 font-mono text-zinc-500">
+            {latest?.latest_tool?.name ? `${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}` : '—'}
+          </span>
+        </div>
       </div>
       </div>
       {footer}
@@ -352,7 +369,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
             x, y,
             z: Number(row?.z_index || index + 1),
             width: legacyDefaultSize ? 300 : Math.max(260, storedWidth),
-            height: legacyDefaultSize ? 180 : Math.max(140, storedHeight),
+            height: legacyDefaultSize ? 320 : Math.max(240, storedHeight),
           };
         });
         if (!cancelled) setAgentLayouts(next);
@@ -552,7 +569,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     y: 40 + Math.floor(index / 4) * 260,
     z: index + 1,
     width: 300,
-    height: 180,
+    height: 320,
   };
 
   const beginAgentDrag = (event: ReactPointerEvent<HTMLDivElement>, agent: ProjectAgent, index: number) => {
@@ -580,7 +597,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
     setAgentLayouts((current) => ({
       ...current,
-      [drag.id]: { ...(current[drag.id] || { x: drag.originX, y: drag.originY, z: 1, width: 300, height: 180 }), x: drag.originX + dx, y: drag.originY + dy },
+      [drag.id]: { ...(current[drag.id] || { x: drag.originX, y: drag.originY, z: 1, width: 300, height: 320 }), x: drag.originX + dx, y: drag.originY + dy },
     }));
   };
 
@@ -598,7 +615,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     draggedAgentRef.current = drag.id;
     const x = drag.originX + (event.clientX - drag.startX) / canvasZoom;
     const y = drag.originY + (event.clientY - drag.startY) / canvasZoom;
-    setAgentLayouts((current) => ({ ...current, [drag.id]: { ...(current[drag.id] || { x, y, z: 1, width: 300, height: 180 }), x, y } }));
+    setAgentLayouts((current) => ({ ...current, [drag.id]: { ...(current[drag.id] || { x, y, z: 1, width: 300, height: 320 }), x, y } }));
     if (selectedProject.api_id) {
       void apiService.updateGroupPaneLayout(selectedProject.api_id, agent.paneId, { pos_x: x, pos_y: y });
     }
@@ -621,7 +638,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     if (!resize || resize.pointerId !== event.pointerId) return;
     event.stopPropagation();
     const width = Math.max(260, Math.min(900, resize.originWidth + (event.clientX - resize.startX) / canvasZoom));
-    const height = Math.max(140, Math.min(700, resize.originHeight + (event.clientY - resize.startY) / canvasZoom));
+    const height = Math.max(240, Math.min(700, resize.originHeight + (event.clientY - resize.startY) / canvasZoom));
     setAgentLayouts((current) => ({ ...current, [resize.id]: { ...current[resize.id], width, height } }));
   };
 
@@ -634,7 +651,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     const layout = {
       ...current,
       width: Math.max(260, Math.min(900, resize.originWidth + (event.clientX - resize.startX) / canvasZoom)),
-      height: Math.max(140, Math.min(700, resize.originHeight + (event.clientY - resize.startY) / canvasZoom)),
+      height: Math.max(240, Math.min(700, resize.originHeight + (event.clientY - resize.startY) / canvasZoom)),
     };
     setAgentLayouts((layouts) => ({ ...layouts, [resize.id]: layout }));
     if (selectedProject.api_id) {
@@ -773,6 +790,8 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
             {visibleAgents.map((agent, index) => {
               const layout = layoutForAgent(agent, index);
               const cardMetrics = liveMetrics[shortPaneId(agent.paneId)];
+              const cardShortId = shortPaneId(agent.paneId);
+              const cardLatest = statuses[agent.paneId] || statuses[`${cardShortId}:main.0`] || statuses[cardShortId] || {};
               const cardBusy = sendingAgentIds.has(shortPaneId(agent.paneId)) || Boolean(cardMetrics?.working) || /running|working|thinking|streaming/.test(String(agent.status || '').toLowerCase());
               return (
               <div
@@ -788,6 +807,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                   <ProjectAgentCard
                     agent={agent}
                     metrics={cardMetrics}
+                    latest={cardLatest}
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
                 removable={Boolean(selectedProject.api_id)}

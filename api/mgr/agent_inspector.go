@@ -2503,36 +2503,36 @@ func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
 	}
 	ctxUsedPct, ctxWindowSize := agentInspectorReadContextWindow(paneID)
 	J(w, M{
-		"pane_id":                    paneID,
-		"conversation_id":            resolvedConversationID,
+		"pane_id":         paneID,
+		"conversation_id": resolvedConversationID,
 		// reply.json's self-described conversation (the conversation the live-tail
 		// ANSWER actually belongs to). The history view attaches the tail only when
 		// this matches committed; on mismatch the agent has rotated conversations
 		// and the view must rebind (see docs §11 / INV-8).
 		"reply_conversation_id": strings.TrimSpace(reply.ConversationID),
-		"history_id":                 answerID,
-		"turn_id":                    strings.TrimSpace(reply.TurnID),
-		"status":                     status,
-		"complete":                   complete,
-		"question":                   aiGatewayCurrentQuestion(current),
-		"answer":                     answer,
-		"thinking":                   thinking,
+		"history_id":            answerID,
+		"turn_id":               strings.TrimSpace(reply.TurnID),
+		"status":                status,
+		"complete":              complete,
+		"question":              aiGatewayCurrentQuestion(current),
+		"answer":                answer,
+		"thinking":              thinking,
 		// Whole in-flight turn as ORDERED blocks (thinking/tool_use/text), as the
 		// serial SSE produced them — live turn renders this in order so a multi-round
 		// turn shows thinking→tool→tool→thinking→text instead of tools jumping above.
-		"items":                      reply.Items,
-		"updated_at":                 strings.TrimSpace(reply.UpdatedAt),
-		"model":                      aiGatewayFirstNonEmpty(aiGatewayReplyPrimaryModel(reply), strings.TrimSpace(current.Model)),
-		"input_tokens":               reply.InputTokens,
-		"output_tokens":              reply.OutputTokens,
-		"cache_read_input_tokens":    reply.CacheReadInputTokens,
+		"items":                       reply.Items,
+		"updated_at":                  strings.TrimSpace(reply.UpdatedAt),
+		"model":                       aiGatewayFirstNonEmpty(aiGatewayReplyPrimaryModel(reply), strings.TrimSpace(current.Model)),
+		"input_tokens":                reply.InputTokens,
+		"output_tokens":               reply.OutputTokens,
+		"cache_read_input_tokens":     reply.CacheReadInputTokens,
 		"cache_creation_input_tokens": reply.CacheCreationInputTokens,
-		"total_tokens":               reply.TotalTokens,
-		"cost_credit":                reply.CostCredit,
+		"total_tokens":                reply.TotalTokens,
+		"cost_credit":                 reply.CostCredit,
 		// Claude Code 自报的权威上下文用量(statusline 落盘的 context.json)。和 pane 状态栏一致;
 		// 优先于用 input_tokens 反推(后者含 cache_read 重复计数)。缺失时为 null/0。
-		"context_used_pct":           ctxUsedPct,
-		"context_window_size":        ctxWindowSize,
+		"context_used_pct":    ctxUsedPct,
+		"context_window_size": ctxWindowSize,
 	})
 }
 
@@ -2552,7 +2552,7 @@ func agentInspectorLiteMetrics(paneID string) M {
 	status := strings.ToLower(rawStatus)
 	complete := status == "idle" || status == "done" || isAIGatewayReplyTerminal(status)
 	ctxUsedPct, ctxWindowSize := agentInspectorReadContextWindow(paneID)
-	return M{
+	out := M{
 		// Keep the raw status string (unchanged from the old {status,updated_at}
 		// shape) so the status-dot consumers keep working; the client lowercases.
 		"status":                      rawStatus,
@@ -2568,6 +2568,58 @@ func agentInspectorLiteMetrics(paneID string) M {
 		"context_used_pct":            ctxUsedPct,
 		"context_window_size":         ctxWindowSize,
 	}
+	if current, err := aiGatewayReadCurrentSnapshotCached(paneID); err == nil {
+		out["latest_question"] = truncateRunes(aiGatewayCurrentQuestion(current), 1200)
+	}
+	for i := len(reply.Items) - 1; i >= 0; i-- {
+		item := reply.Items[i]
+		typeName := strings.TrimSpace(aiGatewayString(item["type"]))
+		if _, exists := out["latest_response"]; !exists && (typeName == "thinking" || typeName == "text") {
+			field := "text"
+			if typeName == "thinking" {
+				field = "thinking"
+			}
+			if value := truncateRunes(aiGatewayString(item[field]), 1800); value != "" {
+				out["latest_response"] = value
+				out["latest_response_type"] = typeName
+			}
+		}
+		if _, exists := out["latest_tool"]; !exists && typeName == "tool_use" {
+			out["latest_tool"] = M{
+				"name":  truncateRunes(aiGatewayString(item["name"]), 120),
+				"input": truncateRunes(compactJSONValue(item["input"]), 1000),
+			}
+		}
+		_, hasResponse := out["latest_response"]
+		_, hasTool := out["latest_tool"]
+		if hasResponse && hasTool {
+			break
+		}
+	}
+	return out
+}
+
+func truncateRunes(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit]) + "…"
+}
+
+func compactJSONValue(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // handleAgentCurrentReplyBatch returns lite header metrics for MANY agents in
@@ -3698,9 +3750,10 @@ func agentInspectorOverrideModel(payload map[string]interface{}, agentID string)
 // fields on either side, and cicyAi/new-api front-ends often strip them anyway.
 // agentInspectorThinkingMode resolves the gateway's thinking policy for an agent —
 // controllable, NOT hardcoded. Precedence:
-//   per-pane agent_config.config {"thinking":"disabled|enabled|passthrough"}
-//   → global_settings.gateway_thinking
-//   → default "disabled".
+//
+//	per-pane agent_config.config {"thinking":"disabled|enabled|passthrough"}
+//	→ global_settings.gateway_thinking
+//	→ default "disabled".
 func agentInspectorThinkingMode(agentID string) string {
 	if m := paneThinkingMode(agentID); m != "" {
 		return m
