@@ -234,6 +234,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   const [sendingAgentIds, setSendingAgentIds] = useState<Set<string>>(new Set());
   const [cancelingAgentIds, setCancelingAgentIds] = useState<Set<string>>(new Set());
   const [agentLayouts, setAgentLayouts] = useState<Record<string, ProjectAgentLayout>>({});
+  const [layoutReadyProjectId, setLayoutReadyProjectId] = useState('');
   const [canvasPan, setCanvasPan] = useState({ x: 60, y: 60 });
   const [canvasZoom, setCanvasZoom] = useState(1);
   const liveMetrics = useMemo(() => {
@@ -320,8 +321,6 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     setSelectedAgentIds(new Set());
     setAgentMessages({});
     setSendingAgentIds(new Set());
-    setCanvasPan({ x: 60, y: 60 });
-    setCanvasZoom(1);
   }, [selectedProject.id]);
 
   useEffect(() => {
@@ -329,6 +328,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     const loadLayout = async () => {
       if (!selectedProject.api_id) {
         setAgentLayouts({});
+        setLayoutReadyProjectId(String(selectedProject.id));
         return;
       }
       try {
@@ -366,9 +366,15 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
             });
           }
         });
-        if (!cancelled) setAgentLayouts(next);
+        if (!cancelled) {
+          setAgentLayouts(next);
+          setLayoutReadyProjectId(String(selectedProject.id));
+        }
       } catch {
-        if (!cancelled) setAgentLayouts({});
+        if (!cancelled) {
+          setAgentLayouts({});
+          setLayoutReadyProjectId(String(selectedProject.id));
+        }
       }
     };
     void loadLayout();
@@ -785,7 +791,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
             backgroundSize: `${32 * canvasZoom}px ${32 * canvasZoom}px`,
           }}
         >
-        {visibleAgents.length ? (
+        {visibleAgents.length && layoutReadyProjectId === String(selectedProject.id) ? (
           <div
             data-id="project-canvas-world"
             className="pointer-events-none absolute inset-0 origin-top-left"
@@ -866,7 +872,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
               </div>
             );})}
           </div>
-        ) : (
+        ) : visibleAgents.length ? null : (
           <div data-id="projects-agent-empty" className="flex min-h-[420px] flex-col items-center justify-center text-center text-zinc-600">
             <FolderKanban className="mb-3 h-10 w-10 opacity-40" />
             <p className="text-sm" data-id="projects-agent-empty-title">{t('projectNoAgents')}</p>
