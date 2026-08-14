@@ -2002,7 +2002,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const fullPaneId = String(agent?.pane_id || agent?.id || '');
     const shortId = fullPaneId.replace(/:.*$/, '');
     const detail = paneDetails[shortId] || paneDetails[fullPaneId] || {};
-    const live = pollStatuses[shortId] || pollStatuses[fullPaneId] || {};
+    // Match TeamPanel's reply-metrics lookup exactly: the full pane-id entry is
+    // the authoritative poll_data payload; the short-id entry is compatibility
+    // fallback and may contain status-only data without model/context/cost.
+    const live = pollStatuses[fullPaneId] || pollStatuses[shortId] || {};
     return {
       paneId: fullPaneId,
       title: String(agent?.title || detail?.title || shortId),
