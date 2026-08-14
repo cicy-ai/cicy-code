@@ -252,12 +252,13 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
   );
 }
 
-export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, onOpenAgent, onCreateAgent = () => {} }: {
+export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, hideFab = false, onOpenAgent, onCreateAgent = () => {} }: {
   agents: ProjectAgent[];
   statuses?: Record<string, any>;
   topRightControls?: ReactNode;
   footerControls?: ReactNode;
   shellPanel?: ReactNode;
+  hideFab?: boolean;
   onOpenAgent: (paneId: string) => void;
   onCreateAgent?: () => void;
 }) {
@@ -419,6 +420,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   }, [layoutReadyProjectId, paneMembershipKey, selectedProject.id]);
 
   useEffect(() => {
+    visibilityCheckedKeyRef.current = '';
     setSelectedAgentIds(new Set());
     setAgentMessages({});
     setSendingAgentIds(new Set());
@@ -870,7 +872,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 tabIndex={0}
                 onClick={() => setSelectedId(project.id)}
                 onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedId(project.id); }}
-                className={cn('group relative mb-1 flex h-12 cursor-pointer items-center gap-2 rounded-xl px-3 transition-colors', active ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200')}
+                className={cn('group relative mb-1 flex h-12 cursor-pointer items-center gap-2 px-3 transition-colors', active ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200')}
               >
                 {project.pinned ? <Pin data-id="project-list-item-pinned" className="h-3 w-3 shrink-0 text-amber-400" /> : null}
                 <span data-id="project-list-item-name" className="min-w-0 flex-1 truncate text-[13px] font-medium">{project.name}</span>
@@ -1044,7 +1046,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           </div>
         ) : null}
         </div>
-        <div data-id="project-fab-wrap" className="absolute bottom-16 right-5 z-[100] flex flex-col items-end gap-2">
+        {!hideFab ? <div data-id="project-fab-wrap" className="absolute bottom-16 right-5 z-[60] flex flex-col items-end gap-2">
           <div
             data-id="project-fab-menu"
             className={cn(
@@ -1083,7 +1085,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           >
             <Plus data-id="project-add-agent-icon" className={cn('h-5 w-5 transition-transform duration-200', fabOpen && 'rotate-45')} />
           </button>
-        </div>
+        </div> : null}
         </div>
 
       </main>
