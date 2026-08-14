@@ -183,19 +183,14 @@ function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable,
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
       <div data-id="project-agent-card-live-body" className="mt-3 min-h-0 flex-1 space-y-2 overflow-hidden text-[11px] leading-4">
-        <div data-id="project-agent-card-latest-question" className="grid grid-cols-[52px_minmax(0,1fr)] gap-2">
-          <span className="font-mono text-zinc-600">Q</span>
-          <span className="line-clamp-2 whitespace-pre-wrap text-zinc-300">{String(latest?.latest_question || '—')}</span>
+        <div data-id="project-agent-card-latest-question" className="line-clamp-2 whitespace-pre-wrap text-zinc-300">
+          {String(latest?.latest_question || '—')}
         </div>
-        <div data-id="project-agent-card-latest-response" className="grid grid-cols-[52px_minmax(0,1fr)] gap-2">
-          <span className="font-mono text-zinc-600">{latest?.latest_response_type === 'thinking' ? 'THINK' : 'REPLY'}</span>
-          <span className="line-clamp-3 whitespace-pre-wrap text-zinc-400">{String(latest?.latest_response || '—')}</span>
+        <div data-id="project-agent-card-latest-response" className="line-clamp-3 whitespace-pre-wrap text-zinc-400">
+          {String(latest?.latest_response || '—')}
         </div>
-        <div data-id="project-agent-card-latest-tool" className="grid grid-cols-[52px_minmax(0,1fr)] gap-2">
-          <span className="font-mono text-zinc-600">TOOL</span>
-          <span className="min-w-0 line-clamp-2 font-mono text-zinc-500">
-            {latest?.latest_tool?.name ? `${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}` : '—'}
-          </span>
+        <div data-id="project-agent-card-latest-tool" className="min-w-0 line-clamp-2 font-mono text-zinc-500">
+          {latest?.latest_tool?.name ? `${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}` : '—'}
         </div>
       </div>
       </div>
@@ -828,7 +823,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                   <footer
                     data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`}
                     onClick={(event) => event.stopPropagation()}
-                    className="flex h-11 items-center border-t border-blue-500/60 bg-[#15161b] px-3 rounded-b-2xl"
+                    className="flex h-11 min-h-11 shrink-0 items-center border-t border-blue-500/60 bg-[#15161b] px-3 rounded-b-2xl"
                   >
                     {cardBusy ? <Loader2 data-id={`project-agent-prompt-sending-${shortPaneId(agent.paneId)}`} className="mr-2 h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" /> : null}
                     <input
