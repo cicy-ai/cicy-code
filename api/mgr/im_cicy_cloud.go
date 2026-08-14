@@ -906,6 +906,8 @@ func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, sende
 			result, rpcErr = agentPersonaData(target)
 		case "persona_save":
 			result, rpcErr = saveAgentPersonaData(target, req.Title, req.Guidance, req.SystemPrompt, req.Meta)
+		case "cancel":
+			result, rpcErr = cancelAgentTurnData(target)
 		default:
 			rpcErr = fmt.Errorf("unsupported rpc operation %q", req.Op)
 		}

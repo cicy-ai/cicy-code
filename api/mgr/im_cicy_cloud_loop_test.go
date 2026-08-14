@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -581,6 +583,122 @@ func TestCiCyCloudRPCReadsStructuredDataWithoutAgentDispatch(t *testing.T) {
 	}
 	if envelope["ok"] != true {
 		t.Fatalf("structured rpc failed: %#v", envelope)
+	}
+}
+
+func TestCiCyCloudRPCCancelInterruptsExactTerminalAgent(t *testing.T) {
+	withTestStore(t)
+	if _, err := store.Exec(`INSERT INTO agent_config
+		(pane_id,title,agent_type,active) VALUES ('w-102:main.0','Terminal Agent','codex',1)`); err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	tmuxLog := filepath.Join(t.TempDir(), "tmux.log")
+	tmuxPath := filepath.Join(binDir, "tmux")
+	if err := os.WriteFile(tmuxPath, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CICY_TEST_TMUX_LOG\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CICY_TEST_TMUX_LOG", tmuxLog)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(M{"message": M{"id": "msg-rpc-cancel-reply-12345678"}})
+	}))
+	defer server.Close()
+	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
+
+	tr := &cicyCloudTransport{token: "test"}
+	if err := tr.handleRPCRequest("msg-rpc-cancel-12345678", "code-source-1234567890123456", "w-web", "w-102", `{"op":"cancel"}`, "ws"); err != nil {
+		t.Fatal(err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(body["text"].(string)), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := envelope["data"].(map[string]any)
+	if envelope["ok"] != true || data["canceled"] != true || data["paneId"] != "w-102" {
+		t.Fatalf("unexpected cancel reply: %#v", envelope)
+	}
+	command, err := os.ReadFile(tmuxLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(string(command)), "send-keys -t w-102:main.0 Escape"; got != want {
+		t.Fatalf("tmux command = %q, want %q", got, want)
+	}
+}
+
+func TestCancelAgentTurnFinalizesStaleHeadlessReply(t *testing.T) {
+	withTempCicyRoot(t)
+	withTestStore(t)
+	const agentID = "w-cicy-cancel-stale"
+	if _, err := store.Exec(`INSERT INTO agent_config
+		(pane_id,title,agent_type,active) VALUES (?, 'Headless Agent', 'cicy', 1)`, agentID+":main.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := aiGatewayWriteReplySnapshot(agentID, aiGatewayReplySnapshot{
+		ConversationID: "conv-cancel", Status: "working", UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := cancelAgentTurnData(agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["canceled"] != true || result["paneId"] != agentID {
+		t.Fatalf("unexpected cancel result: %#v", result)
+	}
+	if reply := aiGatewayLoadReplySnapshot(agentID); reply.Status != "completed" {
+		t.Fatalf("stale reply status = %q, want completed", reply.Status)
+	}
+}
+
+func TestCancelAgentTurnCancelsInFlightHeadlessSession(t *testing.T) {
+	withTestStore(t)
+	const agentID = "w-cicy-cancel-live"
+	if _, err := store.Exec(`INSERT INTO agent_config
+		(pane_id,title,agent_type,active) VALUES (?, 'Live Headless Agent', 'cicy', 1)`, agentID+":main.0"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	session := &cicySession{pending: []string{"queued"}}
+	session.setCancel(cancel)
+	cicySessionsMu.Lock()
+	cicySessions[agentID] = session
+	cicySessionsMu.Unlock()
+	t.Cleanup(func() {
+		cicySessionsMu.Lock()
+		delete(cicySessions, agentID)
+		cicySessionsMu.Unlock()
+	})
+
+	result, err := cancelAgentTurnData(agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["canceled"] != true || result["mode"] != "headless" {
+		t.Fatalf("unexpected cancel result: %#v", result)
+	}
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("in-flight context was not canceled")
+	}
+	session.qmu.Lock()
+	defer session.qmu.Unlock()
+	if len(session.pending) != 0 {
+		t.Fatalf("queued inputs were not cleared: %#v", session.pending)
+	}
+}
+
+func TestCancelAgentTurnRejectsUnknownAgent(t *testing.T) {
+	withTestStore(t)
+	if _, err := cancelAgentTurnData("w-missing-cancel"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not-found error, got %v", err)
 	}
 }
 

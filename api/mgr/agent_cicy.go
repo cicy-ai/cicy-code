@@ -2131,18 +2131,54 @@ func handleCicyCancel(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "pane_id required")
 		return
 	}
+	if normalizeAgentType(paneAgentType(shortID+":main.0")) != "cicy" {
+		// Preserve the headless-only endpoint's historical idempotent response.
+		// Generic terminal-agent interruption is exposed through Cloud RPC.
+		J(w, M{"success": true, "canceled": false, "pane_id": shortID})
+		return
+	}
+	result, err := cancelAgentTurnData(shortID)
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	J(w, M{"success": true, "canceled": result["canceled"], "pane_id": shortID})
+}
+
+// cancelAgentTurnData interrupts the exact agent addressed by the caller. A
+// headless cicy agent is canceled in process; terminal-backed agents receive
+// Escape in their own tmux pane. The result deliberately does not claim that a
+// terminal turn has settled: the authoritative reply snapshot remains the
+// source of truth for the UI's working state.
+func cancelAgentTurnData(paneID string) (M, error) {
+	shortID := shortPaneID(normPaneID(strings.TrimSpace(paneID)))
+	if shortID == "" {
+		return nil, fmt.Errorf("pane_id required")
+	}
+	fullPaneID := normPaneID(shortID)
+	agentType := normalizeAgentType(paneAgentType(fullPaneID))
+	if agentType == "" {
+		return nil, fmt.Errorf("agent %s not found", shortID)
+	}
+	if agentType != "cicy" {
+		if _, err := runTmux("send-keys", "-t", fullPaneID, "Escape"); err != nil {
+			return nil, fmt.Errorf("interrupt agent %s: %w", shortID, err)
+		}
+		return M{"canceled": true, "paneId": shortID, "agentType": agentType, "mode": "tmux_escape"}, nil
+	}
+
 	canceled := cancelCicyPane(shortID)
 	// No in-flight turn (e.g. the server restarted and the in-memory session is
 	// gone) but reply.json is stuck non-terminal from before — the UI shows a
-	// forever-busy turn that cancel can't reach. Treat the user's 停止 as "make
-	// it stop": finalize the stale snapshot so the UI unlocks immediately.
+	// forever-busy turn that cancel can't reach. Treat 停止 as "make it stop" and
+	// finalize the stale snapshot so the next authoritative state unlocks it.
 	if !canceled {
 		if reply := aiGatewayLoadReplySnapshot(shortID); reply.Status != "" && !isAIGatewayReplyTerminal(reply.Status) {
 			cicyWriteTerminalReply(shortID, reply.ConversationID)
 			canceled = true
 		}
 	}
-	J(w, M{"success": true, "canceled": canceled, "pane_id": shortID})
+	return M{"canceled": canceled, "paneId": shortID, "agentType": agentType, "mode": "headless"}, nil
 }
 
 // handleCicyRetry re-runs a cicy agent's latest cancelled/failed turn (web 点
