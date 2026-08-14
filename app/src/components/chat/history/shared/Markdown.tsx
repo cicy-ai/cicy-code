@@ -52,7 +52,7 @@ function AttachmentLink({ href, children }: { href: string; children: any }) {
       ) : null}
       {info.media === 'video' ? (
         <span data-id="current-history-attachment-video" className="block px-2 pt-2">
-          <video data-id="current-history-attachment-video-player" src={info.url} controls preload="metadata" className="aspect-video max-h-96 w-full rounded-lg bg-black object-contain" />
+          <video data-id="current-history-attachment-video-player" src={info.url} controls preload="metadata" className="aspect-video max-h-96 w-full cursor-zoom-in rounded-lg bg-black object-contain" onClick={(event) => { event.stopPropagation(); void event.currentTarget.requestFullscreen?.(); }} />
         </span>
       ) : null}
       <span data-id="current-history-attachment-actions" className="flex min-w-0 items-center gap-2 px-3 py-2">

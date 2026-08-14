@@ -13,7 +13,7 @@ import { ModelTag } from '../../lib/modelTag';
 import { chatAttachmentMarkdown, replAttachmentMarkdown } from '../../lib/attachmentMarkdown';
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
-import { MarkdownBlock } from '../chat/history/shared/Markdown';
+import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
 
 export interface ProjectAgent {
   paneId: string;
@@ -80,12 +80,13 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachment, teamId, selected, removable, footer, width, height, onRemove, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachment, working, teamId, selected, removable, footer, width, height, onRemove, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
   attachments: ProjectAttachment[];
   onRemoveAttachment: (id: string) => void;
+  working: boolean;
   teamId?: string;
   selected: boolean;
   removable: boolean;
@@ -211,9 +212,11 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
             {attachments.map((attachment) => (
               <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className="group relative flex h-14 max-w-[180px] items-center overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
                 {attachment.mediaType === 'image' && attachment.previewURL ? (
-                  <img data-id="project-agent-card-attachment-media" src={attachment.previewURL} alt={attachment.name} className="h-14 w-14 object-cover" />
+                  <span data-id="project-agent-card-attachment-media" className="h-14 w-14 overflow-hidden [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-14 [&_[data-id=current-history-md-img]]:!w-14 [&_[data-id=current-history-md-img]]:rounded-none [&_[data-id=current-history-md-img]]:object-cover">
+                    <MarkdownImg src={attachment.previewURL} alt={attachment.name} />
+                  </span>
                 ) : attachment.mediaType === 'video' && attachment.previewURL ? (
-                  <video data-id="project-agent-card-attachment-media" src={attachment.previewURL} className="h-14 w-20 object-cover" controls />
+                  <video data-id="project-agent-card-attachment-media" src={attachment.previewURL} className="h-14 w-20 cursor-zoom-in object-cover" controls onClick={(event) => { event.stopPropagation(); void event.currentTarget.requestFullscreen?.(); }} />
                 ) : attachment.mediaType === 'audio' && attachment.previewURL ? (
                   <audio data-id="project-agent-card-attachment-media" src={attachment.previewURL} className="h-10 w-32" controls />
                 ) : (
@@ -223,6 +226,11 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
                 <button type="button" data-id="project-agent-card-attachment-remove" onClick={(event) => { event.stopPropagation(); onRemoveAttachment(attachment.id); }} className="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-black/70 text-zinc-300 opacity-0 group-hover:opacity-100"><X className="h-3 w-3" /></button>
               </div>
             ))}
+          </div>
+        ) : null}
+        {working ? (
+          <div data-id="project-agent-card-output-loading" className="mt-auto flex h-5 items-end gap-1 pt-2" aria-label="Loading">
+            {[0, 1, 2].map((index) => <span key={index} className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />)}
           </div>
         ) : null}
       </div>
@@ -892,6 +900,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                     latest={cardLatest}
                     attachments={agentAttachments[cardShortId] || []}
                     onRemoveAttachment={(attachmentId) => removeAgentAttachment(cardShortId, attachmentId)}
+                    working={cardBusy}
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
                 removable={Boolean(selectedProject.api_id)}
