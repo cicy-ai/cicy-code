@@ -13,6 +13,7 @@ import { ModelTag } from '../../lib/modelTag';
 import { chatAttachmentMarkdown, replAttachmentMarkdown } from '../../lib/attachmentMarkdown';
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
+import { MarkdownBlock } from '../chat/history/shared/Markdown';
 
 export interface ProjectAgent {
   paneId: string;
@@ -128,7 +129,7 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
         selected ? 'border-blue-500 ring-1 ring-blue-500/60' : 'border-white/[0.08]',
       )}
     >
-      <div data-id="project-agent-card-body" className="flex flex-1 flex-col p-5">
+      <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-hidden p-5">
       <div data-id="project-agent-card-header" className="flex items-start gap-3">
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
@@ -189,11 +190,11 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
       <div data-id="project-agent-card-live-body" className="mt-3 min-h-0 flex-1 space-y-2 overflow-hidden text-[11px] leading-4">
-        <div data-id="project-agent-card-latest-question" className="line-clamp-2 whitespace-pre-wrap text-zinc-300">
-          {String(latest?.latest_question || '—')}
+        <div data-id="project-agent-card-latest-question" className="max-h-28 overflow-hidden text-zinc-300 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-20">
+          <MarkdownBlock text={String(latest?.latest_question || '—')} />
         </div>
-        <div data-id="project-agent-card-latest-response" className="line-clamp-3 whitespace-pre-wrap text-zinc-400">
-          {String(latest?.latest_response || '—')}
+        <div data-id="project-agent-card-latest-response" className="max-h-28 overflow-hidden text-zinc-400 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-20">
+          <MarkdownBlock text={String(latest?.latest_response || '—')} />
         </div>
         <div data-id="project-agent-card-latest-tool" className="min-w-0 line-clamp-2 font-mono text-zinc-500">
           {latest?.latest_tool?.name ? `${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}` : '—'}
@@ -374,6 +375,11 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
           const originalY = Number.isFinite(Number(row?.pos_y)) ? Number(row.pos_y) : 40 + Math.floor(index / 4) * 360;
           let x = originalX;
           let y = originalY;
+          const sameRow = placed.filter((item) => y < item.y + item.height && y + height > item.y);
+          if (sameRow.length) {
+            const rowRight = Math.max(...sameRow.map((item) => item.x + item.width));
+            if (x - rowRight > 120) x = rowRight + 24;
+          }
           const overlaps = () => placed.some((item) => x < item.x + item.width + 20 && x + width + 20 > item.x && y < item.y + item.height + 20 && y + height + 20 > item.y);
           while (overlaps()) {
             x += 340;
