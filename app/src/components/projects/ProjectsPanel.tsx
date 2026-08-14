@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { Check, FileText, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, Square, Trash2, UserPlus, X } from 'lucide-react';
+import { Check, FileText, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, Square, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -252,13 +252,14 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
   );
 }
 
-export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, onOpenAgent }: {
+export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, onOpenAgent, onCreateAgent = () => {} }: {
   agents: ProjectAgent[];
   statuses?: Record<string, any>;
   topRightControls?: ReactNode;
   footerControls?: ReactNode;
   shellPanel?: ReactNode;
   onOpenAgent: (paneId: string) => void;
+  onCreateAgent?: () => void;
 }) {
   const { t } = useTranslation('workspace');
   const { confirm, prompt, node: dialogsNode } = useDialogs();
@@ -276,6 +277,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [projectMenuId, setProjectMenuId] = useState<string>('');
   const [projectMenuAnchor, setProjectMenuAnchor] = useState<string>('');
   const [addOpen, setAddOpen] = useState(false);
+  const [fabOpen, setFabOpen] = useState(false);
   const [addSearch, setAddSearch] = useState('');
   const [addError, setAddError] = useState('');
   const [selectedToAdd, setSelectedToAdd] = useState<Set<string>>(new Set());
@@ -1036,22 +1038,51 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           <button type="button" data-id="project-canvas-zoom-in" onClick={() => changeZoom(0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomIn')}><Plus className="h-3.5 w-3.5" /></button>
           <button type="button" data-id="project-canvas-reset" onClick={resetCanvasView} className="grid h-7 w-7 place-items-center rounded-md text-zinc-500 hover:bg-white/[0.08] hover:text-white" title={t('projectResetView')}><Maximize2 className="h-3.5 w-3.5" /></button>
         </div>
-        <button
-          type="button"
-          data-id="project-add-agent"
-          onClick={() => openAddAgents(selectedProject)}
-          disabled={!selectedProject.api_id || availableAgents.length === 0}
-          className="absolute bottom-14 right-5 grid h-10 w-10 place-items-center rounded-full bg-blue-600 text-white shadow-[0_8px_20px_rgba(37,99,235,0.3)] transition-transform hover:scale-105 hover:bg-blue-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-          title={t('projectAddAgent')}
-          aria-label={t('projectAddAgent')}
-        >
-          <UserPlus className="h-5 w-5" />
-        </button>
         {footerControls ? (
           <div data-id="project-canvas-footer-controls" className="absolute bottom-1.5 right-4 flex items-center gap-2 px-2 py-1">
             {footerControls}
           </div>
         ) : null}
+        </div>
+        <div data-id="project-fab-wrap" className="absolute bottom-16 right-5 z-[60] flex flex-col items-end gap-2">
+          <div
+            data-id="project-fab-menu"
+            className={cn(
+              'flex origin-bottom-right flex-col items-end gap-2 transition-all duration-200',
+              fabOpen ? 'pointer-events-auto translate-y-0 scale-100 opacity-100' : 'pointer-events-none translate-y-2 scale-95 opacity-0',
+            )}
+          >
+            <button
+              type="button"
+              data-id="project-fab-create-agent"
+              onClick={() => { setFabOpen(false); onCreateAgent(); }}
+              className="flex h-9 items-center gap-2 rounded-full border border-white/[0.10] bg-[#202126] px-3 text-[12px] text-zinc-100 shadow-xl hover:bg-[#292a30]"
+            >
+              <UserPlus data-id="project-fab-create-agent-icon" className="h-4 w-4" />
+              <span data-id="project-fab-create-agent-label">{t('projectCreateAgent')}</span>
+            </button>
+            <button
+              type="button"
+              data-id="project-fab-add-existing"
+              onClick={() => { setFabOpen(false); openAddAgents(selectedProject); }}
+              disabled={!selectedProject.api_id || availableAgents.length === 0}
+              className="flex h-9 items-center gap-2 rounded-full border border-white/[0.10] bg-[#202126] px-3 text-[12px] text-zinc-100 shadow-xl hover:bg-[#292a30] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Users data-id="project-fab-add-existing-icon" className="h-4 w-4" />
+              <span data-id="project-fab-add-existing-label">{t('projectAddExistingAgent')}</span>
+            </button>
+          </div>
+          <button
+            type="button"
+            data-id="project-add-agent"
+            onClick={() => setFabOpen((open) => !open)}
+            className="grid h-10 w-10 place-items-center rounded-full bg-blue-600 text-white shadow-[0_8px_20px_rgba(37,99,235,0.3)] transition-transform hover:scale-105 hover:bg-blue-500 active:scale-95"
+            title={t('projectAddAgent')}
+            aria-label={t('projectAddAgent')}
+            aria-expanded={fabOpen}
+          >
+            <Plus data-id="project-add-agent-icon" className={cn('h-5 w-5 transition-transform duration-200', fabOpen && 'rotate-45')} />
+          </button>
         </div>
         </div>
 

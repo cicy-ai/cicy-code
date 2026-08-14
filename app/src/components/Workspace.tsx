@@ -781,7 +781,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, [leftActive, paneId]);
   useEffect(() => { cache.set(projectsOpenKey(paneId), projectsOpen); }, [paneId, projectsOpen]);
   useEffect(() => {
-    if (projectsOpen) setCliContentOpen(false);
+    if (!projectsOpen) return;
+    setLeftPanelView(null);
+    setKnowledgeOpen(false);
+    setCliContentOpen(false);
   }, [projectsOpen]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, activeTeamPaneId); }, [activeTeamPaneId]);
   useEffect(() => { cache.set(CLI_DRAWER_WIDTH_KEY, cliDrawerWidth); }, [cliDrawerWidth]);
@@ -2181,6 +2184,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 onOpenAgent={(targetPaneId) => {
                   setProjectsOpen(false);
                   onSelectAgent(targetPaneId.replace(/:.*$/, ''));
+                }}
+                onCreateAgent={() => {
+                  setCreateAgentInitialValues(undefined);
+                  setCreateAgentOpen(true);
                 }}
               />
               {cliFixedContent}

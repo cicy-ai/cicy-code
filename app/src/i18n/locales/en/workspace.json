@@ -567,6 +567,8 @@
   "projectDeleteBody": "The project and its agent assignments will be deleted. Agents themselves are not deleted.",
   "projectAgentCount": "{{count}} agents",
   "projectAddAgent": "Add agents",
+  "projectCreateAgent": "Create new agent",
+  "projectAddExistingAgent": "Add existing agents",
   "projectAdd": "Add",
   "projectSearchAgent": "Search agents…",
   "projectSelectedAgents": "{{count}} selected",

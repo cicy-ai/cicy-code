@@ -567,6 +567,8 @@
   "projectDeleteBody": "将删除该项目及其中的 Agent 关联，不会删除 Agent 本身。",
   "projectAgentCount": "{{count}} 个 Agent",
   "projectAddAgent": "添加 Agent",
+  "projectCreateAgent": "新建 Agent",
+  "projectAddExistingAgent": "添加已有 Agent",
   "projectAdd": "添加",
   "projectSearchAgent": "搜索 Agent…",
   "projectSelectedAgents": "已选择 {{count}} 个 Agent",
