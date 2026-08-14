@@ -918,7 +918,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             backgroundSize: `${32 * canvasZoom}px ${32 * canvasZoom}px`,
           }}
         >
-        {visibleAgents.length && layoutReadyProjectId === String(selectedProject.id) ? (
+        {visibleAgents.length ? (
           <div
             data-id="project-canvas-world"
             className="pointer-events-none absolute inset-0 z-20 origin-top-left"
@@ -1024,7 +1024,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               </div>
             );})}
           </div>
-        ) : visibleAgents.length ? null : (
+        ) : (
           <div data-id="projects-agent-empty" className="flex min-h-[420px] flex-col items-center justify-center text-center text-zinc-600">
             <FolderKanban className="mb-3 h-10 w-10 opacity-40" />
             <p className="text-sm" data-id="projects-agent-empty-title">{t('projectNoAgents')}</p>
