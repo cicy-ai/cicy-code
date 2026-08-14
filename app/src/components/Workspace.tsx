@@ -1555,6 +1555,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentTab(normalizeCliContentTab(tab));
     setCliContentOpen(true);
   }, [paneId]);
+  const handleSkillDetailOpen = useCallback(() => {
+    setCliContentMode('fixed');
+    setCliContentOpen(true);
+  }, []);
+  const handleSkillDetailClose = useCallback(() => {
+    setCliContentOpen(false);
+  }, []);
   const handleCliDrawerResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -2162,7 +2169,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       <div data-id="left-panel-skills-view" className="absolute inset-0">
                         <SkillMarketplacePanel
                           paneId={activeCliPaneId || paneId}
-                          onOpenDetail={() => setCliContentOpen(true)}
+                          onOpenDetail={handleSkillDetailOpen}
+                          onCloseDetail={handleSkillDetailClose}
                         />
                       </div>
                     ) : leftActive === 'customAgents' ? (

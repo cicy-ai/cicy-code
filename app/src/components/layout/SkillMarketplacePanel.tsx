@@ -141,7 +141,11 @@ function SkillAvatar({ skill, size = 'md' }: { skill: MarketSkill; size?: 'sm' |
   );
 }
 
-export default function SkillMarketplacePanel({ paneId, onOpenDetail }: { paneId: string; onOpenDetail?: () => void }) {
+export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDetail }: {
+  paneId: string;
+  onOpenDetail?: () => void;
+  onCloseDetail?: () => void;
+}) {
   const { t } = useTranslation('workspace');
   const [skills, setSkills] = useState<MarketSkill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -164,7 +168,10 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail }: { paneId
   // propagates through sendToAgent → MarkdownPane.components → react-markdown
   // and forces the rendered markdown DOM to be replaced — wiping any text
   // selection the user has in the help/tools tab.
-  const handleDetailClose = useCallback(() => setSelectedName(null), []);
+  const handleDetailClose = useCallback(() => {
+    setSelectedName(null);
+    onCloseDetail?.();
+  }, [onCloseDetail]);
   const openDetail = useCallback((name: string) => {
     onOpenDetail?.();
     setSelectedName(name);
