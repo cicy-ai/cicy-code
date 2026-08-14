@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag, isChatModel } from '../lib/modelTag';
+import { metricsFromCurrentReply } from '../lib/agentMetrics';
 import AgentAvatar from './AgentAvatar';
 import MobileQRPopover from './MobileQRPopover';
 import { useDevRegister, devStore } from '../lib/devStore';
@@ -2003,6 +2004,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const shortId = fullPaneId.replace(/:.*$/, '');
     const detail = paneDetails[shortId] || paneDetails[fullPaneId] || {};
     const live = pollStatuses[shortId] || pollStatuses[fullPaneId] || {};
+    const liveMetrics = live && Object.keys(live).length ? metricsFromCurrentReply(live) : undefined;
     return {
       paneId: fullPaneId,
       title: String(agent?.title || detail?.title || shortId),
@@ -2011,6 +2013,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       defaultModel: String(agent?.default_model || detail?.default_model || ''),
       workspace: String(agent?.workspace || detail?.workspace || ''),
       machineLabel: String(agent?.machine_label || detail?.machine_label || ''),
+      liveMetrics,
     };
   }).filter((agent) => agent.paneId), [agents, paneDetails, pollStatuses]);
   const handleStackOpenSession = useCallback((targetPaneId: string) => {

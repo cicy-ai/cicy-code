@@ -7,6 +7,8 @@ import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
 import { cn } from '../../lib/utils';
+import type { AgentLiveMetrics } from '../../lib/agentMetrics';
+import { ModelTag } from '../../lib/modelTag';
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
 
@@ -18,6 +20,7 @@ export interface ProjectAgent {
   defaultModel?: string;
   workspace?: string;
   machineLabel?: string;
+  liveMetrics?: AgentLiveMetrics;
 }
 
 interface AgentProject {
@@ -40,6 +43,26 @@ interface ProjectAgentLayout {
 const DEFAULT_PROJECT_ID = 'default';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
 
+const fmtCost = (cost: number) =>
+  cost <= 0 ? '$0'
+    : cost >= 100 ? `$${Math.round(cost)}`
+      : cost >= 1 ? `$${cost.toFixed(2)}`
+        : cost >= 0.05 ? `$${cost.toFixed(2)}`
+          : cost >= 0.001 ? `$${cost.toFixed(3)}`
+            : `$${cost.toFixed(4)}`;
+
+function CtxRing({ pct }: { pct: number }) {
+  const radius = 4.5;
+  const circumference = 2 * Math.PI * radius;
+  const color = pct > 80 ? '#b91c1c' : pct > 50 ? '#ca8a04' : '#71717a';
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" className="-rotate-90 shrink-0">
+      <circle cx="6" cy="6" r={radius} fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="2.5" />
+      <circle cx="6" cy="6" r={radius} fill="none" stroke={color} strokeWidth="2.5" strokeDasharray={`${Math.max(0.5, (pct / 100) * circumference)} ${circumference}`} strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function ProjectAgentCard({ agent, teamId, selected, removable, onSelect, onOpen, onRemove }: {
   agent: ProjectAgent;
   teamId?: string;
@@ -55,6 +78,7 @@ function ProjectAgentCard({ agent, teamId, selected, removable, onSelect, onOpen
   const status = String(agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
+  const metrics = agent.liveMetrics;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -123,11 +147,16 @@ function ProjectAgentCard({ agent, teamId, selected, removable, onSelect, onOpen
         </div>
       </div>
 
-      <div data-id="project-agent-card-status" className="mt-6 flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2 text-[13px] text-zinc-400" data-id="project-agent-card-status-label">
-          <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy ? 'bg-amber-400' : 'bg-emerald-400')} />
-          <span className="truncate">{status}</span>
-        </div>
+      <div data-id="project-agent-card-metrics" className="mt-6 flex h-5 min-w-0 items-center gap-2 font-mono text-xs text-zinc-500">
+        <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
+        <span data-id="project-agent-card-status" className="shrink-0">{status}</span>
+        {metrics?.model ? <ModelTag model={metrics.model} className="shrink-0" /> : null}
+        {metrics && metrics.ctx > 0 ? (
+          <span data-id="project-agent-card-context" className="flex shrink-0 items-center" title={`Context ${metrics.ctx}% / ${metrics.ctxK}k`}>
+            <CtxRing pct={metrics.ctx} />
+          </span>
+        ) : null}
+        {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
 
     </article>
