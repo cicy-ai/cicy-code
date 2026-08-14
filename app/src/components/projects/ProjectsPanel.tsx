@@ -59,6 +59,10 @@ interface ProjectAttachment {
 const DEFAULT_PROJECT_ID = 'default';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
 const previewableMarkdown = (value: unknown) => String(value || '').replace(/\(file:\/\/(\/?[^)]+)\)/g, (_match, path: string) => `(/${path.replace(/^\/+/, '')})`);
+const projectIdFromURL = () => {
+  const match = window.location.hash.match(/\/projects\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : DEFAULT_PROJECT_ID;
+};
 
 const fmtCost = (cost: number) =>
   cost <= 0 ? '$0'
@@ -257,7 +261,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   const { confirm, prompt, node: dialogsNode } = useDialogs();
   const [groups, setGroups] = useState<AgentProject[]>([]);
   const [teamId, setTeamId] = useState('');
-  const [selectedId, setSelectedId] = useState<number | string>(DEFAULT_PROJECT_ID);
+  const [selectedId, setSelectedId] = useState<number | string>(projectIdFromURL);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -266,6 +270,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   const [createDescription, setCreateDescription] = useState('');
   const [createError, setCreateError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [projectMenuId, setProjectMenuId] = useState<string>('');
   const [addOpen, setAddOpen] = useState(false);
   const [addSearch, setAddSearch] = useState('');
   const [addError, setAddError] = useState('');
@@ -321,6 +326,20 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   }, [t]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!projectMenuId) return;
+    const close = () => setProjectMenuId('');
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [projectMenuId]);
+
+  useEffect(() => {
+    const encodedId = encodeURIComponent(String(selectedId));
+    const base = window.location.hash.replace(/\/projects\/[^/?#]+.*$/, '');
+    const nextHash = `${base || '#/agent/w-1001'}/projects/${encodedId}`;
+    if (window.location.hash !== nextHash) window.history.replaceState(null, '', nextHash);
+  }, [selectedId]);
 
   useEffect(() => {
     if (typeof apiService.getIMAccounts !== 'function') return;
@@ -812,16 +831,19 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                 tabIndex={0}
                 onClick={() => setSelectedId(project.id)}
                 onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedId(project.id); }}
-                className={cn('group mb-1 flex h-12 cursor-pointer items-center gap-2 rounded-xl px-3 transition-colors', active ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200')}
+                className={cn('group relative mb-1 flex h-12 cursor-pointer items-center gap-2 rounded-xl px-3 transition-colors', active ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200')}
               >
                 {project.pinned ? <Pin data-id="project-list-item-pinned" className="h-3 w-3 shrink-0 text-amber-400" /> : null}
                 <span data-id="project-list-item-name" className="min-w-0 flex-1 truncate text-[13px] font-medium">{project.name}</span>
-                <div data-id="project-list-item-actions" className="flex w-[78px] shrink-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                    <button type="button" data-id="project-pin" onClick={(event) => { event.stopPropagation(); void toggleProjectPinned(project); }} className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-white/[0.08] hover:text-amber-300" title={project.pinned ? t('projectUnpin') : t('projectPin')}>{project.pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}</button>
-                    <button type="button" data-id="project-rename" onClick={(event) => { event.stopPropagation(); void renameProject(project); }} className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-white/[0.08] hover:text-zinc-200" title={t('projectRename')}><Pencil className="h-3 w-3" /></button>
-                    {!project.builtin ? (
-                    <button type="button" data-id="project-delete" onClick={(event) => { event.stopPropagation(); void deleteProject(project); }} className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-red-500/10 hover:text-red-300" title={t('projectDelete')}><Trash2 className="h-3 w-3" /></button>
-                    ) : <span className="h-6 w-6" aria-hidden="true" />}
+                <div data-id="project-list-item-actions" className="relative w-7 shrink-0">
+                  <button type="button" data-id="project-more" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setProjectMenuId((current) => current === String(project.id) ? '' : String(project.id)); }} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 opacity-0 transition-opacity hover:bg-white/[0.08] hover:text-zinc-200 group-hover:opacity-100 group-focus-within:opacity-100" title={t('projectMore')}><MoreHorizontal className="h-4 w-4" /></button>
+                  {projectMenuId === String(project.id) ? (
+                    <div data-id="project-more-menu" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} className="absolute right-0 top-8 z-50 min-w-[150px] rounded-xl border border-white/10 bg-[#18191e] p-1 shadow-2xl">
+                      <button type="button" data-id="project-pin" onClick={() => { setProjectMenuId(''); void toggleProjectPinned(project); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/[0.06]">{project.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}{project.pinned ? t('projectUnpin') : t('projectPin')}</button>
+                      <button type="button" data-id="project-rename" onClick={() => { setProjectMenuId(''); void renameProject(project); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/[0.06]"><Pencil className="h-3.5 w-3.5" />{t('projectRename')}</button>
+                      {!project.builtin ? <button type="button" data-id="project-delete" onClick={() => { setProjectMenuId(''); void deleteProject(project); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-red-300 hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" />{t('projectDelete')}</button> : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             );
@@ -834,21 +856,6 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
           <div data-id="projects-agent-heading" className="min-w-0 flex-1">
             <h2 data-id="projects-agent-title" className="truncate text-[15px] font-semibold text-zinc-100">{selectedProject.name}</h2>
             <p data-id="projects-agent-count" className="text-[11px] text-zinc-600">{t('projectAgentCount', { count: visibleAgents.length })}</p>
-          </div>
-          <button
-            type="button"
-            data-id="project-add-agent"
-            onClick={() => openAddAgents(selectedProject)}
-            disabled={!selectedProject.api_id || availableAgents.length === 0}
-            className="mr-2 inline-flex h-8 items-center gap-1.5 rounded-lg bg-blue-500/15 px-3 text-[12px] text-blue-200 hover:bg-blue-500/25 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <UserPlus className="h-3.5 w-3.5" />{t('projectAddAgent')}
-          </button>
-          <div data-id="project-canvas-controls" className="flex items-center gap-1 rounded-lg border border-white/[0.06] bg-black/20 p-1">
-            <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
-            <span data-id="project-canvas-zoom-value" className="w-11 text-center font-mono text-[10px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
-            <button type="button" data-id="project-canvas-zoom-in" onClick={() => changeZoom(0.1)} className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200" title={t('projectZoomIn')}><Plus className="h-3.5 w-3.5" /></button>
-            <button type="button" data-id="project-canvas-reset" onClick={resetCanvasView} className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200" title={t('projectResetView')}><Maximize2 className="h-3.5 w-3.5" /></button>
           </div>
         </header>
 
@@ -983,6 +990,23 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
             <p className="text-sm" data-id="projects-agent-empty-title">{t('projectNoAgents')}</p>
           </div>
         )}
+        <div data-id="project-canvas-controls" className="absolute bottom-5 left-5 z-30 flex items-center gap-1 rounded-xl border border-white/10 bg-[#17181d]/95 p-1.5 shadow-xl backdrop-blur">
+          <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-4 w-4" /></button>
+          <span data-id="project-canvas-zoom-value" className="w-11 text-center font-mono text-[10px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
+          <button type="button" data-id="project-canvas-zoom-in" onClick={() => changeZoom(0.1)} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomIn')}><Plus className="h-4 w-4" /></button>
+          <button type="button" data-id="project-canvas-reset" onClick={resetCanvasView} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 hover:bg-white/[0.08] hover:text-white" title={t('projectResetView')}><Maximize2 className="h-4 w-4" /></button>
+        </div>
+        <button
+          type="button"
+          data-id="project-add-agent"
+          onClick={() => openAddAgents(selectedProject)}
+          disabled={!selectedProject.api_id || availableAgents.length === 0}
+          className="absolute bottom-5 right-5 z-30 grid h-12 w-12 place-items-center rounded-full bg-zinc-100 text-zinc-900 shadow-[0_10px_30px_rgba(0,0,0,0.45)] transition-transform hover:scale-105 hover:bg-white active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+          title={t('projectAddAgent')}
+          aria-label={t('projectAddAgent')}
+        >
+          <UserPlus className="h-5 w-5" />
+        </button>
         </div>
 
       </main>

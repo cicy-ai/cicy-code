@@ -343,7 +343,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   });
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
-  const [projectsOpen, setProjectsOpen] = useState(() => cache.get(projectsOpenKey(paneId), false) === true);
+  const [projectsOpen, setProjectsOpen] = useState(() => /\/projects\/[^/?#]+/.test(window.location.hash) || cache.get(projectsOpenKey(paneId), false) === true);
   const [portsOpen, setPortsOpen] = useState(false);
   const [fixedDomain, setFixedDomain] = useState('');
   const [proxyAvailable, setProxyAvailable] = useState(false);
@@ -2086,7 +2086,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           {/* Office entry retired (2026-06-05) and its components deleted
               (2026-06-11) — the dispatcher (PM) chat now lives directly in the
               team agent card (DispatcherChat). */}
-          <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} disabled={!!globalVar?.helper_mode} />
           <SideBtn
             dataId="btn-projects"
             active={projectsOpen}
@@ -2099,12 +2098,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   setLeftPanelView(null);
                   setKnowledgeOpen(false);
                   setCliContentOpen(false);
+                } else if (/\/projects\//.test(window.location.hash)) {
+                  window.location.hash = window.location.hash.replace(/\/projects\/[^/?#]+.*$/, '');
                 }
                 return next;
               });
             }}
             disabled={!!globalVar?.helper_mode}
           />
+          <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} disabled={!!globalVar?.helper_mode} />
           {/* Helper-mode trial container hides Skills / Providers (gateway) /
               IM / Audit from the activity bar — the drawer should stay
               laser-focused on the install chat. See helperMode in cicy-code
