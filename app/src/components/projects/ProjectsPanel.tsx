@@ -252,11 +252,12 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
   );
 }
 
-export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, onOpenAgent }: {
+export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, onOpenAgent }: {
   agents: ProjectAgent[];
   statuses?: Record<string, any>;
   topRightControls?: ReactNode;
   footerControls?: ReactNode;
+  shellPanel?: ReactNode;
   onOpenAgent: (paneId: string) => void;
 }) {
   const { t } = useTranslation('workspace');
@@ -802,7 +803,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
   return (
     <section data-id="projects-panel" className="flex h-full min-w-0 flex-1 bg-[#090a0d] text-zinc-300">
-      <aside data-id="projects-list" className="flex w-[280px] shrink-0 flex-col border-r border-white/[0.07] bg-[#0d0e12]">
+      <aside data-id="projects-list" className="flex w-[280px] shrink-0 flex-col border-r border-white/[0.07] bg-[#0d0e12] max-[700px]:w-[180px]">
         <header data-id="projects-list-header" className="flex h-14 shrink-0 items-center border-b border-white/[0.07] px-4">
           <h2 data-id="projects-list-title" className="flex-1 text-[15px] font-semibold text-zinc-100">{t('projectsTitle')}</h2>
           <button
@@ -992,7 +993,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             <p className="text-sm" data-id="projects-agent-empty-title">{t('projectNoAgents')}</p>
           </div>
         )}
-        <div data-id="project-canvas-footer" className="fixed inset-x-0 bottom-0 z-[60] h-12 border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur">
+        {shellPanel ? <div data-id="project-canvas-shell-panel" className="absolute inset-x-0 bottom-12 z-30">{shellPanel}</div> : null}
+        <div data-id="project-canvas-footer" className="absolute inset-x-0 bottom-0 z-30 h-12 border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur">
         <div data-id="project-canvas-controls" className="absolute bottom-1.5 left-4 flex items-center gap-0.5 p-1">
           <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
           <span data-id="project-canvas-zoom-value" className="w-9 text-center font-mono text-[9px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>

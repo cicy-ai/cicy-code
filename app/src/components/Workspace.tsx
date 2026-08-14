@@ -50,6 +50,7 @@ import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
 import type { AgentCanvasItem } from './layout/AgentStack';
 import AgentStack, { CardMoreMenu } from './layout/AgentStack';
+import { ShellPanel } from './terminal/ShellPanel';
 import WeChatBindModal from './im/WeChatBindModal';
 import SettingsModal, { type SettingsSection } from './settings/SettingsModal';
 import { useDialogs } from './ui/Modal';
@@ -2158,7 +2159,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <ProjectsPanel
                 agents={projectAgents}
                 statuses={pollStatuses}
-                topRightControls={(
+                topRightControls={!cliContentOpen ? (
                   <CardMoreMenu
                     paneId={activeCliPaneId}
                     items={[
@@ -2171,8 +2172,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       { id: 'agent-stack-card-settings', label: t('tabSettings'), icon: <Settings className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); openPaneSettings(activeCliPaneId); }, active: cliContentOpen && cliContentTab === 'settings' },
                     ]}
                   />
-                )}
+                ) : null}
                 footerControls={stackHeaderControls(activeCliPaneId)}
+                shellPanel={(() => {
+                  const item = stackItems.find((candidate) => candidate.paneId === activeCliPaneId);
+                  return item && !item.isApiOnly && item.ttydSrc ? <ShellPanel agentId={item.paneId} ttydSrc={item.ttydSrc} active /> : null;
+                })()}
                 onOpenAgent={(targetPaneId) => {
                   setProjectsOpen(false);
                   onSelectAgent(targetPaneId.replace(/:.*$/, ''));

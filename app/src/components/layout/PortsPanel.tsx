@@ -51,7 +51,8 @@ export default function PortsPanel({ fixedDomain, proxyAvailable, paneId }: { fi
     } finally { setSaving(false); }
   };
 
-  const dock = document.querySelector<HTMLElement>(`[data-id="agent-stack-card-${paneId}"]`);
+  const dock = document.querySelector<HTMLElement>(`[data-id="agent-stack-card-${paneId}"]`)
+    || document.querySelector<HTMLElement>('[data-id="project-infinite-canvas"]');
   if (!dock) return null;
 
   return createPortal(
