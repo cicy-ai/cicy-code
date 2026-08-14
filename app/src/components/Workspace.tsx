@@ -17,7 +17,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, Folder, X, Settings, Brain, Search,
   LayoutList, Users, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen, Braces, Store, Timer, Grid3X3, Globe2,
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Bot, BookOpen, Store, Timer, Grid3X3, Globe2, Smartphone,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag, isChatModel } from '../lib/modelTag';
@@ -28,7 +28,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { SendingProvider } from '../contexts/SendingContext';
 // import ChatView from './chat/ChatView';
 import TodoPanel from './TodoPanel';
-import CrontabPanel from './CrontabPanel';
 import AccountMatrixPanel from './settings/AccountMatrixPanel';
 // Lazy: these pull in the heavy CodeMirror editor stack. Behind tab gates, so
 // dynamic-importing them keeps codemirror off the first-paint critical path.
@@ -42,8 +41,6 @@ import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
 import { ProxyManagerDialog } from './layout/ProxyManagerDialog';
 import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
 import CustomAgentsPanel from './layout/CustomAgentsPanel';
-import BrowserWindowsPanel, { BrowserWindowsColumn, type Profile as BrowserProfile } from './layout/BrowserWindowsPanel';
-import { MobileDeviceColumn, type MobileSel } from './layout/MobileDevicesPanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
 import AgentUsageLogView from './layout/AgentUsageLogView';
@@ -55,7 +52,6 @@ import type { AgentCanvasItem } from './layout/AgentStack';
 import AgentStack from './layout/AgentStack';
 import WeChatBindModal from './im/WeChatBindModal';
 import SettingsModal, { type SettingsSection } from './settings/SettingsModal';
-import ProvidersModal from './providers/ProvidersModal';
 import { useDialogs } from './ui/Modal';
 import TipBelow from './ui/TipBelow';
 import config, { defaultWorkerWorkspace, syncHostHomeFromPath, urls } from '../config';
@@ -293,12 +289,12 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 }
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
-type LeftPanelView = 'team' | 'skills' | 'customAgents' | 'agents' | 'todo' | 'windows' | null;
-type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'knowledge' | 'audit' | 'timer' | 'github' | RequestViewTab;
+type LeftPanelView = 'team' | 'skills' | 'customAgents' | 'agents' | 'todo' | null;
+type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'audit' | 'github' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'knowledge' || value === 'todo' || value === 'audit' || value === 'timer' || value === 'github') {
+  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'todo' || value === 'audit' || value === 'github') {
     return value;
   }
   return 'files';
@@ -340,10 +336,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const v = cache.get(leftPanelKey(paneId), null);
     // 刷新后恢复上次打开的左栏面板;'todo' 若技能未装会被下方 effect 关掉。
     // 旧缓存里的 'office' 已不在白名单 → 自动落到 null(办公室视图 2026-06-05 下线)。
-    const ok: LeftPanelView[] = ['team', 'skills', 'customAgents', 'agents', 'todo', 'windows'];
+    const ok: LeftPanelView[] = ['team', 'skills', 'customAgents', 'agents', 'todo'];
     return ok.includes(v) ? v : null;
   });
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [portsOpen, setPortsOpen] = useState(false);
   const [fixedDomain, setFixedDomain] = useState('');
   const [proxyAvailable, setProxyAvailable] = useState(false);
@@ -396,11 +393,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [rosterOpen, setRosterOpen] = useState(false);
   const [lastSessionSubTab, setLastSessionSubTab] = useState<RequestViewTab>(() => {
     const v = cache.get(cliContentTabKey(paneId), 'files');
-    return v === 'meta' || v === 'usage' || v === 'analysis' ? v : 'analysis';
+    return v === 'meta' || v === 'usage' || v === 'analysis' || v === 'tools' || v === 'brain' ? v : 'analysis';
   });
-  const [lastRequestSubTab, setLastRequestSubTab] = useState<RequestViewTab>('tools');
-  // Lazy-mount latch for heavy cli-content tabs. The file explorers (FilesView /
-  // KnowledgePanel) restore persisted open files, open fs watchers, and stat/read
+  // Lazy-mount latch for heavy cli-content tabs. FilesView restores persisted
+  // open files, opens fs watchers, and issues stat/read calls
   // on mount — so while mounted-but-hidden they fire fs/stat + fs/read for tabs
   // the user never opened, on every page load. Mount a tab's content only once it
   // has actually been opened; keep it mounted afterwards (tree expansion + open
@@ -411,10 +407,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setSeenCliTabs((prev) => (prev.has(cliContentTab) ? prev : new Set(prev).add(cliContentTab)));
   }, [cliContentOpen, cliContentTab]);
   useEffect(() => {
-    if (cliContentTab === 'meta' || cliContentTab === 'usage' || cliContentTab === 'analysis') {
+    if (cliContentTab === 'meta' || cliContentTab === 'usage' || cliContentTab === 'analysis' || cliContentTab === 'tools' || cliContentTab === 'brain') {
       setLastSessionSubTab(cliContentTab);
-    } else if (cliContentTab === 'tools' || cliContentTab === 'brain') {
-      setLastRequestSubTab(cliContentTab);
     }
   }, [cliContentTab]);
   const [cliContentMode, setCliContentMode] = useState<CliContentMode>('fixed');
@@ -430,7 +424,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // Pending-todo count (status todo on the active pane) for the red
   // badge on the Todo tab.
   const [todoCount, setTodoCount] = useState<number>(0);
-  // Pending-review count (_inbox) for the red badge on the 知识库 (knowledge) tab.
+  // Pending-review count (_inbox) for the red badge on the Knowledge activity icon.
   const [knowledgePendingCount, setKnowledgePendingCount] = useState<number>(0);
   const [auditAlertCount, setAuditAlertCount] = useState<number>(0);
   const [cliDrawerWidth, setCliDrawerWidth] = useState(() => clampCliDrawerWidth(Number(cache.get(CLI_DRAWER_WIDTH_KEY, CLI_DRAWER_DEFAULT_WIDTH))));
@@ -443,10 +437,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // Replaces the old activity-bar left-panels for providers & im.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('language');
-  // Dedicated standalone LLM-provider modal (two columns: list + detail), opened
-  // from the sidebar providers button — separate from the general Settings modal.
-  const [providersModalOpen, setProvidersModalOpen] = useState(false);
-  // Red badge on the sidebar providers button: true when any agent-type's routed
+  const [mobileQROpen, setMobileQROpen] = useState(false);
+  // Red badge in Settings → LLM 供应商: true when any agent-type's routed
   // provider has an empty apiKey (e.g. the seeded deepseek/groq defaults ship
   // keyless). Refetched when the settings modal closes so filling a key clears it.
   const [providersNeedKey, setProvidersNeedKey] = useState(false);
@@ -747,24 +739,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useDesktopEvents(addApp);
 
   const leftActive = leftPanelView;
-  // Selected browser profile → drives the inserted "windows" column between the
-  // left panel and the mid panel. Cleared whenever we leave the windows view.
-  const [browserSel, setBrowserSel] = useState<{ clientId: string; deviceId: string; profile: BrowserProfile } | null>(null);
-  useEffect(() => { if (leftActive !== 'windows') setBrowserSel(null); }, [leftActive]);
   // Opening the Skills panel rechecks the update badge (catches CLI-side installs).
   useEffect(() => { if (leftActive === 'skills') checkPublicSkillUpdate(); }, [leftActive, checkPublicSkillUpdate]);
-  // Selected phone (Android/iOS tab inside the windows panel) → drives the inserted
-  // mobile-device column instead of the browser-windows column. Cleared on leave.
-  const [mobileSel, setMobileSel] = useState<MobileSel | null>(null);
-  useEffect(() => { if (leftActive !== 'windows') setMobileSel(null); }, [leftActive]);
   // External "open profile settings" request (from agent-webpage send open_profile_config,
-  // relayed by useDesktopEvents). Switch to the windows view + hand the request to the panel.
+  // relayed by useDesktopEvents). Open Account Matrix → Devices and hand the request to it.
   const [pendingProfileConfig, setPendingProfileConfig] = useState<{ backend: 'chrome' | 'electron'; accountIdx: number; nonce: number } | null>(null);
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent).detail || {};
-      setLeftPanelView('windows');
       setPendingProfileConfig({ backend: d.backend === 'chrome' ? 'chrome' : 'electron', accountIdx: Number(d.accountIdx), nonce: Date.now() });
+      setCliContentMode('fixed');
+      setCliContentTab('github');
+      setCliContentOpen(true);
     };
     window.addEventListener('cicy-open-profile-config', h as EventListener);
     return () => window.removeEventListener('cicy-open-profile-config', h as EventListener);
@@ -964,7 +950,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     return () => window.removeEventListener('agent-status-change', handler as EventListener);
   }, []);
 
-  const toggleLeft = (p: 'team' | 'skills' | 'customAgents' | 'todo' | 'windows') => {
+  const toggleLeft = (p: 'team' | 'skills' | 'customAgents' | 'todo') => {
     setLeftPanelView(prev => prev === p ? null : p);
   };
 
@@ -1509,14 +1495,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       window.dispatchEvent(new CustomEvent('cicy:open-file', { detail: { path: relPath } }));
     }, 80);
   }, [openPaneFiles]);
-  const openPaneCrontab = useCallback((targetPaneId: string) => {
-    const clean = targetPaneId.replace(/:.*$/, '');
-    if (!clean) return;
-    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
-    setCliContentMode('fixed');
-    setCliContentTab('timer');
-    setCliContentOpen(true);
-  }, [paneId]);
   // markdown history 里点击文件链接 → 揭示文件视图(FilesView 自己监听同一事件打开 tab)。
   useEffect(() => {
     const reveal = () => {
@@ -1568,7 +1546,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     return () => window.removeEventListener('cicy:reveal-role', revealRole as EventListener);
   }, [openPaneMemory, paneId]);
   // Generic opener for the agent-card header buttons that mirror cli-content-tabs
-  // (knowledge / 审计日志 / 审计策略) — open the named content tab for that pane.
+  // (audit/account matrix) — open the named content tab for that pane.
   const openPaneContent = useCallback((targetPaneId: string, tab: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
@@ -1663,32 +1641,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     ...(todoSkillInstalled ? [{ id: 'todo', label: t('tabTodo', 'Todo'), icon: <ListTodo className="h-3.5 w-3.5" /> }] : []),
     { id: 'files', label: t('tabFiles'), icon: <Folder className="h-3.5 w-3.5" /> },
     { id: 'session', label: t('tabSession'), icon: <LineChart className="h-3.5 w-3.5" /> },
-    { id: 'request', label: t('tabRequest', '请求'), icon: <Braces className="h-3.5 w-3.5" /> },
-    { id: 'knowledge', label: t('tabKnowledge', '知识库'), icon: <BookOpen className="h-3.5 w-3.5" /> },
     { id: 'memory', label: t('tabMemory'), icon: <Brain className="h-3.5 w-3.5" /> },
     // Audit as a single security tab — opens an embedded dashboard with three
     // sub-tabs (守护 / 日志 / 策略). Always shown (no audit_enabled gate).
     { id: 'audit', label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }), icon: <ShieldCheck className="h-3.5 w-3.5" /> },
-    { id: 'timer', label: t('timer', { ns: 'common', defaultValue: '定时器' }), icon: <Timer className="h-3.5 w-3.5" /> },
     { id: 'github', label: t('accountMatrixTitle', { defaultValue: '账号矩阵' }), icon: <Grid3X3 className="h-3.5 w-3.5" /> },
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
-  const openCrontab = useCallback(() => {
-    setCliContentTab('timer');
-  }, []);
   const sessionSubTabs: { id: RequestViewTab; label: string }[] = [
     { id: 'analysis', label: t('tabAnalysis', '分析') },
     { id: 'usage', label: t('tabUsage', '用量') },
     { id: 'meta', label: t('tabMeta') },
-  ];
-  // 请求 (request) top-level tab groups the per-request internals: 工具 + 提示词.
-  const requestSubTabs: { id: RequestViewTab; label: string }[] = [
     { id: 'tools', label: t('tabTools') },
     { id: 'brain', label: t('tabBrain') },
   ];
-  const isSessionTab = (tab: WorkspaceCliContentTab) => tab === 'meta' || tab === 'usage' || tab === 'analysis';
-  const isRequestTab = (tab: WorkspaceCliContentTab) => tab === 'tools' || tab === 'brain';
-  const activeSubTabs = isRequestTab(cliContentTab) ? requestSubTabs : sessionSubTabs;
+  const isSessionTab = (tab: WorkspaceCliContentTab) => tab === 'meta' || tab === 'usage' || tab === 'analysis' || tab === 'tools' || tab === 'brain';
   const renderCliContentPanel = () => (
     // The drawer keeps the FilesView mounted (and laid out off-screen when
     // closed) so its chat-ws :code-ext bridge stays connected — agents can
@@ -1736,7 +1703,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="cli-content-tabs-wrap" className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--vsc-border)] px-3">
         <div data-id="cli-content-tabs" className="flex min-w-0 flex-1 gap-1 overflow-x-auto whitespace-nowrap scrollbar-hairline">
           {cliContentTabs.map((item) => {
-            const active = item.id === 'session' ? isSessionTab(cliContentTab) : item.id === 'request' ? isRequestTab(cliContentTab) : cliContentTab === item.id;
+            const active = item.id === 'session' ? isSessionTab(cliContentTab) : cliContentTab === item.id;
             return (
               <TipBelow key={item.id} label={item.label} className="shrink-0">
               <button
@@ -1749,8 +1716,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 }`}
                 onClick={() => {
                   if (item.id === 'session') setCliContentTab(lastSessionSubTab);
-                  else if (item.id === 'request') setCliContentTab(lastRequestSubTab);
-                  else if (item.id === 'timer') openCrontab();
                   else setCliContentTab(item.id as WorkspaceCliContentTab);
                 }}
               >
@@ -1763,14 +1728,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     className="pointer-events-none absolute right-0 top-0 inline-flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-red-500 px-[3px] text-[9px] font-semibold leading-none text-white tabular-nums"
                   >
                     {todoCount > 99 ? '99+' : todoCount}
-                  </span>
-                )}
-                {item.id === 'knowledge' && knowledgePendingCount > 0 && (
-                  <span
-                    data-id="cli-content-tab-knowledge-badge"
-                    className="pointer-events-none absolute right-0 top-0 inline-flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-amber-500 px-[3px] text-[9px] font-semibold leading-none text-white tabular-nums"
-                  >
-                    {knowledgePendingCount > 99 ? '99+' : knowledgePendingCount}
                   </span>
                 )}
                 {item.id === 'audit' && auditAlertCount > 0 && (
@@ -1802,9 +1759,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           </TipBelow>
         </div>
       </div>
-      {isSessionTab(cliContentTab) || isRequestTab(cliContentTab) ? (
+      {isSessionTab(cliContentTab) ? (
         <div data-id="cli-content-session-subtabs" className="flex shrink-0 items-center gap-1 border-b border-[var(--vsc-border)] px-3 py-1.5">
-          {activeSubTabs.map((item) => (
+          {sessionSubTabs.map((item) => (
             <button
               data-id={`cli-content-session-sub-${item.id}`}
               key={item.id}
@@ -1884,24 +1841,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <TodoPanel paneId={activeCliPaneId} active={cliContentOpen && cliContentTab === 'todo'} isMaster={activeCliPaneId === paneId} />
         </div>
         <div
-          data-id="cli-content-knowledge-host"
-          className="absolute inset-0"
-          style={cliContentTab === 'knowledge'
-            ? { position: 'relative', width: '100%', height: '100%' }
-            : { position: 'absolute', width: '100%', height: '100%', visibility: 'hidden', pointerEvents: 'none', zIndex: -1 }
-          }
-        >
-          {seenCliTabs.has('knowledge') && (
-            <Suspense fallback={null}>
-              <KnowledgePanel
-                agentId={nativeFilesAgentId}
-                workspaceFolder={nativeFilesWorkspace}
-                pageClientId={pageClientId}
-              />
-            </Suspense>
-          )}
-        </div>
-        <div
           data-id="cli-content-memory-host"
           className="absolute inset-0"
           style={{ display: cliContentTab === 'memory' ? 'block' : 'none' }}
@@ -1930,18 +1869,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           )}
         </div>
         <div
-          data-id="cli-content-timer-host"
-          className="absolute inset-0"
-          style={{ display: cliContentTab === 'timer' ? 'block' : 'none' }}
-        >
-          <CrontabPanel active={cliContentOpen && cliContentTab === 'timer'} />
-        </div>
-        <div
           data-id="cli-content-github-host"
           className="absolute inset-0"
           style={{ display: cliContentTab === 'github' ? 'block' : 'none' }}
         >
-          <AccountMatrixPanel active={cliContentOpen && cliContentTab === 'github'} paneId={activeCliPaneId} />
+          <AccountMatrixPanel
+            active={cliContentOpen && cliContentTab === 'github'}
+            paneId={activeCliPaneId}
+            openConfigRequest={pendingProfileConfig}
+            onSendToAgent={sendBrowserToAgent}
+            onOpenInEditor={openCodeFile}
+          />
         </div>
         <div
           data-id="cli-content-settings-host"
@@ -2078,7 +2016,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             showHeaderButtons={!cliContentOpen}
             onOpenPaneSettings={openPaneSettings}
             onOpenPaneFiles={openPaneFiles}
-            onOpenPaneCrontab={openPaneCrontab}
             onOpenPaneSession={handleStackOpenSession}
             onOpenPaneTodo={todoSkillInstalled ? openPaneTodo : undefined}
             onOpenPaneMemory={openPaneMemory}
@@ -2128,12 +2065,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             <>
               <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} badge={publicSkillUpdate} badgeTitle={t('skillUpdateAvailable', { defaultValue: '有技能可更新' })} />
               <SideBtn dataId="btn-agent-role-market" active={leftActive === 'customAgents'} icon={<Store className="w-5 h-5" />} title="角色市场" onClick={() => toggleLeft('customAgents')} />
-              {/* Browser windows: Chrome / Electron profiles → live windows + screenshots */}
-              <SideBtn dataId="btn-windows" active={leftActive === 'windows'} icon={<AppWindow className="w-5 h-5" />} title="浏览器窗口" onClick={() => toggleLeft('windows')} />
-              {/* LLM providers: opens the Settings modal on the providers tab. Red
-                  badge when a routed provider has no API key (e.g. seeded
-                  deepseek/groq default keys are empty until filled). */}
-              <SideBtn dataId="btn-providers" active={providersModalOpen} icon={<Boxes className="w-5 h-5" />} title={t('settingsNavProviders', { defaultValue: 'LLM 供应商' })} onClick={() => setProvidersModalOpen(true)} badge={providersNeedKey} />
+              <SideBtn
+                dataId="btn-knowledge"
+                active={knowledgeOpen}
+                icon={<BookOpen className="w-5 h-5" />}
+                title={t('tabKnowledge', { defaultValue: '知识库' })}
+                onClick={() => setKnowledgeOpen(true)}
+                badge={knowledgePendingCount > 0}
+                badgeTitle={t('knowledgePendingBadge', { defaultValue: '{{count}} 条知识待审核', count: knowledgePendingCount })}
+              />
               {/* Audit log/policy live as normal right-panel tabs (日志/策略), gated
                   by the audit master switch — no dedicated left-bar entry. */}
               {/* IM moved into the unified Settings modal (bottom-left gear). */}
@@ -2141,7 +2081,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           )}
         </div>
         <div data-id="activity-bar-bottom" className="flex w-full flex-col items-center gap-3">
-          <MobileQRPopover workspaceTitle={topBarTitle} />
           <button
             ref={membershipTriggerRef}
             type="button"
@@ -2178,12 +2117,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     </> : leftActive === 'customAgents' ? <>
                       <Store className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-custom-agents" className="text-xs font-medium text-zinc-500 flex-1 ml-1">角色市场</span>
-                    </> : leftActive === 'windows' ? <>
-                      <AppWindow className="w-3.5 h-3.5 text-zinc-600" />
-                      <span data-id="left-panel-title-windows" className="text-xs font-medium text-zinc-500 flex-1 ml-1">设备</span>
-                      {/* BrowserWindowsPanel portals its device-actions (eye/add/refresh) into this slot,
-                          so the title + actions share one row instead of two stacked bars. */}
-                      <div data-id="windows-header-actions" id="windows-header-actions" className="flex items-center gap-1" />
                     </> : <>
                       <Users className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-team" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelTeam')}</span>
@@ -2236,49 +2169,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       <div data-id="left-panel-custom-agents-view" className="absolute inset-0">
                         <CustomAgentsPanel paneId={activeCliPaneId || paneId} onCreated={refreshPanes} onSelectAgent={onSelectAgent} marketOnly />
                       </div>
-                    ) : leftActive === 'windows' ? (
-                      <div data-id="left-panel-windows-view" className="absolute inset-0">
-                        <BrowserWindowsPanel
-                          selectedKey={browserSel?.profile.key ?? null}
-                          onSelect={setBrowserSel}
-                          openConfigRequest={pendingProfileConfig}
-                          onSelectMobile={setMobileSel}
-                          selectedMobileKey={mobileSel ? `${mobileSel.clientId}:${mobileSel.id}` : null}
-                          onSendToAgent={sendBrowserToAgent}
-                        />
-                      </div>
                     ) : null}
                   </div>
                 </div>
-              </div>
-            ) : null}
-            {leftActive === 'windows' && browserSel && !globalVar?.helper_mode ? (
-              <div
-                data-id="browser-windows-column"
-                className="h-full w-[300px] min-w-[300px] max-w-[300px] shrink-0 border-r border-[var(--vsc-border)] relative"
-              >
-                <BrowserWindowsColumn
-                  key={`${browserSel.clientId}:${browserSel.profile.key}`}
-                  clientId={browserSel.clientId}
-                  deviceId={browserSel.deviceId}
-                  profile={browserSel.profile}
-                  onClose={() => setBrowserSel(null)}
-                  onSendToAgent={sendBrowserToAgent}
-                  onOpenInEditor={openCodeFile}
-                />
-              </div>
-            ) : null}
-            {leftActive === 'windows' && mobileSel && !globalVar?.helper_mode ? (
-              <div
-                data-id="mobile-device-column-wrap"
-                className="h-full w-[320px] min-w-[320px] max-w-[320px] shrink-0 border-r border-[var(--vsc-border)] relative"
-              >
-                <MobileDeviceColumn
-                  key={`${mobileSel.clientId}:${mobileSel.id}`}
-                  sel={mobileSel}
-                  onClose={() => setMobileSel(null)}
-                  onSendToAgent={sendBrowserToAgent}
-                />
               </div>
             ) : null}
             <div data-testid="mid-panel" data-id="mid-panel" className="min-w-0 flex-1 relative">
@@ -2453,6 +2346,30 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <div data-id="membership-settings-group" className="mt-1 border-t border-white/[0.06] pt-1">
             <button
               type="button"
+              data-id="membership-timer"
+              onClick={() => openSettings('timer')}
+              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+            >
+              <span data-id="membership-timer-label">{t('timer', { ns: 'common', defaultValue: '定时器' })}</span>
+              <Timer className="h-3.5 w-3.5" />
+            </button>
+            {String(globalVar?.public_url || '').trim() ? (
+              <button
+                type="button"
+                data-id="membership-mobile-qr"
+                onClick={() => {
+                  setMembershipMenuOpen(false);
+                  setLangMenuOpen(false);
+                  setMobileQROpen(true);
+                }}
+                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+              >
+                <span data-id="membership-mobile-qr-label">{t('mobileQrTitle')}</span>
+                <Smartphone className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+            <button
+              type="button"
               data-id="membership-settings-general"
               onClick={() => openSettings('general')}
               className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
@@ -2481,6 +2398,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <span data-id="membership-settings-routing-label">{t('settingsNavRouting', { defaultValue: 'Agent 路由' })}</span>
               <Route className="h-3.5 w-3.5" />
             </button>
+            <button
+              type="button"
+              data-id="membership-settings-providers"
+              onClick={() => openSettings('providers')}
+              className="mt-0.5 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+            >
+              <span data-id="membership-settings-providers-label" className="inline-flex items-center gap-1.5">
+                {t('settingsNavProviders', { defaultValue: 'LLM 供应商' })}
+                {providersNeedKey && <span data-id="membership-settings-providers-badge" className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title={t('providerMissingApiKey', { defaultValue: '缺少 API key' })} />}
+              </span>
+              <Boxes className="h-3.5 w-3.5" />
+            </button>
           </div>
           <div data-id="membership-version" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] text-zinc-500">
             <span data-id="membership-version-label">Version</span>
@@ -2505,9 +2434,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         document.body
       ) : null}
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
-      <ProvidersModal open={providersModalOpen} onClose={() => setProvidersModalOpen(false)} />
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
       <ProxyManagerDialog open={proxyManagerOpen} onClose={() => setProxyManagerOpen(false)} paneId={activeCliPaneId || paneId} />
+      <MobileQRPopover workspaceTitle={topBarTitle} open={mobileQROpen} onClose={() => setMobileQROpen(false)} />
       {toast && <div data-id="workspace-toast" className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 text-sm rounded-lg shadow-lg ${toast.variant === 'success' ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>{toast.message}</div>}
       {dialogsNode}
       <CreateAgentDialog
@@ -2531,9 +2460,19 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         flagEmoji={flagEmoji}
         langName={languageDisplayName}
         version={config.version}
+        providersNeedKey={providersNeedKey}
         publicUrl={String(globalVar?.public_url || '')}
         onSavePublicUrl={async (url) => { await updateGlobalVar({ public_url: url }); }}
       />
+      <Suspense fallback={null}>
+        <KnowledgePanel
+          open={knowledgeOpen}
+          onClose={() => setKnowledgeOpen(false)}
+          agentId={nativeFilesAgentId}
+          workspaceFolder={nativeFilesWorkspace}
+          pageClientId={pageClientId}
+        />
+      </Suspense>
     </div>
     </SendingProvider>
   );

@@ -49,7 +49,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.404"
+const version = "2.3.405"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -678,7 +678,6 @@ Options:
 
 	// Hook: thinking → idle
 	RegisterHook(func(paneID string, old, new paneSt) {
-		reportCiCyCloudAgentState(paneID)
 		if old.Status != nil && *old.Status == "thinking" && new.Status != nil && *new.Status == "idle" {
 			go dispatchQueue(paneID)
 

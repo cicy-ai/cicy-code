@@ -924,6 +924,7 @@ export default function BrowserWindowsPanel({
   onSelectMobile,
   selectedMobileKey,
   onSendToAgent,
+  inlineActions = false,
 }: {
   selectedKey?: string | null;
   onSelect: (sel: { clientId: string; deviceId: string; profile: Profile } | null) => void;
@@ -934,6 +935,9 @@ export default function BrowserWindowsPanel({
   selectedMobileKey?: string | null; // `${clientId}:${id}`
   // Desktop tab: "send to agent" on a desktop snapshot routes a prompt to the CLI.
   onSendToAgent?: (text: string) => void;
+  // Account Matrix embeds this panel without the old left-panel header portal.
+  // Render eye/add/refresh beside the device selector in that layout.
+  inlineActions?: boolean;
 }) {
   const { t } = useTranslation('layout');
   const [devices, setDevices] = useState<Device[]>([]);
@@ -1099,12 +1103,15 @@ export default function BrowserWindowsPanel({
 
   return (
     <div data-id="BrowserWindowsPanel" className="absolute inset-0 flex flex-col bg-[#0A0A0A]">
-      {headerSlot ? createPortal(deviceActions, headerSlot) : null}
+      {!inlineActions && headerSlot ? createPortal(deviceActions, headerSlot) : null}
       {/* device selector */}
-      <div data-id="browser-windows-device" className="flex flex-col gap-2 px-2 py-2 border-b border-white/[0.06] shrink-0">
+      <div data-id="browser-windows-device" className="flex items-center gap-2 px-2 py-2 border-b border-white/[0.06] shrink-0">
         {/* device select on its own full-width line — custom dropdown so long
             device-ids + full detail (region/IP/uptime/lang) are visible */}
-        <DeviceSelect devices={devices} value={clientId} onChange={setClientId} loading={devLoading} />
+        <div className="min-w-0 flex-1">
+          <DeviceSelect devices={devices} value={clientId} onChange={setClientId} loading={devLoading} />
+        </div>
+        {inlineActions ? deviceActions : null}
       </div>
 
       {/* backend tabs — icon-only segmented control (tooltips name each) */}

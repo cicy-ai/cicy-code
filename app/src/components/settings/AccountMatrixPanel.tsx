@@ -19,8 +19,11 @@ import GithubAccountsPanel from "./GithubAccountsPanel";
 import GoogleAccountsPanel, { GoogleIcon, openChromeProfile } from "./GoogleAccountsPanel";
 import ChatGPTAccountsPanel, { ChatGPTIcon } from "./ChatGPTAccountsPanel";
 import { AppModal, useDialogs } from "../ui/Modal";
+import BrowserWindowsPanel, { BrowserWindowsColumn, type Profile as BrowserProfile } from "../layout/BrowserWindowsPanel";
+import { MobileDeviceColumn, type MobileSel } from "../layout/MobileDevicesPanel";
 
 type Platform = "github" | "cloudflare" | "google" | "chatgpt";
+type MatrixSection = "accounts" | "devices";
 type CFAccount = {
   name: string;
   label: string;
@@ -41,12 +44,21 @@ const r2DetailKeys = ["bucket", "public_url"] as const;
 export default function AccountMatrixPanel({
   active,
   paneId,
+  openConfigRequest,
+  onSendToAgent,
+  onOpenInEditor,
 }: {
   active: boolean;
   paneId: string;
+  openConfigRequest?: { backend: "chrome" | "electron"; accountIdx: number; nonce: number } | null;
+  onSendToAgent?: (text: string) => void;
+  onOpenInEditor?: (path: string) => void;
 }) {
   const { t } = useTranslation("workspace");
+  const [section, setSection] = useState<MatrixSection>("accounts");
   const [platform, setPlatform] = useState<Platform>("github");
+  const [browserSel, setBrowserSel] = useState<{ clientId: string; deviceId: string; profile: BrowserProfile } | null>(null);
+  const [mobileSel, setMobileSel] = useState<MobileSel | null>(null);
   const [accounts, setAccounts] = useState<CFAccount[]>([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState("");
@@ -78,6 +90,9 @@ export default function AccountMatrixPanel({
   useEffect(() => {
     if (active && platform === "cloudflare") void load();
   }, [active, platform]);
+  useEffect(() => {
+    if (openConfigRequest) setSection("devices");
+  }, [openConfigRequest]);
   const send = async (name: string) => {
     setSending(name);
     try {
@@ -174,9 +189,27 @@ export default function AccountMatrixPanel({
   return (
     <div
       data-id="account-matrix-panel"
-      className={`h-full min-h-0 overflow-hidden ${active ? "" : "hidden"}`}
+      className={`h-full min-h-0 overflow-hidden ${active ? "flex flex-col" : "hidden"}`}
     >
-      <div data-id="account-matrix-body" className="flex h-full min-h-0">
+      <div data-id="account-matrix-section-tabs" className="flex h-11 shrink-0 items-center gap-1 border-b border-white/[0.06] px-3">
+        <button
+          type="button"
+          data-id="account-matrix-section-accounts"
+          onClick={() => setSection("accounts")}
+          className={`rounded-md px-3 py-1.5 text-[12px] transition-colors ${section === "accounts" ? "bg-white/[0.08] text-zinc-100" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"}`}
+        >
+          {t("accountMatrixAccountsTab", { defaultValue: "帐户" })}
+        </button>
+        <button
+          type="button"
+          data-id="account-matrix-section-devices"
+          onClick={() => setSection("devices")}
+          className={`rounded-md px-3 py-1.5 text-[12px] transition-colors ${section === "devices" ? "bg-white/[0.08] text-zinc-100" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"}`}
+        >
+          {t("accountMatrixDevicesTab", { defaultValue: "设备" })}
+        </button>
+      </div>
+      <div data-id="account-matrix-body" className={`min-h-0 flex-1 ${section === "accounts" ? "flex" : "hidden"}`}>
         <aside
           data-id="account-matrix-platform-tabs"
           className="flex w-14 shrink-0 flex-col items-center gap-1.5 border-r border-white/[0.06] py-3"
@@ -422,6 +455,45 @@ export default function AccountMatrixPanel({
             </div>
           )}
         </main>
+      </div>
+      <div data-id="account-matrix-devices" className={`min-h-0 flex-1 ${section === "devices" ? "flex" : "hidden"}`}>
+        <div data-id="account-matrix-device-list" className="relative h-full w-[280px] min-w-[220px] shrink-0 border-r border-white/[0.06]">
+          {active && section === "devices" ? (
+            <BrowserWindowsPanel
+              selectedKey={browserSel?.profile.key ?? null}
+              onSelect={setBrowserSel}
+              openConfigRequest={openConfigRequest}
+              onSelectMobile={setMobileSel}
+              selectedMobileKey={mobileSel ? `${mobileSel.clientId}:${mobileSel.id}` : null}
+              onSendToAgent={onSendToAgent}
+              inlineActions
+            />
+          ) : null}
+        </div>
+        <div data-id="account-matrix-device-detail" className="relative h-full min-w-0 flex-1">
+          {browserSel ? (
+            <BrowserWindowsColumn
+              key={`${browserSel.clientId}:${browserSel.profile.key}`}
+              clientId={browserSel.clientId}
+              deviceId={browserSel.deviceId}
+              profile={browserSel.profile}
+              onClose={() => setBrowserSel(null)}
+              onSendToAgent={onSendToAgent}
+              onOpenInEditor={onOpenInEditor}
+            />
+          ) : mobileSel ? (
+            <MobileDeviceColumn
+              key={`${mobileSel.clientId}:${mobileSel.id}`}
+              sel={mobileSel}
+              onClose={() => setMobileSel(null)}
+              onSendToAgent={onSendToAgent}
+            />
+          ) : (
+            <div data-id="account-matrix-device-detail-empty" className="flex h-full items-center justify-center px-6 text-center text-[12px] text-zinc-600">
+              {t("accountMatrixSelectDevice", { defaultValue: "选择左侧设备或浏览器 Profile 查看详情" })}
+            </div>
+          )}
+        </div>
       </div>
       {dialogsNode}
     </div>

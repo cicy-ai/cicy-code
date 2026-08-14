@@ -14,6 +14,8 @@ import { cn } from '../lib/utils';
 type Props = {
   /** Reserved for future use (currently unused now that the QR is a plain URL). */
   workspaceTitle?: string;
+  open: boolean;
+  onClose: () => void;
 };
 
 // The Telegram bot the 小程序 method opens. Single source of truth for both the
@@ -29,11 +31,10 @@ const TG_BOT = 'cicy_ai_bot';
 //
 // Hidden entirely when the operator hasn't set CICY_PUBLIC_URL — that env
 // signals "this server is reachable from elsewhere".
-export default function MobileQRPopover(_props: Props) {
+export default function MobileQRPopover({ open, onClose }: Props) {
   const { t } = useTranslation('workspace');
   const { globalVar } = useApp();
   const publicUrl: string = (globalVar?.public_url || '').trim();
-  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   // In cicy-desktop's Electron shell window.cicy is the preload bridge.
   // "Open in CiCy Desktop" is pointless when the user is already there.
@@ -79,11 +80,11 @@ export default function MobileQRPopover(_props: Props) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') onClose();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [open]);
+  }, [onClose, open]);
 
   if (!publicUrl) return null;
 
@@ -124,22 +125,7 @@ export default function MobileQRPopover(_props: Props) {
 
 
 
-  return (
-    <>
-      <button
-        type="button"
-        data-id="mobile-qr-trigger"
-        onClick={() => setOpen(true)}
-        title={t('mobileQrTitle')}
-        className={cn(
-          'group flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.02] text-zinc-400 transition-all hover:border-white/[0.14] hover:text-zinc-100 cursor-pointer',
-          open && 'border-white/[0.14] text-zinc-100 shadow-[0_12px_30px_rgba(0,0,0,0.28)]',
-        )}
-      >
-        <Smartphone className="h-4 w-4" />
-      </button>
-
-      {open
+  return open
         ? createPortal(
             <div
               data-id="mobile-qr-modal-root"
@@ -151,7 +137,7 @@ export default function MobileQRPopover(_props: Props) {
               <div
                 data-id="mobile-qr-backdrop"
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setOpen(false)}
+                onClick={onClose}
               />
               {/* Modal panel */}
               <div
@@ -166,7 +152,7 @@ export default function MobileQRPopover(_props: Props) {
                   <button
                     type="button"
                     data-id="mobile-qr-close"
-                    onClick={() => setOpen(false)}
+                    onClick={onClose}
                     className="rounded-md p-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200 cursor-pointer"
                   >
                     <X className="h-4 w-4" />
@@ -291,7 +277,5 @@ export default function MobileQRPopover(_props: Props) {
             </div>,
             document.body,
           )
-        : null}
-    </>
-  );
+        : null;
 }

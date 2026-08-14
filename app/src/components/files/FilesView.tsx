@@ -32,6 +32,9 @@ interface FilesViewProps {
    *  "memory") instead of the workspace, and only that root's tree is shown. */
   scopeRoot?: string;
   className?: string;
+  /** Targeted open request from a parent surface. Unlike the global
+   *  cicy:open-file event, this only affects this FilesView instance. */
+  openRequest?: { path: string; root?: string; nonce: number } | null;
 }
 
 type TabKind = 'file' | 'diff';
@@ -133,7 +136,7 @@ function savePersistedTabs(agentId: string, tabs: Tab[], activeId: string, fsRoo
  *   - per-file dirty state lifted from CodeEditor
  *   - fsnotify watcher for explorer refresh + external-change detection
  */
-export default function FilesView({ agentId, workspaceFolder, pageClientId, scopeRoot, className }: FilesViewProps) {
+export default function FilesView({ agentId, workspaceFolder, pageClientId, scopeRoot, className, openRequest }: FilesViewProps) {
   // Default fs root for this view's CRUD + tab open. "workspace" preserves the
   // Files-tab behavior; a scopeRoot (e.g. "memory") anchors everything there.
   const fsRoot = scopeRoot || 'workspace';
@@ -286,6 +289,11 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, scop
     },
     [],
   );
+
+  useEffect(() => {
+    if (!openRequest?.path) return;
+    openFileTab(openRequest.path, openRequest.root || fsRoot);
+  }, [openRequest, openFileTab, fsRoot]);
 
   // markdown history 里点击文件链接 → 打开到编辑器 tab(Workspace 负责揭示文件视图)。
   useEffect(() => {

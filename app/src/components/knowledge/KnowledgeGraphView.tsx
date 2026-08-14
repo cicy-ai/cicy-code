@@ -3,18 +3,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
-import { X, Loader2, RefreshCw, FileText, Search } from 'lucide-react';
+import { Loader2, RefreshCw, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
-import MarkdownPreview from '../files/MarkdownPreview';
 
 // Knowledge graph: a BIPARTITE force graph over ~/cicy-ai/knowledge — entry nodes
 // (colored by governance status) linked to their tag nodes (hubs). The store has
 // no [[wikilinks]], so tags + domains ARE the structure. Search, domain/status
-// filters, hover-neighborhood highlight, and a markdown detail drawer. Data comes
-// straight from /api/knowledge (view=index, bodies fetched per-click).
+// filters, hover-neighborhood highlight, and entry selection live here. The
+// parent decides where the selected Markdown file opens.
 
-interface KnEntry { id: string; title: string; tags?: string; status?: string; domain?: string; summary?: string }
+interface KnEntry { id: string; title: string; tags?: string; status?: string; domain?: string; summary?: string; path?: string }
 interface GNode { id: string; kind: 'entry' | 'tag'; label: string; status?: string; domain?: string; val: number; color: string; x?: number; y?: number }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -27,16 +26,15 @@ const parseTags = (t?: string): string[] =>
   (t || '').split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
 const normStatus = (s?: string) => (s || 'canon').toLowerCase();
 
-interface Props { className?: string }
+interface Props { className?: string; onOpenEntry?: (entry: KnEntry) => void }
 
-export default function KnowledgeGraphView({ className }: Props) {
+export default function KnowledgeGraphView({ className, onOpenEntry }: Props) {
   const { t } = useTranslation('workspace');
   const stLabel = (s?: string) => { const k = normStatus(s); return t('st' + k.charAt(0).toUpperCase() + k.slice(1)); };
   const [entries, setEntries] = useState<KnEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selected, setSelected] = useState<KnEntry | null>(null);
-  const [detail, setDetail] = useState<{ body: string; loading: boolean }>({ body: '', loading: false });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [offDomains, setOffDomains] = useState<Set<string>>(new Set());
   const [offStatus, setOffStatus] = useState<Set<string>>(new Set());
@@ -106,16 +104,16 @@ export default function KnowledgeGraphView({ className }: Props) {
     const s = new Set<string>([hoverId]); (neighbors.get(hoverId) || new Set()).forEach((x) => s.add(x)); return s;
   }, [hoverId, neighbors]);
 
-  const openEntry = useCallback(async (id: string) => {
-    const ent = entries.find((e) => e.id === id) || null; setSelected(ent); if (!ent) return;
-    setDetail({ body: '', loading: true });
-    try { const { data } = await apiService.getKnowledge(id); setDetail({ body: typeof data?.body === 'string' ? data.body : '', loading: false }); }
-    catch (e: any) { setDetail({ body: t('knLoadFailed', { msg: e?.message || '' }), loading: false }); }
-  }, [entries]);
+  const openEntry = useCallback((id: string) => {
+    const entry = entries.find((item) => item.id === id);
+    if (!entry) return;
+    setSelectedId(id);
+    onOpenEntry?.(entry);
+  }, [entries, onOpenEntry]);
 
   const onNodeClick = useCallback((node: any) => { if (node?.kind === 'entry') openEntry(String(node.id).replace(/^e:/, '')); }, [openEntry]);
 
-  const selId = selected ? `e:${selected.id}` : null;
+  const selId = selectedId ? `e:${selectedId}` : null;
   const chip = (active: boolean, onClick: () => void, key: string, label: string, dot?: string) => (
     <button key={key} type="button" onClick={onClick}
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors ${active ? 'border-white/[0.14] bg-white/[0.06] text-zinc-200' : 'border-white/[0.05] text-zinc-600 line-through'}`}>
@@ -211,27 +209,6 @@ export default function KnowledgeGraphView({ className }: Props) {
           )}
         </div>
 
-        {/* entry detail drawer */}
-        {selected ? (
-          <div data-id="knowledge-graph-detail" className="flex w-[400px] shrink-0 flex-col border-l border-[var(--vsc-border)] bg-[#0b0b0d]">
-            <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--vsc-border)] px-3">
-              <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-zinc-200"><FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" /><span className="truncate">{selected.title}</span></span>
-              <button data-id="knowledge-graph-detail-close" type="button" onClick={() => setSelected(null)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200"><X className="h-4 w-4" /></button>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--vsc-border)] px-3 py-2 text-[10px]">
-              {selected.status ? <span className="rounded px-1.5 py-0.5" style={{ background: `${STATUS_COLOR[normStatus(selected.status)] || '#52525b'}22`, color: STATUS_COLOR[normStatus(selected.status)] || '#a1a1aa' }}>{stLabel(selected.status)}</span> : null}
-              {selected.domain ? <span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-zinc-400">{selected.domain}</span> : null}
-              {parseTags(selected.tags).map((tg) => <span key={tg} className="rounded bg-blue-500/10 px-1.5 py-0.5 text-blue-300/80">#{tg}</span>)}
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto px-3 py-2">
-              {detail.loading ? (
-                <div className="flex items-center gap-2 text-[12px] text-zinc-600"><Loader2 className="h-4 w-4 animate-spin" /> {t('knLoadingBody')}</div>
-              ) : (
-                <MarkdownPreview source={detail.body || t('knEmpty')} className="text-[12px]" />
-              )}
-            </div>
-          </div>
-        ) : null}
       </div>
     </div>
   );

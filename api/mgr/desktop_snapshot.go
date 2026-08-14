@@ -144,6 +144,9 @@ func captureDevice(clientID, deviceID, platform string, keep int) (string, error
 	if b64 == "" {
 		return "", errors.New("empty snapshot (desktop_snapshot returned no image)")
 	}
+	if strings.HasPrefix(strings.TrimSpace(b64), "Error:") {
+		return "", errors.New(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(b64), "Error:")))
+	}
 	clean := strings.NewReplacer("\n", "", "\r", "", " ", "", "\t", "").Replace(b64)
 	if strings.HasPrefix(clean, "data:") { // tolerate a data: URL prefix
 		if i := strings.IndexByte(clean, ','); i > 0 {
@@ -167,27 +170,44 @@ func captureDevice(clientID, deviceID, platform string, keep int) (string, error
 	return name, nil
 }
 
-// extractSnapshotB64 pulls the base64 image out of the desktop_snapshot result,
-// which may be a raw base64 string, an object {b64|base64|image|data|jpeg: "..."},
-// or a JSON-encoded string of such an object.
+// extractSnapshotB64 pulls the base64 image out of the desktop_snapshot result.
+// Desktop tools use the MCP-style {content:[{type:"text",text:"..."}]} shape,
+// while older clients returned raw base64 or {b64|base64|image|data|jpeg:"..."}.
+// RPC bridges may additionally JSON-encode any of these shapes.
 func extractSnapshotB64(res interface{}) string {
-	pick := func(m map[string]interface{}) string {
+	switch v := res.(type) {
+	case map[string]interface{}:
 		for _, k := range []string{"b64", "base64", "image", "data", "jpeg"} {
-			if s, ok := m[k].(string); ok && strings.TrimSpace(s) != "" {
+			if s, ok := v[k].(string); ok && strings.TrimSpace(s) != "" {
 				return strings.TrimSpace(s)
 			}
 		}
-		return ""
-	}
-	switch v := res.(type) {
-	case map[string]interface{}:
-		return pick(v)
+		// MCP content blocks carry the image as a text block. Only accept `text`
+		// on an actual text block so unrelated diagnostic objects are ignored.
+		if typ, _ := v["type"].(string); typ == "text" {
+			if s, _ := v["text"].(string); strings.TrimSpace(s) != "" {
+				return strings.TrimSpace(s)
+			}
+		}
+		for _, k := range []string{"content", "result"} {
+			if nested, ok := v[k]; ok {
+				if s := extractSnapshotB64(nested); s != "" {
+					return s
+				}
+			}
+		}
+	case []interface{}:
+		for _, item := range v {
+			if s := extractSnapshotB64(item); s != "" {
+				return s
+			}
+		}
 	case string:
 		t := strings.TrimSpace(v)
-		if strings.HasPrefix(t, "{") {
-			var m map[string]interface{}
-			if json.Unmarshal([]byte(t), &m) == nil {
-				if s := pick(m); s != "" {
+		if strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[") {
+			var decoded interface{}
+			if json.Unmarshal([]byte(t), &decoded) == nil {
+				if s := extractSnapshotB64(decoded); s != "" {
 					return s
 				}
 			}
@@ -196,6 +216,7 @@ func extractSnapshotB64(res interface{}) string {
 	default:
 		return ""
 	}
+	return ""
 }
 
 func pruneSnapshots(dir string, keep int) {

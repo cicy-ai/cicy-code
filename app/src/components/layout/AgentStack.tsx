@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { BookOpen, Braces, Brain, Check, CircleHelp, Columns2, Copy, CornerDownLeft, ExternalLink, Folder, Grid3X3, History, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, Timer, X } from 'lucide-react'
+import { Brain, Check, CircleHelp, Columns2, Copy, CornerDownLeft, ExternalLink, Folder, Grid3X3, History, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -524,7 +524,6 @@ function AgentStack({
   showHeaderButtons = true,
   onOpenPaneSettings,
   onOpenPaneFiles,
-  onOpenPaneCrontab,
   onOpenPaneSession,
   onOpenPaneTodo,
   onOpenPaneMemory,
@@ -541,12 +540,11 @@ function AgentStack({
   showHeaderButtons?: boolean
   onOpenPaneSettings: (paneId: string) => void
   onOpenPaneFiles: (paneId: string) => void
-  onOpenPaneCrontab?: (paneId: string) => void
   onOpenPaneSession: (paneId: string) => void
   onOpenPaneTodo?: (paneId: string) => void
   onOpenPaneMemory?: (paneId: string) => void
   // Generic "open this right-panel content tab for the pane" — used for the
-  // header buttons that mirror cli-content-tabs (knowledge / 审计日志 / 审计策略).
+  // header buttons that mirror cli-content-tabs (audit / account matrix).
   onOpenPaneContent?: (paneId: string, tab: string) => void
   onRenamePaneTitle?: (paneId: string, nextTitle: string) => Promise<void> | void
   // Pending-todo count for the active pane; shown as a badge on its todo button.
@@ -749,7 +747,6 @@ function AgentStack({
             showHeaderButtons={showHeaderButtons}
             onOpenPaneSettings={onOpenPaneSettings}
             onOpenPaneFiles={onOpenPaneFiles}
-            onOpenPaneCrontab={onOpenPaneCrontab}
             onOpenPaneSession={onOpenPaneSession}
             onOpenPaneTodo={onOpenPaneTodo}
             onOpenPaneMemory={onOpenPaneMemory}
@@ -803,7 +800,6 @@ function AgentStackCard({
   showHeaderButtons,
   onOpenPaneSettings,
   onOpenPaneFiles,
-  onOpenPaneCrontab,
   onOpenPaneSession,
   onOpenPaneTodo,
   onOpenPaneMemory,
@@ -830,7 +826,6 @@ function AgentStackCard({
   showHeaderButtons: boolean;
   onOpenPaneSettings: (paneId: string) => void;
   onOpenPaneFiles: (paneId: string) => void;
-  onOpenPaneCrontab?: (paneId: string) => void;
   onOpenPaneSession: (paneId: string) => void;
   onOpenPaneTodo?: (paneId: string) => void;
   onOpenPaneMemory?: (paneId: string) => void;
@@ -1057,11 +1052,6 @@ function AgentStackCard({
     onOpenPaneFiles(item.paneId)
   }, [item.paneId, onOpenPaneFiles])
 
-  const handleOpenCrontab = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation()
-    onOpenPaneCrontab?.(item.paneId)
-  }, [item.paneId, onOpenPaneCrontab])
-
   const handleOpenAccountMatrix = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     onOpenPaneContent?.(item.paneId, 'github')
@@ -1077,14 +1067,6 @@ function AgentStackCard({
     onOpenPaneTodo?.(item.paneId)
   }, [item.paneId, onOpenPaneTodo])
 
-  const handleOpenRequest = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation()
-    onOpenPaneContent?.(item.paneId, 'tools')
-  }, [item.paneId, onOpenPaneContent])
-  const handleOpenKnowledge = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation()
-    onOpenPaneContent?.(item.paneId, 'knowledge')
-  }, [item.paneId, onOpenPaneContent])
   const handleOpenAudit = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     onOpenPaneContent?.(item.paneId, 'audit')
@@ -1292,17 +1274,6 @@ function AgentStackCard({
                   icon: <LineChart className="h-4 w-4" />,
                   onClick: handleOpenSession,
                 },
-                ...(onOpenPaneContent ? [{
-                  id: 'agent-stack-card-request',
-                  label: t('tabRequest', { ns: 'workspace' }),
-                  icon: <Braces className="h-4 w-4" />,
-                  onClick: handleOpenRequest,
-                }, {
-                  id: 'agent-stack-card-knowledge',
-                  label: t('tabKnowledge', { ns: 'workspace' }),
-                  icon: <BookOpen className="h-4 w-4" />,
-                  onClick: handleOpenKnowledge,
-                }] : []),
                 ...(onOpenPaneMemory ? [{
                   id: 'agent-stack-card-memory',
                   label: t('tabMemory', { ns: 'workspace' }),
@@ -1315,12 +1286,6 @@ function AgentStackCard({
                   icon: <ShieldCheck className="h-4 w-4" />,
                   onClick: handleOpenAudit,
                   badge: auditAlertCount,
-                }] : []),
-                ...(onOpenPaneCrontab ? [{
-                  id: 'agent-stack-card-timer',
-                  label: t('timer', { ns: 'common', defaultValue: '定时器' }),
-                  icon: <Timer className="h-4 w-4" />,
-                  onClick: handleOpenCrontab,
                 }] : []),
                 ...(onOpenPaneContent ? [{
                   id: 'agent-stack-card-account-matrix',

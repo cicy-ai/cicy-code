@@ -1133,6 +1133,9 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
 
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   useEffect(() => {
+    // Keep marketplace navigation self-contained: opening a skill detail
+    // replaces the right drawer content instead of covering the main
+    // workspace/editor in the middle panel.
     setPortalTarget(document.querySelector('[data-id="right-panel"]') as HTMLElement | null);
   }, []);
   if (!portalTarget) return null;

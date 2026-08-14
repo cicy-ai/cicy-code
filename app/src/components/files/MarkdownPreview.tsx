@@ -8,6 +8,7 @@ import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
 import { Check, Copy } from 'lucide-react';
 import i18n from '../../i18n';
+import { stripMarkdownFrontmatter } from './markdownFrontmatter';
 
 const t = (k: string, o?: Record<string, unknown>) =>
   i18n.t(`fileExplorer.${k}`, { ns: 'workspace', ...o }) as string;
@@ -48,6 +49,7 @@ function formatBytes(n: number): string {
 // save-state change) would rebuild the preview DOM.
 function MarkdownPreview({ source, className = '' }: Props) {
   const [forceRender, setForceRender] = useState(false);
+  const previewSource = stripMarkdownFrontmatter(source);
 
   // Guard: don't auto-render an oversized document (would freeze the UI).
   if (source.length > MARKDOWN_PREVIEW_SOFT_MAX && !forceRender) {
@@ -222,7 +224,7 @@ function MarkdownPreview({ source, className = '' }: Props) {
             },
           }}
         >
-          {source}
+          {previewSource}
         </Markdown>
       </div>
     </div>

@@ -177,7 +177,7 @@ func renderReplyItemForIM(item map[string]interface{}) string {
 		// leaking localhost ports and Go socket errors into Feishu/WeChat makes a
 		// transient retry look like several separate user-facing failures.
 		if imIsTechnicalTransportFailure(txt) {
-			return "⚠️ 服务连接暂时中断，正在重试。"
+			return ""
 		}
 		return imTruncateLongString(txt, 2500)
 	case "tool_use":
@@ -197,7 +197,7 @@ func renderReplyItemForIM(item map[string]interface{}) string {
 			return "❌ " + name + " 失败"
 		}
 		if imIsTechnicalTransportFailure("生成失败 " + errText) {
-			return "❌ " + name + " 执行失败，请稍后重试。"
+			return ""
 		}
 		return "❌ " + name + " 失败\n" + imTruncateLongString(errText, 500)
 	}
@@ -212,6 +212,7 @@ func imIsTechnicalTransportFailure(text string) bool {
 	for _, marker := range []string{
 		"broken pipe", "closed network connection", "connection reset by peer",
 		"write tcp", "read tcp", "dial tcp", "127.0.0.1:", "localhost:",
+		"tls: bad record mac", "upstream tls handshake", "\neof", "\r\neof",
 	} {
 		if strings.Contains(lower, marker) {
 			return true

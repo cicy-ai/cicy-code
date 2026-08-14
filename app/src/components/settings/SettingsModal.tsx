@@ -4,10 +4,11 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { SlidersHorizontal, Globe, MessageCircle, Route, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle, Paperclip } from 'lucide-react';
+import { SlidersHorizontal, Globe, MessageCircle, Route, Boxes, Timer, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle, Paperclip } from 'lucide-react';
 import { useApp } from '../../contexts/AppContext';
 import ProviderDashboard from '../providers/ProviderDashboard';
 import IMDashboard from '../im/IMDashboard';
+import CrontabPanel from '../CrontabPanel';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
 import { useDialogs } from '../ui/Modal';
@@ -17,7 +18,7 @@ import { useDialogs } from '../ui/Modal';
 // the right — replaces the scattered activity-bar left-panels (providers/im)
 // and the membership-popover language submenu. Opened from the bottom-left
 // settings popover (entries above the version line).
-export type SettingsSection = 'general' | 'language' | 'im' | 'routing' | 'providers';
+export type SettingsSection = 'general' | 'language' | 'im' | 'timer' | 'routing' | 'providers';
 
 // Common email providers → their SMTP/IMAP/POP3 servers. Typing an account whose
 // domain matches one of these auto-fills the servers, so the user only enters the
@@ -60,6 +61,7 @@ export default function SettingsModal({
   flagEmoji,
   langName,
   version,
+  providersNeedKey,
   publicUrl,
   onSavePublicUrl,
 }: {
@@ -73,6 +75,7 @@ export default function SettingsModal({
   flagEmoji: (code: string) => string;
   langName: (code: string) => string;
   version?: string;
+  providersNeedKey?: boolean;
   publicUrl: string;
   onSavePublicUrl: (url: string) => Promise<void>;
 }) {
@@ -304,10 +307,9 @@ export default function SettingsModal({
     { id: 'general', label: t('settingsNavGeneral', { defaultValue: '通用' }), icon: <SlidersHorizontal className="h-4 w-4" /> },
     { id: 'language', label: t('settingsNavLanguage', { defaultValue: '语言' }), icon: <Globe className="h-4 w-4" /> },
     { id: 'im', label: t('settingsNavIM', { defaultValue: 'IM 通知' }), icon: <MessageCircle className="h-4 w-4" /> },
+    { id: 'timer', label: t('timer', { ns: 'common', defaultValue: '定时器' }), icon: <Timer className="h-4 w-4" /> },
     { id: 'routing', label: t('settingsNavRouting', { defaultValue: 'Agent 路由' }), icon: <Route className="h-4 w-4" /> },
-    // 'providers' nav removed — LLM 供应商 has its own full-screen entry from the
-    // sidebar (btn-providers → ProvidersModal). The section itself still exists
-    // for deep-links; it's just no longer a tab here.
+    { id: 'providers', label: t('settingsNavProviders', { defaultValue: 'LLM 供应商' }), icon: <Boxes className="h-4 w-4" /> },
   ];
   const isProviderSection = section === 'routing' || section === 'providers';
 
@@ -355,6 +357,9 @@ export default function SettingsModal({
                 <span data-id={`settings-modal-nav-${item.id}-label`} className="truncate">{item.label}</span>
                 {item.id === 'general' && emailNeedsSetup && (
                   <span data-id="settings-modal-nav-general-badge" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title={t('emailNeedsSetup', { defaultValue: '未配置令牌投递邮箱 / SMTP' })} />
+                )}
+                {item.id === 'providers' && providersNeedKey && (
+                  <span data-id="settings-modal-nav-providers-badge" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title={t('providerMissingApiKey', { defaultValue: '缺少 API key' })} />
                 )}
               </button>
             ))}
@@ -611,6 +616,10 @@ export default function SettingsModal({
             <div data-id="settings-section-im" className={`flex h-full ${section === 'im' ? '' : 'hidden'}`}>
               <div ref={setImLeft} data-id="settings-im-left" className="h-full w-[340px] shrink-0 border-r border-white/[0.06]" />
               <div ref={setImRight} data-id="settings-im-right" className="h-full min-w-0 flex-1" />
+            </div>
+
+            <div data-id="settings-section-timer" className={`h-full ${section === 'timer' ? '' : 'hidden'}`}>
+              <CrontabPanel active={open && section === 'timer'} />
             </div>
 
             {/* Routing + Providers — both backed by ProviderDashboard (tab driven by nav) */}
