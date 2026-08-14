@@ -60,7 +60,7 @@ const DEFAULT_PROJECT_ID = 'default';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
 const previewableMarkdown = (value: unknown) => String(value || '').replace(/\(file:\/\/(\/?[^)]+)\)/g, (_match, path: string) => `(/${path.replace(/^\/+/, '')})`);
 const projectIdFromURL = () => {
-  const match = window.location.hash.match(/\/projects\/([^/?#]+)/);
+  const match = window.location.hash.match(/^#\/project\/([^/?#]+)/);
   return match ? decodeURIComponent(match[1]) : DEFAULT_PROJECT_ID;
 };
 
@@ -197,12 +197,12 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
       </div>
       <div data-id="project-agent-card-live-body" className="mt-3 min-h-0 flex-1 space-y-2 overflow-hidden text-[11px] leading-4">
         {latest?.latest_question ? (
-          <div data-id="project-agent-card-latest-question" className="max-h-28 overflow-hidden text-zinc-300 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-20">
+          <div data-id="project-agent-card-latest-question" className="max-h-52 overflow-hidden text-zinc-300 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
             <MarkdownBlock text={previewableMarkdown(latest.latest_question)} />
           </div>
         ) : null}
         {latest?.latest_response ? (
-          <div data-id="project-agent-card-latest-response" className="max-h-28 overflow-hidden text-zinc-400 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-20">
+          <div data-id="project-agent-card-latest-response" className="max-h-52 overflow-hidden text-zinc-400 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
             <MarkdownBlock text={previewableMarkdown(latest.latest_response)} />
           </div>
         ) : null}
@@ -214,19 +214,19 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
         {attachments.length ? (
           <div data-id="project-agent-card-attachments" className="flex flex-wrap gap-2 overflow-hidden pt-1">
             {attachments.map((attachment) => (
-              <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className="group relative flex h-14 max-w-[180px] items-center overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
+              <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className={cn('group relative flex flex-col overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]', attachment.mediaType === 'audio' ? 'w-36' : 'w-20')}>
                 {attachment.mediaType === 'image' && attachment.previewURL ? (
-                  <span data-id="project-agent-card-attachment-media" className="h-14 w-14 overflow-hidden [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-14 [&_[data-id=current-history-md-img]]:!w-14 [&_[data-id=current-history-md-img]]:rounded-none [&_[data-id=current-history-md-img]]:object-cover">
+                  <span data-id="project-agent-card-attachment-media" className="h-14 w-full overflow-hidden [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-14 [&_[data-id=current-history-md-img]]:!w-full [&_[data-id=current-history-md-img]]:rounded-none [&_[data-id=current-history-md-img]]:object-cover">
                     <MarkdownImg src={attachment.previewURL} alt={attachment.name} />
                   </span>
                 ) : attachment.mediaType === 'video' && attachment.previewURL ? (
-                  <video data-id="project-agent-card-attachment-media" src={attachment.previewURL} className="h-14 w-20 cursor-zoom-in object-cover" controls onClick={(event) => { event.stopPropagation(); void event.currentTarget.requestFullscreen?.(); }} />
+                  <video data-id="project-agent-card-attachment-media" src={attachment.previewURL} className="h-14 w-full cursor-zoom-in object-cover" controls onClick={(event) => { event.stopPropagation(); void event.currentTarget.requestFullscreen?.(); }} />
                 ) : attachment.mediaType === 'audio' && attachment.previewURL ? (
-                  <audio data-id="project-agent-card-attachment-media" src={attachment.previewURL} className="h-10 w-32" controls />
+                  <audio data-id="project-agent-card-attachment-media" src={attachment.previewURL} className="h-10 w-full" controls />
                 ) : (
-                  <FileText className="mx-3 h-5 w-5 shrink-0 text-zinc-500" />
+                  <span className="grid h-14 w-full place-items-center"><FileText className="h-5 w-5 text-zinc-500" /></span>
                 )}
-                <span className="min-w-0 truncate pr-6 text-[10px] text-zinc-300">{attachment.status === 'uploading' ? `${attachment.progress}%` : attachment.name}</span>
+                <span className="w-full truncate border-t border-white/[0.07] px-2 py-1 text-center text-[10px] text-zinc-300">{attachment.status === 'uploading' ? `${attachment.progress}%` : attachment.name}</span>
                 <button type="button" data-id="project-agent-card-attachment-remove" onClick={(event) => { event.stopPropagation(); onRemoveAttachment(attachment.id); }} className="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-black/70 text-zinc-300 opacity-0 group-hover:opacity-100"><X className="h-3 w-3" /></button>
               </div>
             ))}
@@ -252,9 +252,11 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
   );
 }
 
-export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
+export default function ProjectsPanel({ agents, statuses = {}, ownerPaneId = 'w-1001', footerControls, onOpenAgent }: {
   agents: ProjectAgent[];
   statuses?: Record<string, any>;
+  ownerPaneId?: string;
+  footerControls?: ReactNode;
   onOpenAgent: (paneId: string) => void;
 }) {
   const { t } = useTranslation('workspace');
@@ -271,6 +273,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   const [createError, setCreateError] = useState('');
   const [creating, setCreating] = useState(false);
   const [projectMenuId, setProjectMenuId] = useState<string>('');
+  const [projectMenuAnchor, setProjectMenuAnchor] = useState<string>('');
   const [addOpen, setAddOpen] = useState(false);
   const [addSearch, setAddSearch] = useState('');
   const [addError, setAddError] = useState('');
@@ -329,15 +332,14 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
 
   useEffect(() => {
     if (!projectMenuId) return;
-    const close = () => setProjectMenuId('');
+    const close = () => { setProjectMenuId(''); setProjectMenuAnchor(''); };
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [projectMenuId]);
 
   useEffect(() => {
     const encodedId = encodeURIComponent(String(selectedId));
-    const base = window.location.hash.replace(/\/projects\/[^/?#]+.*$/, '');
-    const nextHash = `${base || '#/agent/w-1001'}/projects/${encodedId}`;
+    const nextHash = `#/project/${encodedId}`;
     if (window.location.hash !== nextHash) window.history.replaceState(null, '', nextHash);
   }, [selectedId]);
 
@@ -802,7 +804,6 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     <section data-id="projects-panel" className="flex h-full min-w-0 flex-1 bg-[#090a0d] text-zinc-300">
       <aside data-id="projects-list" className="flex w-[280px] shrink-0 flex-col border-r border-white/[0.07] bg-[#0d0e12]">
         <header data-id="projects-list-header" className="flex h-14 shrink-0 items-center border-b border-white/[0.07] px-4">
-          <FolderKanban className="mr-2 h-4 w-4 text-zinc-500" />
           <h2 data-id="projects-list-title" className="flex-1 text-[15px] font-semibold text-zinc-100">{t('projectsTitle')}</h2>
           <button
             type="button"
@@ -835,6 +836,16 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
               >
                 {project.pinned ? <Pin data-id="project-list-item-pinned" className="h-3 w-3 shrink-0 text-amber-400" /> : null}
                 <span data-id="project-list-item-name" className="min-w-0 flex-1 truncate text-[13px] font-medium">{project.name}</span>
+                <div data-id="project-list-item-actions" className="relative w-7 shrink-0">
+                  <button type="button" data-id="project-more" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setProjectMenuId(String(project.id)); setProjectMenuAnchor(String(project.id)); }} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 opacity-0 transition-opacity hover:bg-white/[0.08] hover:text-zinc-200 group-hover:opacity-100 group-focus-within:opacity-100" title={t('projectMore')}><MoreHorizontal className="h-4 w-4" /></button>
+                  {projectMenuId === String(project.id) && projectMenuAnchor === String(project.id) ? (
+                    <div data-id="project-more-menu" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} className="absolute right-0 top-8 z-50 min-w-[150px] rounded-xl border border-white/10 bg-[#18191e] p-1 shadow-2xl">
+                      <button type="button" data-id="project-pin" onClick={() => { setProjectMenuId(''); void toggleProjectPinned(project); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/[0.06]">{project.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}{project.pinned ? t('projectUnpin') : t('projectPin')}</button>
+                      <button type="button" data-id="project-rename" onClick={() => { setProjectMenuId(''); void renameProject(project); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/[0.06]"><Pencil className="h-3.5 w-3.5" />{t('projectRename')}</button>
+                      {!project.builtin ? <button type="button" data-id="project-delete" onClick={() => { setProjectMenuId(''); void deleteProject(project); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-red-300 hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" />{t('projectDelete')}</button> : null}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             );
           })}
@@ -847,9 +858,9 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
             <h2 data-id="projects-agent-title" className="truncate text-[15px] font-semibold text-zinc-100">{selectedProject.name}</h2>
             <p data-id="projects-agent-count" className="text-[11px] text-zinc-600">{t('projectAgentCount', { count: visibleAgents.length })}</p>
           </div>
-          <div data-id="project-list-item-actions" className="relative">
-            <button type="button" data-id="project-more" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setProjectMenuId((current) => current === String(selectedProject.id) ? '' : String(selectedProject.id)); }} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 hover:bg-white/[0.08] hover:text-zinc-200" title={t('projectMore')}><MoreHorizontal className="h-4 w-4" /></button>
-            {projectMenuId === String(selectedProject.id) ? (
+          <div data-id={`agent-stack-card-more-${shortPaneId(ownerPaneId)}`} className="relative">
+            <button type="button" data-id={`agent-stack-card-more-button-${shortPaneId(ownerPaneId)}`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setProjectMenuId(String(selectedProject.id)); setProjectMenuAnchor('header'); }} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 hover:bg-white/[0.08] hover:text-zinc-200" title={t('projectMore')}><MoreHorizontal className="h-4 w-4" /></button>
+            {projectMenuId === String(selectedProject.id) && projectMenuAnchor === 'header' ? (
               <div data-id="project-more-menu" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} className="absolute right-0 top-9 z-50 min-w-[150px] rounded-xl border border-white/10 bg-[#18191e] p-1 shadow-2xl">
                 <button type="button" data-id="project-pin" onClick={() => { setProjectMenuId(''); void toggleProjectPinned(selectedProject); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/[0.06]">{selectedProject.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}{selectedProject.pinned ? t('projectUnpin') : t('projectPin')}</button>
                 <button type="button" data-id="project-rename" onClick={() => { setProjectMenuId(''); void renameProject(selectedProject); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/[0.06]"><Pencil className="h-3.5 w-3.5" />{t('projectRename')}</button>
@@ -881,7 +892,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
         {visibleAgents.length && layoutReadyProjectId === String(selectedProject.id) ? (
           <div
             data-id="project-canvas-world"
-            className="pointer-events-none absolute inset-0 origin-top-left"
+            className="pointer-events-none absolute inset-0 z-20 origin-top-left"
             style={{ transform: `translate(${canvasPan.x}px, ${canvasPan.y}px) scale(${canvasZoom})` }}
           >
             {visibleAgents.map((agent, index) => {
@@ -990,11 +1001,11 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
             <p className="text-sm" data-id="projects-agent-empty-title">{t('projectNoAgents')}</p>
           </div>
         )}
-        <div data-id="project-canvas-controls" className="absolute bottom-5 left-5 z-30 flex items-center gap-1 rounded-xl border border-white/10 bg-[#17181d]/95 p-1.5 shadow-xl backdrop-blur">
-          <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-4 w-4" /></button>
-          <span data-id="project-canvas-zoom-value" className="w-11 text-center font-mono text-[10px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
-          <button type="button" data-id="project-canvas-zoom-in" onClick={() => changeZoom(0.1)} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomIn')}><Plus className="h-4 w-4" /></button>
-          <button type="button" data-id="project-canvas-reset" onClick={resetCanvasView} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 hover:bg-white/[0.08] hover:text-white" title={t('projectResetView')}><Maximize2 className="h-4 w-4" /></button>
+        <div data-id="project-canvas-controls" className="absolute bottom-4 left-4 z-10 flex items-center gap-0.5 rounded-lg border border-white/10 bg-[#17181d]/95 p-1 shadow-xl backdrop-blur">
+          <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
+          <span data-id="project-canvas-zoom-value" className="w-9 text-center font-mono text-[9px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
+          <button type="button" data-id="project-canvas-zoom-in" onClick={() => changeZoom(0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomIn')}><Plus className="h-3.5 w-3.5" /></button>
+          <button type="button" data-id="project-canvas-reset" onClick={resetCanvasView} className="grid h-7 w-7 place-items-center rounded-md text-zinc-500 hover:bg-white/[0.08] hover:text-white" title={t('projectResetView')}><Maximize2 className="h-3.5 w-3.5" /></button>
         </div>
         <button
           type="button"
@@ -1007,6 +1018,11 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
         >
           <UserPlus className="h-5 w-5" />
         </button>
+        {footerControls ? (
+          <div data-id="project-canvas-footer-controls" className="fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-white/10 bg-[#111216]/95 px-2 py-1.5 shadow-2xl backdrop-blur">
+            {footerControls}
+          </div>
+        ) : null}
         </div>
 
       </main>

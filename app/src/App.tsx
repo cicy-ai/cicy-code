@@ -31,6 +31,9 @@ function parseHash(): { view: ViewType; agentId: string } {
   if (hash.startsWith('#/wsl-install')) {
     return { view: 'wsl-install', agentId: '' };
   }
+  if (hash.startsWith('#/project/')) {
+    return { view: 'workspace', agentId: 'w-1001' };
+  }
   if (hash.startsWith('#/agent/')) {
     const m = hash.match(/\/agent\/([^/]+)/);
     return { view: 'workspace', agentId: m ? decodeURIComponent(m[1]).replace(/:.*$/, '') : 'w-1001' };

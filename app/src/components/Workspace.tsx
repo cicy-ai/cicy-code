@@ -343,7 +343,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   });
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
-  const [projectsOpen, setProjectsOpen] = useState(() => /\/projects\/[^/?#]+/.test(window.location.hash) || cache.get(projectsOpenKey(paneId), false) === true);
+  const [projectsOpen, setProjectsOpen] = useState(() => /^#\/project\/[^/?#]+/.test(window.location.hash) || cache.get(projectsOpenKey(paneId), false) === true);
   const [portsOpen, setPortsOpen] = useState(false);
   const [fixedDomain, setFixedDomain] = useState('');
   const [proxyAvailable, setProxyAvailable] = useState(false);
@@ -2098,8 +2098,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   setLeftPanelView(null);
                   setKnowledgeOpen(false);
                   setCliContentOpen(false);
-                } else if (/\/projects\//.test(window.location.hash)) {
-                  window.location.hash = window.location.hash.replace(/\/projects\/[^/?#]+.*$/, '');
+                } else if (/^#\/project\//.test(window.location.hash)) {
+                  window.location.hash = `#/agent/${encodeURIComponent(paneId.replace(/:.*$/, ''))}`;
                 }
                 return next;
               });
@@ -2154,6 +2154,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <ProjectsPanel
                 agents={projectAgents}
                 statuses={pollStatuses}
+                ownerPaneId={paneId}
+                footerControls={stackHeaderControls(activeCliPaneId)}
                 onOpenAgent={(targetPaneId) => {
                   setProjectsOpen(false);
                   onSelectAgent(targetPaneId.replace(/:.*$/, ''));
