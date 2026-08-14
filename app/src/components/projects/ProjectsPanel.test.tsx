@@ -97,6 +97,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       return node as HTMLElement;
     });
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).not.toBeInTheDocument();
+    const canvasNode = card.closest('[data-id="project-canvas-node-w-101"]') as HTMLElement;
+    fireEvent.pointerDown(canvasNode, { button: 0, pointerId: 1, clientX: 120, clientY: 120 });
+    fireEvent.pointerUp(canvasNode, { pointerId: 1, clientX: 120, clientY: 120 });
     fireEvent.click(card);
 
     const input = await waitFor(() => {

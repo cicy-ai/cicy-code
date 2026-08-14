@@ -499,7 +499,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
       originY: layout.y,
       moved: false,
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
   };
 
   const moveAgent = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -518,7 +518,13 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     const drag = agentDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     agentDragRef.current = null;
-    if (!drag.moved) return;
+    if (!drag.moved) {
+      toggleAgentSelection(agent);
+      // Pointer capture may emit a click after pointerup. Suppress that click
+      // so a single press cannot immediately select and then deselect the card.
+      draggedAgentRef.current = drag.id;
+      return;
+    }
     draggedAgentRef.current = drag.id;
     const x = drag.originX + (event.clientX - drag.startX) / canvasZoom;
     const y = drag.originY + (event.clientY - drag.startY) / canvasZoom;
