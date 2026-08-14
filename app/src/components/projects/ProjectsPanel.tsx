@@ -315,6 +315,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [layoutReadyProjectId, setLayoutReadyProjectId] = useState('');
   const [canvasPan, setCanvasPan] = useState({ x: 60, y: 60 });
   const [canvasZoom, setCanvasZoom] = useState(1);
+  const [dockHeight, setDockHeight] = useState(0);
   const liveMetrics = useMemo(() => {
     const result: Record<string, AgentLiveMetrics> = {};
     for (const agent of agents) {
@@ -330,6 +331,28 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const agentDragRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
   const agentResizeRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originWidth: number; originHeight: number } | null>(null);
   const panDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+
+  useEffect(() => {
+    if (!dockOpen) { setDockHeight(0); return; }
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let observed: Element | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    const measure = () => {
+      const next = canvas.querySelector('[data-id="ports-panel"], [data-id="project-canvas-shell-panel"]');
+      if (!next) return;
+      setDockHeight(Math.ceil(next.getBoundingClientRect().height));
+      if (next === observed) return;
+      resizeObserver?.disconnect();
+      observed = next;
+      resizeObserver = new ResizeObserver(() => setDockHeight(Math.ceil(next.getBoundingClientRect().height)));
+      resizeObserver.observe(next);
+    };
+    measure();
+    const observer = new MutationObserver(measure);
+    observer.observe(canvas, { childList: true, subtree: true });
+    return () => { observer.disconnect(); resizeObserver?.disconnect(); };
+  }, [dockOpen]);
 
   const load = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -1094,7 +1117,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           </div>
         )}
         {shellPanel ? <div data-id="project-canvas-shell-panel" className="absolute inset-x-0 bottom-12 z-40 max-h-[260px] overflow-hidden [&_[data-id^=agent-stack-shell-terminal]]:!h-52">{shellPanel}</div> : null}
-        <div data-id="project-canvas-footer" className="absolute inset-x-0 bottom-0 z-50 h-12 border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur">
+        <div data-id="project-canvas-footer" className="absolute inset-x-0 bottom-0 z-[70] h-12 border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur">
         <div data-id="project-canvas-controls" className="absolute bottom-1.5 left-4 flex items-center gap-0.5 p-1">
           <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
           <span data-id="project-canvas-zoom-value" className="w-9 text-center font-mono text-[9px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
@@ -1107,7 +1130,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           </div>
         ) : null}
         </div>
-        <div data-id="project-fab-wrap" className={cn('absolute right-5 z-[60] flex flex-col items-end gap-2 transition-[bottom] duration-200', dockOpen ? 'bottom-[20.25rem]' : 'bottom-16')}>
+        <div data-id="project-fab-wrap" className="absolute right-5 z-[60] flex flex-col items-end gap-2 transition-[bottom] duration-200" style={{ bottom: dockOpen ? 60 + dockHeight : 64 }}>
           <div
             data-id="project-fab-menu"
             className={cn(
