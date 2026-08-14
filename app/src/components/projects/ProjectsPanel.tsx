@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { Bot, Check, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, Square, Trash2, UserPlus, X } from 'lucide-react';
+import { Check, FileText, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, Square, Trash2, UserPlus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -10,6 +10,7 @@ import { cn, copyToClipboard } from '../../lib/utils';
 import type { AgentLiveMetrics } from '../../lib/agentMetrics';
 import { metricsFromCurrentReply } from '../../lib/agentMetrics';
 import { ModelTag } from '../../lib/modelTag';
+import { chatAttachmentMarkdown, replAttachmentMarkdown } from '../../lib/attachmentMarkdown';
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
 
@@ -42,6 +43,18 @@ interface ProjectAgentLayout {
   height: number;
 }
 
+interface ProjectAttachment {
+  id: string;
+  name: string;
+  size: number;
+  isImage: boolean;
+  mediaType?: 'image' | 'video' | 'audio';
+  previewURL?: string;
+  fileRef?: string;
+  status: 'uploading' | 'done' | 'error';
+  progress: number;
+}
+
 const DEFAULT_PROJECT_ID = 'default';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
 
@@ -65,17 +78,18 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable, footer, width, height, onOpen, onRemove, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachment, teamId, selected, removable, footer, width, height, onRemove, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
+  attachments: ProjectAttachment[];
+  onRemoveAttachment: (id: string) => void;
   teamId?: string;
   selected: boolean;
   removable: boolean;
   footer?: ReactNode;
   width: number;
   height: number;
-  onOpen: () => void;
   onRemove: () => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -135,14 +149,6 @@ function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable,
           </button>
           {menuOpen ? (
             <div data-id="project-agent-card-menu" className="absolute right-0 top-9 z-20 min-w-[150px] overflow-hidden rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
-              <button
-                type="button"
-                data-id="project-agent-card-open"
-                onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onOpen(); }}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]"
-              >
-                <Bot className="h-3.5 w-3.5" />{t('projectOpenAgent')}
-              </button>
               {removable ? (
                 <button
                   type="button"
@@ -192,6 +198,25 @@ function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable,
         <div data-id="project-agent-card-latest-tool" className="min-w-0 line-clamp-2 font-mono text-zinc-500">
           {latest?.latest_tool?.name ? `${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}` : '—'}
         </div>
+        {attachments.length ? (
+          <div data-id="project-agent-card-attachments" className="flex flex-wrap gap-2 overflow-hidden pt-1">
+            {attachments.map((attachment) => (
+              <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className="group relative flex h-14 max-w-[180px] items-center overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
+                {attachment.mediaType === 'image' && attachment.previewURL ? (
+                  <img data-id="project-agent-card-attachment-media" src={attachment.previewURL} alt={attachment.name} className="h-14 w-14 object-cover" />
+                ) : attachment.mediaType === 'video' && attachment.previewURL ? (
+                  <video data-id="project-agent-card-attachment-media" src={attachment.previewURL} className="h-14 w-20 object-cover" controls />
+                ) : attachment.mediaType === 'audio' && attachment.previewURL ? (
+                  <audio data-id="project-agent-card-attachment-media" src={attachment.previewURL} className="h-10 w-32" controls />
+                ) : (
+                  <FileText className="mx-3 h-5 w-5 shrink-0 text-zinc-500" />
+                )}
+                <span className="min-w-0 truncate pr-6 text-[10px] text-zinc-300">{attachment.status === 'uploading' ? `${attachment.progress}%` : attachment.name}</span>
+                <button type="button" data-id="project-agent-card-attachment-remove" onClick={(event) => { event.stopPropagation(); onRemoveAttachment(attachment.id); }} className="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-black/70 text-zinc-300 opacity-0 group-hover:opacity-100"><X className="h-3 w-3" /></button>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
       </div>
       {footer}
@@ -231,6 +256,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   const [selectedToAdd, setSelectedToAdd] = useState<Set<string>>(new Set());
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
+  const [agentAttachments, setAgentAttachments] = useState<Record<string, ProjectAttachment[]>>({});
   const [sendingAgentIds, setSendingAgentIds] = useState<Set<string>>(new Set());
   const [cancelingAgentIds, setCancelingAgentIds] = useState<Set<string>>(new Set());
   const [agentLayouts, setAgentLayouts] = useState<Record<string, ProjectAgentLayout>>({});
@@ -531,17 +557,50 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     });
   };
 
+  const addAgentFiles = (agent: ProjectAgent, files: FileList | File[]) => {
+    const agentId = shortPaneId(agent.paneId);
+    Array.from(files).forEach((file) => {
+      const id = `project-att-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const mediaType = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : undefined;
+      const attachment: ProjectAttachment = { id, name: file.name, size: file.size, isImage: mediaType === 'image', mediaType, previewURL: mediaType ? URL.createObjectURL(file) : undefined, status: 'uploading', progress: 0 };
+      setAgentAttachments((current) => ({ ...current, [agentId]: [...(current[agentId] || []), attachment] }));
+      void apiService.uploadAssetFile(agent.paneId, file, (loaded, total) => {
+        setAgentAttachments((current) => ({ ...current, [agentId]: (current[agentId] || []).map((item) => item.id === id ? { ...item, progress: Math.max(1, Math.round((loaded / total) * 100)) } : item) }));
+      }).then((response: any) => {
+        const uploaded = response?.data?.file || {};
+        setAgentAttachments((current) => ({ ...current, [agentId]: (current[agentId] || []).map((item) => item.id === id ? { ...item, status: 'done', progress: 100, fileRef: String(uploaded.file_ref || uploaded.fileRef || '') } : item) }));
+      }).catch(() => {
+        setAgentAttachments((current) => ({ ...current, [agentId]: (current[agentId] || []).map((item) => item.id === id ? { ...item, status: 'error' } : item) }));
+      });
+    });
+  };
+
+  const removeAgentAttachment = (agentId: string, attachmentId: string) => {
+    setAgentAttachments((current) => {
+      const attachment = (current[agentId] || []).find((item) => item.id === attachmentId);
+      if (attachment?.previewURL) URL.revokeObjectURL(attachment.previewURL);
+      return { ...current, [agentId]: (current[agentId] || []).filter((item) => item.id !== attachmentId) };
+    });
+  };
+
   const sendAgentMessage = async (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
     const text = String(agentMessages[id] || '').trim();
-    if (!text || sendingAgentIds.has(id)) return;
+    const attachments = agentAttachments[id] || [];
+    if ((!text && !attachments.some((item) => item.status === 'done')) || attachments.some((item) => item.status === 'uploading') || sendingAgentIds.has(id)) return;
+    const attachmentText = attachments.filter((item) => item.status === 'done' && item.fileRef).map((item) => agent.agentType === 'cicy' ? chatAttachmentMarkdown(item.name, item.fileRef!, item.isImage) : replAttachmentMarkdown(item.name, item.fileRef!)).join('\n\n');
+    const message = [text, attachmentText].filter(Boolean).join('\n\n');
     setSendingAgentIds((current) => new Set(current).add(id));
     try {
-      await sendToAgent(agent.paneId, text, {
+      await sendToAgent(agent.paneId, message, {
         submit: true,
         agentType: agent.agentType,
       });
       setAgentMessages((current) => ({ ...current, [id]: '' }));
+      setAgentAttachments((current) => {
+        (current[id] || []).forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
+        return { ...current, [id]: [] };
+      });
     } catch (cause: any) {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.message || t('projectMessageFailed') }));
     } finally {
@@ -818,6 +877,8 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                     agent={agent}
                     metrics={cardMetrics}
                     latest={cardLatest}
+                    attachments={agentAttachments[cardShortId] || []}
+                    onRemoveAttachment={(attachmentId) => removeAgentAttachment(cardShortId, attachmentId)}
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
                 removable={Boolean(selectedProject.api_id)}
@@ -829,13 +890,31 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                     onClick={(event) => event.stopPropagation()}
                     className="flex h-9 min-h-9 shrink-0 items-center rounded-b-2xl border-t border-white/[0.08] bg-[#15161b] px-3"
                   >
-                    {cardBusy ? <Loader2 data-id={`project-agent-prompt-sending-${shortPaneId(agent.paneId)}`} className="mr-2 h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" /> : null}
+                    <input
+                      data-id={`project-agent-prompt-file-input-${cardShortId}`}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(event) => { if (event.target.files?.length) addAgentFiles(agent, event.target.files); event.target.value = ''; }}
+                    />
+                    <button
+                      type="button"
+                      data-id={`project-agent-prompt-attach-${cardShortId}`}
+                      onClick={() => document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-file-input-${cardShortId}"]`)?.click()}
+                      className="mr-2 grid h-6 w-6 shrink-0 place-items-center rounded-md text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200"
+                    >
+                      <Paperclip className="h-3.5 w-3.5" />
+                    </button>
                     <input
                       data-id={`project-agent-prompt-input-${shortPaneId(agent.paneId)}`}
                       value={agentMessages[shortPaneId(agent.paneId)] || ''}
                       onChange={(event) => {
                         const id = shortPaneId(agent.paneId);
                         setAgentMessages((current) => ({ ...current, [id]: event.target.value }));
+                      }}
+                      onPaste={(event) => {
+                        const files = Array.from(event.clipboardData?.files || []);
+                        if (files.length) { event.preventDefault(); addAgentFiles(agent, files); }
                       }}
                       onKeyDown={(event) => {
                         if (event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -846,8 +925,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                       }}
                       placeholder={t('projectMessagePlaceholder')}
                       autoFocus
-                      disabled={cardBusy}
-                      className="min-w-0 flex-1 bg-transparent text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 disabled:opacity-60"
+                      className="min-w-0 flex-1 bg-transparent text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600"
                     />
                     {cardBusy ? (
                       <button
@@ -858,12 +936,16 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                         className="ml-2 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/[0.10] text-zinc-200 hover:bg-white/[0.16] disabled:opacity-50"
                         title={t('composerStop', { ns: 'chat', defaultValue: '停止' })}
                       >
-                        {cancelingAgentIds.has(shortPaneId(agent.paneId)) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3 w-3 fill-current" />}
+                        {cancelingAgentIds.has(shortPaneId(agent.paneId)) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : (
+                          <span data-id={`project-agent-prompt-sending-${cardShortId}`} className="relative grid h-4 w-4 place-items-center">
+                            <Loader2 className="absolute h-4 w-4 animate-spin text-blue-400" />
+                            <Square className="h-2 w-2 fill-current" />
+                          </span>
+                        )}
                       </button>
                     ) : null}
                   </footer>
                 ) : null}
-                onOpen={() => onOpenAgent(agent.paneId)}
                 onRemove={() => { void removeAgent(agent); }}
                 onResizePointerDown={(event) => beginAgentResize(event, agent, index)}
                 onResizePointerMove={resizeAgent}
