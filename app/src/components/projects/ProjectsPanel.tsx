@@ -149,7 +149,6 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, onSelec
 
       <div data-id="project-agent-card-metrics" className="mt-5 flex h-9 min-w-0 items-start gap-2 border-b border-white/[0.08] pb-4 font-mono text-xs text-zinc-500">
         <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
-        <span data-id="project-agent-card-status" className="shrink-0">{status}</span>
         {metrics?.model ? <ModelTag model={metrics.model} className="shrink-0" /> : null}
         {metrics && metrics.ctx > 0 ? (
           <span data-id="project-agent-card-context" className="flex shrink-0 items-center" title={`Context ${metrics.ctx}% / ${metrics.ctxK}k`}>
@@ -410,7 +409,16 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     if (!selectedProject.api_id || selectedToAdd.size === 0) return;
     setBusy(true);
     try {
-      await Promise.all([...selectedToAdd].map((paneId) => apiService.addGroupPane(selectedProject.api_id, paneId)));
+      const paneIds = [...selectedToAdd];
+      for (const [offset, paneId] of paneIds.entries()) {
+        await apiService.addGroupPane(selectedProject.api_id, paneId);
+        const index = visibleAgents.length + offset;
+        await apiService.updateGroupPaneLayout(selectedProject.api_id, paneId, {
+          pos_x: 40 + (index % 4) * 340,
+          pos_y: 40 + Math.floor(index / 4) * 260,
+          z_index: index + 1,
+        });
+      }
       setAddOpen(false);
       setSelectedToAdd(new Set());
       await load();

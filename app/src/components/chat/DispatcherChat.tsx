@@ -451,7 +451,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
           agent, so the stations stream into the history below — the strip is what
           turns that stream back into a line you can read (and a gate you can
           approve). Renders nothing when this agent has never run one. */}
-      <LineStrip paneId={paneId} />
+      <LineStrip paneId={paneId} active={active} />
       <div data-id="dispatcher-chat-history" className="min-h-0 flex-1 overflow-hidden">
         <CurrentHistoryView key={paneId} paneId={paneId} open={active} agentType={agentType} fullWidth leftAlignQuestions />
       </div>

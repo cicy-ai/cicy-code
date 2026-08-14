@@ -45,6 +45,24 @@ export interface LineRun {
   metrics?: LineMetrics
 }
 
+let runsCache: LineRun[] = []
+let runsFetchedAt = 0
+let runsRequest: Promise<LineRun[]> | null = null
+
+async function fetchLineRuns(force = false): Promise<LineRun[]> {
+  if (!force && runsFetchedAt > 0 && Date.now() - runsFetchedAt < 1000) return runsCache
+  if (runsRequest) return runsRequest
+  runsRequest = (async () => {
+    const resp = await fetch(`${getApiBase()}/api/line/runs`)
+    if (!resp.ok) throw new Error(`line runs: ${resp.status}`)
+    const data = await resp.json()
+    runsCache = Array.isArray(data?.runs) ? data.runs : []
+    runsFetchedAt = Date.now()
+    return runsCache
+  })().finally(() => { runsRequest = null })
+  return runsRequest
+}
+
 // stationState folds the attempt list down to one state per declared station.
 // A station can appear several times (each rework is an attempt); the LAST one
 // is its current state, and the count is what makes a rework loop visible.
@@ -56,32 +74,31 @@ function stationState(run: LineRun, id: string) {
   return { last, reworks, cost, ran: attempts.length > 0 }
 }
 
-export default function LineStrip({ paneId }: { paneId: string }) {
+export default function LineStrip({ paneId, active }: { paneId: string; active: boolean }) {
   const [run, setRun] = useState<LineRun | null>(null)
   const [approving, setApproving] = useState(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
+    if (!active) return
     try {
-      const resp = await fetch(`${getApiBase()}/api/line/runs`)
-      if (!resp.ok) return
-      const data = await resp.json()
-      const runs: LineRun[] = data?.runs || []
+      const runs = await fetchLineRuns(force)
       // The newest run on THIS agent. /api/line/runs is already newest-first.
       setRun(runs.find((r) => r.agent_id === paneId) || null)
     } catch {
       // The engine is loopback-only and may simply not be there. A board that
       // throws when there is nothing to show is worse than one that shows nothing.
     }
-  }, [paneId])
+  }, [active, paneId])
 
   useEffect(() => {
+    if (!active) return
     void load()
     // Poll while a run is live; back off to a slow tick once it settles, so a
     // finished run still updates if someone approves it from the CLI.
     const live = run?.status === 'running'
     const id = window.setInterval(() => { void load() }, live ? 1500 : 8000)
     return () => window.clearInterval(id)
-  }, [load, run?.status])
+  }, [active, load, run?.status])
 
   const approve = useCallback(async () => {
     if (!run) return
@@ -95,7 +112,7 @@ export default function LineStrip({ paneId }: { paneId: string }) {
       })
     } finally {
       setApproving(false)
-      void load()
+      void load(true)
     }
   }, [run, load])
 

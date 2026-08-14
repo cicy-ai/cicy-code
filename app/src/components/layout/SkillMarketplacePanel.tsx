@@ -63,6 +63,20 @@ interface MarketSkill {
   registry_source?: string;
 }
 
+let marketSkillsCache: MarketSkill[] | null = null;
+let marketSkillsRequest: Promise<MarketSkill[]> | null = null;
+
+async function fetchMarketSkills(force = false): Promise<MarketSkill[]> {
+  if (!force && marketSkillsCache) return marketSkillsCache;
+  if (marketSkillsRequest) return marketSkillsRequest;
+  marketSkillsRequest = (async () => {
+    const res = await apiService.listMarketSkills();
+    marketSkillsCache = Array.isArray(res?.data?.skills) ? res.data.skills : [];
+    return marketSkillsCache;
+  })().finally(() => { marketSkillsRequest = null; });
+  return marketSkillsRequest;
+}
+
 interface SkillDetailPayload {
   skill: MarketSkill;
   skill_md?: string;
@@ -181,12 +195,11 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
   const handleOpenFrpServerManager = useCallback(() => { setSelectedName(null); setFrpServerManagerOpen(true); }, []);
   const handleOpenWebClients = useCallback(() => { setSelectedName(null); setWebClientsOpen(true); }, []);
 
-  const load = async () => {
+  const load = async (force = false) => {
     setLoading(true);
     setLoadError('');
     try {
-      const res = await apiService.listMarketSkills();
-      setSkills(Array.isArray(res?.data?.skills) ? res.data.skills : []);
+      setSkills(await fetchMarketSkills(force));
     } catch (e: any) {
       setLoadError(e?.message || t('marketplaceLoadFailed'));
     } finally {
@@ -250,12 +263,11 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
       if (data?.skill) {
         const fresh = data.skill as MarketSkill;
         setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, ...fresh, has_update: fresh.has_update ?? false } : s));
-      } else {
-        await load();
       }
+      await load(true);
       return data;
     } catch (e: any) {
-      await load();
+      await load(true);
       return { ok: false, error: e?.message || t('marketplaceInstallFailed') };
     }
     finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
@@ -269,12 +281,11 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
       if (data?.skill) {
         const fresh = data.skill as MarketSkill;
         setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, ...fresh, has_update: fresh.has_update ?? false } : s));
-      } else {
-        await load();
       }
+      await load(true);
       return data;
     } catch (e: any) {
-      await load();
+      await load(true);
       return { ok: false, error: e?.message || t('marketplaceUpdateFailed') };
     }
     finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
@@ -292,7 +303,7 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
       if (result?.ok === false) failed += 1;
       else succeeded += 1;
     }
-    await load();
+    await load(true);
     setBulkUpdateResult(t('marketplaceUpdateAllResult', { succeeded, failed }));
     setBulkUpdating(false);
   };
@@ -308,12 +319,11 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
       if (data?.skill) {
         const fresh = data.skill as MarketSkill;
         setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, ...fresh } : s));
-      } else {
-        await load();
       }
+      await load(true);
       return data;
     } catch (e: any) {
-      await load();
+      await load(true);
       return { ok: false, error: e?.message || t('marketplaceEjectFailed') };
     }
     finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
@@ -327,12 +337,11 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
       if (data?.skill) {
         const fresh = data.skill as MarketSkill;
         setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, ...fresh } : s));
-      } else {
-        await load();
       }
+      await load(true);
       return data;
     } catch (e: any) {
-      await load();
+      await load(true);
       return { ok: false, error: e?.message || t('marketplaceUninstallFailed') };
     }
     finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
@@ -407,7 +416,7 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
                     ? t('marketplaceUpdatingAll')
                     : t('marketplaceUpdateAllCount', { count: counts.updates })}
                 </button>
-                <button data-id="skill-market-refresh" onClick={load} className="shrink-0 p-1 text-zinc-500 hover:text-zinc-300 rounded" title={t('marketplaceRetry')}>
+                <button data-id="skill-market-refresh" onClick={() => { void load(true); }} className="shrink-0 p-1 text-zinc-500 hover:text-zinc-300 rounded" title={t('marketplaceRetry')}>
                   <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
                 </button>
               </div>
@@ -424,7 +433,7 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
               ) : loadError ? (
                 <div data-id="skill-market-error" className="p-4 text-xs">
                   <div data-id="skill-market-error-msg" className="text-red-400 mb-2">{t('marketplaceFailedToLoad')}: {loadError}</div>
-                  <button data-id="skill-market-error-retry" onClick={load} className="text-zinc-400 hover:text-zinc-100 underline">{t('marketplaceRetry')}</button>
+                  <button data-id="skill-market-error-retry" onClick={() => { void load(true); }} className="text-zinc-400 hover:text-zinc-100 underline">{t('marketplaceRetry')}</button>
                 </div>
               ) : filtered.length === 0 ? (
                 <div data-id="skill-market-empty" className="p-4 text-xs text-zinc-500">{t('marketplaceEmpty')}</div>
