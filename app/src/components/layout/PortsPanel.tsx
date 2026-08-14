@@ -51,12 +51,12 @@ export default function PortsPanel({ fixedDomain, proxyAvailable, paneId }: { fi
     } finally { setSaving(false); }
   };
 
-  const dock = document.querySelector<HTMLElement>(`[data-id="agent-stack-card-${paneId}"]`)
-    || document.querySelector<HTMLElement>('[data-id="project-infinite-canvas"]');
+  const agentDock = document.querySelector<HTMLElement>(`[data-id="agent-stack-card-${paneId}"]`);
+  const dock = agentDock || document.querySelector<HTMLElement>('[data-id="project-infinite-canvas"]');
   if (!dock) return null;
 
   return createPortal(
-      <section data-id="ports-panel" className="shrink-0 overflow-hidden border-t border-white/[0.06] bg-[#101012]">
+      <section data-id="ports-panel" className={agentDock ? 'shrink-0 overflow-hidden border-t border-white/[0.06] bg-[#101012]' : 'absolute inset-x-0 bottom-12 z-40 max-h-[260px] overflow-hidden border-t border-white/[0.06] bg-[#101012] shadow-2xl'}>
         <div className="max-h-[280px] overflow-auto p-3">
           {error && <div className="mb-3 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-300">{error}</div>}
           {loading ? <div className="py-8 text-center text-[12px] text-zinc-600">加载中…</div> : sorted.length === 0 ? <div className="py-8 text-center text-[12px] text-zinc-600">还没有转发端口</div> : (

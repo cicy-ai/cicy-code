@@ -299,6 +299,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     return result;
   }, [agents, statuses]);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const visibilityCheckedKeyRef = useRef('');
   const agentDragRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
   const agentResizeRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originWidth: number; originHeight: number } | null>(null);
   const panDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
@@ -380,6 +381,40 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     agent.workspace,
   ].some((value) => String(value || '').toLowerCase().includes(normalizedAddSearch)));
   const paneMembershipKey = selectedProject.pane_ids.map(shortPaneId).sort().join('|');
+
+  useEffect(() => {
+    const checkKey = `${selectedProject.id}:${paneMembershipKey}`;
+    if (layoutReadyProjectId !== String(selectedProject.id) || visibilityCheckedKeyRef.current === checkKey || !visibleAgents.length) return;
+    const frame = window.requestAnimationFrame(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      visibilityCheckedKeyRef.current = checkKey;
+      const layouts = visibleAgents.map((agent, index) => agentLayouts[shortPaneId(agent.paneId)] || {
+        x: 40 + (index % 4) * 340,
+        y: 40 + Math.floor(index / 4) * 260,
+        z: index + 1,
+        width: 300,
+        height: 320,
+      });
+      const viewportWidth = canvas.clientWidth;
+      const viewportHeight = Math.max(1, canvas.clientHeight - 48);
+      const anyVisible = layouts.some((layout) => {
+        const left = canvasPan.x + layout.x * canvasZoom;
+        const top = canvasPan.y + layout.y * canvasZoom;
+        return left < viewportWidth && left + layout.width * canvasZoom > 0 && top < viewportHeight && top + layout.height * canvasZoom > 0;
+      });
+      if (anyVisible) return;
+      const minX = Math.min(...layouts.map((layout) => layout.x));
+      const minY = Math.min(...layouts.map((layout) => layout.y));
+      const maxX = Math.max(...layouts.map((layout) => layout.x + layout.width));
+      const maxY = Math.max(...layouts.map((layout) => layout.y + layout.height));
+      const margin = 40;
+      const zoom = Math.min(1, Math.max(0.35, Math.min((viewportWidth - margin * 2) / Math.max(1, maxX - minX), (viewportHeight - margin * 2) / Math.max(1, maxY - minY))));
+      setCanvasZoom(Number(zoom.toFixed(2)));
+      setCanvasPan({ x: margin - minX * zoom, y: margin - minY * zoom });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [layoutReadyProjectId, paneMembershipKey, selectedProject.id]);
 
   useEffect(() => {
     setSelectedAgentIds(new Set());
@@ -993,8 +1028,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             <p className="text-sm" data-id="projects-agent-empty-title">{t('projectNoAgents')}</p>
           </div>
         )}
-        {shellPanel ? <div data-id="project-canvas-shell-panel" className="absolute inset-x-0 bottom-12 z-30">{shellPanel}</div> : null}
-        <div data-id="project-canvas-footer" className="absolute inset-x-0 bottom-0 z-30 h-12 border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur">
+        {shellPanel ? <div data-id="project-canvas-shell-panel" className="absolute inset-x-0 bottom-12 z-40 max-h-[260px] overflow-hidden [&_[data-id^=agent-stack-shell-terminal]]:!h-52">{shellPanel}</div> : null}
+        <div data-id="project-canvas-footer" className="absolute inset-x-0 bottom-0 z-50 h-12 border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur">
         <div data-id="project-canvas-controls" className="absolute bottom-1.5 left-4 flex items-center gap-0.5 p-1">
           <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
           <span data-id="project-canvas-zoom-value" className="w-9 text-center font-mono text-[9px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
