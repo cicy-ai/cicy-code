@@ -58,6 +58,7 @@ interface ProjectAttachment {
 
 const DEFAULT_PROJECT_ID = 'default';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
+const previewableMarkdown = (value: unknown) => String(value || '').replace(/\(file:\/\/(\/?[^)]+)\)/g, (_match, path: string) => `(/${path.replace(/^\/+/, '')})`);
 
 const fmtCost = (cost: number) =>
   cost <= 0 ? '$0'
@@ -190,15 +191,21 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
       <div data-id="project-agent-card-live-body" className="mt-3 min-h-0 flex-1 space-y-2 overflow-hidden text-[11px] leading-4">
-        <div data-id="project-agent-card-latest-question" className="max-h-28 overflow-hidden text-zinc-300 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-20">
-          <MarkdownBlock text={String(latest?.latest_question || '—')} />
-        </div>
-        <div data-id="project-agent-card-latest-response" className="max-h-28 overflow-hidden text-zinc-400 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-20">
-          <MarkdownBlock text={String(latest?.latest_response || '—')} />
-        </div>
-        <div data-id="project-agent-card-latest-tool" className="min-w-0 line-clamp-2 font-mono text-zinc-500">
-          {latest?.latest_tool?.name ? `${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}` : '—'}
-        </div>
+        {latest?.latest_question ? (
+          <div data-id="project-agent-card-latest-question" className="max-h-28 overflow-hidden text-zinc-300 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-20">
+            <MarkdownBlock text={previewableMarkdown(latest.latest_question)} />
+          </div>
+        ) : null}
+        {latest?.latest_response ? (
+          <div data-id="project-agent-card-latest-response" className="max-h-28 overflow-hidden text-zinc-400 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-20">
+            <MarkdownBlock text={previewableMarkdown(latest.latest_response)} />
+          </div>
+        ) : null}
+        {latest?.latest_tool?.name ? (
+          <div data-id="project-agent-card-latest-tool" className="min-w-0 line-clamp-2 font-mono text-zinc-500">
+            {`${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}`}
+          </div>
+        ) : null}
         {attachments.length ? (
           <div data-id="project-agent-card-attachments" className="flex flex-wrap gap-2 overflow-hidden pt-1">
             {attachments.map((attachment) => (
