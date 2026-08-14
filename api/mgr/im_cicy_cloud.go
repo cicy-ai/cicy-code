@@ -1187,19 +1187,7 @@ func (t *cicyCloudTransport) reportAllAgents() {
 		// Record the attempt before I/O. A failing Cloud endpoint must not turn
 		// the heartbeat path itself into a quota-exhausting retry loop.
 		t.lastHeartbeat = now
-		telemetry := collectCiCyCodeTelemetry()
-		heartbeat := M{"platform": telemetry.Platform, "arch": telemetry.Arch,
-			"runtime": telemetry.Runtime, "cpuModel": telemetry.CPUModel,
-			"cpuCores": telemetry.CPUCores, "memoryTotalMB": telemetry.MemoryTotalMB,
-			"gpu": telemetry.GPU}
-		heartbeat["ports"] = portMaps(pruneOfflinePublishedPorts())
-		if tunnelURL := cftCurrentURL(); tunnelURL != "" {
-			heartbeat["tunnelUrl"] = tunnelURL
-			heartbeat["tunnelToken"] = loadAPIToken()
-		}
-		if err := cloudJSON(http.MethodPost, "/api/code/instances/heartbeat", t.token, heartbeat, nil); err != nil {
-			log.Printf("[im] cicy cloud heartbeat failed: %v", err)
-		}
+		t.reportHeartbeat(cftCurrentURL())
 	}
 	if !presenceDue {
 		return
@@ -1207,6 +1195,50 @@ func (t *cicyCloudTransport) reportAllAgents() {
 	t.lastPresence = now
 	t.syncAgentConfigs()
 	t.reportAgentDirectoryAndState(t.currentStreamEpoch())
+}
+
+func (t *cicyCloudTransport) reportHeartbeat(tunnelURL string) {
+	telemetry := collectCiCyCodeTelemetry()
+	heartbeat := M{"platform": telemetry.Platform, "arch": telemetry.Arch,
+		"runtime": telemetry.Runtime, "cpuModel": telemetry.CPUModel,
+		"cpuCores": telemetry.CPUCores, "memoryTotalMB": telemetry.MemoryTotalMB,
+		"gpu": telemetry.GPU}
+	heartbeat["ports"] = portMaps(pruneOfflinePublishedPorts())
+	if tunnelURL = strings.TrimSpace(tunnelURL); tunnelURL != "" {
+		heartbeat["tunnelUrl"] = tunnelURL
+		heartbeat["tunnelToken"] = loadAPIToken()
+	}
+	if err := cloudJSON(http.MethodPost, "/api/code/instances/heartbeat", t.token, heartbeat, nil); err != nil {
+		log.Printf("[im] cicy cloud heartbeat failed: %v", err)
+	}
+}
+
+func (t *cicyCloudTransport) reportTunnelReady(tunnelURL string) {
+	t.presenceMu.Lock()
+	defer t.presenceMu.Unlock()
+	t.lastHeartbeat = time.Now()
+	t.reportHeartbeat(tunnelURL)
+}
+
+// reportCiCyCloudTunnelReady publishes the assigned URL immediately. Quick
+// tunnels become ready asynchronously, often just after the normal startup
+// heartbeat, so waiting for the next interval leaves Cloud with a stale URL.
+func reportCiCyCloudTunnelReady(tunnelURL string) {
+	if strings.TrimSpace(tunnelURL) == "" {
+		return
+	}
+	accounts, err := imListAccounts()
+	if err != nil {
+		return
+	}
+	for _, account := range accounts {
+		if !account.Enabled || account.Platform != imPlatformCiCyCloud || strings.TrimSpace(account.Secret) == "" {
+			continue
+		}
+		if transport, ok := imTransportFor(account.ID).(*cicyCloudTransport); ok {
+			go transport.reportTunnelReady(tunnelURL)
+		}
+	}
 }
 
 // reportAgentState publishes a complete current snapshot on every local state

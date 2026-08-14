@@ -315,6 +315,39 @@ func TestCiCyCloudPresenceIntervalStaysInsideOfflineWindow(t *testing.T) {
 	}
 }
 
+func TestCiCyCloudTunnelReadyImmediatelyReportsTunnelURL(t *testing.T) {
+	heartbeats := make(chan M, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/code/instances/heartbeat" {
+			t.Errorf("unexpected route %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		var body M
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("heartbeat decode: %v", err)
+		}
+		heartbeats <- body
+		_ = json.NewEncoder(w).Encode(M{"success": true})
+	}))
+	defer server.Close()
+	t.Setenv("CICY_CLOUD_ORIGIN", server.URL)
+
+	now := time.Now()
+	tr := &cicyCloudTransport{token: "test", lastHeartbeat: now, lastPresence: now}
+	url := "https://ready-now.trycloudflare.com"
+	tr.reportTunnelReady(url)
+
+	select {
+	case body := <-heartbeats:
+		if body["tunnelUrl"] != url {
+			t.Fatalf("tunnelUrl = %#v, want %q", body["tunnelUrl"], url)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("tunnel-ready heartbeat was not sent immediately")
+	}
+}
+
 func TestCiCyCloudErrorRetryDelayRemainsQuotaSafe(t *testing.T) {
 	// Poll sleeps this adaptive delay before the generic IM loop adds its 3s
 	// error delay. At the steady-state maximum, four continuously failing

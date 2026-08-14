@@ -360,6 +360,7 @@ func cftNamedOnce(bin, token, url, port string) error {
 				if url != "" {
 					cftTunnelURL.Store(url)
 					cftWriteState(url, port)
+					reportCiCyCloudTunnelReady(url)
 					log.Printf("[cft] ─────────────────────────────────────────────")
 					log.Printf("[cft] ✅ Public (named, stable): %s", url)
 					log.Printf("[cft] ─────────────────────────────────────────────")
@@ -509,6 +510,7 @@ func cftRunCommand(cmd *exec.Cmd, port, initialURL string) error {
 			publishedURL = pendingURL
 			cftTunnelURL.Store(pendingURL)
 			cftWriteState(pendingURL, port)
+			reportCiCyCloudTunnelReady(pendingURL)
 			log.Printf("[cft] ─────────────────────────────────────────────")
 			log.Printf("[cft] ✅ Public: %s", pendingURL)
 			log.Printf("[cft] ─────────────────────────────────────────────")
