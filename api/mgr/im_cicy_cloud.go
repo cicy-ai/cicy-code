@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -1112,9 +1113,47 @@ func cicyCloudPreview(value string, limit int) string {
 	return strings.TrimSpace(value[:cut]) + suffix
 }
 
+func cicyCloudFiniteNumber(value interface{}) (float64, bool) {
+	var number float64
+	switch value := value.(type) {
+	case int:
+		number = float64(value)
+	case int8:
+		number = float64(value)
+	case int16:
+		number = float64(value)
+	case int32:
+		number = float64(value)
+	case int64:
+		number = float64(value)
+	case uint:
+		number = float64(value)
+	case uint8:
+		number = float64(value)
+	case uint16:
+		number = float64(value)
+	case uint32:
+		number = float64(value)
+	case uint64:
+		number = float64(value)
+	case float32:
+		number = float64(value)
+	case float64:
+		number = value
+	case json.Number:
+		parsed, err := value.Float64()
+		if err != nil {
+			return 0, false
+		}
+		number = parsed
+	default:
+		return 0, false
+	}
+	return number, !math.IsNaN(number) && !math.IsInf(number, 0)
+}
+
 func cicyCloudAgentRuntimeState(agentID, defaultModel string, metrics M) M {
-	state := M{"agentId": agentID, "status": "idle", "model": defaultModel,
-		"contextUsedPct": 0, "cost": float64(0), "online": true}
+	state := M{"agentId": agentID, "status": "idle", "model": defaultModel, "online": true}
 	if metrics == nil {
 		return state
 	}
@@ -1124,8 +1163,16 @@ func cicyCloudAgentRuntimeState(agentID, defaultModel string, metrics M) M {
 	if value := strings.TrimSpace(aiGatewayString(metrics["model"])); value != "" {
 		state["model"] = value
 	}
-	state["contextUsedPct"] = int(aiGatewayFloat(metrics["context_used_pct"]))
-	state["cost"] = aiGatewayFloat(metrics["cost_credit"])
+	if value, ok := cicyCloudFiniteNumber(metrics["context_used_pct"]); ok {
+		state["contextUsedPct"] = int(max(0, min(100, value)))
+	}
+	if value, ok := cicyCloudFiniteNumber(metrics["context_window_size"]); ok && value > 0 {
+		state["contextWindowSize"] = int(value)
+	}
+	// cost_credit is the cumulative USD cost reported by the local inspector.
+	if value, ok := cicyCloudFiniteNumber(metrics["cost_credit"]); ok && value >= 0 {
+		state["cost"] = value
+	}
 	state["updatedAt"] = strings.TrimSpace(aiGatewayString(metrics["updated_at"]))
 	if complete, ok := metrics["complete"].(bool); ok {
 		state["working"] = !complete

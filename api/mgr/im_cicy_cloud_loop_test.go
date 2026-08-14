@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -267,12 +268,12 @@ func TestCiCyCloudAgentRuntimeStateIncludesBoundedConversationPreview(t *testing
 	question := strings.Repeat("问", 300)
 	response := strings.Repeat("答", 300)
 	state := cicyCloudAgentRuntimeState("w-1004", "fallback-model", M{
-		"status": "thinking", "model": "gpt-live", "context_used_pct": 42,
+		"status": "thinking", "model": "gpt-live", "context_used_pct": 42, "context_window_size": 200000,
 		"cost_credit": 0.125, "complete": false, "latest_question": question, "latest_response": response,
 		"latest_response_type": "text", "updated_at": "2026-08-14T13:00:00Z",
 		"latest_tool": M{"name": "exec_command", "input": strings.Repeat("参数", 100)},
 	})
-	if state["status"] != "thinking" || state["model"] != "gpt-live" || state["contextUsedPct"] != 42 || state["cost"] != 0.125 || state["working"] != true {
+	if state["status"] != "thinking" || state["model"] != "gpt-live" || state["contextUsedPct"] != 42 || state["contextWindowSize"] != 200000 || state["cost"] != 0.125 || state["working"] != true {
 		t.Fatalf("runtime metrics = %#v", state)
 	}
 	if got := anyString(state["latestQuestion"]); len(got) > 256 || !strings.HasSuffix(got, "…") {
@@ -287,6 +288,58 @@ func TestCiCyCloudAgentRuntimeStateIncludesBoundedConversationPreview(t *testing
 	tool, ok := state["latestTool"].(M)
 	if !ok || tool["name"] != "exec_command" || len(anyString(tool["input"])) > 96 {
 		t.Fatalf("latest tool = %#v", state["latestTool"])
+	}
+}
+
+func TestCiCyCloudAgentRuntimeStatePreservesMetricPresence(t *testing.T) {
+	tests := []struct {
+		name           string
+		metrics        M
+		wantContext    interface{}
+		wantWindow     interface{}
+		wantCost       interface{}
+		wantModel      string
+		wantMetricKeys bool
+	}{
+		{name: "no metrics", metrics: nil, wantModel: "configured-model"},
+		{name: "missing fields", metrics: M{}, wantModel: "configured-model"},
+		{name: "nil fields", metrics: M{"context_used_pct": nil, "context_window_size": nil, "cost_credit": nil}, wantModel: "configured-model"},
+		{name: "wrong field types", metrics: M{"context_used_pct": "0", "context_window_size": true, "cost_credit": "0"}, wantModel: "configured-model"},
+		{name: "explicit numeric zero", metrics: M{"context_used_pct": 0, "context_window_size": 0, "cost_credit": float64(0)}, wantContext: 0, wantCost: float64(0), wantModel: "configured-model", wantMetricKeys: true},
+		{name: "json numbers", metrics: M{"context_used_pct": json.Number("42"), "context_window_size": json.Number("200000"), "cost_credit": json.Number("0.004")}, wantContext: 42, wantWindow: 200000, wantCost: float64(0.004), wantModel: "configured-model", wantMetricKeys: true},
+		{name: "runtime model wins", metrics: M{"model": "runtime-model"}, wantModel: "runtime-model"},
+		{name: "empty runtime model falls back", metrics: M{"model": "  "}, wantModel: "configured-model"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			state := cicyCloudAgentRuntimeState("w-1004", "configured-model", test.metrics)
+			if state["model"] != test.wantModel {
+				t.Fatalf("model = %#v, want %q", state["model"], test.wantModel)
+			}
+			context, hasContext := state["contextUsedPct"]
+			window, hasWindow := state["contextWindowSize"]
+			cost, hasCost := state["cost"]
+			if context != test.wantContext || window != test.wantWindow || cost != test.wantCost {
+				t.Fatalf("metrics = context(%v, %v) window(%v, %v) cost(%v, %v)", context, hasContext, window, hasWindow, cost, hasCost)
+			}
+			if test.wantMetricKeys != hasContext || test.wantMetricKeys != hasCost || (test.wantWindow != nil) != hasWindow {
+				t.Fatalf("metric presence = context:%v window:%v cost:%v", hasContext, hasWindow, hasCost)
+			}
+		})
+	}
+}
+
+func TestCiCyCloudAgentRuntimeStateRejectsNonFiniteMetrics(t *testing.T) {
+	state := cicyCloudAgentRuntimeState("w-1004", "configured-model", M{
+		"context_used_pct": math.NaN(), "context_window_size": math.Inf(1), "cost_credit": math.Inf(-1),
+	})
+	for _, key := range []string{"contextUsedPct", "contextWindowSize", "cost"} {
+		if _, exists := state[key]; exists {
+			t.Fatalf("non-finite %s was published: %#v", key, state[key])
+		}
+	}
+	if _, err := json.Marshal(state); err != nil {
+		t.Fatalf("runtime state is not JSON-safe: %v", err)
 	}
 }
 
