@@ -10,7 +10,6 @@ import { cn } from '../../lib/utils';
 import type { AgentLiveMetrics } from '../../lib/agentMetrics';
 import { metricsFromCurrentReply } from '../../lib/agentMetrics';
 import { ModelTag } from '../../lib/modelTag';
-import { useApp } from '../../contexts/AppContext';
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
 
@@ -22,7 +21,6 @@ export interface ProjectAgent {
   defaultModel?: string;
   workspace?: string;
   machineLabel?: string;
-  liveReply?: any;
 }
 
 interface AgentProject {
@@ -44,58 +42,6 @@ interface ProjectAgentLayout {
 
 const DEFAULT_PROJECT_ID = 'default';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
-const PROJECT_METRICS_PUSH_STALE_MS = 12000;
-const PROJECT_METRICS_FALLBACK_MS = 5000;
-
-function useProjectLiveMetrics(agents: ProjectAgent[]) {
-  const { chatWsConnected } = useApp();
-  const ids = useMemo(() => agents.map((agent) => shortPaneId(agent.paneId)).filter(Boolean).sort(), [agents]);
-  const key = ids.join(',');
-  const [metrics, setMetrics] = useState<Record<string, AgentLiveMetrics>>({});
-  const lastPushRef = useRef(0);
-
-  const fold = useCallback((lookup: (id: string) => any) => {
-    setMetrics((previous) => {
-      let changed = false;
-      const next = { ...previous };
-      for (const id of key.split(',').filter(Boolean)) {
-        const reply = lookup(id);
-        if (!reply || typeof reply !== 'object' || Object.keys(reply).length === 0) continue;
-        const value = metricsFromCurrentReply(reply, previous[id]);
-        if (previous[id]?.sig !== value.sig || previous[id]?.model !== value.model) {
-          next[id] = value;
-          changed = true;
-        }
-      }
-      return changed ? next : previous;
-    });
-  }, [key]);
-
-  useEffect(() => {
-    if (!key) return;
-    const byId = new Map(agents.map((agent) => [shortPaneId(agent.paneId), agent.liveReply]));
-    fold((id) => byId.get(id));
-    lastPushRef.current = Date.now();
-  }, [agents, key, fold]);
-
-  useEffect(() => {
-    if (!key) return;
-    let cancelled = false;
-    const tick = async () => {
-      if (document.hidden) return;
-      const stale = Date.now() - lastPushRef.current > PROJECT_METRICS_PUSH_STALE_MS;
-      if (chatWsConnected && !stale) return;
-      const response = await apiService.getAgentCurrentReplyBatch(key.split(',').filter(Boolean)).catch(() => null);
-      const rows = response?.data?.metrics;
-      if (!cancelled && rows && typeof rows === 'object') fold((id) => rows[id]);
-    };
-    void tick();
-    const timer = window.setInterval(tick, PROJECT_METRICS_FALLBACK_MS);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [chatWsConnected, fold, key]);
-
-  return metrics;
-}
 
 const fmtCost = (cost: number) =>
   cost <= 0 ? '$0'
@@ -217,8 +163,9 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, onSelec
   );
 }
 
-export default function ProjectsPanel({ agents, onOpenAgent }: {
+export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   agents: ProjectAgent[];
+  statuses?: Record<string, any>;
   onOpenAgent: (paneId: string) => void;
 }) {
   const { t } = useTranslation('workspace');
@@ -244,7 +191,16 @@ export default function ProjectsPanel({ agents, onOpenAgent }: {
   const [agentLayouts, setAgentLayouts] = useState<Record<string, ProjectAgentLayout>>({});
   const [canvasPan, setCanvasPan] = useState({ x: 60, y: 60 });
   const [canvasZoom, setCanvasZoom] = useState(1);
-  const liveMetrics = useProjectLiveMetrics(agents);
+  const liveMetrics = useMemo(() => {
+    const result: Record<string, AgentLiveMetrics> = {};
+    for (const agent of agents) {
+      const fullId = String(agent.paneId || '');
+      const shortId = shortPaneId(fullId);
+      const reply = statuses[fullId] || statuses[shortId];
+      if (reply && typeof reply === 'object') result[shortId] = metricsFromCurrentReply(reply);
+    }
+    return result;
+  }, [agents, statuses]);
   const canvasRef = useRef<HTMLDivElement>(null);
   const agentDragRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
   const panDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
@@ -279,6 +235,7 @@ export default function ProjectsPanel({ agents, onOpenAgent }: {
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
+    if (typeof apiService.getIMAccounts !== 'function') return;
     let cancelled = false;
     apiService.getIMAccounts().then((response) => {
       if (cancelled) return;

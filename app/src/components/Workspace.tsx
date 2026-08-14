@@ -2014,7 +2014,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       defaultModel: String(agent?.default_model || detail?.default_model || ''),
       workspace: String(agent?.workspace || detail?.workspace || ''),
       machineLabel: String(agent?.machine_label || detail?.machine_label || ''),
-      liveReply: live,
     };
   }).filter((agent) => agent.paneId), [agents, paneDetails, pollStatuses]);
   const handleStackOpenSession = useCallback((targetPaneId: string) => {
@@ -2150,6 +2149,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             {projectsOpen ? (
               <ProjectsPanel
                 agents={projectAgents}
+                statuses={pollStatuses}
                 onOpenAgent={(targetPaneId) => {
                   setProjectsOpen(false);
                   onSelectAgent(targetPaneId.replace(/:.*$/, ''));
