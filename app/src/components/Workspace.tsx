@@ -76,6 +76,7 @@ const CLI_DRAWER_WIDTH_KEY = 'ws_cliDrawerWidth';
 const CLI_CONTENT_MODE_KEY = 'ws_cliContentMode';
 const cliContentTabKey = (paneId: string) => `TeamPanel:${paneId}.paneId:cliContentTab`;
 const leftPanelKey = (masterAgentId: string) => `ws_leftPanel:${masterAgentId}`;
+const projectsOpenKey = (masterAgentId: string) => `ws_projectsOpen:${masterAgentId}`;
 const cliContentOpenKey = (masterAgentId: string) => `ws_cliContentOpen:${masterAgentId}`;
 const chatClientIdStorageKey = (masterAgentId: string) => `cicy_chat_client_id:${masterAgentId}`;
 const chatClientIdStorage = (): Storage =>
@@ -342,7 +343,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   });
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
-  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [projectsOpen, setProjectsOpen] = useState(() => cache.get(projectsOpenKey(paneId), false) === true);
   const [portsOpen, setPortsOpen] = useState(false);
   const [fixedDomain, setFixedDomain] = useState('');
   const [proxyAvailable, setProxyAvailable] = useState(false);
@@ -777,6 +778,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => {
     cache.set(leftPanelKey(paneId), leftActive);
   }, [leftActive, paneId]);
+  useEffect(() => { cache.set(projectsOpenKey(paneId), projectsOpen); }, [paneId, projectsOpen]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, activeTeamPaneId); }, [activeTeamPaneId]);
   useEffect(() => { cache.set(CLI_DRAWER_WIDTH_KEY, cliDrawerWidth); }, [cliDrawerWidth]);
   useEffect(() => { cache.set(cliContentOpenKey(paneId), cliContentOpen); }, [cliContentOpen, paneId]);

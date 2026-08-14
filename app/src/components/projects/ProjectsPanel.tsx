@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { Bot, Check, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, Trash2, UserPlus, X } from 'lucide-react';
+import { Bot, Check, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, Square, Trash2, UserPlus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -38,6 +38,8 @@ interface ProjectAgentLayout {
   x: number;
   y: number;
   z: number;
+  width: number;
+  height: number;
 }
 
 const DEFAULT_PROJECT_ID = 'default';
@@ -63,24 +65,30 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, teamId, selected, removable, footer, onSelect, onOpen, onRemove }: {
+function ProjectAgentCard({ agent, metrics, teamId, selected, removable, footer, width, height, onSelect, onOpen, onRemove, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   teamId?: string;
   selected: boolean;
   removable: boolean;
   footer?: ReactNode;
+  width: number;
+  height: number;
   onSelect: () => void;
   onOpen: () => void;
   onRemove: () => void;
+  onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onResizePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onResizePointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const { t } = useTranslation('workspace');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [identityCopied, setIdentityCopied] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const status = String(agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
-  const identity = [teamId, shortPaneId(agent.paneId), agent.agentType].filter(Boolean).join(' · ');
+  const identity = teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -101,24 +109,19 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, footer,
       data-id={`project-agent-card-${shortPaneId(agent.paneId)}`}
       onClick={onSelect}
       aria-pressed={selected}
+      style={{ width, height }}
       className={cn(
-        'relative flex min-h-[148px] w-[300px] cursor-pointer flex-col rounded-2xl border bg-[#111216] shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
+        'relative flex min-h-[140px] min-w-[260px] cursor-pointer flex-col rounded-2xl border bg-[#111216] shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
         selected ? 'border-blue-500 ring-1 ring-blue-500/60' : 'border-white/[0.08]',
       )}
     >
       <div data-id="project-agent-card-body" className="flex flex-1 flex-col p-5">
       <div data-id="project-agent-card-header" className="flex items-start gap-3">
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
-          <h3 data-id="project-agent-card-title" className="truncate text-[17px] font-semibold text-zinc-100">{agent.title || agent.paneId}</h3>
-          <button
-            type="button"
-            data-id="project-agent-card-identity"
-            onClick={(event) => { event.stopPropagation(); void copyToClipboard(identity); }}
-            className="mt-0.5 block max-w-full truncate font-mono text-[12px] text-zinc-500 hover:text-zinc-300"
-            title={identity}
-          >
-            {identity}
-          </button>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <h3 data-id="project-agent-card-title" className="truncate text-[17px] font-semibold text-zinc-100">{agent.title || agent.paneId}</h3>
+            {agent.agentType ? <span data-id="project-agent-card-agent-type" className="shrink-0 font-mono text-[12px] text-zinc-500">{agent.agentType}</span> : null}
+          </div>
         </div>
         <div data-id="project-agent-card-menu-wrap" ref={menuRef} className="relative">
           <button
@@ -157,6 +160,22 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, footer,
 
       <div data-id="project-agent-card-metrics" className="mt-5 flex h-9 min-w-0 items-start gap-2 border-b border-white/[0.08] pb-4 font-mono text-xs text-zinc-500">
         <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
+        <button
+          type="button"
+          data-id="project-agent-card-identity"
+          onClick={(event) => {
+            event.stopPropagation();
+            void copyToClipboard(identity).then((copied) => {
+              if (!copied) return;
+              setIdentityCopied(true);
+              window.setTimeout(() => setIdentityCopied(false), 1500);
+            });
+          }}
+          className={cn('min-w-0 truncate hover:text-zinc-300', identityCopied ? 'text-emerald-400' : 'text-zinc-500')}
+          title={identity}
+        >
+          {identityCopied ? t('copied', { defaultValue: '已复制' }) : identity}
+        </button>
         {metrics?.model ? <ModelTag model={metrics.model} className="shrink-0" /> : null}
         {metrics && metrics.ctx > 0 ? (
           <span data-id="project-agent-card-context" className="flex shrink-0 items-center" title={`Context ${metrics.ctx}% / ${metrics.ctxK}k`}>
@@ -167,6 +186,14 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, footer,
       </div>
       </div>
       {footer}
+      <div
+        data-id={`project-agent-card-resize-${shortPaneId(agent.paneId)}`}
+        onPointerDown={onResizePointerDown}
+        onPointerMove={onResizePointerMove}
+        onPointerUp={onResizePointerUp}
+        onPointerCancel={onResizePointerUp}
+        className="absolute bottom-0 right-0 h-5 w-5 cursor-nwse-resize touch-none rounded-br-2xl"
+      />
     </article>
   );
 }
@@ -196,6 +223,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
   const [sendingAgentIds, setSendingAgentIds] = useState<Set<string>>(new Set());
+  const [cancelingAgentIds, setCancelingAgentIds] = useState<Set<string>>(new Set());
   const [sendFeedbackByAgent, setSendFeedbackByAgent] = useState<Record<string, string>>({});
   const [agentLayouts, setAgentLayouts] = useState<Record<string, ProjectAgentLayout>>({});
   const [canvasPan, setCanvasPan] = useState({ x: 60, y: 60 });
@@ -212,6 +240,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   }, [agents, statuses]);
   const canvasRef = useRef<HTMLDivElement>(null);
   const agentDragRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
+  const agentResizeRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originWidth: number; originHeight: number } | null>(null);
   const panDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const draggedAgentRef = useRef('');
 
@@ -316,7 +345,15 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
             key = `${Math.round(x)}:${Math.round(y)}`;
           }
           occupied.add(key);
-          next[id] = { x, y, z: Number(row?.z_index || index + 1) };
+          const storedWidth = Number(row?.width || 300);
+          const storedHeight = Number(row?.height || 180);
+          const legacyDefaultSize = storedWidth === 480 && storedHeight === 320;
+          next[id] = {
+            x, y,
+            z: Number(row?.z_index || index + 1),
+            width: legacyDefaultSize ? 300 : Math.max(260, storedWidth),
+            height: legacyDefaultSize ? 180 : Math.max(140, storedHeight),
+          };
         });
         if (!cancelled) setAgentLayouts(next);
       } catch {
@@ -482,6 +519,31 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
         next.delete(id);
         return next;
       });
+      window.setTimeout(() => {
+        document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-input-${id}"]`)?.focus();
+      }, 0);
+    }
+  };
+
+  const cancelAgentMessage = async (agent: ProjectAgent) => {
+    const id = shortPaneId(agent.paneId);
+    if (cancelingAgentIds.has(id)) return;
+    setCancelingAgentIds((current) => new Set(current).add(id));
+    try {
+      if (agent.agentType === 'cicy') await apiService.cancelCicyReply(agent.paneId);
+      else await apiService.sendKeys(agent.paneId, 'Escape');
+      setSendingAgentIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    } finally {
+      setCancelingAgentIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+      window.setTimeout(() => document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-input-${id}"]`)?.focus(), 0);
     }
   };
 
@@ -489,6 +551,8 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     x: 40 + (index % 4) * 340,
     y: 40 + Math.floor(index / 4) * 260,
     z: index + 1,
+    width: 300,
+    height: 180,
   };
 
   const beginAgentDrag = (event: ReactPointerEvent<HTMLDivElement>, agent: ProjectAgent, index: number) => {
@@ -516,7 +580,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
     setAgentLayouts((current) => ({
       ...current,
-      [drag.id]: { ...(current[drag.id] || { z: 1 }), x: drag.originX + dx, y: drag.originY + dy },
+      [drag.id]: { ...(current[drag.id] || { x: drag.originX, y: drag.originY, z: 1, width: 300, height: 180 }), x: drag.originX + dx, y: drag.originY + dy },
     }));
   };
 
@@ -534,9 +598,49 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     draggedAgentRef.current = drag.id;
     const x = drag.originX + (event.clientX - drag.startX) / canvasZoom;
     const y = drag.originY + (event.clientY - drag.startY) / canvasZoom;
-    setAgentLayouts((current) => ({ ...current, [drag.id]: { ...(current[drag.id] || { z: 1 }), x, y } }));
+    setAgentLayouts((current) => ({ ...current, [drag.id]: { ...(current[drag.id] || { x, y, z: 1, width: 300, height: 180 }), x, y } }));
     if (selectedProject.api_id) {
       void apiService.updateGroupPaneLayout(selectedProject.api_id, agent.paneId, { pos_x: x, pos_y: y });
+    }
+  };
+
+  const beginAgentResize = (event: ReactPointerEvent<HTMLDivElement>, agent: ProjectAgent, index: number) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const layout = layoutForAgent(agent, index);
+    agentResizeRef.current = {
+      id: shortPaneId(agent.paneId), pointerId: event.pointerId,
+      startX: event.clientX, startY: event.clientY,
+      originWidth: layout.width, originHeight: layout.height,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const resizeAgent = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const resize = agentResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+    const width = Math.max(260, Math.min(900, resize.originWidth + (event.clientX - resize.startX) / canvasZoom));
+    const height = Math.max(140, Math.min(700, resize.originHeight + (event.clientY - resize.startY) / canvasZoom));
+    setAgentLayouts((current) => ({ ...current, [resize.id]: { ...current[resize.id], width, height } }));
+  };
+
+  const endAgentResize = (event: ReactPointerEvent<HTMLDivElement>, agent: ProjectAgent) => {
+    const resize = agentResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+    agentResizeRef.current = null;
+    const current = agentLayouts[resize.id] || layoutForAgent(agent, 0);
+    const layout = {
+      ...current,
+      width: Math.max(260, Math.min(900, resize.originWidth + (event.clientX - resize.startX) / canvasZoom)),
+      height: Math.max(140, Math.min(700, resize.originHeight + (event.clientY - resize.startY) / canvasZoom)),
+    };
+    setAgentLayouts((layouts) => ({ ...layouts, [resize.id]: layout }));
+    if (selectedProject.api_id) {
+      void apiService.updateGroupPaneLayout(selectedProject.api_id, agent.paneId, {
+        pos_x: layout.x, pos_y: layout.y, width: layout.width, height: layout.height, z_index: layout.z,
+      });
     }
   };
 
@@ -668,6 +772,8 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
           >
             {visibleAgents.map((agent, index) => {
               const layout = layoutForAgent(agent, index);
+              const cardMetrics = liveMetrics[shortPaneId(agent.paneId)];
+              const cardBusy = sendingAgentIds.has(shortPaneId(agent.paneId)) || Boolean(cardMetrics?.working) || /running|working|thinking|streaming/.test(String(agent.status || '').toLowerCase());
               return (
               <div
                 key={agent.paneId}
@@ -681,17 +787,19 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
               >
                   <ProjectAgentCard
                     agent={agent}
-                    metrics={liveMetrics[shortPaneId(agent.paneId)]}
+                    metrics={cardMetrics}
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
                 removable={Boolean(selectedProject.api_id)}
+                width={layout.width}
+                height={layout.height}
                 footer={selectedAgentIds.has(shortPaneId(agent.paneId)) ? (
                   <footer
                     data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`}
                     onClick={(event) => event.stopPropagation()}
                     className="flex h-11 items-center border-t border-blue-500/60 bg-[#15161b] px-3 rounded-b-2xl"
                   >
-                    {sendingAgentIds.has(shortPaneId(agent.paneId)) ? <Loader2 data-id={`project-agent-prompt-sending-${shortPaneId(agent.paneId)}`} className="mr-2 h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" /> : null}
+                    {cardBusy ? <Loader2 data-id={`project-agent-prompt-sending-${shortPaneId(agent.paneId)}`} className="mr-2 h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" /> : null}
                     <input
                       data-id={`project-agent-prompt-input-${shortPaneId(agent.paneId)}`}
                       value={agentMessages[shortPaneId(agent.paneId)] || ''}
@@ -709,15 +817,30 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                       }}
                       placeholder={t('projectMessagePlaceholder')}
                       autoFocus
-                      disabled={sendingAgentIds.has(shortPaneId(agent.paneId))}
+                      disabled={cardBusy}
                       className="min-w-0 flex-1 bg-transparent text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 disabled:opacity-60"
                     />
+                    {cardBusy ? (
+                      <button
+                        type="button"
+                        data-id={`project-agent-prompt-cancel-${shortPaneId(agent.paneId)}`}
+                        onClick={() => { void cancelAgentMessage(agent); }}
+                        disabled={cancelingAgentIds.has(shortPaneId(agent.paneId))}
+                        className="ml-2 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/[0.10] text-zinc-200 hover:bg-white/[0.16] disabled:opacity-50"
+                        title={t('composerStop', { ns: 'chat', defaultValue: '停止' })}
+                      >
+                        {cancelingAgentIds.has(shortPaneId(agent.paneId)) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3 w-3 fill-current" />}
+                      </button>
+                    ) : null}
                     {sendFeedbackByAgent[shortPaneId(agent.paneId)] ? <span data-id={`project-agent-prompt-feedback-${shortPaneId(agent.paneId)}`} className="ml-2 max-w-20 truncate text-[10px] text-zinc-500" title={sendFeedbackByAgent[shortPaneId(agent.paneId)]}>{sendFeedbackByAgent[shortPaneId(agent.paneId)]}</span> : null}
                   </footer>
                 ) : null}
                 onSelect={() => toggleAgentSelection(agent)}
                 onOpen={() => onOpenAgent(agent.paneId)}
                 onRemove={() => { void removeAgent(agent); }}
+                onResizePointerDown={(event) => beginAgentResize(event, agent, index)}
+                onResizePointerMove={resizeAgent}
+                onResizePointerUp={(event) => endAgentResize(event, agent)}
               />
               </div>
             );})}

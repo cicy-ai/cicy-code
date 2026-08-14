@@ -111,7 +111,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', keyCode: 229, isComposing: true });
     expect(agentSend.sendToAgent).not.toHaveBeenCalled();
 
+    input.blur();
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
     await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(input).toHaveFocus());
   });
 });
