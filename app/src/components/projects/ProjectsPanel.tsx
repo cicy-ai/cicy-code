@@ -6,7 +6,7 @@ import { Bot, Check, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Pe
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
-import { cn } from '../../lib/utils';
+import { cn, copyToClipboard } from '../../lib/utils';
 import type { AgentLiveMetrics } from '../../lib/agentMetrics';
 import { metricsFromCurrentReply } from '../../lib/agentMetrics';
 import { ModelTag } from '../../lib/modelTag';
@@ -80,6 +80,7 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, footer,
   const status = String(agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
+  const identity = [teamId, shortPaneId(agent.paneId), agent.agentType].filter(Boolean).join(' · ');
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -109,11 +110,16 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, footer,
       <div data-id="project-agent-card-header" className="flex items-start gap-3">
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <h3 data-id="project-agent-card-title" className="truncate text-[17px] font-semibold text-zinc-100">{agent.title || agent.paneId}</h3>
-          <p data-id="project-agent-card-identity" className="mt-0.5 truncate font-mono text-[12px] text-zinc-500">
-            {[teamId, shortPaneId(agent.paneId), agent.agentType].filter(Boolean).join(' · ')}
-          </p>
+          <button
+            type="button"
+            data-id="project-agent-card-identity"
+            onClick={(event) => { event.stopPropagation(); void copyToClipboard(identity); }}
+            className="mt-0.5 block max-w-full truncate font-mono text-[12px] text-zinc-500 hover:text-zinc-300"
+            title={identity}
+          >
+            {identity}
+          </button>
         </div>
-        {selected ? <span data-id="project-agent-card-selected" className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-500 text-white"><Check className="h-3.5 w-3.5" /></span> : null}
         <div data-id="project-agent-card-menu-wrap" ref={menuRef} className="relative">
           <button
             type="button"
