@@ -252,13 +252,13 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
   );
 }
 
-export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, hideFab = false, onOpenAgent, onCreateAgent = () => {} }: {
+export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, dockOpen = false, onOpenAgent, onCreateAgent = () => {} }: {
   agents: ProjectAgent[];
   statuses?: Record<string, any>;
   topRightControls?: ReactNode;
   footerControls?: ReactNode;
   shellPanel?: ReactNode;
-  hideFab?: boolean;
+  dockOpen?: boolean;
   onOpenAgent: (paneId: string) => void;
   onCreateAgent?: () => void;
 }) {
@@ -1046,7 +1046,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           </div>
         ) : null}
         </div>
-        {!hideFab ? <div data-id="project-fab-wrap" className="absolute bottom-16 right-5 z-[60] flex flex-col items-end gap-2">
+        <div data-id="project-fab-wrap" className={cn('absolute right-5 z-[60] flex flex-col items-end gap-2 transition-[bottom] duration-200', dockOpen ? 'bottom-[20.25rem]' : 'bottom-16')}>
           <div
             data-id="project-fab-menu"
             className={cn(
@@ -1085,7 +1085,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           >
             <Plus data-id="project-add-agent-icon" className={cn('h-5 w-5 transition-transform duration-200', fabOpen && 'rotate-45')} />
           </button>
-        </div> : null}
+        </div>
         </div>
 
       </main>

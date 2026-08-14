@@ -2177,7 +2177,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   />
                 ) : null}
                 footerControls={stackHeaderControls(activeCliPaneId, false)}
-                hideFab={portsOpen || isShellOpen(activeCliPaneId)}
+                dockOpen={portsOpen || isShellOpen(activeCliPaneId)}
                 shellPanel={(() => {
                   const item = stackItems.find((candidate) => candidate.paneId === activeCliPaneId);
                   return item && !item.isApiOnly && item.ttydSrc ? <ShellPanel agentId={item.paneId} ttydSrc={item.ttydSrc} active /> : null;
