@@ -122,6 +122,7 @@ function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable,
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 data-id="project-agent-card-title" className="truncate text-[17px] font-semibold text-zinc-100">{agent.title || agent.paneId}</h3>
             {agent.agentType ? <span data-id="project-agent-card-agent-type" className="shrink-0 font-mono text-[12px] text-zinc-500">{agent.agentType}</span> : null}
+            {metrics?.model ? <ModelTag model={metrics.model} className="shrink-0" /> : null}
           </div>
         </div>
         <div data-id="project-agent-card-menu-wrap" ref={menuRef} className="relative">
@@ -173,11 +174,9 @@ function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable,
             });
           }}
           className={cn('min-w-0 truncate hover:text-zinc-300', identityCopied ? 'text-emerald-400' : 'text-zinc-500')}
-          title={identity}
         >
           {identityCopied ? t('copied', { defaultValue: '已复制' }) : identity}
         </button>
-        {metrics?.model ? <ModelTag model={metrics.model} className="shrink-0" /> : null}
         {metrics && metrics.ctx > 0 ? (
           <span data-id="project-agent-card-context" className="flex shrink-0 items-center" title={`Context ${metrics.ctx}% / ${metrics.ctxK}k`}>
             <CtxRing pct={metrics.ctx} />
@@ -241,7 +240,6 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
   const [sendingAgentIds, setSendingAgentIds] = useState<Set<string>>(new Set());
   const [cancelingAgentIds, setCancelingAgentIds] = useState<Set<string>>(new Set());
-  const [sendFeedbackByAgent, setSendFeedbackByAgent] = useState<Record<string, string>>({});
   const [agentLayouts, setAgentLayouts] = useState<Record<string, ProjectAgentLayout>>({});
   const [canvasPan, setCanvasPan] = useState({ x: 60, y: 60 });
   const [canvasZoom, setCanvasZoom] = useState(1);
@@ -330,7 +328,6 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     setSelectedAgentIds(new Set());
     setAgentMessages({});
     setSendingAgentIds(new Set());
-    setSendFeedbackByAgent({});
     setCanvasPan({ x: 60, y: 60 });
     setCanvasZoom(1);
   }, [selectedProject.id]);
@@ -512,7 +509,6 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
-    setSendFeedbackByAgent((current) => ({ ...current, [id]: '' }));
   };
 
   const sendAgentMessage = async (agent: ProjectAgent) => {
@@ -520,16 +516,14 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     const text = String(agentMessages[id] || '').trim();
     if (!text || sendingAgentIds.has(id)) return;
     setSendingAgentIds((current) => new Set(current).add(id));
-    setSendFeedbackByAgent((current) => ({ ...current, [id]: '' }));
     try {
       await sendToAgent(agent.paneId, text, {
         submit: true,
         agentType: agent.agentType,
       });
       setAgentMessages((current) => ({ ...current, [id]: '' }));
-      setSendFeedbackByAgent((current) => ({ ...current, [id]: t('projectMessageSentToAgent') }));
     } catch (cause: any) {
-      setSendFeedbackByAgent((current) => ({ ...current, [id]: cause?.message || t('projectMessageFailed') }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.message || t('projectMessageFailed') }));
     } finally {
       setSendingAgentIds((current) => {
         const next = new Set(current);
@@ -826,7 +820,6 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                       onChange={(event) => {
                         const id = shortPaneId(agent.paneId);
                         setAgentMessages((current) => ({ ...current, [id]: event.target.value }));
-                        setSendFeedbackByAgent((current) => ({ ...current, [id]: '' }));
                       }}
                       onKeyDown={(event) => {
                         if (event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -852,7 +845,6 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                         {cancelingAgentIds.has(shortPaneId(agent.paneId)) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3 w-3 fill-current" />}
                       </button>
                     ) : null}
-                    {sendFeedbackByAgent[shortPaneId(agent.paneId)] ? <span data-id={`project-agent-prompt-feedback-${shortPaneId(agent.paneId)}`} className="ml-2 max-w-20 truncate text-[10px] text-zinc-500" title={sendFeedbackByAgent[shortPaneId(agent.paneId)]}>{sendFeedbackByAgent[shortPaneId(agent.paneId)]}</span> : null}
                   </footer>
                 ) : null}
                 onSelect={() => toggleAgentSelection(agent)}
