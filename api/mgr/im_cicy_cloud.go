@@ -1138,6 +1138,11 @@ func cicyCloudAgentRuntimeState(agentID, defaultModel string, metrics M) M {
 		state["latestResponseType"] = truncateRunes(aiGatewayString(metrics["latest_response_type"]), 24)
 		state["latestResponseAt"] = strings.TrimSpace(aiGatewayString(metrics["updated_at"]))
 	}
+	if tool, ok := metrics["latest_tool"].(M); ok {
+		if name := cicyCloudPreview(aiGatewayString(tool["name"]), 64); name != "" {
+			state["latestTool"] = M{"name": name, "input": cicyCloudPreview(aiGatewayString(tool["input"]), 96)}
+		}
+	}
 	return state
 }
 

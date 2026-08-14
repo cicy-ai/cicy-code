@@ -268,6 +268,7 @@ func TestCiCyCloudAgentRuntimeStateIncludesBoundedConversationPreview(t *testing
 		"status": "thinking", "model": "gpt-live", "context_used_pct": 42,
 		"cost_credit": 0.125, "complete": false, "latest_question": question, "latest_response": response,
 		"latest_response_type": "text", "updated_at": "2026-08-14T13:00:00Z",
+		"latest_tool": M{"name": "exec_command", "input": strings.Repeat("参数", 100)},
 	})
 	if state["status"] != "thinking" || state["model"] != "gpt-live" || state["contextUsedPct"] != 42 || state["cost"] != 0.125 || state["working"] != true {
 		t.Fatalf("runtime metrics = %#v", state)
@@ -281,12 +282,17 @@ func TestCiCyCloudAgentRuntimeStateIncludesBoundedConversationPreview(t *testing
 	if state["latestResponseType"] != "text" || state["latestResponseAt"] != "2026-08-14T13:00:00Z" {
 		t.Fatalf("conversation metadata = %#v", state)
 	}
+	tool, ok := state["latestTool"].(M)
+	if !ok || tool["name"] != "exec_command" || len(anyString(tool["input"])) > 96 {
+		t.Fatalf("latest tool = %#v", state["latestTool"])
+	}
 }
 
 func TestCiCyCloudAgentRuntimeStateFitsMaximumHubSnapshot(t *testing.T) {
 	metrics := M{"status": "thinking", "model": "gpt-live", "complete": false,
 		"latest_question": strings.Repeat("问", 300), "latest_response": strings.Repeat("答", 300),
-		"latest_response_type": "thinking", "updated_at": "2026-08-14T13:00:00.123456789Z"}
+		"latest_response_type": "thinking", "updated_at": "2026-08-14T13:00:00.123456789Z",
+		"latest_tool": M{"name": strings.Repeat("工", 80), "input": strings.Repeat("参", 120)}}
 	states := make([]M, 0, 500)
 	for index := 0; index < 500; index++ {
 		states = append(states, cicyCloudAgentRuntimeState(fmt.Sprintf("w-%04d", index), "gpt-live", metrics))
