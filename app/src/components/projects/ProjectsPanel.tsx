@@ -901,9 +901,10 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                       type="button"
                       data-id={`project-agent-prompt-attach-${cardShortId}`}
                       onClick={() => document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-file-input-${cardShortId}"]`)?.click()}
-                      className="mr-2 grid h-6 w-6 shrink-0 place-items-center rounded-md text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200"
+                      aria-label="Attach"
+                      className="mr-2 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.06] text-zinc-300 hover:border-white/20 hover:bg-white/[0.10] hover:text-white"
                     >
-                      <Paperclip className="h-3.5 w-3.5" />
+                      <Paperclip className="h-4 w-4" strokeWidth={2.25} />
                     </button>
                     <input
                       data-id={`project-agent-prompt-input-${shortPaneId(agent.paneId)}`}
