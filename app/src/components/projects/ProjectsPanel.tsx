@@ -1044,7 +1044,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           </div>
         ) : null}
         </div>
-        <div data-id="project-fab-wrap" className="absolute bottom-16 right-5 z-[60] flex flex-col items-end gap-2">
+        <div data-id="project-fab-wrap" className="absolute bottom-16 right-5 z-[100] flex flex-col items-end gap-2">
           <div
             data-id="project-fab-menu"
             className={cn(

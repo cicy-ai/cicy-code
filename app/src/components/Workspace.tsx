@@ -1930,14 +1930,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     </div>
   );
   const cliFixedContent = renderCliContentPanel();
-  const stackHeaderControls = useCallback((targetPaneId: string) => targetPaneId === activeCliPaneId ? (
+  const stackHeaderControls = useCallback((targetPaneId: string, showModelPicker = true) => targetPaneId === activeCliPaneId ? (
     <>
-      <ModelPicker
+      {showModelPicker ? <ModelPicker
         paneId={activeCliPaneId}
         agentDetail={paneDetails[activeCliPaneId.split(':')[0]] || (activeCliPaneId.split(':')[0] === paneId.split(':')[0] ? agentDetail : null)}
         onUpdated={(patch) => applyPanePatch(activeCliPaneId, patch)}
         onOpen={() => refreshPaneDetail(activeCliPaneId)}
-      />
+      /> : null}
       {/* Model picker sits at the LEFT of the bottom bar (grouped with the
           non-cicy attach button just before it); the spacer pushes the remaining
           controls to the right. */}
@@ -2176,7 +2176,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     ]}
                   />
                 ) : null}
-                footerControls={stackHeaderControls(activeCliPaneId)}
+                footerControls={stackHeaderControls(activeCliPaneId, false)}
                 shellPanel={(() => {
                   const item = stackItems.find((candidate) => candidate.paneId === activeCliPaneId);
                   return item && !item.isApiOnly && item.ttydSrc ? <ShellPanel agentId={item.paneId} ttydSrc={item.ttydSrc} active /> : null;
