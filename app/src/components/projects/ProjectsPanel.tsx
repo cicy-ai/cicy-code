@@ -252,10 +252,10 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
   );
 }
 
-export default function ProjectsPanel({ agents, statuses = {}, ownerPaneId = 'w-1001', footerControls, onOpenAgent }: {
+export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, onOpenAgent }: {
   agents: ProjectAgent[];
   statuses?: Record<string, any>;
-  ownerPaneId?: string;
+  topRightControls?: ReactNode;
   footerControls?: ReactNode;
   onOpenAgent: (paneId: string) => void;
 }) {
@@ -858,16 +858,7 @@ export default function ProjectsPanel({ agents, statuses = {}, ownerPaneId = 'w-
             <h2 data-id="projects-agent-title" className="truncate text-[15px] font-semibold text-zinc-100">{selectedProject.name}</h2>
             <p data-id="projects-agent-count" className="text-[11px] text-zinc-600">{t('projectAgentCount', { count: visibleAgents.length })}</p>
           </div>
-          <div data-id={`agent-stack-card-more-${shortPaneId(ownerPaneId)}`} className="relative">
-            <button type="button" data-id={`agent-stack-card-more-button-${shortPaneId(ownerPaneId)}`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setProjectMenuId(String(selectedProject.id)); setProjectMenuAnchor('header'); }} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 hover:bg-white/[0.08] hover:text-zinc-200" title={t('projectMore')}><MoreHorizontal className="h-4 w-4" /></button>
-            {projectMenuId === String(selectedProject.id) && projectMenuAnchor === 'header' ? (
-              <div data-id="project-more-menu" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} className="absolute right-0 top-9 z-50 min-w-[150px] rounded-xl border border-white/10 bg-[#18191e] p-1 shadow-2xl">
-                <button type="button" data-id="project-pin" onClick={() => { setProjectMenuId(''); void toggleProjectPinned(selectedProject); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/[0.06]">{selectedProject.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}{selectedProject.pinned ? t('projectUnpin') : t('projectPin')}</button>
-                <button type="button" data-id="project-rename" onClick={() => { setProjectMenuId(''); void renameProject(selectedProject); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/[0.06]"><Pencil className="h-3.5 w-3.5" />{t('projectRename')}</button>
-                {!selectedProject.builtin ? <button type="button" data-id="project-delete" onClick={() => { setProjectMenuId(''); void deleteProject(selectedProject); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-red-300 hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" />{t('projectDelete')}</button> : null}
-              </div>
-            ) : null}
-          </div>
+          {topRightControls}
         </header>
 
         <div
@@ -1001,7 +992,7 @@ export default function ProjectsPanel({ agents, statuses = {}, ownerPaneId = 'w-
             <p className="text-sm" data-id="projects-agent-empty-title">{t('projectNoAgents')}</p>
           </div>
         )}
-        <div data-id="project-canvas-footer" className="absolute inset-x-0 bottom-0 z-30 h-12 border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur">
+        <div data-id="project-canvas-footer" className="fixed inset-x-0 bottom-0 z-[60] h-12 border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur">
         <div data-id="project-canvas-controls" className="absolute bottom-1.5 left-4 flex items-center gap-0.5 p-1">
           <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
           <span data-id="project-canvas-zoom-value" className="w-9 text-center font-mono text-[9px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
@@ -1020,7 +1011,7 @@ export default function ProjectsPanel({ agents, statuses = {}, ownerPaneId = 'w-
           <UserPlus className="h-5 w-5" />
         </button>
         {footerControls ? (
-          <div data-id="project-canvas-footer-controls" className="absolute bottom-1.5 left-1/2 flex -translate-x-1/2 items-center gap-2 px-2 py-1">
+          <div data-id="project-canvas-footer-controls" className="absolute bottom-1.5 right-4 flex items-center gap-2 px-2 py-1">
             {footerControls}
           </div>
         ) : null}

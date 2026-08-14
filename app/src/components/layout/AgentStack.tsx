@@ -141,7 +141,7 @@ function AttachSendButton({ paneId }: { paneId: string }) {
   )
 }
 // One entry in the card's ⋯ menu.
-interface CardMenuItem {
+export interface CardMenuItem {
   id: string
   label: string
   icon: React.ReactNode
@@ -156,7 +156,7 @@ interface CardMenuItem {
 // carry unread counts, and hiding a button hides its badge. So the counts are
 // SUMMED onto the trigger — otherwise "collapse the header" would quietly mean
 // "stop telling me there's something to look at".
-function CardMoreMenu({ paneId, items }: { paneId: string; items: CardMenuItem[] }) {
+export function CardMoreMenu({ paneId, items }: { paneId: string; items: CardMenuItem[] }) {
   const { t } = useTranslation('workspace')
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)

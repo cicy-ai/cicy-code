@@ -49,7 +49,7 @@ import AgentUsageAnalysisView from './layout/AgentUsageAnalysisView';
 import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
 import type { AgentCanvasItem } from './layout/AgentStack';
-import AgentStack from './layout/AgentStack';
+import AgentStack, { CardMoreMenu } from './layout/AgentStack';
 import WeChatBindModal from './im/WeChatBindModal';
 import SettingsModal, { type SettingsSection } from './settings/SettingsModal';
 import { useDialogs } from './ui/Modal';
@@ -2158,7 +2158,20 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <ProjectsPanel
                 agents={projectAgents}
                 statuses={pollStatuses}
-                ownerPaneId={paneId}
+                topRightControls={(
+                  <CardMoreMenu
+                    paneId={activeCliPaneId}
+                    items={[
+                      ...(todoSkillInstalled ? [{ id: 'agent-stack-card-todo', label: t('tabTodo'), icon: <ListTodo className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); openPaneTodo(activeCliPaneId); }, badge: todoCount }] : []),
+                      { id: 'agent-stack-card-files', label: t('tabFiles'), icon: <Folder className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); openPaneFiles(activeCliPaneId); } },
+                      { id: 'agent-stack-card-session', label: t('tabSession'), icon: <LineChart className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); handleStackOpenSession(activeCliPaneId); } },
+                      { id: 'agent-stack-card-memory', label: t('tabMemory'), icon: <Brain className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); openPaneMemory(activeCliPaneId); } },
+                      { id: 'agent-stack-card-audit', label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }), icon: <ShieldCheck className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'audit'); }, badge: auditAlertCount },
+                      { id: 'agent-stack-card-account-matrix', label: t('accountMatrixTitle', { defaultValue: '账号矩阵' }), icon: <Grid3X3 className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'github'); } },
+                      { id: 'agent-stack-card-settings', label: t('tabSettings'), icon: <Settings className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); openPaneSettings(activeCliPaneId); }, active: cliContentOpen && cliContentTab === 'settings' },
+                    ]}
+                  />
+                )}
                 footerControls={stackHeaderControls(activeCliPaneId)}
                 onOpenAgent={(targetPaneId) => {
                   setProjectsOpen(false);
