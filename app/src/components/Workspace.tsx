@@ -779,6 +779,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     cache.set(leftPanelKey(paneId), leftActive);
   }, [leftActive, paneId]);
   useEffect(() => { cache.set(projectsOpenKey(paneId), projectsOpen); }, [paneId, projectsOpen]);
+  useEffect(() => {
+    if (projectsOpen) setCliContentOpen(false);
+  }, [projectsOpen]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, activeTeamPaneId); }, [activeTeamPaneId]);
   useEffect(() => { cache.set(CLI_DRAWER_WIDTH_KEY, cliDrawerWidth); }, [cliDrawerWidth]);
   useEffect(() => { cache.set(cliContentOpenKey(paneId), cliContentOpen); }, [cliContentOpen, paneId]);
@@ -2151,6 +2154,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <main data-id="content-area" className="flex-1 relative overflow-hidden">
           <div data-id="main-layout" className="flex h-full min-w-0">
             {projectsOpen ? (
+              <>
               <ProjectsPanel
                 agents={projectAgents}
                 statuses={pollStatuses}
@@ -2161,6 +2165,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   onSelectAgent(targetPaneId.replace(/:.*$/, ''));
                 }}
               />
+              {cliFixedContent}
+              </>
             ) : (
             <>
             {leftActive && !globalVar?.helper_mode ? (

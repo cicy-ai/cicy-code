@@ -1001,7 +1001,8 @@ export default function ProjectsPanel({ agents, statuses = {}, ownerPaneId = 'w-
             <p className="text-sm" data-id="projects-agent-empty-title">{t('projectNoAgents')}</p>
           </div>
         )}
-        <div data-id="project-canvas-controls" className="absolute bottom-4 left-4 z-10 flex items-center gap-0.5 rounded-lg border border-white/10 bg-[#17181d]/95 p-1 shadow-xl backdrop-blur">
+        <div data-id="project-canvas-footer" className="absolute inset-x-0 bottom-0 z-30 h-12 border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur">
+        <div data-id="project-canvas-controls" className="absolute bottom-1.5 left-4 flex items-center gap-0.5 p-1">
           <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
           <span data-id="project-canvas-zoom-value" className="w-9 text-center font-mono text-[9px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
           <button type="button" data-id="project-canvas-zoom-in" onClick={() => changeZoom(0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomIn')}><Plus className="h-3.5 w-3.5" /></button>
@@ -1012,17 +1013,18 @@ export default function ProjectsPanel({ agents, statuses = {}, ownerPaneId = 'w-
           data-id="project-add-agent"
           onClick={() => openAddAgents(selectedProject)}
           disabled={!selectedProject.api_id || availableAgents.length === 0}
-          className="absolute bottom-5 right-5 z-30 grid h-12 w-12 place-items-center rounded-full bg-blue-600 text-white shadow-[0_10px_30px_rgba(37,99,235,0.35)] transition-transform hover:scale-105 hover:bg-blue-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+          className="absolute bottom-14 right-5 grid h-10 w-10 place-items-center rounded-full bg-blue-600 text-white shadow-[0_8px_20px_rgba(37,99,235,0.3)] transition-transform hover:scale-105 hover:bg-blue-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
           title={t('projectAddAgent')}
           aria-label={t('projectAddAgent')}
         >
           <UserPlus className="h-5 w-5" />
         </button>
         {footerControls ? (
-          <div data-id="project-canvas-footer-controls" className="fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-white/10 bg-[#111216]/95 px-2 py-1.5 shadow-2xl backdrop-blur">
+          <div data-id="project-canvas-footer-controls" className="absolute bottom-1.5 left-1/2 flex -translate-x-1/2 items-center gap-2 px-2 py-1">
             {footerControls}
           </div>
         ) : null}
+        </div>
         </div>
 
       </main>
