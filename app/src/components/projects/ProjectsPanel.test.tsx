@@ -15,9 +15,10 @@ const api = vi.hoisted(() => ({
   removeGroupPane: vi.fn(),
   updateGroupPaneLayout: vi.fn(),
 }));
+const agentSend = vi.hoisted(() => ({ sendToAgent: vi.fn() }));
 
 vi.mock('../../services/api', () => ({ default: api }));
-vi.mock('../../services/agentSend', () => ({ sendToAgent: vi.fn() }));
+vi.mock('../../services/agentSend', () => agentSend);
 vi.mock('../AgentAvatar', () => ({ default: () => <span data-testid="agent-avatar" /> }));
 
 import ProjectsPanel from './ProjectsPanel';
@@ -79,5 +80,35 @@ describe('<ProjectsPanel /> project creation', () => {
     expect(await screen.findByText('network unavailable')).toBeInTheDocument();
     expect(input).toHaveValue('New project');
     expect(document.querySelector('[data-id="project-create-modal"]')).toBeInTheDocument();
+  });
+});
+
+describe('<ProjectsPanel /> agent prompt footer', () => {
+  it('stays hidden until the card is selected and ignores IME confirmation Enter', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' }]} onOpenAgent={vi.fn()} />);
+
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).not.toBeInTheDocument();
+    fireEvent.click(card);
+
+    const input = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
+      if (!node) throw new Error('agent prompt footer did not open');
+      return node as HTMLInputElement;
+    });
+    fireEvent.change(input, { target: { value: '中文任务' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', keyCode: 229, isComposing: true });
+    expect(agentSend.sendToAgent).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledTimes(1));
   });
 });

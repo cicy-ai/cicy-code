@@ -104,6 +104,7 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, onSelec
         selected ? 'rounded-t-2xl border-blue-500 ring-1 ring-blue-500/60' : 'rounded-2xl border-white/[0.08]',
       )}
     >
+      <div data-id="project-agent-card-body" className="flex flex-1 flex-col">
       <div data-id="project-agent-card-header" className="flex items-start gap-3">
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <h3 data-id="project-agent-card-title" className="truncate text-[17px] font-semibold text-zinc-100">{agent.title || agent.paneId}</h3>
@@ -157,7 +158,7 @@ function ProjectAgentCard({ agent, metrics, teamId, selected, removable, onSelec
         ) : null}
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
-
+      </div>
     </article>
   );
 }
@@ -670,7 +671,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                 onRemove={() => { void removeAgent(agent); }}
               />
               {selectedAgentIds.has(shortPaneId(agent.paneId)) ? (
-                <footer data-id={`project-agent-prompt-${shortPaneId(agent.paneId)}`} className="flex h-11 w-[300px] items-center border border-t-0 border-blue-500/60 bg-[#15161b] px-3 shadow-[0_14px_30px_rgba(0,0,0,0.3)] rounded-b-2xl">
+                <footer data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`} className="flex h-11 w-[300px] items-center border border-t-0 border-blue-500/60 bg-[#15161b] px-3 shadow-[0_14px_30px_rgba(0,0,0,0.3)] rounded-b-2xl">
                   {sendingAgentIds.has(shortPaneId(agent.paneId)) ? <Loader2 data-id={`project-agent-prompt-sending-${shortPaneId(agent.paneId)}`} className="mr-2 h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" /> : null}
                   <input
                     data-id={`project-agent-prompt-input-${shortPaneId(agent.paneId)}`}
@@ -688,6 +689,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                       }
                     }}
                     placeholder={t('projectMessagePlaceholder')}
+                    autoFocus
                     disabled={sendingAgentIds.has(shortPaneId(agent.paneId))}
                     className="min-w-0 flex-1 bg-transparent text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 disabled:opacity-60"
                   />
