@@ -57,11 +57,35 @@ interface ProjectAttachment {
 }
 
 const DEFAULT_PROJECT_ID = 'default';
+const PROJECT_VIEW_CACHE_PREFIX = 'cicy_project_view:';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
 const previewableMarkdown = (value: unknown) => String(value || '').replace(/\(file:\/\/(\/?[^)]+)\)/g, (_match, path: string) => `(/${path.replace(/^\/+/, '')})`);
 const projectIdFromURL = () => {
   const match = window.location.hash.match(/^#\/project\/([^/?#]+)/);
   return match ? decodeURIComponent(match[1]) : DEFAULT_PROJECT_ID;
+};
+
+interface ProjectViewCache {
+  zoom: number;
+  pan: { x: number; y: number };
+  layouts: Record<string, ProjectAgentLayout>;
+}
+
+const projectViewCacheKey = (projectId: number | string) => `${PROJECT_VIEW_CACHE_PREFIX}${projectId}`;
+const readProjectViewCache = (projectId: number | string): ProjectViewCache | null => {
+  try {
+    const value = JSON.parse(localStorage.getItem(projectViewCacheKey(projectId)) || 'null');
+    if (!value || typeof value !== 'object') return null;
+    return {
+      zoom: Math.min(2, Math.max(0.35, Number(value.zoom) || 1)),
+      pan: { x: Number(value.pan?.x) || 0, y: Number(value.pan?.y) || 0 },
+      layouts: value.layouts && typeof value.layouts === 'object' ? value.layouts : {},
+    };
+  } catch { return null; }
+};
+const writeProjectViewCache = (projectId: number | string, patch: Partial<ProjectViewCache>) => {
+  const current = readProjectViewCache(projectId) || { zoom: 1, pan: { x: 60, y: 60 }, layouts: {} };
+  try { localStorage.setItem(projectViewCacheKey(projectId), JSON.stringify({ ...current, ...patch })); } catch {}
 };
 
 const fmtCost = (cost: number) =>
@@ -413,14 +437,22 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       const maxY = Math.max(...layouts.map((layout) => layout.y + layout.height));
       const margin = 40;
       const zoom = Math.min(1, Math.max(0.35, Math.min((viewportWidth - margin * 2) / Math.max(1, maxX - minX), (viewportHeight - margin * 2) / Math.max(1, maxY - minY))));
-      setCanvasZoom(Number(zoom.toFixed(2)));
-      setCanvasPan({ x: margin - minX * zoom, y: margin - minY * zoom });
+      const nextZoom = Number(zoom.toFixed(2));
+      const nextPan = { x: margin - minX * zoom, y: margin - minY * zoom };
+      setCanvasZoom(nextZoom);
+      setCanvasPan(nextPan);
+      writeProjectViewCache(selectedProject.id, { zoom: nextZoom, pan: nextPan });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [layoutReadyProjectId, paneMembershipKey, selectedProject.id]);
 
   useEffect(() => {
     visibilityCheckedKeyRef.current = '';
+    const cached = readProjectViewCache(selectedProject.id);
+    setAgentLayouts(cached?.layouts || {});
+    setCanvasPan(cached?.pan || { x: 60, y: 60 });
+    setCanvasZoom(cached?.zoom || 1);
+    setLayoutReadyProjectId(cached ? String(selectedProject.id) : '');
     setSelectedAgentIds(new Set());
     setAgentMessages({});
     setSendingAgentIds(new Set());
@@ -429,8 +461,15 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   useEffect(() => {
     let cancelled = false;
     const loadLayout = async () => {
+      const cached = readProjectViewCache(selectedProject.id);
+      if (cached) {
+        setAgentLayouts(cached.layouts);
+        setCanvasPan(cached.pan);
+        setCanvasZoom(cached.zoom);
+        setLayoutReadyProjectId(String(selectedProject.id));
+      }
       if (!selectedProject.api_id) {
-        setAgentLayouts({});
+        if (!cached) setAgentLayouts({});
         setLayoutReadyProjectId(String(selectedProject.id));
         return;
       }
@@ -468,15 +507,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           };
           next[id] = layout;
           placed.push(layout);
-          if ((x !== originalX || y !== originalY) && selectedProject.api_id) {
-            void apiService.updateGroupPaneLayout(selectedProject.api_id, String(row?.pane_id || id), {
-              pos_x: x, pos_y: y, width, height, z_index: layout.z,
-            });
-          }
         });
         if (!cancelled) {
           setAgentLayouts(next);
           setLayoutReadyProjectId(String(selectedProject.id));
+          writeProjectViewCache(selectedProject.id, { layouts: next });
         }
       } catch {
         if (!cancelled) {
@@ -602,7 +637,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           pos_x: x, pos_y: y, width, height, z_index: layout.z,
         });
         occupied.push(layout);
-        setAgentLayouts((current) => ({ ...current, [shortPaneId(paneId)]: layout }));
+        setAgentLayouts((current) => {
+          const next = { ...current, [shortPaneId(paneId)]: layout };
+          writeProjectViewCache(selectedProject.id, { layouts: next });
+          return next;
+        });
         setGroups((current) => current.map((group) => String(group.id) === String(selectedProject.id)
           ? { ...group, pane_ids: [...group.pane_ids, paneId], pane_count: group.pane_count + 1 }
           : group));
@@ -627,6 +666,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setAgentLayouts((current) => {
       const next = { ...current };
       delete next[id];
+      writeProjectViewCache(selectedProject.id, { layouts: next });
       return next;
     });
     await load(false);
@@ -766,7 +806,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     }
     const x = drag.originX + (event.clientX - drag.startX) / canvasZoom;
     const y = drag.originY + (event.clientY - drag.startY) / canvasZoom;
-    setAgentLayouts((current) => ({ ...current, [drag.id]: { ...(current[drag.id] || { x, y, z: 1, width: 300, height: 320 }), x, y } }));
+    setAgentLayouts((current) => {
+      const next = { ...current, [drag.id]: { ...(current[drag.id] || { x, y, z: 1, width: 300, height: 320 }), x, y } };
+      writeProjectViewCache(selectedProject.id, { layouts: next });
+      return next;
+    });
     if (selectedProject.api_id) {
       void apiService.updateGroupPaneLayout(selectedProject.api_id, agent.paneId, { pos_x: x, pos_y: y });
     }
@@ -804,7 +848,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       width: Math.max(260, Math.min(900, resize.originWidth + (event.clientX - resize.startX) / canvasZoom)),
       height: Math.max(240, Math.min(700, resize.originHeight + (event.clientY - resize.startY) / canvasZoom)),
     };
-    setAgentLayouts((layouts) => ({ ...layouts, [resize.id]: layout }));
+    setAgentLayouts((layouts) => {
+      const next = { ...layouts, [resize.id]: layout };
+      writeProjectViewCache(selectedProject.id, { layouts: next });
+      return next;
+    });
     if (selectedProject.api_id) {
       void apiService.updateGroupPaneLayout(selectedProject.api_id, agent.paneId, {
         pos_x: layout.x, pos_y: layout.y, width: layout.width, height: layout.height, z_index: layout.z,
@@ -831,13 +879,22 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   };
 
   const endCanvasPan = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (panDragRef.current?.pointerId === event.pointerId) panDragRef.current = null;
+    if (panDragRef.current?.pointerId !== event.pointerId) return;
+    const drag = panDragRef.current;
+    panDragRef.current = null;
+    writeProjectViewCache(selectedProject.id, { pan: { x: drag.originX + event.clientX - drag.startX, y: drag.originY + event.clientY - drag.startY } });
   };
 
-  const changeZoom = (delta: number) => setCanvasZoom((current) => Math.min(2, Math.max(0.35, Number((current + delta).toFixed(2)))));
+  const changeZoom = (delta: number) => setCanvasZoom((current) => {
+    const next = Math.min(2, Math.max(0.35, Number((current + delta).toFixed(2))));
+    writeProjectViewCache(selectedProject.id, { zoom: next });
+    return next;
+  });
   const resetCanvasView = () => {
-    setCanvasPan({ x: 60, y: 60 });
+    const pan = { x: 60, y: 60 };
+    setCanvasPan(pan);
     setCanvasZoom(1);
+    writeProjectViewCache(selectedProject.id, { pan, zoom: 1 });
   };
 
   return (
@@ -911,7 +968,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           onWheel={(event) => {
             event.preventDefault();
             if (event.ctrlKey || event.metaKey) changeZoom(event.deltaY > 0 ? -0.08 : 0.08);
-            else setCanvasPan((current) => ({ x: current.x - event.deltaX, y: current.y - event.deltaY }));
+            else setCanvasPan((current) => {
+              const next = { x: current.x - event.deltaX, y: current.y - event.deltaY };
+              writeProjectViewCache(selectedProject.id, { pan: next });
+              return next;
+            });
           }}
           className="relative min-h-0 flex-1 touch-none overflow-hidden cursor-grab active:cursor-grabbing"
           style={{

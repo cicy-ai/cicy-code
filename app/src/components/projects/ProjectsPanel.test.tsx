@@ -30,9 +30,36 @@ const defaultGroups = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   api.listGroups.mockResolvedValue({ data: { groups: defaultGroups } });
   api.getGroup.mockResolvedValue({ data: { panes: [] } });
   api.createGroup.mockResolvedValue({ data: { id: 3 } });
+});
+
+describe('<ProjectsPanel /> project view cache', () => {
+  it('restores zoom and card layout before the background layout request resolves', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    api.getGroup.mockReturnValue(new Promise(() => {}));
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({
+      zoom: 1.25,
+      pan: { x: 18, y: 24 },
+      layouts: { 'w-101': { x: 120, y: 80, z: 3, width: 420, height: 360 } },
+    }));
+
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' }]} onOpenAgent={vi.fn()} />);
+
+    const node = await waitFor(() => {
+      const value = document.querySelector<HTMLElement>('[data-id="project-canvas-node-w-101"]');
+      if (!value) throw new Error('cached agent card did not render');
+      return value;
+    });
+    expect(node.style.left).toBe('120px');
+    expect(node.style.top).toBe('80px');
+    expect(document.querySelector('[data-id="project-agent-card-w-101"]')).toHaveStyle({ width: '420px', height: '360px' });
+    expect(document.querySelector('[data-id="project-canvas-zoom-value"]')).toHaveTextContent('125%');
+  });
 });
 
 async function openCreateModal() {
