@@ -206,7 +206,7 @@ function CardMoreMenu({ paneId, items }: { paneId: string; items: CardMenuItem[]
           data-id={`agent-stack-card-more-menu-${paneId}`}
           role="menu"
           onClick={(event) => event.stopPropagation()}
-          className="absolute bottom-full right-0 z-50 mb-1 min-w-[168px] overflow-hidden rounded-lg border border-white/[0.08] bg-[#141417] py-1 shadow-[0_8px_28px_rgba(0,0,0,0.6)]"
+          className="absolute right-0 top-full z-30 mt-1 min-w-[168px] overflow-hidden rounded-lg border border-white/[0.08] bg-[#141417] py-1 shadow-[0_8px_28px_rgba(0,0,0,0.6)]"
         >
           {items.map((it) => (
             <button
@@ -1089,7 +1089,7 @@ function AgentStackCard({
       className={`absolute overflow-hidden text-left transition-colors ${active ? 'flex-col bg-[#0c0d10]' : ''}`}
       style={layoutStyle}
     >
-      <div data-id={`agent-stack-card-header-${item.paneId}`} className="z-40 flex h-12 shrink-0 items-center border-b border-[var(--vsc-border)] bg-[#0c0d10] px-3">
+      <div data-id={`agent-stack-card-header-${item.paneId}`} className="flex h-12 shrink-0 items-center border-b border-[var(--vsc-border)] px-3">
         <div data-id={`agent-stack-card-header-main-${item.paneId}`} className="flex items-center gap-3 min-w-0 flex-1">
           <AgentAvatar
             agentType={item.agentType}
@@ -1206,7 +1206,7 @@ function AgentStackCard({
         {/* The terminal/history view switch lives floating at the top-center of
             the card body now (see agent-stack-card-view-tabs below). */}
         {!globalVar?.helper_mode && (
-        <div data-id={`agent-stack-card-header-right-${item.paneId}`} className="absolute bottom-3 right-3 z-50 flex items-center gap-1 rounded-xl border border-white/[0.08] bg-[#15161a]/95 p-1 shadow-xl backdrop-blur">
+        <div data-id={`agent-stack-card-header-right-${item.paneId}`} className="ml-2 flex items-center gap-1">
           {showHeaderButtons ? (
             <HelpDocsLink paneId={item.paneId} compact={splitControl.isSplit} />
           ) : null}
