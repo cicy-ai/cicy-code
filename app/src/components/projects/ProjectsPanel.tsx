@@ -65,7 +65,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable, footer, width, height, onSelect, onOpen, onRemove, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable, footer, width, height, onOpen, onRemove, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
@@ -75,7 +75,6 @@ function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable,
   footer?: ReactNode;
   width: number;
   height: number;
-  onSelect: () => void;
   onOpen: () => void;
   onRemove: () => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -108,7 +107,6 @@ function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable,
   return (
     <article
       data-id={`project-agent-card-${shortPaneId(agent.paneId)}`}
-      onClick={onSelect}
       aria-pressed={selected}
       style={{ width, height }}
       className={cn(
@@ -186,15 +184,15 @@ function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable,
       </div>
       <div data-id="project-agent-card-live-body" className="mt-3 min-h-0 flex-1 space-y-2 overflow-hidden text-[11px] leading-4">
         <div data-id="project-agent-card-latest-question" className="grid grid-cols-[52px_minmax(0,1fr)] gap-2">
-          <span className="font-mono text-zinc-600">1. Q</span>
+          <span className="font-mono text-zinc-600">Q</span>
           <span className="line-clamp-2 whitespace-pre-wrap text-zinc-300">{String(latest?.latest_question || '—')}</span>
         </div>
         <div data-id="project-agent-card-latest-response" className="grid grid-cols-[52px_minmax(0,1fr)] gap-2">
-          <span className="font-mono text-zinc-600">2. {latest?.latest_response_type === 'thinking' ? 'THINK' : 'REPLY'}</span>
+          <span className="font-mono text-zinc-600">{latest?.latest_response_type === 'thinking' ? 'THINK' : 'REPLY'}</span>
           <span className="line-clamp-3 whitespace-pre-wrap text-zinc-400">{String(latest?.latest_response || '—')}</span>
         </div>
         <div data-id="project-agent-card-latest-tool" className="grid grid-cols-[52px_minmax(0,1fr)] gap-2">
-          <span className="font-mono text-zinc-600">3. TOOL</span>
+          <span className="font-mono text-zinc-600">TOOL</span>
           <span className="min-w-0 line-clamp-2 font-mono text-zinc-500">
             {latest?.latest_tool?.name ? `${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}` : '—'}
           </span>
@@ -257,10 +255,9 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   const agentDragRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
   const agentResizeRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originWidth: number; originHeight: number } | null>(null);
   const panDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const draggedAgentRef = useRef('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     setError('');
     try {
       const response = await apiService.listGroups();
@@ -281,7 +278,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     } catch (cause: any) {
       setError(cause?.message || t('projectLoadFailed'));
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [t]);
 
@@ -343,31 +340,36 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
         const response = await apiService.getGroup(selectedProject.api_id);
         const rows = Array.isArray(response?.data?.panes) ? response.data.panes : [];
         const next: Record<string, ProjectAgentLayout> = {};
-        const occupied = new Set<string>();
+        const placed: ProjectAgentLayout[] = [];
         rows.forEach((row: any, index: number) => {
           const id = shortPaneId(String(row?.pane_id || ''));
           if (!id) return;
-          let x = Number.isFinite(Number(row?.pos_x)) ? Number(row.pos_x) : 40 + (index % 4) * 340;
-          let y = Number.isFinite(Number(row?.pos_y)) ? Number(row.pos_y) : 40 + Math.floor(index / 4) * 260;
-          let key = `${Math.round(x)}:${Math.round(y)}`;
-          while (occupied.has(key)) {
-            x += 340;
-            if (x > 1400) {
-              x = 40;
-              y += 260;
-            }
-            key = `${Math.round(x)}:${Math.round(y)}`;
-          }
-          occupied.add(key);
           const storedWidth = Number(row?.width || 300);
           const storedHeight = Number(row?.height || 180);
           const legacyDefaultSize = storedWidth === 480 && storedHeight === 320;
-          next[id] = {
+          const width = legacyDefaultSize ? 300 : Math.max(260, storedWidth);
+          const height = legacyDefaultSize ? 320 : Math.max(240, storedHeight);
+          const originalX = Number.isFinite(Number(row?.pos_x)) ? Number(row.pos_x) : 40 + (index % 4) * 340;
+          const originalY = Number.isFinite(Number(row?.pos_y)) ? Number(row.pos_y) : 40 + Math.floor(index / 4) * 360;
+          let x = originalX;
+          let y = originalY;
+          const overlaps = () => placed.some((item) => x < item.x + item.width + 20 && x + width + 20 > item.x && y < item.y + item.height + 20 && y + height + 20 > item.y);
+          while (overlaps()) {
+            x += 340;
+            if (x > 1400) { x = 40; y += 360; }
+          }
+          const layout = {
             x, y,
             z: Number(row?.z_index || index + 1),
-            width: legacyDefaultSize ? 300 : Math.max(260, storedWidth),
-            height: legacyDefaultSize ? 320 : Math.max(240, storedHeight),
+            width, height,
           };
+          next[id] = layout;
+          placed.push(layout);
+          if ((x !== originalX || y !== originalY) && selectedProject.api_id) {
+            void apiService.updateGroupPaneLayout(selectedProject.api_id, String(row?.pane_id || id), {
+              pos_x: x, pos_y: y, width, height, z_index: layout.z,
+            });
+          }
         });
         if (!cancelled) setAgentLayouts(next);
       } catch {
@@ -473,18 +475,32 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     setBusy(true);
     try {
       const paneIds = [...selectedToAdd];
+      const occupied = Object.values(agentLayouts);
       for (const [offset, paneId] of paneIds.entries()) {
         await apiService.addGroupPane(selectedProject.api_id, paneId);
         const index = visibleAgents.length + offset;
-        void apiService.updateGroupPaneLayout(selectedProject.api_id, paneId, {
-          pos_x: 40 + (index % 4) * 340,
-          pos_y: 40 + Math.floor(index / 4) * 260,
-          z_index: index + 1,
-        }).catch(() => undefined);
+        const width = 300;
+        const height = 320;
+        let x = 40;
+        let y = 40;
+        const overlaps = () => occupied.some((item) => x < item.x + item.width + 20 && x + width + 20 > item.x && y < item.y + item.height + 20 && y + height + 20 > item.y);
+        while (overlaps()) {
+          x += 340;
+          if (x > 1400) { x = 40; y += 360; }
+        }
+        const layout = { x, y, width, height, z: index + 1 };
+        await apiService.updateGroupPaneLayout(selectedProject.api_id, paneId, {
+          pos_x: x, pos_y: y, width, height, z_index: layout.z,
+        });
+        occupied.push(layout);
+        setAgentLayouts((current) => ({ ...current, [shortPaneId(paneId)]: layout }));
+        setGroups((current) => current.map((group) => String(group.id) === String(selectedProject.id)
+          ? { ...group, pane_ids: [...group.pane_ids, paneId], pane_count: group.pane_count + 1 }
+          : group));
       }
       setAddOpen(false);
       setSelectedToAdd(new Set());
-      await load();
+      await load(false);
     } catch (cause: any) {
       setAddError(cause?.response?.data?.error || cause?.message || t('projectAddAgentFailed'));
     } finally {
@@ -495,15 +511,20 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   const removeAgent = async (agent: ProjectAgent) => {
     if (!selectedProject.api_id) return;
     await apiService.removeGroupPane(selectedProject.api_id, agent.paneId);
-    await load();
+    const id = shortPaneId(agent.paneId);
+    setGroups((current) => current.map((group) => String(group.id) === String(selectedProject.id)
+      ? { ...group, pane_ids: group.pane_ids.filter((paneId) => shortPaneId(paneId) !== id), pane_count: Math.max(0, group.pane_count - 1) }
+      : group));
+    setAgentLayouts((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    await load(false);
   };
 
   const toggleAgentSelection = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
-    if (draggedAgentRef.current === id) {
-      draggedAgentRef.current = '';
-      return;
-    }
     setSelectedAgentIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -601,12 +622,8 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
     agentDragRef.current = null;
     if (!drag.moved) {
       toggleAgentSelection(agent);
-      // Pointer capture may emit a click after pointerup. Suppress that click
-      // so a single press cannot immediately select and then deselect the card.
-      draggedAgentRef.current = drag.id;
       return;
     }
-    draggedAgentRef.current = drag.id;
     const x = drag.originX + (event.clientX - drag.startX) / canvasZoom;
     const y = drag.originY + (event.clientY - drag.startY) / canvasZoom;
     setAgentLayouts((current) => ({ ...current, [drag.id]: { ...(current[drag.id] || { x, y, z: 1, width: 300, height: 320 }), x, y } }));
@@ -847,7 +864,6 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                     ) : null}
                   </footer>
                 ) : null}
-                onSelect={() => toggleAgentSelection(agent)}
                 onOpen={() => onOpenAgent(agent.paneId)}
                 onRemove={() => { void removeAgent(agent); }}
                 onResizePointerDown={(event) => beginAgentResize(event, agent, index)}
