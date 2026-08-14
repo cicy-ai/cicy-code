@@ -336,22 +336,17 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     if (!dockOpen) { setDockHeight(0); return; }
     const canvas = canvasRef.current;
     if (!canvas) return;
-    let observed: Element | null = null;
-    let resizeObserver: ResizeObserver | null = null;
+    const resizeObserver = new ResizeObserver(() => measure());
     const measure = () => {
-      const next = canvas.querySelector('[data-id="ports-panel"], [data-id="project-canvas-shell-panel"]');
-      if (!next) return;
-      setDockHeight(Math.ceil(next.getBoundingClientRect().height));
-      if (next === observed) return;
-      resizeObserver?.disconnect();
-      observed = next;
-      resizeObserver = new ResizeObserver(() => setDockHeight(Math.ceil(next.getBoundingClientRect().height)));
-      resizeObserver.observe(next);
+      const docks = Array.from(canvas.querySelectorAll('[data-id="ports-panel"], [data-id="project-canvas-shell-panel"]'));
+      setDockHeight(Math.ceil(Math.max(0, ...docks.map((dock) => dock.getBoundingClientRect().height))));
+      resizeObserver.disconnect();
+      docks.forEach((dock) => resizeObserver.observe(dock));
     };
     measure();
     const observer = new MutationObserver(measure);
     observer.observe(canvas, { childList: true, subtree: true });
-    return () => { observer.disconnect(); resizeObserver?.disconnect(); };
+    return () => { observer.disconnect(); resizeObserver.disconnect(); };
   }, [dockOpen]);
 
   const load = useCallback(async (showLoading = true) => {
