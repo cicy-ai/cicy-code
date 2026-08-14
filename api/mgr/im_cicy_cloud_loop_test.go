@@ -279,7 +279,7 @@ func TestCiCyCloudAgentRuntimeStateIncludesBoundedConversationPreview(t *testing
 	if got := anyString(state["latestResponse"]); len(got) > 256 || !strings.HasSuffix(got, "…") {
 		t.Fatalf("latest response = %d bytes without bounded ellipsis", len(got))
 	}
-	if state["latestResponseType"] != "text" || state["latestResponseAt"] != "2026-08-14T13:00:00Z" {
+	if state["latestResponseType"] != "text" || state["latestResponseAt"] != "2026-08-14T13:00:00Z" || state["updatedAt"] != "2026-08-14T13:00:00Z" {
 		t.Fatalf("conversation metadata = %#v", state)
 	}
 	tool, ok := state["latestTool"].(M)

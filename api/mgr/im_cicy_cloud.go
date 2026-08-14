@@ -1124,6 +1124,7 @@ func cicyCloudAgentRuntimeState(agentID, defaultModel string, metrics M) M {
 	}
 	state["contextUsedPct"] = int(aiGatewayFloat(metrics["context_used_pct"]))
 	state["cost"] = aiGatewayFloat(metrics["cost_credit"])
+	state["updatedAt"] = strings.TrimSpace(aiGatewayString(metrics["updated_at"]))
 	if complete, ok := metrics["complete"].(bool); ok {
 		state["working"] = !complete
 	}
