@@ -160,7 +160,7 @@ function ProjectAgentCard({ agent, metrics, latest, teamId, selected, removable,
         </div>
       </div>
 
-      <div data-id="project-agent-card-metrics" className="mt-5 flex h-9 min-w-0 items-start gap-2 border-b border-white/[0.08] pb-4 font-mono text-xs text-zinc-500">
+      <div data-id="project-agent-card-metrics" className="mt-2 flex h-7 min-w-0 items-center gap-2 border-b border-white/[0.08] pb-2 font-mono text-xs text-zinc-500">
         <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
         <button
           type="button"
