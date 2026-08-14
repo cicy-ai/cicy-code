@@ -8,7 +8,9 @@ import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
 import { cn } from '../../lib/utils';
 import type { AgentLiveMetrics } from '../../lib/agentMetrics';
+import { metricsFromCurrentReply } from '../../lib/agentMetrics';
 import { ModelTag } from '../../lib/modelTag';
+import { useApp } from '../../contexts/AppContext';
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
 
@@ -20,7 +22,7 @@ export interface ProjectAgent {
   defaultModel?: string;
   workspace?: string;
   machineLabel?: string;
-  liveMetrics?: AgentLiveMetrics;
+  liveReply?: any;
 }
 
 interface AgentProject {
@@ -42,6 +44,58 @@ interface ProjectAgentLayout {
 
 const DEFAULT_PROJECT_ID = 'default';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
+const PROJECT_METRICS_PUSH_STALE_MS = 12000;
+const PROJECT_METRICS_FALLBACK_MS = 5000;
+
+function useProjectLiveMetrics(agents: ProjectAgent[]) {
+  const { chatWsConnected } = useApp();
+  const ids = useMemo(() => agents.map((agent) => shortPaneId(agent.paneId)).filter(Boolean).sort(), [agents]);
+  const key = ids.join(',');
+  const [metrics, setMetrics] = useState<Record<string, AgentLiveMetrics>>({});
+  const lastPushRef = useRef(0);
+
+  const fold = useCallback((lookup: (id: string) => any) => {
+    setMetrics((previous) => {
+      let changed = false;
+      const next = { ...previous };
+      for (const id of key.split(',').filter(Boolean)) {
+        const reply = lookup(id);
+        if (!reply || typeof reply !== 'object' || Object.keys(reply).length === 0) continue;
+        const value = metricsFromCurrentReply(reply, previous[id]);
+        if (previous[id]?.sig !== value.sig || previous[id]?.model !== value.model) {
+          next[id] = value;
+          changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [key]);
+
+  useEffect(() => {
+    if (!key) return;
+    const byId = new Map(agents.map((agent) => [shortPaneId(agent.paneId), agent.liveReply]));
+    fold((id) => byId.get(id));
+    lastPushRef.current = Date.now();
+  }, [agents, key, fold]);
+
+  useEffect(() => {
+    if (!key) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (document.hidden) return;
+      const stale = Date.now() - lastPushRef.current > PROJECT_METRICS_PUSH_STALE_MS;
+      if (chatWsConnected && !stale) return;
+      const response = await apiService.getAgentCurrentReplyBatch(key.split(',').filter(Boolean)).catch(() => null);
+      const rows = response?.data?.metrics;
+      if (!cancelled && rows && typeof rows === 'object') fold((id) => rows[id]);
+    };
+    void tick();
+    const timer = window.setInterval(tick, PROJECT_METRICS_FALLBACK_MS);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [chatWsConnected, fold, key]);
+
+  return metrics;
+}
 
 const fmtCost = (cost: number) =>
   cost <= 0 ? '$0'
@@ -63,8 +117,9 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, teamId, selected, removable, onSelect, onOpen, onRemove }: {
+function ProjectAgentCard({ agent, metrics, teamId, selected, removable, onSelect, onOpen, onRemove }: {
   agent: ProjectAgent;
+  metrics?: AgentLiveMetrics;
   teamId?: string;
   selected: boolean;
   removable: boolean;
@@ -78,7 +133,6 @@ function ProjectAgentCard({ agent, teamId, selected, removable, onSelect, onOpen
   const status = String(agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
-  const metrics = agent.liveMetrics;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -100,7 +154,7 @@ function ProjectAgentCard({ agent, teamId, selected, removable, onSelect, onOpen
       onClick={onSelect}
       aria-pressed={selected}
       className={cn(
-        'relative flex h-[220px] w-[300px] cursor-pointer flex-col border bg-[#111216] p-5 shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
+        'relative flex min-h-[148px] w-[300px] cursor-pointer flex-col border bg-[#111216] p-5 shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
         selected ? 'rounded-t-2xl border-blue-500 ring-1 ring-blue-500/60' : 'rounded-2xl border-white/[0.08]',
       )}
     >
@@ -147,7 +201,7 @@ function ProjectAgentCard({ agent, teamId, selected, removable, onSelect, onOpen
         </div>
       </div>
 
-      <div data-id="project-agent-card-metrics" className="mt-6 flex h-5 min-w-0 items-center gap-2 font-mono text-xs text-zinc-500">
+      <div data-id="project-agent-card-metrics" className="mt-5 flex h-9 min-w-0 items-start gap-2 border-b border-white/[0.08] pb-4 font-mono text-xs text-zinc-500">
         <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
         <span data-id="project-agent-card-status" className="shrink-0">{status}</span>
         {metrics?.model ? <ModelTag model={metrics.model} className="shrink-0" /> : null}
@@ -190,6 +244,7 @@ export default function ProjectsPanel({ agents, onOpenAgent }: {
   const [agentLayouts, setAgentLayouts] = useState<Record<string, ProjectAgentLayout>>({});
   const [canvasPan, setCanvasPan] = useState({ x: 60, y: 60 });
   const [canvasZoom, setCanvasZoom] = useState(1);
+  const liveMetrics = useProjectLiveMetrics(agents);
   const canvasRef = useRef<HTMLDivElement>(null);
   const agentDragRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
   const panDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
@@ -641,6 +696,7 @@ export default function ProjectsPanel({ agents, onOpenAgent }: {
               >
                   <ProjectAgentCard
                     agent={agent}
+                    metrics={liveMetrics[shortPaneId(agent.paneId)]}
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
                 removable={Boolean(selectedProject.api_id)}
