@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -168,7 +169,7 @@ func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
 		t.Fatal("agent state was not published over websocket")
 	}
 	encodedDirectory, _ := json.Marshal(directory)
-	for _, forbidden := range []string{"status", "model", "contextUsedPct", "context_used_pct", "cost", "online"} {
+	for _, forbidden := range []string{"status", "model", "contextUsedPct", "context_used_pct", "cost", "online", "latestQuestion", "latestResponse"} {
 		if bytes.Contains(encodedDirectory, []byte(`"`+forbidden+`"`)) {
 			t.Fatalf("runtime field %q leaked into directory HTTP body: %s", forbidden, encodedDirectory)
 		}
@@ -257,6 +258,45 @@ func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("reconnect did not publish agent state over websocket")
+	}
+}
+
+func TestCiCyCloudAgentRuntimeStateIncludesBoundedConversationPreview(t *testing.T) {
+	question := strings.Repeat("问", 300)
+	response := strings.Repeat("答", 300)
+	state := cicyCloudAgentRuntimeState("w-1004", "fallback-model", M{
+		"status": "thinking", "model": "gpt-live", "context_used_pct": 42,
+		"cost_credit": 0.125, "complete": false, "latest_question": question, "latest_response": response,
+		"latest_response_type": "text", "updated_at": "2026-08-14T13:00:00Z",
+	})
+	if state["status"] != "thinking" || state["model"] != "gpt-live" || state["contextUsedPct"] != 42 || state["cost"] != 0.125 || state["working"] != true {
+		t.Fatalf("runtime metrics = %#v", state)
+	}
+	if got := anyString(state["latestQuestion"]); len(got) > 256 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("latest question = %d bytes without bounded ellipsis", len(got))
+	}
+	if got := anyString(state["latestResponse"]); len(got) > 256 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("latest response = %d bytes without bounded ellipsis", len(got))
+	}
+	if state["latestResponseType"] != "text" || state["latestResponseAt"] != "2026-08-14T13:00:00Z" {
+		t.Fatalf("conversation metadata = %#v", state)
+	}
+}
+
+func TestCiCyCloudAgentRuntimeStateFitsMaximumHubSnapshot(t *testing.T) {
+	metrics := M{"status": "thinking", "model": "gpt-live", "complete": false,
+		"latest_question": strings.Repeat("问", 300), "latest_response": strings.Repeat("答", 300),
+		"latest_response_type": "thinking", "updated_at": "2026-08-14T13:00:00.123456789Z"}
+	states := make([]M, 0, 500)
+	for index := 0; index < 500; index++ {
+		states = append(states, cicyCloudAgentRuntimeState(fmt.Sprintf("w-%04d", index), "gpt-live", metrics))
+	}
+	payload, err := json.Marshal(states)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) > 512<<10 {
+		t.Fatalf("maximum state snapshot = %d bytes, exceeds 512 KiB", len(payload))
 	}
 }
 

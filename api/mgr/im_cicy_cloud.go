@@ -1091,6 +1091,56 @@ func splitCiCyCloudPeer(peer string) (string, string) {
 	return parts[0], ""
 }
 
+func cicyCloudPreview(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 {
+		return ""
+	}
+	if len(value) <= limit {
+		return value
+	}
+	suffix := "…"
+	if limit < len(suffix) {
+		return ""
+	}
+	cut := limit - len(suffix)
+	for cut > 0 && value[cut]&0xc0 == 0x80 {
+		cut--
+	}
+	return strings.TrimSpace(value[:cut]) + suffix
+}
+
+func cicyCloudAgentRuntimeState(agentID, defaultModel string, metrics M) M {
+	state := M{"agentId": agentID, "status": "idle", "model": defaultModel,
+		"contextUsedPct": 0, "cost": float64(0), "online": true}
+	if metrics == nil {
+		return state
+	}
+	if value := strings.TrimSpace(aiGatewayString(metrics["status"])); value != "" {
+		state["status"] = value
+	}
+	if value := strings.TrimSpace(aiGatewayString(metrics["model"])); value != "" {
+		state["model"] = value
+	}
+	state["contextUsedPct"] = int(aiGatewayFloat(metrics["context_used_pct"]))
+	state["cost"] = aiGatewayFloat(metrics["cost_credit"])
+	if complete, ok := metrics["complete"].(bool); ok {
+		state["working"] = !complete
+	}
+	// Project cards only need a compact live preview. Keep the authoritative
+	// reply.json payload local and publish bounded excerpts so a full 500-agent
+	// state snapshot stays below the Hub's 512 KiB frame limit.
+	if value := cicyCloudPreview(aiGatewayString(metrics["latest_question"]), 256); value != "" {
+		state["latestQuestion"] = value
+	}
+	if value := cicyCloudPreview(aiGatewayString(metrics["latest_response"]), 256); value != "" {
+		state["latestResponse"] = value
+		state["latestResponseType"] = truncateRunes(aiGatewayString(metrics["latest_response_type"]), 24)
+		state["latestResponseAt"] = strings.TrimSpace(aiGatewayString(metrics["updated_at"]))
+	}
+	return state
+}
+
 func collectCiCyCloudAgents() ([]M, []M, error) {
 	if store == nil {
 		return nil, nil, fmt.Errorf("agent store unavailable")
@@ -1115,19 +1165,7 @@ func collectCiCyCloudAgents() ([]M, []M, error) {
 		agentID := shortPaneID(paneID)
 		directory = append(directory, M{"agentId": agentID, "title": title,
 			"agentType": agentType, "role": role, "useCustomGateway": useCustomGateway})
-		status, model, contextUsedPct, cost := "idle", defaultModel, 0, float64(0)
-		if metrics := agentInspectorLiteMetrics(agentID); metrics != nil {
-			if value := strings.TrimSpace(aiGatewayString(metrics["status"])); value != "" {
-				status = value
-			}
-			if value := strings.TrimSpace(aiGatewayString(metrics["model"])); value != "" {
-				model = value
-			}
-			contextUsedPct = int(aiGatewayFloat(metrics["context_used_pct"]))
-			cost = aiGatewayFloat(metrics["cost_credit"])
-		}
-		states = append(states, M{"agentId": agentID, "status": status, "model": model,
-			"contextUsedPct": contextUsedPct, "cost": cost, "online": true})
+		states = append(states, cicyCloudAgentRuntimeState(agentID, defaultModel, agentInspectorLiteMetrics(agentID)))
 	}
 	return directory, states, rows.Err()
 }

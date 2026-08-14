@@ -939,6 +939,9 @@ func (s *aiGatewayAuditSession) writeStartSnapshots() error {
 		hub.publishAgent(s.agentID, *statusEvent)
 	}
 	hub.publishAgent(s.agentID, currentUpdatedEvent)
+	if !s.auxiliary {
+		reportCiCyCloudAgentState(s.agentID)
+	}
 	return nil
 }
 
@@ -1428,6 +1431,7 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	}
 	hub.publishAgent(s.agentID, currentUpdatedEvent)
 	if !s.auxiliary {
+		reportCiCyCloudAgentState(s.agentID)
 		// aux calls (title/suggestion generation) complete without tool_calls but
 		// are not user turns — never notify for them.
 		finalQuestion, _ := currentUpdatedData["question"].(string)
