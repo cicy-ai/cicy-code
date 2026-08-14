@@ -521,9 +521,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
   const toggleAgentSelection = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
     setSelectedAgentIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
+      return current.has(id) ? new Set() : new Set([id]);
     });
   };
 
@@ -823,7 +821,7 @@ export default function ProjectsPanel({ agents, statuses = {}, onOpenAgent }: {
                   <footer
                     data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`}
                     onClick={(event) => event.stopPropagation()}
-                    className="flex h-11 min-h-11 shrink-0 items-center border-t border-blue-500/60 bg-[#15161b] px-3 rounded-b-2xl"
+                    className="flex h-9 min-h-9 shrink-0 items-center rounded-b-2xl border-t border-white/[0.08] bg-[#15161b] px-3"
                   >
                     {cardBusy ? <Loader2 data-id={`project-agent-prompt-sending-${shortPaneId(agent.paneId)}`} className="mr-2 h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" /> : null}
                     <input
