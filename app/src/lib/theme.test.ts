@@ -56,6 +56,9 @@ describe('global theme', () => {
     expect(css).toContain('[data-id="ModelTag"]');
     expect(css).toContain('[data-id="agent-usage-analysis-breakdown"] .fill-zinc-100');
     expect(css).toContain('[data-id="team-context-ring"]');
+    expect(css).toContain('[class~="text-zinc-400/85"]');
+    expect(css).toContain('html[data-theme="light"] .inspector-markdown pre');
+    expect(css).toContain('html[data-theme="light"] ::-webkit-scrollbar-thumb');
     expect(css).toContain('rgba(63,63,70,0.14)');
   });
 });
