@@ -119,6 +119,14 @@ html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/[0.
 html[data-theme="light"] [class~="text-white"]:not([class*="bg-"]),
 html[data-theme="light"] [class~="text-zinc-100"],
 html[data-theme="light"] [class~="text-zinc-200"] { color: #18181b !important; }
+/* Neutral selected tabs/cards often pair a translucent white or VS Code
+   surface with text-white. Those are light-gray surfaces in Light mode, so
+   their foreground must become dark. Solid semantic buttons (blue/green/red)
+   do not match these selectors and keep white text. */
+html[data-theme="light"] [class~="text-white"][class*="bg-white"],
+html[data-theme="light"] [class~="text-white"][class*="bg-[var(--vsc-bg"] {
+  color: #18181b !important;
+}
 html[data-theme="light"] [class~="text-zinc-300"] { color: #3f3f46 !important; }
 html[data-theme="light"] [class~="text-zinc-400"] { color: #52525b !important; }
 html[data-theme="light"] [class~="text-zinc-500"] { color: #71717a !important; }

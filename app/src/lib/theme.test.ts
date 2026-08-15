@@ -60,6 +60,8 @@ describe('global theme', () => {
     expect(css).toContain('[data-id="agent-usage-analysis-breakdown"] .fill-zinc-100');
     expect(css).toContain('[data-id="team-context-ring"]');
     expect(css).toContain('[class~="text-zinc-400/85"]');
+    expect(css).toContain('[class~="text-white"][class*="bg-white"]');
+    expect(css).toContain('[class~="text-white"][class*="bg-[var(--vsc-bg"]');
     expect(css).toContain('html[data-theme="light"] .inspector-markdown pre');
     expect(css).toContain('html[data-theme="light"] ::-webkit-scrollbar-thumb');
     expect(css).toContain('html[data-theme="light"] .markdown-body .hljs');
