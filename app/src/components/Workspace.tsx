@@ -68,7 +68,6 @@ import { lockPointer, unlockPointer, clearPointerLock } from '../lib/pointerLock
 import { emitWebFrameMaskEvent } from '../lib/webFrameMask';
 import PortsPanel from './layout/PortsPanel';
 import ProjectsPanel, { type ProjectAgent } from './projects/ProjectsPanel';
-const CurrentHistoryView = lazy(() => import('./chat/CurrentHistoryView'));
 
 const cache = {
   get: (k: string, def: any) => { try { const v = JSON.parse(localStorage.getItem(k)!); return v ?? def; } catch { return def; } },
@@ -1835,16 +1834,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           style={{ display: cliContentTab === 'history' ? 'block' : 'none' }}
         >
           {cliContentOpen && cliContentTab === 'history' && (
-            <Suspense fallback={null}>
-              <CurrentHistoryView
-                key={activeCliPaneId}
-                paneId={activeCliPaneId}
-                open
-                fullWidth
-                leftAlignQuestions
-                agentType={String(projectAgents.find((agent) => agent.paneId.replace(/:.*$/, '') === activeCliPaneId)?.agentType || '')}
-              />
-            </Suspense>
+            <AgentInspector
+              paneId={activeCliPaneId}
+              paneTitle={
+                paneDetails[activeCliPaneId]?.title
+                || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
+                || activeCliPaneId
+              }
+              open
+              embedded
+              requestedTab="history"
+              liveStatus={chatWsLiveStatus}
+              inspectorVersion={chatWsInspectorVersion}
+              onPanePatch={applyPanePatch}
+              onClose={() => {}}
+            />
           )}
         </div>
         <div
