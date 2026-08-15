@@ -832,18 +832,27 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     if ((!text && !attachments.some((item) => item.status === 'done')) || attachments.some((item) => item.status === 'uploading') || sendingAgentIds.has(id)) return;
     const attachmentText = attachments.filter((item) => item.status === 'done' && item.fileRef).map((item) => agent.agentType === 'cicy' ? chatAttachmentMarkdown(item.name, item.fileRef!, item.isImage) : replAttachmentMarkdown(item.name, item.fileRef!)).join('\n\n');
     const message = [text, attachmentText].filter(Boolean).join('\n\n');
+    const previousReply = agentReplies[id];
     setSendingAgentIds((current) => new Set(current).add(id));
+    setAgentMessages((current) => ({ ...current, [id]: '' }));
+    if (text) {
+      setAgentReplies((current) => ({
+        ...current,
+        [id]: { question: text, items: [], answer: '', thinking: '', status: 'pending' },
+      }));
+    }
     try {
       await sendToAgent(agent.paneId, message, {
         submit: true,
         agentType: agent.agentType,
       });
-      setAgentMessages((current) => ({ ...current, [id]: '' }));
       setAgentAttachments((current) => {
         (current[id] || []).forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
         return { ...current, [id]: [] };
       });
     } catch (cause: any) {
+      setAgentMessages((current) => ({ ...current, [id]: text }));
+      if (text) setAgentReplies((current) => ({ ...current, [id]: previousReply || {} }));
       window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.message || t('projectMessageFailed') }));
     } finally {
       setSendingAgentIds((current) => {

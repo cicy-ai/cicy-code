@@ -181,6 +181,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     input.blur();
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
     await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('中文任务')).toBeInTheDocument();
+    expect(input).toHaveValue('');
     await waitFor(() => expect(input).toHaveFocus());
   });
 });
