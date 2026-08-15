@@ -303,7 +303,7 @@ export default function AgentInspector({
 
   useEffect(() => {
     if (!requestedTab) return;
-    setTab(requestedTab === 'notes' || requestedTab === 'history' ? 'overview' : requestedTab);
+    setTab(requestedTab === 'notes' ? 'overview' : requestedTab);
   }, [paneId, requestedTab]);
 
   useEffect(() => {
