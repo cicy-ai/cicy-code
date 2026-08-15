@@ -196,6 +196,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const loadingRef = useRef<HTMLDivElement>(null);
   const followLoadingRef = useRef(true);
   const historyLoadingRef = useRef(false);
+  const initialBottomKeyRef = useRef('');
   const prependMetricsRef = useRef<{ top: number; height: number } | null>(null);
   const [renderedHistory, setRenderedHistory] = useState<HistoryTurn[]>([]);
   const [historyBefore, setHistoryBefore] = useState<number | null>(null);
@@ -214,6 +215,18 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const rawQuestion = String(optimisticQuestion || freshestQuestion);
   const visibleQuestion = questionWithoutUploadedAttachments(rawQuestion);
   const visibleQuestionAttachments = uploadedAttachmentsFromQuestion(rawQuestion);
+
+  // The sentinel lives above the live turn, so a card must open at the bottom.
+  // Otherwise an idle card starts at scrollTop=0, the sentinel is visible on
+  // mount, and history expands without any upward scroll from the user.
+  useLayoutEffect(() => {
+    const node = bodyScrollRef.current;
+    const key = `${agent.paneId}:${rawQuestion}`;
+    if (!node || !rawQuestion || initialBottomKeyRef.current === key) return;
+    initialBottomKeyRef.current = key;
+    node.scrollTop = node.scrollHeight;
+    followLoadingRef.current = true;
+  }, [agent.paneId, rawQuestion]);
 
   // A newly-sent idle question owns the live area immediately. Older history
   // stays in window._cacheHistory/IndexedDB, but is removed from the rendered
