@@ -559,8 +559,11 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
   .cicy-term-host .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
     width: 5px !important;
   }
-  .cicy-term-host .xterm .xterm-scrollable-element > .scrollbar.horizontal {
+  .cicy-term-host .xterm .xterm-scrollable-element > .scrollbar:not(.vertical) {
     display: none !important;
+  }
+  .cicy-term-host .xterm .xterm-scrollable-element {
+    overflow: hidden !important;
   }
   .cicy-term-host .xterm-viewport {
     overflow-x: hidden !important;
