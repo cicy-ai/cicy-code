@@ -9,10 +9,11 @@ import { markdown } from '@codemirror/lang-markdown';
 import { Loader2, Check, AlertCircle, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
+import { isCicyLiteAgent } from '../../lib/agentType';
 
 // The roster drawer's per-agent editor. Tab 1 is always the agent's OWN guidance
 // doc — [ CLAUDE.md / AGENTS.md ] — (per-agent, DB-resolved via scope 'agent').
-// For CICY agents there are two more tabs — [ meta.yaml ] [ system.md ] — the
+// For CICY agents there are two more tabs — [ system.md ] [ meta.yaml ] — the
 // SHARED role-template files (scope 'role', <slug>/<file>); many agents share one
 // role dir, so editing them affects every agent on that role. Non-cicy agents
 // (claude/codex/opencode/kiro) don't use the cicy role template, so they get the
@@ -145,7 +146,7 @@ export default function AgentDocRoleEditor({ paneId, className }: Props) {
     return () => { cancelled = true; };
   }, [paneId]);
 
-  const isCicy = agentType.toLowerCase() === 'cicy';
+  const isCicy = isCicyLiteAgent(agentType);
   const docName = agentType.toLowerCase() === 'claude' ? 'CLAUDE.md' : 'AGENTS.md';
   // Cicy agents fall back to the universal `assistant` role when they have no
   // role_template of their own, so meta.yaml / system.md are always editable.
@@ -160,8 +161,8 @@ export default function AgentDocRoleEditor({ paneId, className }: Props) {
       { key: 'doc', label: docName, scope: 'agent', name: paneId, shared: false },
     ];
     if (isCicy) {
-      list.push({ key: 'meta', label: 'meta.yaml', scope: 'role', name: `${slug}/meta.yaml`, shared: true });
       list.push({ key: 'system', label: 'system.md', scope: 'role', name: `${slug}/system.md`, shared: true });
+      list.push({ key: 'meta', label: 'meta.yaml', scope: 'role', name: `${slug}/meta.yaml`, shared: true });
     }
     return list;
   }, [paneId, docName, slug, isCicy]);
