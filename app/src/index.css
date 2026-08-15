@@ -257,15 +257,15 @@ html[data-theme="light"] [class~="border-white/20"],
 html[data-theme="light"] [class~="border-white/25"] { border-color: #d4d4d8 !important; }
 html[data-theme="light"] [class*="divide-white"] > :not(:last-child) { border-color: #e4e4e7 !important; }
 html[data-theme="light"] [class~="bg-white/[0.02]"],
-html[data-theme="light"] [class~="bg-white/[0.03]"] { background-color: #ffffff !important; }
+html[data-theme="light"] [class~="bg-white/[0.03]"],
 html[data-theme="light"] [class~="bg-white/[0.04]"],
 html[data-theme="light"] [class~="bg-white/[0.05]"],
-html[data-theme="light"] [class~="bg-white/[0.06]"] { background-color: #f4f4f5 !important; }
+html[data-theme="light"] [class~="bg-white/[0.06]"],
 html[data-theme="light"] [class~="bg-white/[0.08]"],
 html[data-theme="light"] [class~="bg-white/[0.10]"] { background-color: #e4e4e7 !important; }
 html[data-theme="light"] [class~="bg-white/[0.01]"],
 html[data-theme="light"] [class~="bg-white/[0.015]"],
-html[data-theme="light"] [class~="bg-white/[0.025]"] { background-color: #ffffff !important; }
+html[data-theme="light"] [class~="bg-white/[0.025]"],
 html[data-theme="light"] [class~="bg-white/[0.035]"],
 html[data-theme="light"] [class~="bg-white/[0.045]"],
 html[data-theme="light"] [class~="bg-white/5"] { background-color: #f4f4f5 !important; }
@@ -424,6 +424,34 @@ html[data-theme="light"] [data-id="settings-theme-selector"] button[aria-pressed
   box-shadow: 0 1px 3px rgba(24, 24, 27, 0.10);
 }
 html[data-theme="light"] [data-id="settings-public-url-input"] { background-color: #ffffff !important; }
+
+html[data-theme="light"] [data-id^="project-agent-card-"][aria-pressed] {
+  background-color: #ffffff !important;
+  border-color: #e4e4e7 !important;
+  box-shadow: 0 8px 24px rgba(24, 24, 27, 0.08) !important;
+}
+html[data-theme="light"] [data-id^="project-agent-card-"][aria-pressed="true"] {
+  border-color: #60a5fa !important;
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.10) !important;
+}
+html[data-theme="light"] [data-id^="project-agent-card-attachment-"] {
+  background-color: #ffffff !important;
+  border-color: #e4e4e7 !important;
+}
+html[data-theme="light"] [data-id="project-agent-card-attachment-remove"] {
+  background-color: rgba(255, 255, 255, 0.94) !important;
+  color: #52525b !important;
+  border: 1px solid #d4d4d8;
+}
+html[data-theme="light"] [data-id^="team-panel-worker-w-"]:not([data-id*="wrap"]):not([data-id*="forks"]):not([data-id*="menu"]) {
+  background-color: #ffffff !important;
+  border-color: #e4e4e7 !important;
+}
+html[data-theme="light"] [data-id^="agent-role-market-"][class*="rounded-xl"] {
+  background-color: #ffffff !important;
+  border-color: #e4e4e7 !important;
+  box-shadow: 0 1px 2px rgba(24, 24, 27, 0.04);
+}
 
 html[data-theme="light"] [data-id="file-explorer-node"][data-active="true"],
 html[data-theme="light"] [data-id="file-explorer-node"][data-selected="true"] {
