@@ -89,6 +89,7 @@ const TERM_THEMES = {
     brightBlack: '#71717a', brightRed: '#dc2626', brightGreen: '#059669', brightYellow: '#ca8a04', brightBlue: '#2563eb', brightMagenta: '#c026d3', brightCyan: '#0891b2', brightWhite: '#18181b',
   },
 }
+const TERM_MINIMUM_CONTRAST = { dark: 1, light: 4.5 } as const
 
 const MSG_IN_INPUT = '1'
 const MSG_IN_PING = '2'
@@ -248,11 +249,15 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
     const host = hostRef.current
     if (!host || !ttydSrc) return
 
+    const initialTheme = getCicyTheme()
     const term = new Terminal({
       scrollback: 5000,
       fontSize: 13,
       fontFamily: MONO_FONT,
-      theme: TERM_THEMES[getCicyTheme()],
+      theme: TERM_THEMES[initialTheme],
+      // ANSI truecolor output can bypass our 16-color palette. Keep normal
+      // text readable without flattening intentional terminal colors.
+      minimumContrastRatio: TERM_MINIMUM_CONTRAST[initialTheme],
       allowProposedApi: true,
     })
     const fit = new FitAddon()
@@ -262,7 +267,11 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
     term.loadAddon(new Unicode11Addon())
     term.unicode.activeVersion = '11'
     term.open(host)
-    const onThemeChange = () => { term.options.theme = TERM_THEMES[getCicyTheme()] }
+    const onThemeChange = () => {
+      const theme = getCicyTheme()
+      term.options.theme = TERM_THEMES[theme]
+      term.options.minimumContrastRatio = TERM_MINIMUM_CONTRAST[theme]
+    }
     window.addEventListener('cicy-theme-change', onThemeChange)
     fit.fit()
     term.focus()

@@ -522,12 +522,7 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
 }
 
 @layer utilities {
-  /* TerminalView(无 iframe 终端):切换/重连期间旧画面压暗保留,新连接首帧
-     到达才 reset+写入 —— 无空窗防闪。xterm 容器撑满宿主。 */
-  .cicy-term-switching {
-    filter: brightness(0.45) saturate(0.6);
-    transition: filter 0.12s;
-  }
+  /* TerminalView(无 iframe 终端):连接状态由角标表达；切换时保持终端原色。 */
   .cicy-term-host .xterm {
     height: 100%;
   }
