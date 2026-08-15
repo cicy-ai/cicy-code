@@ -425,6 +425,16 @@ html[data-theme="light"] [data-id="settings-theme-selector"] button[aria-pressed
 }
 html[data-theme="light"] [data-id="settings-public-url-input"] { background-color: #ffffff !important; }
 
+html[data-theme="light"] [data-id="file-explorer-node"][data-active="true"],
+html[data-theme="light"] [data-id="file-explorer-node"][data-selected="true"] {
+  background-color: #dbeafe !important;
+  color: #1e3a8a !important;
+  --tw-ring-color: #93c5fd !important;
+}
+html[data-theme="light"] [data-id="file-explorer-node"]:hover {
+  background-color: #eff6ff !important;
+}
+
 html[data-theme="light"] .cm-panels,
 html[data-theme="light"] .cm-cicy-search { background-color: #fafafa !important; color: #27272a !important; }
 html[data-theme="light"] .cm-panels.cm-panels-top { border-bottom-color: #d4d4d8 !important; }
@@ -548,6 +558,12 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
   .cicy-term-host .xterm .xterm-scrollable-element > .scrollbar.vertical,
   .cicy-term-host .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
     width: 5px !important;
+  }
+  .cicy-term-host .xterm .xterm-scrollable-element > .scrollbar.horizontal {
+    display: none !important;
+  }
+  .cicy-term-host .xterm-viewport {
+    overflow-x: hidden !important;
   }
   .cicy-term-host .xterm-viewport::-webkit-scrollbar {
     width: 5px;
