@@ -100,8 +100,56 @@ html[data-theme="light"] [class~="text-zinc-200"] { color: #18181b !important; }
 html[data-theme="light"] [class~="text-zinc-300"] { color: #3f3f46 !important; }
 html[data-theme="light"] [class~="text-zinc-400"] { color: #52525b !important; }
 html[data-theme="light"] [class~="text-zinc-500"] { color: #71717a !important; }
-html[data-theme="light"] [class~="text-zinc-600"],
-html[data-theme="light"] [class~="text-zinc-700"] { color: #a1a1aa !important; }
+html[data-theme="light"] [class~="text-zinc-600"] { color: #71717a !important; }
+html[data-theme="light"] [class~="text-zinc-700"] { color: #71717a !important; }
+
+/* Dark-theme semantic foregrounds use pale 100-400 shades. On a light
+   surface those shades lose contrast, so keep the semantic hue but use the
+   corresponding readable dark foreground. Opacity suffixes are intentionally
+   included: they are especially common in notices and inspector hints. */
+html[data-theme="light"] [class*="text-sky-1"],
+html[data-theme="light"] [class*="text-sky-2"],
+html[data-theme="light"] [class*="text-sky-3"],
+html[data-theme="light"] [class*="text-sky-4"] { color: #0369a1 !important; }
+html[data-theme="light"] [class*="text-amber-1"],
+html[data-theme="light"] [class*="text-amber-2"],
+html[data-theme="light"] [class*="text-amber-3"],
+html[data-theme="light"] [class*="text-amber-4"] { color: #92400e !important; }
+html[data-theme="light"] [class*="text-red-1"],
+html[data-theme="light"] [class*="text-red-2"],
+html[data-theme="light"] [class*="text-red-3"],
+html[data-theme="light"] [class*="text-red-4"],
+html[data-theme="light"] [class*="text-rose-1"],
+html[data-theme="light"] [class*="text-rose-2"],
+html[data-theme="light"] [class*="text-rose-3"],
+html[data-theme="light"] [class*="text-rose-4"] { color: #b91c1c !important; }
+html[data-theme="light"] [class*="text-emerald-1"],
+html[data-theme="light"] [class*="text-emerald-2"],
+html[data-theme="light"] [class*="text-emerald-3"],
+html[data-theme="light"] [class*="text-emerald-4"] { color: #047857 !important; }
+
+/* Preserve semantic status surfaces without carrying dark-only 800-950
+   backgrounds into the light palette. */
+html[data-theme="light"] [class*="bg-sky-800"],
+html[data-theme="light"] [class*="bg-sky-900"] { background-color: #dbeafe !important; }
+html[data-theme="light"] [class*="bg-amber-900"],
+html[data-theme="light"] [class*="bg-amber-950"] { background-color: #fef3c7 !important; }
+html[data-theme="light"] [class*="bg-red-800"],
+html[data-theme="light"] [class*="bg-red-900"],
+html[data-theme="light"] [class*="bg-red-950"] { background-color: #fee2e2 !important; }
+html[data-theme="light"] [class*="bg-rose-900"],
+html[data-theme="light"] [class*="bg-rose-950"] { background-color: #ffe4e6 !important; }
+html[data-theme="light"] [class*="bg-emerald-900"],
+html[data-theme="light"] [class*="bg-emerald-950"] { background-color: #d1fae5 !important; }
+html[data-theme="light"] [class*="border-sky-7"],
+html[data-theme="light"] [class*="border-sky-8"] { border-color: #7dd3fc !important; }
+html[data-theme="light"] [class*="border-amber-7"],
+html[data-theme="light"] [class*="border-amber-8"],
+html[data-theme="light"] [class*="border-amber-9"] { border-color: #fbbf24 !important; }
+html[data-theme="light"] [class*="border-red-7"],
+html[data-theme="light"] [class*="border-red-8"],
+html[data-theme="light"] [class*="border-red-9"],
+html[data-theme="light"] [class*="border-rose-7"] { border-color: #fca5a5 !important; }
 
 html[data-theme="light"] [class~="border-white/[0.06]"],
 html[data-theme="light"] [class~="border-white/[0.08]"],
@@ -195,6 +243,22 @@ html[data-theme="light"] [data-id="knowledge-graph-toolbar"],
 html[data-theme="light"] [data-id="knowledge-graph-canvas"] { background-color: #fafafa !important; }
 html[data-theme="light"] [data-id="knowledge-graph-search"] { background-color: #ffffff !important; color: #27272a !important; border-color: #d4d4d8 !important; }
 html[data-theme="light"] [data-id="knowledge-graph-refresh"] { background-color: rgba(255,255,255,0.9) !important; color: #52525b !important; border-color: #d4d4d8 !important; }
+
+/* Skill detail markdown uses dark translucent table/code containers that are
+   structural content, not modal backdrops. Give those named surfaces an
+   explicit light treatment so command references remain readable. */
+html[data-theme="light"] [data-id="skill-md-table"] {
+  background-color: #fafafa !important;
+  border-color: #d4d4d8 !important;
+}
+html[data-theme="light"] [data-id="skill-md-code-block"] {
+  background-color: #f4f4f5 !important;
+  border-color: #d4d4d8 !important;
+}
+html[data-theme="light"] [data-id="skill-md-content"] code {
+  background-color: #fef3c7 !important;
+  color: #92400e !important;
+}
 
 html[data-theme="light"] :is(input, textarea, select)[class*="bg-black"] {
   background-color: #ffffff !important;
