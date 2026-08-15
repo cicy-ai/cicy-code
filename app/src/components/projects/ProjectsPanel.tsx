@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
 import { cn, copyToClipboard } from '../../lib/utils';
+import { guidanceFilenameForAgentType } from '../../lib/agentType';
 import type { AgentLiveMetrics } from '../../lib/agentMetrics';
 import { metricsFromCurrentReply } from '../../lib/agentMetrics';
 import { ModelTag } from '../../lib/modelTag';
@@ -108,7 +109,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachment, working, teamId, selected, removable, footer, width, height, onRemove, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachment, working, teamId, selected, removable, footer, width, height, onRemove, onOpenGuidance, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
@@ -122,6 +123,7 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
   width: number;
   height: number;
   onRemove: () => void;
+  onOpenGuidance: () => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizePointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -168,6 +170,7 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
             {metrics?.model ? <ModelTag model={metrics.model} className="shrink-0" /> : null}
           </div>
         </div>
+        <div data-id="project-agent-card-header-actions" className="flex shrink-0 items-center gap-0.5">
         <div data-id="project-agent-card-menu-wrap" ref={menuRef} className="relative">
           <button
             type="button"
@@ -192,6 +195,17 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
               ) : null}
             </div>
           ) : null}
+        </div>
+        <button
+          type="button"
+          data-id={`project-agent-card-guidance-${shortPaneId(agent.paneId)}`}
+          onClick={(event) => { event.stopPropagation(); onOpenGuidance(); }}
+          className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
+          title={guidanceFilenameForAgentType(agent.agentType) || 'AGENTS.md'}
+          aria-label={guidanceFilenameForAgentType(agent.agentType) || 'AGENTS.md'}
+        >
+          <FileText className="h-4 w-4" />
+        </button>
         </div>
       </div>
 
@@ -276,7 +290,7 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
   );
 }
 
-export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, dockOpen = false, onOpenAgent, onCreateAgent = () => {} }: {
+export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, dockOpen = false, onOpenAgent, onCreateAgent = () => {}, onOpenGuidance = () => {} }: {
   agents: ProjectAgent[];
   statuses?: Record<string, any>;
   topRightControls?: ReactNode;
@@ -285,6 +299,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   dockOpen?: boolean;
   onOpenAgent: (paneId: string) => void;
   onCreateAgent?: () => void;
+  onOpenGuidance?: (paneId: string) => void;
 }) {
   const { t } = useTranslation('workspace');
   const { confirm, prompt, node: dialogsNode } = useDialogs();
@@ -1102,6 +1117,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                   </footer>
                 ) : null}
                 onRemove={() => { void removeAgent(agent); }}
+                onOpenGuidance={() => onOpenGuidance(agent.paneId)}
                 onResizePointerDown={(event) => beginAgentResize(event, agent, index)}
                 onResizePointerMove={resizeAgent}
                 onResizePointerUp={(event) => endAgentResize(event, agent)}

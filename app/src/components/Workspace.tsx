@@ -2193,6 +2193,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   setCreateAgentInitialValues(undefined);
                   setCreateAgentOpen(true);
                 }}
+                onOpenGuidance={openPaneMemory}
               />
               {cliFixedContent}
               </>

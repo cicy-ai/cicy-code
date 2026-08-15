@@ -132,6 +132,19 @@ describe('<ProjectsPanel /> project creation', () => {
 });
 
 describe('<ProjectsPanel /> agent prompt footer', () => {
+  it('opens the selected agent guidance document from the header action', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    const onOpenGuidance = vi.fn();
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' }]} onOpenAgent={vi.fn()} onOpenGuidance={onOpenGuidance} />);
+
+    const button = await screen.findByRole('button', { name: 'CLAUDE.md' });
+    fireEvent.click(button);
+
+    expect(onOpenGuidance).toHaveBeenCalledWith('w-101:main.0');
+  });
+
   it('stays hidden until the card is selected and ignores IME confirmation Enter', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
