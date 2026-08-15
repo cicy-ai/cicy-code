@@ -35,7 +35,6 @@ const FilesView = lazy(() => import('./files/FilesView'));
 const KnowledgePanel = lazy(() => import('./knowledge/KnowledgePanel'));
 // Lazy: the team roster opens on demand (icon next to create-worker).
 const TeamRosterPanel = lazy(() => import('./layout/TeamRosterPanel'));
-const AgentGuidanceDetail = lazy(() => import('./layout/AgentGuidanceDetail'));
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
 import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
@@ -347,7 +346,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(() => /^#\/project\/[^/?#]+/.test(window.location.hash) || cache.get(projectsOpenKey(paneId), false) === true);
   const [portsOpen, setPortsOpen] = useState(false);
-  const [guidanceDetailPaneId, setGuidanceDetailPaneId] = useState('');
   const [fixedDomain, setFixedDomain] = useState('');
   const [proxyAvailable, setProxyAvailable] = useState(false);
   useEffect(() => {
@@ -1554,17 +1552,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentOpen(true);
   }, [paneId]);
   const openAgentGuidanceDetail = useCallback((targetPaneId: string) => {
-    const clean = targetPaneId.replace(/:.*$/, '');
-    if (!clean) return;
-    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
-    setGuidanceDetailPaneId(clean);
-    setCliContentMode('fixed');
-    setCliContentOpen(true);
-  }, [paneId]);
-  const closeAgentGuidanceDetail = useCallback(() => {
-    setGuidanceDetailPaneId('');
-    setCliContentOpen(false);
-  }, []);
+    openPaneMemory(targetPaneId);
+  }, [openPaneMemory]);
   useEffect(() => {
     const revealRole = (event: Event) => {
       const slug = String((event as CustomEvent).detail?.slug || '').trim();
@@ -1740,15 +1729,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         )}
         onMouseDown={handleCliDrawerResizeStart}
       />
-      {guidanceDetailPaneId ? (
-        <Suspense fallback={null}>
-          <AgentGuidanceDetail
-            paneId={guidanceDetailPaneId}
-            title={projectAgents.find((agent) => agent.paneId.replace(/:.*$/, '') === guidanceDetailPaneId)?.title || guidanceDetailPaneId}
-            onClose={closeAgentGuidanceDetail}
-          />
-        </Suspense>
-      ) : null}
       <div data-id="cli-content-tabs-wrap" className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--vsc-border)] px-3">
         <div data-id="cli-content-tabs" className="flex min-w-0 flex-1 gap-1 overflow-x-auto whitespace-nowrap scrollbar-hairline">
           {cliContentTabs.map((item) => {
