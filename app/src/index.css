@@ -464,6 +464,21 @@ html[data-theme="light"] [data-id="terminal-view-retrying"] {
 html[data-theme="light"] [data-id="terminal-view-retrying-dot"] {
   background-color: #d97706 !important;
 }
+[data-id="project-agent-card-live-body"]::-webkit-scrollbar {
+  width: 6px;
+}
+[data-id="project-agent-card-live-body"]::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-id="project-agent-card-live-body"]::-webkit-scrollbar-thumb {
+  background: rgba(161, 161, 170, 0.38);
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+[data-id="project-agent-card-live-body"]:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(113, 113, 122, 0.55);
+}
 html[data-theme="light"] [data-id^="team-panel-worker-w-"]:not([data-id*="wrap"]):not([data-id*="forks"]):not([data-id*="menu"]) {
   background-color: #ffffff !important;
   border-color: #e4e4e7 !important;

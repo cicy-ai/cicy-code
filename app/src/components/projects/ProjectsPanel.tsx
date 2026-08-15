@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { Check, FileText, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, Square, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { Check, FileText, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -161,11 +161,11 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
         selected ? 'border-blue-500 ring-1 ring-blue-500/60' : 'border-white/[0.08]',
       )}
     >
-      <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-hidden p-5">
+      <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-4 pt-5">
       <div data-id="project-agent-card-header" className="flex items-start gap-3">
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
-            <h3 data-id="project-agent-card-title" className="truncate text-[17px] font-semibold text-zinc-100">{agent.title || agent.paneId}</h3>
+            <h3 data-id="project-agent-card-title" className="truncate text-[18px] font-semibold tracking-[-0.01em] text-zinc-100">{agent.title || agent.paneId}</h3>
             {agent.agentType ? <span data-id="project-agent-card-agent-type" className="shrink-0 font-mono text-[12px] text-zinc-500">{agent.agentType}</span> : null}
             {metrics?.model ? <ModelTag model={metrics.model} className="shrink-0" /> : null}
           </div>
@@ -209,7 +209,7 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
         </div>
       </div>
 
-      <div data-id="project-agent-card-metrics" className="mt-2 flex h-7 min-w-0 items-center gap-2 border-b border-white/[0.08] pb-2 font-mono text-xs text-zinc-500">
+      <div data-id="project-agent-card-metrics" className="mt-2.5 flex h-8 min-w-0 items-center gap-2 border-b border-white/[0.08] pb-2.5 font-mono text-[13px] text-zinc-500">
         <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
         <button
           type="button"
@@ -233,19 +233,19 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
         ) : null}
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
-      <div data-id="project-agent-card-live-body" className="mt-3 min-h-0 flex-1 space-y-2 overflow-hidden text-[11px] leading-4">
+      <div data-id="project-agent-card-live-body" onWheel={(event) => event.stopPropagation()} className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-2 text-[14px] leading-[21px] [scrollbar-width:thin]">
         {latest?.latest_question ? (
-          <div data-id="project-agent-card-latest-question" className="max-h-52 overflow-hidden text-zinc-300 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
+          <div data-id="project-agent-card-latest-question" className="ml-auto max-w-[92%] rounded-xl rounded-br-sm bg-blue-500/10 px-3 py-2 text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
             <MarkdownBlock text={previewableMarkdown(latest.latest_question)} />
           </div>
         ) : null}
         {latest?.latest_response ? (
-          <div data-id="project-agent-card-latest-response" className="max-h-52 overflow-hidden text-zinc-400 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
+          <div data-id="project-agent-card-latest-response" className="text-zinc-400 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
             <MarkdownBlock text={previewableMarkdown(latest.latest_response)} />
           </div>
         ) : null}
         {latest?.latest_tool?.name ? (
-          <div data-id="project-agent-card-latest-tool" className="min-w-0 line-clamp-2 font-mono text-zinc-500">
+          <div data-id="project-agent-card-latest-tool" className="min-w-0 line-clamp-2 rounded-lg border border-white/[0.06] bg-white/[0.025] px-2.5 py-2 font-mono text-[12px] leading-4 text-zinc-500">
             {`${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}`}
           </div>
         ) : null}
@@ -1057,7 +1057,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                   <footer
                     data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`}
                     onClick={(event) => event.stopPropagation()}
-                    className="flex h-9 min-h-9 shrink-0 items-center rounded-b-2xl border-t border-white/[0.08] bg-[#15161b] px-3"
+                    className="flex h-12 min-h-12 shrink-0 items-center rounded-b-2xl border-t border-white/[0.08] bg-[#15161b] px-3"
                   >
                     <input
                       data-id={`project-agent-prompt-file-input-${cardShortId}`}
@@ -1071,7 +1071,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       data-id={`project-agent-prompt-attach-${cardShortId}`}
                       onClick={() => document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-file-input-${cardShortId}"]`)?.click()}
                       aria-label="Attach"
-                      className="mr-2 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.06] text-zinc-300 hover:border-white/20 hover:bg-white/[0.10] hover:text-white"
+                      className="mr-2 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.06] text-zinc-300 hover:border-white/20 hover:bg-white/[0.10] hover:text-white"
                     >
                       <Paperclip className="h-4 w-4" strokeWidth={2.25} />
                     </button>
@@ -1095,7 +1095,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       }}
                       placeholder={t('projectMessagePlaceholder')}
                       autoFocus
-                      className="min-w-0 flex-1 bg-transparent text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600"
+                      className="min-w-0 flex-1 bg-transparent text-[14px] leading-5 text-zinc-200 outline-none placeholder:text-zinc-600"
                     />
                     {cardBusy ? (
                       <button
@@ -1113,7 +1113,19 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                           </span>
                         )}
                       </button>
-                    ) : null}
+                    ) : (
+                      <button
+                        type="button"
+                        data-id={`project-agent-prompt-send-${shortPaneId(agent.paneId)}`}
+                        onClick={() => { void sendAgentMessage(agent); }}
+                        disabled={!(agentMessages[shortPaneId(agent.paneId)] || '').trim() && !(agentAttachments[cardShortId] || []).length}
+                        className="ml-2 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-600 text-white transition hover:bg-blue-500 disabled:bg-white/[0.06] disabled:text-zinc-600"
+                        title={t('send', { defaultValue: '发送' })}
+                        aria-label={t('send', { defaultValue: '发送' })}
+                      >
+                        <SendHorizontal className="h-4 w-4" />
+                      </button>
+                    )}
                   </footer>
                 ) : null}
                 onRemove={() => { void removeAgent(agent); }}
