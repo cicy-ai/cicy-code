@@ -109,7 +109,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, selected, removable, footer, width, height, onRemove, onOpenGuidance, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, selected, removable, footer, width, height, onSelect, onRemove, onOpenGuidance, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
@@ -121,6 +121,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, sele
   footer?: ReactNode;
   width: number;
   height: number;
+  onSelect: () => void;
   onRemove: () => void;
   onOpenGuidance: () => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -174,6 +175,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, sele
     <article
       data-id={`project-agent-card-${shortPaneId(agent.paneId)}`}
       aria-pressed={selected}
+      onClick={onSelect}
       style={{ width, height }}
       className={cn(
         'relative flex min-h-[240px] min-w-[260px] cursor-pointer flex-col rounded-2xl border bg-[#111216] shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
@@ -257,7 +259,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, sele
         ref={bodyScrollRef}
         data-id="project-agent-card-live-body"
         onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
         onScroll={updateBodyScrollButton}
         className="h-full min-h-0 w-full cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-0.5 text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
@@ -1136,6 +1137,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 removable={Boolean(selectedProject.api_id)}
                 width={layout.width}
                 height={layout.height}
+                onSelect={() => toggleAgentSelection(agent)}
                 footer={selectedAgentIds.has(shortPaneId(agent.paneId)) ? (
                   <footer
                     data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`}

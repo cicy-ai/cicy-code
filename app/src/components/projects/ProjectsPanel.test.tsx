@@ -164,7 +164,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     const canvasNode = card.closest('[data-id="project-canvas-node-w-101"]') as HTMLElement;
     fireEvent.pointerDown(canvasNode, { button: 0, pointerId: 1, clientX: 120, clientY: 120 });
     fireEvent.pointerUp(canvasNode, { pointerId: 1, clientX: 120, clientY: 120 });
-    fireEvent.click(card);
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-live-body"]') as HTMLElement);
 
     const input = await waitFor(() => {
       const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
