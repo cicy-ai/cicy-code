@@ -572,7 +572,7 @@
   "projectAdd": "添加",
   "projectSearchAgent": "搜索 Agent…",
   "projectSelectedAgents": "已选择 {{count}} 个 Agent",
-  "projectMessagePlaceholder": "给选中的 Agent 发送消息…",
+  "projectMessagePlaceholder": "给 agent 发送消息",
   "projectSelectAgentFirst": "先选择一个或多个 Agent 再发送消息",
   "projectSendMessage": "发送消息",
   "projectMessageSent": "已发送给 {{count}} 个 Agent",

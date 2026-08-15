@@ -176,7 +176,7 @@ func renderReplyItemForIM(item map[string]interface{}) string {
 		// Gateway/network diagnostics are useful in reply.json and local logs, but
 		// leaking localhost ports and Go socket errors into Feishu/WeChat makes a
 		// transient retry look like several separate user-facing failures.
-		if imIsTechnicalTransportFailure(txt) {
+		if isTechnicalTransportFailure(txt) {
 			return ""
 		}
 		return imTruncateLongString(txt, 2500)
@@ -196,7 +196,7 @@ func renderReplyItemForIM(item map[string]interface{}) string {
 		if errText == "" {
 			return "❌ " + name + " 失败"
 		}
-		if imIsTechnicalTransportFailure("生成失败 " + errText) {
+		if isTechnicalTransportFailure("生成失败 " + errText) {
 			return ""
 		}
 		return "❌ " + name + " 失败\n" + imTruncateLongString(errText, 500)
@@ -204,7 +204,7 @@ func renderReplyItemForIM(item map[string]interface{}) string {
 	return ""
 }
 
-func imIsTechnicalTransportFailure(text string) bool {
+func isTechnicalTransportFailure(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	if !strings.Contains(lower, "生成失败") && !strings.Contains(lower, "http 5") {
 		return false

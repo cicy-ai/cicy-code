@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
   removeGroupPane: vi.fn(),
   updateGroupPaneLayout: vi.fn(),
   getAgentCurrentReply: vi.fn(),
+  uploadAssetFile: vi.fn(),
 }));
 const agentSend = vi.hoisted(() => ({ sendToAgent: vi.fn() }));
 
@@ -41,6 +42,8 @@ beforeEach(() => {
   api.getGroup.mockResolvedValue({ data: { panes: [] } });
   api.createGroup.mockResolvedValue({ data: { id: 3 } });
   api.getAgentCurrentReply.mockResolvedValue({ data: { question: '', items: [], status: 'completed' } });
+  api.uploadAssetFile.mockResolvedValue({ data: { file: { file_ref: '/home/cicy/cicy-ai/assets/queued.png' } } });
+  vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:queued-image'), revokeObjectURL: vi.fn() });
 });
 
 describe('<ProjectsPanel /> floating action button', () => {
@@ -83,6 +86,30 @@ describe('<ProjectsPanel /> project view cache', () => {
     expect(node.style.top).toBe('80px');
     expect(document.querySelector('[data-id="project-agent-card-w-101"]')).toHaveStyle({ width: '420px', height: '360px' });
     expect(document.querySelector('[data-id="project-canvas-zoom-value"]')).toHaveTextContent('125%');
+  });
+
+  it('brings default-project cards into view when agents arrive after the project', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({
+      zoom: 1,
+      pan: { x: 60, y: 60 },
+      layouts: { 'w-101': { x: 4000, y: 3000, z: 1, width: 300, height: 320 } },
+    }));
+    const { rerender } = render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
+    await screen.findByText('projectDefault');
+    const canvas = document.querySelector('[data-id="project-infinite-canvas"]') as HTMLElement;
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 700 });
+
+    rerender(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' }]} onOpenAgent={vi.fn()} />);
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-w-101"]')).toBeInTheDocument());
+    await waitFor(() => {
+      const cached = JSON.parse(localStorage.getItem('cicy_project_view:default') || '{}');
+      expect(cached.pan.x).not.toBe(60);
+    });
   });
 });
 
@@ -135,6 +162,66 @@ describe('<ProjectsPanel /> project creation', () => {
 });
 
 describe('<ProjectsPanel /> agent prompt footer', () => {
+  it('shows the realtime latest question instead of a stale reply snapshot', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    api.getAgentCurrentReply.mockResolvedValue({ data: { question: '上一条消息', items: [], status: 'thinking' } });
+    render(<ProjectsPanel
+      agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'thinking' }]}
+      statuses={{ 'w-101:main.0': { status: 'thinking', latest_question: '最新消息', updated_at: '2' } }}
+      onOpenAgent={vi.fn()}
+    />);
+
+    expect(await screen.findByText('最新消息')).toBeInTheDocument();
+    expect(screen.queryByText('上一条消息')).not.toBeInTheDocument();
+  });
+
+  it('renders reply markdown and unwraps Codex exec tool calls', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    api.getAgentCurrentReply.mockResolvedValue({
+      data: {
+        question: '检查输出\n\n[image.png](/home/cicy/cicy-ai/assets/2026/08/15/example.png)',
+        items: [
+          { type: 'text', text: '**结论**\n\n- 第一项\n- 第二项' },
+          {
+            type: 'tool_use',
+            name: 'exec',
+            input: 'const r = await tools.exec_command({cmd:"cicy-knowledge recall \\\"tool use\\\"",workdir:"/tmp"}); text(r.output);',
+            output: 'Script completed\nWall time 0.1 seconds\nOutput:\n- 命中一\n- 命中二',
+          },
+          { type: 'tool_use', name: 'wait', input: '{"cell_id":"117","yield_time_ms":30000}' },
+        ],
+        status: 'completed',
+      },
+    });
+
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+
+    const response = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-latest-response"]');
+      if (!node) throw new Error('reply did not render');
+      return node as HTMLElement;
+    });
+    expect(response.querySelector('strong')).toHaveTextContent('结论');
+    expect(await screen.findByText('检查输出')).toBeInTheDocument();
+    expect(await screen.findByText('image.png')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-latest-question"] img')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-question-attachment"]')).not.toHaveTextContent('/home/cicy/cicy-ai/assets/');
+    expect(response.querySelectorAll('li')).toHaveLength(2);
+    expect(await screen.findByText('exec_command')).toBeInTheDocument();
+    expect(screen.queryByText('wait')).not.toBeInTheDocument();
+    expect(screen.queryByText(/cell_id/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/const r = await tools\.exec_command/)).not.toBeInTheDocument();
+
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-reply-tool"] summary') as HTMLElement);
+    expect(await screen.findAllByText('cicy-knowledge recall "tool use"')).toHaveLength(2);
+    const result = document.querySelector('[data-id="project-agent-card-tool-result-markdown"]') as HTMLElement;
+    expect(result.querySelectorAll('li')).toHaveLength(2);
+  });
+
   it('opens the selected agent guidance document from the header action', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
@@ -148,19 +235,19 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(onOpenGuidance).toHaveBeenCalledWith('w-101:main.0');
   });
 
-  it('stays hidden until the card is selected and ignores IME confirmation Enter', async () => {
+  it('always shows the footer and ignores IME confirmation Enter', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
     });
     agentSend.sendToAgent.mockResolvedValue(undefined);
-    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' }]} onOpenAgent={vi.fn()} />);
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' }]} statuses={{ 'w-101:main.0': { status: 'completed', latest_response: '上一轮回答' } }} onOpenAgent={vi.fn()} />);
 
     const card = await waitFor(() => {
       const node = document.querySelector('[data-id="project-agent-card-w-101"]');
       if (!node) throw new Error('agent card did not render');
       return node as HTMLElement;
     });
-    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
     const canvasNode = card.closest('[data-id="project-canvas-node-w-101"]') as HTMLElement;
     fireEvent.pointerDown(canvasNode, { button: 0, pointerId: 1, clientX: 120, clientY: 120 });
     fireEvent.pointerUp(canvasNode, { pointerId: 1, clientX: 120, clientY: 120 });
@@ -182,7 +269,123 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
     await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('中文任务')).toBeInTheDocument();
+    expect(screen.queryByText('上一轮回答')).not.toBeInTheDocument();
     expect(input).toHaveValue('');
     await waitFor(() => expect(input).toHaveFocus());
+  });
+
+  it('queues multiple prompts while thinking and sends them together when idle', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+    const thinkingAgent = { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'thinking' };
+    const { rerender } = render(<ProjectsPanel agents={[thinkingAgent]} statuses={{ 'w-101:main.0': { status: 'thinking', updated_at: '1' } }} onOpenAgent={vi.fn()} />);
+
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(card);
+    const input = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
+      if (!node) throw new Error('prompt did not open');
+      return node as HTMLInputElement;
+    });
+
+    expect(document.querySelector('[data-id="project-agent-prompt-cancel-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-prompt-send-w-101"]')).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: '第一条' } });
+    expect(document.querySelector('[data-id="project-agent-prompt-cancel-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-prompt-send-w-101"]')).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    fireEvent.change(input, { target: { value: '第二条' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    expect(agentSend.sendToAgent).not.toHaveBeenCalled();
+    expect(document.querySelectorAll('[data-id="project-agent-message-queue-item"]')).toHaveLength(1);
+    expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).toHaveTextContent('第一条 第二条');
+
+    // The pane list can lag and still say thinking. The fresher status snapshot
+    // reaching completed must release the queue.
+    rerender(<ProjectsPanel agents={[thinkingAgent]} statuses={{ 'w-101:main.0': { status: 'completed', updated_at: '2' } }} onOpenAgent={vi.fn()} />);
+    await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledWith(
+      'w-101:main.0',
+      '第一条\n\n第二条',
+      { submit: true, agentType: 'codex' },
+    ));
+    expect(document.querySelectorAll('[data-id="project-agent-message-queue-item"]')).toHaveLength(0);
+    expect(await screen.findByText(/第一条/)).toBeInTheDocument();
+  });
+
+  it('keeps a queued image visible when another text message is queued', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    const thinkingAgent = { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'thinking' };
+    render(<ProjectsPanel agents={[thinkingAgent]} statuses={{ 'w-101:main.0': { status: 'thinking' } }} onOpenAgent={vi.fn()} />);
+
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(card);
+    const fileInput = document.querySelector('[data-id="project-agent-prompt-file-input-w-101"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [new File(['png'], 'queued.png', { type: 'image/png' })] } });
+    await waitFor(() => expect(document.querySelector('[data-id^="project-agent-card-attachment-"]')).toBeInTheDocument());
+    await waitFor(() => expect((document.querySelector('[data-id="project-agent-prompt-send-w-101"]') as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(document.querySelector('[data-id="project-agent-prompt-send-w-101"]') as HTMLElement);
+
+    await waitFor(() => expect(document.querySelector('[data-id^="project-agent-message-queue-attachment-"]')).toBeInTheDocument());
+    const input = document.querySelector('[data-id="project-agent-prompt-input-w-101"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '继续检查图片' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    expect(document.querySelector('[data-id^="project-agent-message-queue-attachment-"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).toHaveTextContent('继续检查图片');
+    expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).not.toHaveTextContent('/home/cicy/cicy-ai/assets/queued.png');
+    expect(agentSend.sendToAgent).not.toHaveBeenCalled();
+
+    fireEvent.click(document.querySelector('[data-id="project-agent-message-queue-edit-w-101"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).not.toBeInTheDocument();
+    expect(input).toHaveValue('继续检查图片');
+    expect(document.querySelector('[data-id="project-agent-card-attachment-media"]')).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).toBeInTheDocument());
+    fireEvent.click(document.querySelector('[data-id="project-agent-message-queue-delete-w-101"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).not.toBeInTheDocument();
+    expect(agentSend.sendToAgent).not.toHaveBeenCalled();
+  });
+
+  it('clears an idle-send image immediately while delivery is still pending', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    let finishSend!: () => void;
+    agentSend.sendToAgent.mockReturnValue(new Promise<void>((resolve) => { finishSend = resolve; }));
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'idle' }]} onOpenAgent={vi.fn()} />);
+
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(card);
+    const fileInput = document.querySelector('[data-id="project-agent-prompt-file-input-w-101"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [new File(['png'], 'idle.png', { type: 'image/png' })] } });
+    await waitFor(() => expect((document.querySelector('[data-id="project-agent-prompt-send-w-101"]') as HTMLButtonElement).disabled).toBe(false));
+    const input = document.querySelector('[data-id="project-agent-prompt-input-w-101"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '检查图片' } });
+    fireEvent.click(document.querySelector('[data-id="project-agent-prompt-send-w-101"]') as HTMLElement);
+
+    expect(input).toHaveValue('');
+    expect(document.querySelector('[data-id="project-agent-card-attachments"]')).not.toBeInTheDocument();
+    expect(await screen.findByText('检查图片')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-question-attachment"] img')).toBeInTheDocument();
+    finishSend();
   });
 });

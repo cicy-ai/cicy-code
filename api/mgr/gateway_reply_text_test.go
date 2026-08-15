@@ -39,6 +39,18 @@ func TestRenderReplyItemForIMHidesTechnicalTransportFailure(t *testing.T) {
 	}
 }
 
+func TestGatewayFiltersEveryTechnicalTransportFailureBeforePublishing(t *testing.T) {
+	items := []map[string]interface{}{
+		{"type": "text", "text": "正常回答"},
+		{"type": "text", "text": "⚠️ 生成失败（HTTP 502）\n\nlocal error: tls: bad record MAC"},
+		{"type": "text", "text": "⚠️ 生成失败（HTTP 502）\n\nlocal error: tls: bad record MAC"},
+	}
+	got := aiGatewayFilterTechnicalTransportFailures(items)
+	if len(got) != 1 || got[0]["text"] != "正常回答" {
+		t.Fatalf("technical transport failures reached publish payload: %#v", got)
+	}
+}
+
 func TestRenderReplyItemForIMHidesTechnicalToolError(t *testing.T) {
 	got := renderReplyItemForIM(map[string]interface{}{
 		"type": "tool_error", "name": "fetch", "error": "dial tcp 127.0.0.1:9001: connection reset by peer",

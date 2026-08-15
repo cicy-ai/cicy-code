@@ -1338,10 +1338,6 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 		if r := []rune(errorText); len(r) > 1200 {
 			errorText = strings.TrimSpace(string(r[:1200])) + "…"
 		}
-		if s.reply.Answer == "" {
-			s.reply.Answer = errorText
-			requestSpan.AnswerPreview = aiGatewayPreviewText(errorText, 220)
-		}
 		// Persist the failure DETAIL as a visible item (HTTP <statusCode> + message)
 		// so the history view shows WHY it failed, not just a bare "failed" status.
 		// Plain text (no cicy_outcome tag) → renders as normal markdown content.
@@ -1351,14 +1347,30 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 				// "HTTP 200" would be misleading for an aborted-empty stream.
 				detail = "⚠️ 生成中断\n\n" + errorText
 			}
-			s.reply.Items = append(s.reply.Items, map[string]interface{}{
-				"id":   len(s.reply.Items) + 1,
-				"type": "text",
-				"text": detail,
-			})
+			// Transient socket/TLS diagnostics remain available in gateway logs, but
+			// must not become user-visible conversation content in reply.json.
+			if !isTechnicalTransportFailure(detail) {
+				if s.reply.Answer == "" {
+					s.reply.Answer = errorText
+					requestSpan.AnswerPreview = aiGatewayPreviewText(errorText, 220)
+				}
+				s.reply.Items = append(s.reply.Items, map[string]interface{}{
+					"id":   len(s.reply.Items) + 1,
+					"type": "text",
+					"text": detail,
+				})
+			}
 		}
 		s.current.Status = "failed"
 		s.reply.Status = "failed"
+		// Some providers surface the same transport failure both as a parsed text
+		// item and as the synthesized failure detail above. Remove every copy before
+		// reply.json, reply hooks, and current_updated are produced.
+		s.reply.Items = aiGatewayFilterTechnicalTransportFailures(s.reply.Items)
+		if isTechnicalTransportFailure(fmt.Sprintf("生成失败 HTTP %d %s", statusCode, s.reply.Answer)) {
+			s.reply.Answer = ""
+			requestSpan.AnswerPreview = ""
+		}
 	} else {
 		s.current.Status = ""
 		s.reply.Status = ""
@@ -1500,6 +1512,17 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	// 调试/数据收集：当 CICY_GATEWAY_REPLY_MIRROR=1 时把本次完整的请求+响应+解析结果
 	// 镜像写到 reply_mirror/ 目录，供后续分析。完全不影响主路径。
 	aiGatewayWriteReplyMirror(s, statusCode, headers, responseBody, parsed, replySnapshot)
+}
+
+func aiGatewayFilterTechnicalTransportFailures(items []map[string]interface{}) []map[string]interface{} {
+	filtered := make([]map[string]interface{}, 0, len(items))
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(aiGatewayString(item["type"])), "text") && isTechnicalTransportFailure(aiGatewayString(item["text"])) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 // aiGatewayHistoryDir resolves where an agent's conversation store lives:

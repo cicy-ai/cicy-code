@@ -14,7 +14,7 @@ import { chatAttachmentMarkdown, replAttachmentMarkdown } from '../../lib/attach
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
 import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
-import { toolHeadline } from '../chat/history/lib/toolFormat';
+import { formatToolResult, toolHeadline } from '../chat/history/lib/toolFormat';
 
 export interface ProjectAgent {
   paneId: string;
@@ -57,10 +57,44 @@ interface ProjectAttachment {
   progress: number;
 }
 
+interface QueuedAgentMessage {
+  id: string;
+  display: string;
+  payload: string;
+  attachments: ProjectAttachment[];
+}
+
 const DEFAULT_PROJECT_ID = 'default';
 const PROJECT_VIEW_CACHE_PREFIX = 'cicy_project_view:';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
 const previewableMarkdown = (value: unknown) => String(value || '').replace(/\(file:\/\/(\/?[^)]+)\)/g, (_match, path: string) => `(/${path.replace(/^\/+/, '')})`);
+const questionWithoutUploadedAttachments = (value: unknown) => String(value || '')
+  .replace(/!?\[[^\]]*\]\((?:file:\/\/)?\/?[^)\n]*\/cicy-ai\/assets\/[^)\n]+\)/gi, '')
+  .replace(/!?\[[^\]]*\]\(\/?assets\/files\/[^)\n]+\)/gi, '')
+  .replace(/\n{3,}/g, '\n\n')
+  .trim();
+const uploadedAttachmentsFromQuestion = (value: unknown) => String(value || '').match(
+  /!?\[[^\]]*\]\((?:file:\/\/)?\/?[^)\n]*(?:\/cicy-ai\/assets\/|\/assets\/files\/)[^)\n]+\)/gi,
+) || [];
+const decodeJSString = (literal: string) => {
+  const value = String(literal || '');
+  if (value.startsWith('"')) {
+    try { return JSON.parse(value); } catch { return value.slice(1, -1); }
+  }
+  return value.slice(1, -1)
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\([\\'"`])/g, '$1');
+};
+const codexExecCommands = (input: unknown) => {
+  const source = String(input || '');
+  const commands: string[] = [];
+  const pattern = /tools\.exec_command\s*\(\s*\{[\s\S]*?\bcmd\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(source))) commands.push(decodeJSString(match[1]).trim());
+  return commands.filter(Boolean);
+};
 const projectIdFromURL = () => {
   const match = window.location.hash.match(/^#\/project\/([^/?#]+)/);
   return match ? decodeURIComponent(match[1]) : DEFAULT_PROJECT_ID;
@@ -109,11 +143,12 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, selected, removable, footer, width, height, onSelect, onRemove, onOpenGuidance, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, working, teamId, selected, removable, footer, width, height, onSelect, onRemove, onOpenGuidance, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
   reply?: any;
+  optimisticQuestion?: string;
   working: boolean;
   teamId?: string;
   selected: boolean;
@@ -134,11 +169,21 @@ function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, sele
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const bodyScrollRef = useRef<HTMLDivElement>(null);
+  const loadingRef = useRef<HTMLDivElement>(null);
+  const followLoadingRef = useRef(true);
   const status = String(agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
   const identity = teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId);
   const replyItems = Array.isArray(reply?.items) ? reply.items : [];
+  const latestQuestion = String(latest?.latest_question || '');
+  const replyQuestion = String(reply?.question || '');
+  const latestUpdatedAt = Date.parse(String(latest?.updated_at || '')) || 0;
+  const replyUpdatedAt = Date.parse(String(reply?.updated_at || '')) || 0;
+  const freshestQuestion = latestQuestion && latestUpdatedAt >= replyUpdatedAt ? latestQuestion : replyQuestion || latestQuestion;
+  const rawQuestion = String(optimisticQuestion || freshestQuestion);
+  const visibleQuestion = questionWithoutUploadedAttachments(rawQuestion);
+  const visibleQuestionAttachments = uploadedAttachmentsFromQuestion(rawQuestion);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -156,6 +201,31 @@ function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, sele
     const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 8;
     setShowScrollToBottom(overflow && !atBottom);
   }, []);
+
+  const handleBodyScroll = useCallback(() => {
+    const node = bodyScrollRef.current;
+    if (!node) return;
+    const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 8;
+    if (!working) {
+      followLoadingRef.current = atBottom;
+    } else {
+      const loading = loadingRef.current;
+      const bodyRect = node.getBoundingClientRect();
+      const loadingRect = loading?.getBoundingClientRect();
+      const loadingVisible = Boolean(loadingRect && loadingRect.bottom > bodyRect.top && loadingRect.top < bodyRect.bottom);
+      followLoadingRef.current = atBottom || loadingVisible;
+    }
+    updateBodyScrollButton();
+  }, [updateBodyScrollButton, working]);
+
+  useEffect(() => {
+    const node = bodyScrollRef.current;
+    if (!node || !working || !followLoadingRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (followLoadingRef.current) node.scrollTop = node.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [latest, reply, working]);
 
   useEffect(() => {
     const node = bodyScrollRef.current;
@@ -254,18 +324,23 @@ function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, sele
         ) : null}
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
-      <div data-id="project-agent-card-live-body-wrap" className="relative mt-3 min-h-0 flex-1">
+      <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 min-h-0 flex-1">
       <div
         ref={bodyScrollRef}
         data-id="project-agent-card-live-body"
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
-        onScroll={updateBodyScrollButton}
-        className="h-full min-h-0 w-full cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-0.5 text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
+        onScroll={handleBodyScroll}
+        className="h-full min-h-0 w-full cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
       >
-        {(reply?.question || latest?.latest_question) ? (
-          <div data-id="project-agent-card-latest-question" className="mr-auto max-w-[92%] rounded-xl rounded-bl-sm bg-blue-500/10 px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
-            <MarkdownBlock text={previewableMarkdown(reply?.question || latest.latest_question)} />
+        {visibleQuestion || visibleQuestionAttachments.length ? (
+          <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown mr-auto max-w-[92%] rounded-xl rounded-bl-sm bg-blue-500/10 px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-1 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-16 [&_[data-id=current-history-md-img]]:!max-h-16 [&_[data-id=current-history-md-img]]:!w-16 [&_[data-id=current-history-md-img]]:!max-w-16 [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-cover">
+            {visibleQuestion ? <MarkdownBlock text={previewableMarkdown(visibleQuestion)} /> : null}
+            {visibleQuestionAttachments.map((attachment, index) => (
+              <div key={`${attachment}-${index}`} data-id="project-agent-card-question-attachment">
+                <MarkdownBlock text={previewableMarkdown(attachment)} />
+              </div>
+            ))}
           </div>
         ) : null}
         {replyItems.length ? replyItems.map((item: any, index: number) => {
@@ -275,19 +350,21 @@ function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, sele
               <Atom className="mt-0.5 h-4 w-4 shrink-0" />
               <span className="shrink-0 font-medium text-zinc-400">Think</span>
               <span aria-hidden="true">·</span>
-              <div className="min-w-0 flex-1"><MarkdownBlock text={previewableMarkdown(String(item.thinking))} /></div>
+              <div className="chat-markdown current-history-markdown min-w-0 flex-1"><MarkdownBlock text={previewableMarkdown(String(item.thinking))} /></div>
             </div>
           );
           if (type === 'text' && item?.text) return (
-            <div key={`text-${index}`} data-id="project-agent-card-latest-response" className="text-zinc-300"><MarkdownBlock text={previewableMarkdown(String(item.text))} /></div>
+            <div key={`text-${index}`} data-id="project-agent-card-latest-response" className="chat-markdown current-history-markdown text-zinc-300"><MarkdownBlock text={previewableMarkdown(String(item.text))} /></div>
           );
           if (type === 'tool_use') {
+            if (String(item?.name || '').toLowerCase() === 'wait') return null;
             const input = item?.input == null ? '' : typeof item.input === 'string' ? item.input : JSON.stringify(item.input);
             const output = item?.output == null ? '' : typeof item.output === 'string' ? item.output : JSON.stringify(item.output);
-            const tool = { name: String(item?.name || 'Tool'), arg: input, result: output, isError: item?.output_is_error === true };
+            const commands = String(item?.name || '') === 'exec' ? codexExecCommands(input) : [];
+            const tool = { name: commands.length ? 'exec_command' : String(item?.name || 'Tool'), arg: commands.length ? JSON.stringify({ command: commands.join('\n\n') }) : input, result: output, isError: item?.output_is_error === true };
             const headline = toolHeadline(tool);
-            const parsedInput = item?.input && typeof item.input === 'object' ? item.input : {};
-            const command = String(parsedInput.command || parsedInput.cmd || '').trim();
+            const command = commands.join('\n\n') || String(item?.input?.command || item?.input?.cmd || '').trim();
+            const result = formatToolResult(tool);
             return (
               <details key={`tool-${index}`} data-id="project-agent-card-reply-tool" className="group text-zinc-500">
                 <summary className="flex cursor-pointer list-none items-center gap-2 py-1 select-none [&::-webkit-details-marker]:hidden">
@@ -296,7 +373,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, sele
                   <span className="shrink-0 font-medium text-zinc-400">{tool.name}</span>
                   {headline ? <><span aria-hidden="true">·</span><span className="min-w-0 truncate">{headline}</span></> : null}
                 </summary>
-                {(command || input || output) ? (
+                {(command || input || result) ? (
                   <div className={cn('ml-6 mt-1 overflow-hidden rounded-xl border bg-black/[0.12]', tool.isError ? 'border-red-400/20' : 'border-white/[0.08]')}>
                     {(command || input) ? (
                       <div className="flex items-start gap-2 border-b border-white/[0.08] px-3 py-2 font-mono text-[12px] leading-5 text-zinc-400">
@@ -304,25 +381,25 @@ function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, sele
                         <button type="button" aria-label={t('copy', { defaultValue: '复制' })} title={t('copy', { defaultValue: '复制' })} onClick={(event) => { event.preventDefault(); event.stopPropagation(); void copyToClipboard(command || input); }} className="shrink-0 rounded p-1 hover:bg-white/[0.06] hover:text-zinc-200"><Copy className="h-3.5 w-3.5" /></button>
                       </div>
                     ) : null}
-                    {output ? <pre className={cn('max-h-52 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[12px] leading-5', tool.isError ? 'text-red-300/80' : 'text-zinc-400')}>{output}</pre> : null}
+                    {result ? <div data-id="project-agent-card-tool-result-markdown" className={cn('chat-markdown current-history-markdown max-h-52 overflow-auto px-3 py-2 text-[13px] leading-5', tool.isError ? 'text-red-300/80' : 'text-zinc-400')}><MarkdownBlock text={previewableMarkdown(result)} /></div> : null}
                   </div>
                 ) : null}
               </details>
             );
           }
           return null;
-        }) : latest?.latest_response ? (
-          <div data-id="project-agent-card-latest-response" className="text-zinc-400 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
+        }) : !reply?.question && latest?.latest_response ? (
+          <div data-id="project-agent-card-latest-response" className="chat-markdown current-history-markdown text-zinc-400 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
             <MarkdownBlock text={previewableMarkdown(latest.latest_response)} />
           </div>
         ) : null}
-        {!replyItems.length && latest?.latest_tool?.name ? (
+        {!reply?.question && !replyItems.length && latest?.latest_tool?.name ? (
           <div data-id="project-agent-card-latest-tool" className="min-w-0 line-clamp-2 font-mono text-[13px] leading-5 text-zinc-500">
             {`${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}`}
           </div>
         ) : null}
         {working ? (
-          <div data-id="project-agent-card-output-loading" className="mt-auto flex h-5 items-end gap-1 pt-2" aria-label="Loading">
+          <div ref={loadingRef} data-id="project-agent-card-output-loading" className="mt-auto flex h-5 items-end gap-1 pt-2" aria-label="Loading">
             {[0, 1, 2].map((index) => <span key={index} className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />)}
           </div>
         ) : null}
@@ -382,6 +459,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
   const [agentAttachments, setAgentAttachments] = useState<Record<string, ProjectAttachment[]>>({});
   const [agentReplies, setAgentReplies] = useState<Record<string, any>>({});
+  const [queuedAgentMessages, setQueuedAgentMessages] = useState<Record<string, QueuedAgentMessage[]>>({});
   const [sendingAgentIds, setSendingAgentIds] = useState<Set<string>>(new Set());
   const [cancelingAgentIds, setCancelingAgentIds] = useState<Set<string>>(new Set());
   const [agentLayouts, setAgentLayouts] = useState<Record<string, ProjectAgentLayout>>({});
@@ -404,6 +482,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const agentDragRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
   const agentResizeRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originWidth: number; originHeight: number } | null>(null);
   const panDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const optimisticQuestionsRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     if (dockOpen) setFabOpen(false);
@@ -503,36 +582,47 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     agent.workspace,
   ].some((value) => String(value || '').toLowerCase().includes(normalizedAddSearch)));
   const paneMembershipKey = selectedProject.pane_ids.map(shortPaneId).sort().join('|');
-  const replyUpdateKey = visibleAgents.map((agent) => {
-    const id = shortPaneId(agent.paneId);
-    const summary = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id] || {};
-    return `${id}:${String(summary?.updated_at || '')}`;
-  }).join('|');
-
+  const visibleAgentKey = visibleAgents.map((agent) => shortPaneId(agent.paneId)).sort().join('|');
   useEffect(() => {
     let cancelled = false;
     const ids = visibleAgents.map((agent) => shortPaneId(agent.paneId));
     if (!ids.length) { setAgentReplies({}); return () => { cancelled = true; }; }
-    void Promise.all(ids.map(async (id) => {
-      try {
-        const response = await apiService.getAgentCurrentReply(id);
-        return [id, response?.data || {}] as const;
-      } catch {
-        return [id, null] as const;
-      }
-    })).then((rows) => {
+    let polling = false;
+    const pollReplies = async () => {
+      if (polling || cancelled) return;
+      polling = true;
+      const rows = await Promise.all(ids.map(async (id) => {
+        try {
+          const response = await apiService.getAgentCurrentReply(id);
+          return [id, response?.data || {}] as const;
+        } catch {
+          return [id, null] as const;
+        }
+      }));
+      polling = false;
       if (cancelled) return;
       setAgentReplies((current) => {
+        let changed = false;
         const next = { ...current };
-        for (const [id, reply] of rows) if (reply) next[id] = reply;
-        return next;
+        for (const [id, reply] of rows) {
+          if (!reply) continue;
+          const optimistic = optimisticQuestionsRef.current[id];
+          if (optimistic && String(reply.question || '').trim() !== optimistic) continue;
+          if (optimistic) delete optimisticQuestionsRef.current[id];
+          if (JSON.stringify(current[id] || {}) === JSON.stringify(reply)) continue;
+          next[id] = reply;
+          changed = true;
+        }
+        return changed ? next : current;
       });
-    });
-    return () => { cancelled = true; };
-  }, [paneMembershipKey, replyUpdateKey]);
+    };
+    void pollReplies();
+    const timer = window.setInterval(() => { void pollReplies(); }, 500);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [visibleAgentKey]);
 
   useEffect(() => {
-    const checkKey = `${selectedProject.id}:${paneMembershipKey}`;
+    const checkKey = `${selectedProject.id}:${paneMembershipKey}:${visibleAgentKey}`;
     if (layoutReadyProjectId !== String(selectedProject.id) || visibilityCheckedKeyRef.current === checkKey || !visibleAgents.length) return;
     const frame = window.requestAnimationFrame(() => {
       const canvas = canvasRef.current;
@@ -566,7 +656,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       writeProjectViewCache(selectedProject.id, { zoom: nextZoom, pan: nextPan });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [layoutReadyProjectId, paneMembershipKey, selectedProject.id]);
+  }, [layoutReadyProjectId, paneMembershipKey, selectedProject.id, visibleAgentKey]);
 
   useEffect(() => {
     visibilityCheckedKeyRef.current = '';
@@ -577,7 +667,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setLayoutReadyProjectId(cached ? String(selectedProject.id) : '');
     setSelectedAgentIds(new Set());
     setAgentMessages({});
+    setQueuedAgentMessages({});
     setSendingAgentIds(new Set());
+    optimisticQuestionsRef.current = {};
   }, [selectedProject.id]);
 
   useEffect(() => {
@@ -825,34 +917,32 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     });
   };
 
-  const sendAgentMessage = async (agent: ProjectAgent) => {
+  const agentIsThinking = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
-    const text = String(agentMessages[id] || '').trim();
-    const attachments = agentAttachments[id] || [];
-    if ((!text && !attachments.some((item) => item.status === 'done')) || attachments.some((item) => item.status === 'uploading') || sendingAgentIds.has(id)) return;
-    const attachmentText = attachments.filter((item) => item.status === 'done' && item.fileRef).map((item) => agent.agentType === 'cicy' ? chatAttachmentMarkdown(item.name, item.fileRef!, item.isImage) : replAttachmentMarkdown(item.name, item.fileRef!)).join('\n\n');
-    const message = [text, attachmentText].filter(Boolean).join('\n\n');
-    const previousReply = agentReplies[id];
+    const summary = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id] || {};
+    // poll/status is the freshest source. Do not OR it with stale agent/reply
+    // snapshots: an old "thinking" there would keep queued prompts stuck forever
+    // after the live status has already reached completed/idle.
+    const status = String(summary?.status || agentReplies[id]?.status || agent.status || '').toLowerCase();
+    return sendingAgentIds.has(id) || Boolean(liveMetrics[id]?.working) || /thinking|working|running|streaming|pending|tool_use|tool_call|in_progress/.test(status);
+  };
+
+  const deliverAgentMessage = async (agent: ProjectAgent, message: string, displayQuestion: string, previousReply: any, sentAttachments: ProjectAttachment[] = [], restoreText = '') => {
+    const id = shortPaneId(agent.paneId);
     setSendingAgentIds((current) => new Set(current).add(id));
-    setAgentMessages((current) => ({ ...current, [id]: '' }));
-    if (text) {
-      setAgentReplies((current) => ({
-        ...current,
-        [id]: { question: text, items: [], answer: '', thinking: '', status: 'pending' },
-      }));
-    }
+    optimisticQuestionsRef.current[id] = displayQuestion;
+    setAgentReplies((current) => ({
+      ...current,
+      [id]: { question: displayQuestion, items: [], answer: '', thinking: '', status: 'pending' },
+    }));
     try {
-      await sendToAgent(agent.paneId, message, {
-        submit: true,
-        agentType: agent.agentType,
-      });
-      setAgentAttachments((current) => {
-        (current[id] || []).forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
-        return { ...current, [id]: [] };
-      });
+      await sendToAgent(agent.paneId, message, { submit: true, agentType: agent.agentType });
+      sentAttachments.forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
     } catch (cause: any) {
-      setAgentMessages((current) => ({ ...current, [id]: text }));
-      if (text) setAgentReplies((current) => ({ ...current, [id]: previousReply || {} }));
+      delete optimisticQuestionsRef.current[id];
+      setAgentMessages((current) => ({ ...current, [id]: [restoreText, current[id]].filter(Boolean).join('\n') }));
+      setAgentAttachments((current) => ({ ...current, [id]: [...sentAttachments, ...(current[id] || [])] }));
+      setAgentReplies((current) => ({ ...current, [id]: previousReply || {} }));
       window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.message || t('projectMessageFailed') }));
     } finally {
       setSendingAgentIds((current) => {
@@ -867,6 +957,69 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       });
     }
   };
+
+  const sendAgentMessage = async (agent: ProjectAgent) => {
+    const id = shortPaneId(agent.paneId);
+    const text = String(agentMessages[id] || '').trim();
+    const attachments = agentAttachments[id] || [];
+    if ((!text && !attachments.some((item) => item.status === 'done')) || attachments.some((item) => item.status === 'uploading')) return;
+    const attachmentText = attachments.filter((item) => item.status === 'done' && item.fileRef).map((item) => agent.agentType === 'cicy' ? chatAttachmentMarkdown(item.name, item.fileRef!, item.isImage) : replAttachmentMarkdown(item.name, item.fileRef!)).join('\n\n');
+    const message = [text, attachmentText].filter(Boolean).join('\n\n');
+    const displayQuestion = message;
+    const previousReply = agentReplies[id];
+    setAgentMessages((current) => ({ ...current, [id]: '' }));
+    if (agentIsThinking(agent)) {
+      setQueuedAgentMessages((current) => ({
+        ...current,
+        [id]: [...(current[id] || []), { id: `queued-${Date.now()}-${Math.random().toString(36).slice(2)}`, display: text, payload: message, attachments: attachments.filter((item) => item.status === 'done') }],
+      }));
+      // The queue owns these attachment previews until it is released. Merely
+      // detach them from the composer so a later text message cannot erase them.
+      setAgentAttachments((current) => ({ ...current, [id]: [] }));
+      return;
+    }
+    // Clear the composer immediately, in lockstep with the optimistic question.
+    // Keep the attachment objects alive until delivery succeeds so a failure can
+    // restore both text and files without asking the user to upload again.
+    setAgentAttachments((current) => ({ ...current, [id]: [] }));
+    await deliverAgentMessage(agent, message, displayQuestion, previousReply, attachments, text);
+  };
+
+  const editQueuedAgentMessage = (agent: ProjectAgent) => {
+    const id = shortPaneId(agent.paneId);
+    const queued = queuedAgentMessages[id] || [];
+    if (!queued.length) return;
+    const queuedText = queued.map((item) => questionWithoutUploadedAttachments(item.display)).filter(Boolean).join('\n');
+    const currentText = String(agentMessages[id] || '').trim();
+    const queuedAttachments = queued.flatMap((item) => item.attachments);
+    setAgentMessages((current) => ({ ...current, [id]: [queuedText, currentText].filter(Boolean).join('\n') }));
+    setAgentAttachments((current) => ({ ...current, [id]: [...queuedAttachments, ...(current[id] || [])] }));
+    setQueuedAgentMessages((current) => ({ ...current, [id]: [] }));
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-input-${id}"]`)?.focus({ preventScroll: true });
+    });
+  };
+
+  const deleteQueuedAgentMessage = (agent: ProjectAgent) => {
+    const id = shortPaneId(agent.paneId);
+    const queued = queuedAgentMessages[id] || [];
+    queued.flatMap((item) => item.attachments).forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
+    setQueuedAgentMessages((current) => ({ ...current, [id]: [] }));
+  };
+
+  useEffect(() => {
+    for (const agent of agents) {
+      const id = shortPaneId(agent.paneId);
+      const queued = queuedAgentMessages[id] || [];
+      if (!queued.length || agentIsThinking(agent)) continue;
+      const payload = queued.map((item) => item.payload).join('\n\n');
+      const displayQuestion = payload;
+      const previousReply = agentReplies[id];
+      queued.flatMap((item) => item.attachments).forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
+      setQueuedAgentMessages((current) => ({ ...current, [id]: [] }));
+      void deliverAgentMessage(agent, payload, displayQuestion, previousReply);
+    }
+  }, [agents, agentReplies, queuedAgentMessages, sendingAgentIds, statuses]);
 
   const cancelAgentMessage = async (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
@@ -1140,6 +1293,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     metrics={cardMetrics}
                     latest={cardLatest}
                     reply={agentReplies[cardShortId]}
+                    optimisticQuestion={optimisticQuestionsRef.current[cardShortId]}
                     working={cardBusy}
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
@@ -1147,13 +1301,57 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 width={layout.width}
                 height={layout.height}
                 onSelect={() => toggleAgentSelection(agent)}
-                footer={selectedAgentIds.has(shortPaneId(agent.paneId)) ? (
+                footer={(
                   <footer
                     data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
                     className="flex shrink-0 flex-col rounded-b-2xl border-t border-white/[0.08] bg-[#15161b]"
                   >
+                    {(queuedAgentMessages[cardShortId] || []).length ? (
+                      <div data-id={`project-agent-message-queue-${cardShortId}`} className="max-h-28 overflow-y-auto border-b border-white/[0.06] px-3 py-2">
+                        <div data-id="project-agent-message-queue-item" className="relative whitespace-pre-wrap break-words rounded-lg bg-amber-500/[0.07] px-2.5 py-1.5 pr-16 text-[12px] leading-5 text-zinc-300">
+                          <div data-id="project-agent-message-queue-actions" className="absolute right-1.5 top-1.5 flex items-center gap-0.5">
+                            <button
+                              type="button"
+                              data-id={`project-agent-message-queue-edit-${cardShortId}`}
+                              aria-label="编辑队列消息"
+                              title="编辑队列消息"
+                              onClick={() => editQueuedAgentMessage(agent)}
+                              className="grid h-6 w-6 place-items-center rounded-md text-zinc-500 transition hover:bg-white/[0.08] hover:text-zinc-200"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              data-id={`project-agent-message-queue-delete-${cardShortId}`}
+                              aria-label="删除队列消息"
+                              title="删除队列消息"
+                              onClick={() => deleteQueuedAgentMessage(agent)}
+                              className="grid h-6 w-6 place-items-center rounded-md text-zinc-500 transition hover:bg-red-500/10 hover:text-red-400"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          {(queuedAgentMessages[cardShortId] || []).flatMap((queued) => queued.attachments).length ? (
+                            <div data-id="project-agent-message-queue-attachments" className="mb-1.5 flex gap-2 overflow-x-auto">
+                              {(queuedAgentMessages[cardShortId] || []).flatMap((queued) => queued.attachments).map((attachment) => (
+                                <div key={attachment.id} data-id={`project-agent-message-queue-attachment-${attachment.id}`} className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
+                                  {attachment.mediaType === 'image' && attachment.previewURL ? (
+                                    <span data-id="project-agent-message-queue-attachment-media" className="block h-full w-full [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-full [&_[data-id=current-history-md-img]]:object-cover">
+                                      <MarkdownImg src={attachment.previewURL} alt={attachment.name} />
+                                    </span>
+                                  ) : (
+                                    <span data-id="project-agent-message-queue-attachment-file" className="grid h-full w-full place-items-center"><FileText className="h-5 w-5 text-zinc-500" /></span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                          {(queuedAgentMessages[cardShortId] || []).map((queued) => questionWithoutUploadedAttachments(queued.display)).filter(Boolean).join('\n')}
+                        </div>
+                      </div>
+                    ) : null}
                     {(agentAttachments[cardShortId] || []).length ? (
                       <div data-id="project-agent-card-attachments" className="flex w-full gap-2 overflow-x-auto border-b border-white/[0.06] px-3 py-2">
                         {(agentAttachments[cardShortId] || []).map((attachment) => (
@@ -1191,8 +1389,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                         }
                       }}
                       placeholder={t('projectMessagePlaceholder')}
-                      autoFocus
-                      className="min-w-0 flex-1 bg-transparent text-[14px] leading-5 text-zinc-200 outline-none placeholder:text-zinc-600"
+                      autoFocus={selectedAgentIds.has(cardShortId)}
+                      className="min-w-0 flex-1 bg-transparent text-[14px] leading-5 text-zinc-200 outline-none placeholder:text-zinc-500/40"
                     />
                     </div>
                     <div data-id={`project-agent-card-prompt-actions-${cardShortId}`} className="flex h-10 min-h-10 w-full items-center justify-between px-3 pb-1">
@@ -1212,7 +1410,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     >
                       <Paperclip className="h-4 w-4" strokeWidth={2.25} />
                     </button>
-                    {cardBusy ? (
+                    <div className="flex items-center">
+                    {cardBusy && !(agentMessages[cardShortId] || '').trim() && !(agentAttachments[cardShortId] || []).length ? (
                       <button
                         type="button"
                         data-id={`project-agent-prompt-cancel-${shortPaneId(agent.paneId)}`}
@@ -1230,20 +1429,21 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       </button>
                     ) : (
                       <button
-                        type="button"
-                        data-id={`project-agent-prompt-send-${shortPaneId(agent.paneId)}`}
-                        onClick={() => { void sendAgentMessage(agent); }}
-                        disabled={!(agentMessages[shortPaneId(agent.paneId)] || '').trim() && !(agentAttachments[cardShortId] || []).length}
-                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-900 transition hover:bg-white disabled:bg-white/[0.06] disabled:text-zinc-600"
-                        title={t('send', { defaultValue: '发送' })}
-                        aria-label={t('send', { defaultValue: '发送' })}
-                      >
-                        <SendHorizontal className="h-4 w-4" />
-                      </button>
+                      type="button"
+                      data-id={`project-agent-prompt-send-${shortPaneId(agent.paneId)}`}
+                      onClick={() => { void sendAgentMessage(agent); }}
+                      disabled={!(agentMessages[shortPaneId(agent.paneId)] || '').trim() && !(agentAttachments[cardShortId] || []).length}
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-900 transition hover:bg-white disabled:bg-white/[0.06] disabled:text-zinc-600"
+                      title={cardBusy ? t('projectQueueMessage', { defaultValue: '加入队列' }) : t('send', { defaultValue: '发送' })}
+                      aria-label={cardBusy ? t('projectQueueMessage', { defaultValue: '加入队列' }) : t('send', { defaultValue: '发送' })}
+                    >
+                      <SendHorizontal className="h-4 w-4" />
+                    </button>
                     )}
                     </div>
+                    </div>
                   </footer>
-                ) : null}
+                )}
                 onRemove={() => { void removeAgent(agent); }}
                 onOpenGuidance={() => onOpenGuidance(agent.paneId)}
                 onResizePointerDown={(event) => beginAgentResize(event, agent, index)}
