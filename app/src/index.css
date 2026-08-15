@@ -24,6 +24,77 @@
   --vsc-error: #f14c4c;
 }
 
+html[data-theme="light"] {
+  --vsc-bg: #f4f4f5;
+  --vsc-bg-secondary: #ffffff;
+  --vsc-bg-hover: #e4e4e7;
+  --vsc-bg-active: #d4d4d8;
+  --vsc-bg-titlebar: #fafafa;
+  --vsc-input: #ffffff;
+  --vsc-border: #d4d4d8;
+  --vsc-border-subtle: #e4e4e7;
+  --vsc-text: #27272a;
+  --vsc-text-secondary: #52525b;
+  --vsc-text-muted: #71717a;
+  --vsc-text-disabled: #a1a1aa;
+}
+
+html[data-theme="light"],
+html[data-theme="light"] body,
+html[data-theme="light"] #root {
+  background: #f4f4f5;
+  color: #3f3f46;
+}
+
+/* Compatibility theme for the legacy dark-only Tailwind surfaces. Keep the
+   terminal and CodeMirror on their purpose-built themes; all application
+   chrome, cards, panels, menus and modals follow the global selector. */
+html[data-theme="light"] [class~="bg-[#0A0A0A]"],
+html[data-theme="light"] [class~="bg-[#09090b]"],
+html[data-theme="light"] [class~="bg-[#0b0b0d]"],
+html[data-theme="light"] [class~="bg-[#0e0e0e]"],
+html[data-theme="light"] [class~="bg-[#111216]"],
+html[data-theme="light"] [class~="bg-[#111216]/95"],
+html[data-theme="light"] [class~="bg-[#15161b]"],
+html[data-theme="light"] [class~="bg-[#161618]"],
+html[data-theme="light"] [class~="bg-[#1a1b20]"],
+html[data-theme="light"] [class~="bg-[#202126]"] { background-color: #fafafa !important; }
+
+html[data-theme="light"] [class~="bg-zinc-950"],
+html[data-theme="light"] [class~="bg-zinc-900"],
+html[data-theme="light"] [class~="bg-black"] { background-color: #f4f4f5 !important; }
+
+html[data-theme="light"] [class~="text-white"]:not([class*="bg-"]),
+html[data-theme="light"] [class~="text-zinc-100"],
+html[data-theme="light"] [class~="text-zinc-200"] { color: #18181b !important; }
+html[data-theme="light"] [class~="text-zinc-300"] { color: #3f3f46 !important; }
+html[data-theme="light"] [class~="text-zinc-400"] { color: #52525b !important; }
+html[data-theme="light"] [class~="text-zinc-500"] { color: #71717a !important; }
+html[data-theme="light"] [class~="text-zinc-600"],
+html[data-theme="light"] [class~="text-zinc-700"] { color: #a1a1aa !important; }
+
+html[data-theme="light"] [class~="border-white/[0.06]"],
+html[data-theme="light"] [class~="border-white/[0.08]"],
+html[data-theme="light"] [class~="border-white/[0.10]"],
+html[data-theme="light"] [class~="border-white/10"] { border-color: #e4e4e7 !important; }
+html[data-theme="light"] [class~="bg-white/[0.02]"],
+html[data-theme="light"] [class~="bg-white/[0.03]"],
+html[data-theme="light"] [class~="bg-white/[0.04]"],
+html[data-theme="light"] [class~="bg-white/[0.05]"],
+html[data-theme="light"] [class~="bg-white/[0.06]"],
+html[data-theme="light"] [class~="bg-white/[0.08]"],
+html[data-theme="light"] [class~="bg-white/[0.10]"] { background-color: #e4e4e7 !important; }
+
+html[data-theme="light"] select option,
+html[data-theme="light"] select optgroup { background-color: #ffffff; color: #27272a; }
+html[data-theme="light"] .chat-markdown { color: #3f3f46; }
+html[data-theme="light"] .chat-markdown :is(h1,h2,h3,h4,strong) { color: #18181b; }
+html[data-theme="light"] .chat-markdown code { background: #e4e4e7; color: #27272a; }
+html[data-theme="light"] .chat-markdown pre { background: #f4f4f5; }
+html[data-theme="light"] .chat-markdown blockquote { border-left-color: #d4d4d8; color: #71717a; }
+
+html[data-theme="light"] :is(.xterm, .cm-editor, .cm-editor *) { color-scheme: dark; }
+
 @layer utilities {
   .cicy-btn {
     padding: 4px 6px;

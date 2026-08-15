@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { SlidersHorizontal, Globe, MessageCircle, Route, Boxes, Timer, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle, Paperclip } from 'lucide-react';
+import { SlidersHorizontal, Globe, MessageCircle, Route, Boxes, Timer, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle, Paperclip, Sun, Moon } from 'lucide-react';
 import { useApp } from '../../contexts/AppContext';
 import ProviderDashboard from '../providers/ProviderDashboard';
 import IMDashboard from '../im/IMDashboard';
@@ -12,6 +12,7 @@ import CrontabPanel from '../CrontabPanel';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
 import { useDialogs } from '../ui/Modal';
+import { getCicyTheme, setCicyTheme, type CicyTheme } from '../../lib/theme';
 
 // Unified, productized Settings surface. One fullscreen modal with a left nav
 // (Language / IM / Agent Routing / LLM Providers) and a large content area on
@@ -97,6 +98,7 @@ export default function SettingsModal({
   const [attachDraft, setAttachDraft] = useState(String(currentMaxAttach));
   const [attachSaving, setAttachSaving] = useState(false);
   const [attachSaved, setAttachSaved] = useState(false);
+  const [theme, setTheme] = useState<CicyTheme>(getCicyTheme);
   const attachClean = Math.max(1, Math.round(Number(attachDraft) || 0));
   const attachDirty = attachClean !== currentMaxAttach;
   useEffect(() => {
@@ -383,6 +385,30 @@ export default function SettingsModal({
                   </header>
 
                   <div className="space-y-4">
+                  <section data-id="settings-theme-block" className={card}>
+                    <div className="flex items-start gap-3">
+                      <span className={iconTile}>{theme === 'light' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-semibold text-zinc-100">{t('settingsThemeTitle', { defaultValue: '主题' })}</div>
+                        <div className="mt-0.5 text-[11px] leading-5 text-zinc-500">{t('settingsThemeHint', { defaultValue: '切换整个工作区、项目、详情面板和设置界面的外观。' })}</div>
+                        <div data-id="settings-theme-selector" className="mt-3 grid grid-cols-2 gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] p-1">
+                          {(['light', 'dark'] as const).map((value) => (
+                            <button
+                              key={value}
+                              type="button"
+                              data-id={`settings-theme-${value}`}
+                              aria-pressed={theme === value}
+                              onClick={() => { setTheme(value); setCicyTheme(value); }}
+                              className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-[12px] transition-colors ${theme === value ? 'bg-white/[0.10] text-zinc-100 shadow-sm' : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'}`}
+                            >
+                              {value === 'light' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+                              {value === 'light' ? 'Light' : 'Dark'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
                   {/* Card: 公网访问地址 */}
                   <section data-id="settings-publicurl-block" className={card}>
                     <div className="flex items-start gap-3">
