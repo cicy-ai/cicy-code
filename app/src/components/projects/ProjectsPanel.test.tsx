@@ -181,13 +181,14 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
     });
     api.getAgentCurrentReply.mockResolvedValue({ data: { question: '当前问题', items: [{ type: 'text', text: '当前回答' }], status: 'completed' } });
-    api.getAgentHistoryIDs.mockResolvedValue({ data: { conversation_id: 'conversation-1', id: 5 } });
+    api.getAgentHistoryIDs.mockResolvedValue({ data: { conversation_id: 'conversation-1', id: 6 } });
     api.getAgentCurrentHistory.mockResolvedValue({
       data: { items: [
         { history_id: 1, conversation_id: 'conversation-1', role: 'user', content: '更早问题' },
         { history_id: 2, conversation_id: 'conversation-1', role: 'assistant', content: '更早回答' },
         { history_id: 3, conversation_id: 'conversation-1', role: 'user', content: '上一问题' },
         { history_id: 4, conversation_id: 'conversation-1', role: 'assistant', content: '上一回答' },
+        { history_id: 5, conversation_id: 'conversation-1', role: 'assistant', content: '上一回答续段' },
       ] },
     });
 
@@ -198,7 +199,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
     expect(await screen.findByText('上一问题')).toBeInTheDocument();
     expect(await screen.findByText('上一回答')).toBeInTheDocument();
+    expect(await screen.findByText('上一回答续段')).toBeInTheDocument();
     expect(screen.queryByText('更早问题')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('agent-avatar')).toHaveLength(1);
     expect(api.getAgentCurrentHistory).toHaveBeenCalledTimes(1);
   });
 

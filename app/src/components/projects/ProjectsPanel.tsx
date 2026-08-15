@@ -197,7 +197,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const followLoadingRef = useRef(true);
   const historyLoadingRef = useRef(false);
   const initialBottomKeyRef = useRef('');
-  const prependMetricsRef = useRef<{ top: number; height: number } | null>(null);
   const [renderedHistory, setRenderedHistory] = useState<HistoryTurn[]>([]);
   const [historyBefore, setHistoryBefore] = useState<number | null>(null);
   const [historyConversationId, setHistoryConversationId] = useState('');
@@ -276,8 +275,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         setHistoryBefore(0);
         return;
       }
-      const node = bodyScrollRef.current;
-      if (node) prependMetricsRef.current = { top: node.scrollTop, height: node.scrollHeight };
       setRenderedHistory((current) => [...group, ...current]);
       setHistoryBefore(Number(group[0]?.history_id || 0));
     } catch {
@@ -288,14 +285,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       setHistoryLoading(false);
     }
   }, [agent.paneId, historyBefore, historyConversationId, optimisticQuestion]);
-
-  useLayoutEffect(() => {
-    const metrics = prependMetricsRef.current;
-    const node = bodyScrollRef.current;
-    if (!metrics || !node) return;
-    node.scrollTop = metrics.top + (node.scrollHeight - metrics.height);
-    prependMetricsRef.current = null;
-  }, [renderedHistory]);
 
   useEffect(() => {
     const root = bodyScrollRef.current;
@@ -485,7 +474,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           );
           if (turn.role === 'assistant') return (
             <div key={key} data-id="project-agent-card-history-answer">
-              <AssistantTurnView turn={turn} turnKey={key} isLatestTurn={false} showAvatar agentType={String(agent.agentType || '')} paneId={agent.paneId} hideTools={false} />
+              <AssistantTurnView turn={turn} turnKey={key} isLatestTurn={false} showAvatar={renderedHistory[index - 1]?.role !== 'assistant'} agentType={String(agent.agentType || '')} paneId={agent.paneId} hideTools={false} />
             </div>
           );
           return null;
