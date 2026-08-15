@@ -354,6 +354,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('中文任务')).toBeInTheDocument();
     expect(screen.queryByText('上一轮回答')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-current-turn"]')).toHaveClass('min-h-full');
     expect(input).toHaveValue('');
     await waitFor(() => expect(input).toHaveFocus());
   });

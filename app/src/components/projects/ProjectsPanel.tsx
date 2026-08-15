@@ -197,6 +197,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const followLoadingRef = useRef(true);
   const historyLoadingRef = useRef(false);
   const parkBelowSentinelRef = useRef(false);
+  const resetLiveTurnToBottomRef = useRef(false);
   const initialBottomKeyRef = useRef('');
   const [renderedHistory, setRenderedHistory] = useState<HistoryTurn[]>([]);
   const [historyBefore, setHistoryBefore] = useState<number | null>(null);
@@ -233,11 +234,24 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   // rows until the user scrolls upward into the sentinel again.
   useLayoutEffect(() => {
     if (!optimisticQuestion) return;
+    resetLiveTurnToBottomRef.current = true;
     setRenderedHistory([]);
     setHistoryBefore(null);
     setHistoryConversationId('');
     followLoadingRef.current = true;
   }, [optimisticQuestion]);
+
+  useLayoutEffect(() => {
+    if (!resetLiveTurnToBottomRef.current || renderedHistory.length) return;
+    const node = bodyScrollRef.current;
+    if (!node) return;
+    // Clearing expanded history changes scrollHeight after the optimistic-Q
+    // render. Bottom-align that cleared DOM, not the previous history DOM, so
+    // the top sentinel cannot enter the viewport and self-trigger on send.
+    node.scrollTop = node.scrollHeight;
+    followLoadingRef.current = true;
+    resetLiveTurnToBottomRef.current = false;
+  }, [optimisticQuestion, renderedHistory]);
 
   const loadPreviousQA = useCallback(async () => {
     if (historyLoadingRef.current) return;
@@ -493,6 +507,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           );
           return null;
         })}
+        <div data-id="project-agent-card-current-turn" className={cn('space-y-3.5', renderedHistory.length ? '' : 'flex min-h-full flex-col justify-end gap-3.5 space-y-0')}>
         {visibleQuestion || visibleQuestionAttachments.length ? (
           <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown mr-auto max-w-[92%] rounded-xl rounded-bl-sm bg-blue-500/10 px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-1 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-16 [&_[data-id=current-history-md-img]]:!max-h-16 [&_[data-id=current-history-md-img]]:!w-16 [&_[data-id=current-history-md-img]]:!max-w-16 [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-cover">
             {visibleQuestion ? <MarkdownBlock text={previewableMarkdown(visibleQuestion)} /> : null}
@@ -563,6 +578,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             {[0, 1, 2].map((index) => <span key={index} className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />)}
           </div>
         ) : null}
+        </div>
       </div>
       {showScrollToBottom ? (
         <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-2 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur hover:bg-[#292a30] hover:text-white">
