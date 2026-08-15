@@ -68,7 +68,7 @@ import { lockPointer, unlockPointer, clearPointerLock } from '../lib/pointerLock
 import { emitWebFrameMaskEvent } from '../lib/webFrameMask';
 import PortsPanel from './layout/PortsPanel';
 import ProjectsPanel, { type ProjectAgent } from './projects/ProjectsPanel';
-import CurrentHistoryView from './chat/CurrentHistoryView';
+const CurrentHistoryView = lazy(() => import('./chat/CurrentHistoryView'));
 
 const cache = {
   get: (k: string, def: any) => { try { const v = JSON.parse(localStorage.getItem(k)!); return v ?? def; } catch { return def; } },
@@ -1835,14 +1835,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           style={{ display: cliContentTab === 'history' ? 'block' : 'none' }}
         >
           {cliContentOpen && cliContentTab === 'history' && (
-            <CurrentHistoryView
-              key={activeCliPaneId}
-              paneId={activeCliPaneId}
-              open
-              fullWidth
-              leftAlignQuestions
-              agentType={String(projectAgents.find((agent) => agent.paneId.replace(/:.*$/, '') === activeCliPaneId)?.agentType || '')}
-            />
+            <Suspense fallback={null}>
+              <CurrentHistoryView
+                key={activeCliPaneId}
+                paneId={activeCliPaneId}
+                open
+                fullWidth
+                leftAlignQuestions
+                agentType={String(projectAgents.find((agent) => agent.paneId.replace(/:.*$/, '') === activeCliPaneId)?.agentType || '')}
+              />
+            </Suspense>
           )}
         </div>
         <div
