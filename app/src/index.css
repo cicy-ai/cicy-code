@@ -406,6 +406,9 @@ html[data-theme="light"] :is(pre, code)[class*="bg-black"] {
 }
 html[data-theme="light"] [data-id="terminal-view"],
 html[data-theme="light"] [data-id^="agent-stack-card-body-"] { background-color: #fafafa !important; }
+html[data-theme="light"] .cicy-term-host .xterm-viewport {
+  background-color: #fafafa !important;
+}
 
 /* Settings uses translucent white layers for its dark surfaces. In Light
    mode those should become crisp cards, not medium-gray slabs. */
