@@ -439,6 +439,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [apiOpen, setApiOpen] = useState(false);
   const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const toastTimerRef = useRef<number>(0);
   // Unified Settings modal (Language / IM / Agent Routing / LLM Providers).
   // Replaces the old activity-bar left-panels for providers & im.
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -950,10 +951,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const handler = (e: CustomEvent<string | ToastState>) => {
       const detail = e.detail;
       setToast(typeof detail === 'string' ? { message: detail } : detail);
-      setTimeout(() => setToast(null), 5000);
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = window.setTimeout(() => setToast(null), 5000);
     };
     window.addEventListener('show-toast', handler as EventListener);
-    return () => window.removeEventListener('show-toast', handler as EventListener);
+    return () => {
+      window.removeEventListener('show-toast', handler as EventListener);
+      window.clearTimeout(toastTimerRef.current);
+    };
   }, []);
 
   // Status change listener (from WebSocket)
@@ -2562,7 +2567,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
       <ProxyManagerDialog open={proxyManagerOpen} onClose={() => setProxyManagerOpen(false)} paneId={activeCliPaneId || paneId} />
       <MobileQRPopover workspaceTitle={topBarTitle} open={mobileQROpen} onClose={() => setMobileQROpen(false)} />
-      {toast && <div data-id="workspace-toast" className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 text-sm rounded-lg shadow-lg ${toast.variant === 'success' ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>{toast.message}</div>}
+      {toast && (
+        <div data-id="workspace-toast" role="status" className={`fixed left-1/2 top-4 z-[9999] flex max-w-[min(560px,calc(100vw-32px))] -translate-x-1/2 items-start gap-3 rounded-xl border px-4 py-3 pr-11 text-sm shadow-xl backdrop-blur ${toast.variant === 'success' ? 'border-emerald-500/25 bg-emerald-950/95 text-emerald-50' : 'border-white/10 bg-zinc-800/95 text-zinc-100'}`}>
+          <span data-id="workspace-toast-message" className="min-w-0 break-words leading-5">{toast.message}</span>
+          <button data-id="workspace-toast-close" type="button" aria-label="Close" onClick={() => { window.clearTimeout(toastTimerRef.current); setToast(null); }} className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-lg text-current opacity-60 transition hover:bg-white/10 hover:opacity-100"><X className="h-4 w-4" /></button>
+        </div>
+      )}
       {dialogsNode}
       <CreateAgentDialog
         open={createAgentOpen}

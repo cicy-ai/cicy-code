@@ -252,7 +252,7 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
         {attachments.length ? (
           <div data-id="project-agent-card-attachments" className="flex flex-wrap gap-2 overflow-hidden pt-1">
             {attachments.map((attachment) => (
-              <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className={cn('group relative flex flex-col overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]', attachment.mediaType === 'audio' ? 'w-36' : 'w-20')}>
+              <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className={cn('group relative flex flex-col overflow-visible rounded-lg border border-white/10 bg-white/[0.04]', attachment.mediaType === 'audio' ? 'w-36' : 'w-20')}>
                 {attachment.mediaType === 'image' && attachment.previewURL ? (
                   <span data-id="project-agent-card-attachment-media" className="h-14 w-full overflow-hidden [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-14 [&_[data-id=current-history-md-img]]:!w-full [&_[data-id=current-history-md-img]]:rounded-none [&_[data-id=current-history-md-img]]:object-cover">
                     <MarkdownImg src={attachment.previewURL} alt={attachment.name} />
@@ -265,7 +265,7 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
                   <span className="grid h-14 w-full place-items-center"><FileText className="h-5 w-5 text-zinc-500" /></span>
                 )}
                 <span className="w-full truncate border-t border-white/[0.07] px-2 py-1 text-center text-[10px] text-zinc-300">{attachment.status === 'uploading' ? `${attachment.progress}%` : attachment.name}</span>
-                <button type="button" data-id="project-agent-card-attachment-remove" onClick={(event) => { event.stopPropagation(); onRemoveAttachment(attachment.id); }} className="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-black/70 text-zinc-300 opacity-0 group-hover:opacity-100"><X className="h-3 w-3" /></button>
+                <button type="button" data-id="project-agent-card-attachment-remove" aria-label="Remove attachment" onClick={(event) => { event.stopPropagation(); onRemoveAttachment(attachment.id); }} className="absolute -right-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-black/70 text-zinc-300 opacity-0 shadow-md transition group-hover:opacity-100"><X className="h-3 w-3" /></button>
               </div>
             ))}
           </div>
