@@ -551,8 +551,9 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
     <div data-id="terminal-view" className={`relative h-full w-full bg-black ${className || ''}`}>
       <div ref={hostRef} className="cicy-term-host h-full w-full pl-1 pt-1" />
       {connState === 'retrying' ? (
-        <div data-id="terminal-view-retrying" className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[11px] text-amber-300">
-          重连中…
+        <div data-id="terminal-view-retrying" role="status" className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-full border border-amber-400/25 bg-black/80 px-2.5 py-1 text-[11px] font-medium text-amber-300 shadow-lg backdrop-blur-sm">
+          <span data-id="terminal-view-retrying-dot" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+          <span>重连中…</span>
         </div>
       ) : null}
     </div>

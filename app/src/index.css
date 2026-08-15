@@ -452,6 +452,15 @@ html[data-theme="light"] [data-id="workspace-toast"] {
 html[data-theme="light"] [data-id="workspace-toast-close"]:hover {
   background-color: #f4f4f5 !important;
 }
+html[data-theme="light"] [data-id="terminal-view-retrying"] {
+  background-color: rgba(255, 251, 235, 0.96) !important;
+  border-color: #fcd34d !important;
+  color: #92400e !important;
+  box-shadow: 0 4px 14px rgba(146, 64, 14, 0.12) !important;
+}
+html[data-theme="light"] [data-id="terminal-view-retrying-dot"] {
+  background-color: #d97706 !important;
+}
 html[data-theme="light"] [data-id^="team-panel-worker-w-"]:not([data-id*="wrap"]):not([data-id*="forks"]):not([data-id*="menu"]) {
   background-color: #ffffff !important;
   border-color: #e4e4e7 !important;
