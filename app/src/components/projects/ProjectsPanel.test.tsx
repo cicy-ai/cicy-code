@@ -2,7 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  initReactI18next: { type: '3rdParty', init: vi.fn() },
+  useTranslation: () => ({ t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue || key }),
 }));
 
 const api = vi.hoisted(() => ({
@@ -14,6 +15,7 @@ const api = vi.hoisted(() => ({
   addGroupPane: vi.fn(),
   removeGroupPane: vi.fn(),
   updateGroupPaneLayout: vi.fn(),
+  getAgentCurrentReply: vi.fn(),
 }));
 const agentSend = vi.hoisted(() => ({ sendToAgent: vi.fn() }));
 
@@ -38,6 +40,7 @@ beforeEach(() => {
   api.listGroups.mockResolvedValue({ data: { groups: defaultGroups } });
   api.getGroup.mockResolvedValue({ data: { panes: [] } });
   api.createGroup.mockResolvedValue({ data: { id: 3 } });
+  api.getAgentCurrentReply.mockResolvedValue({ data: { question: '', items: [], status: 'completed' } });
 });
 
 describe('<ProjectsPanel /> floating action button', () => {
@@ -139,7 +142,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     const onOpenGuidance = vi.fn();
     render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' }]} onOpenAgent={vi.fn()} onOpenGuidance={onOpenGuidance} />);
 
-    const button = await screen.findByRole('button', { name: 'CLAUDE.md' });
+    const button = await screen.findByRole('button', { name: '人设' });
     fireEvent.click(button);
 
     expect(onOpenGuidance).toHaveBeenCalledWith('w-101:main.0');
@@ -168,6 +171,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       if (!node) throw new Error('agent prompt footer did not open');
       return node as HTMLInputElement;
     });
+    fireEvent.click(card);
+    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
+
     fireEvent.change(input, { target: { value: '中文任务' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', keyCode: 229, isComposing: true });
     expect(agentSend.sendToAgent).not.toHaveBeenCalled();

@@ -437,6 +437,12 @@ html[data-theme="light"] [data-id^="project-agent-card-"][aria-pressed="true"] {
   border-color: #60a5fa !important;
   box-shadow: 0 8px 24px rgba(37, 99, 235, 0.10) !important;
 }
+html[data-theme="light"] [data-id="project-agent-card-latest-response"] {
+  color: #18181b !important;
+}
+html[data-theme="light"] [data-id="project-agent-card-latest-tool"] {
+  color: #71717a !important;
+}
 html[data-theme="light"] [data-id^="project-agent-card-attachment-"] {
   background-color: #ffffff !important;
   border-color: #e4e4e7 !important;

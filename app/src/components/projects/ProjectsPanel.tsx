@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { Check, FileText, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { Atom, Check, ChevronDown, Copy, FileText, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
 import { cn, copyToClipboard } from '../../lib/utils';
-import { guidanceFilenameForAgentType } from '../../lib/agentType';
 import type { AgentLiveMetrics } from '../../lib/agentMetrics';
 import { metricsFromCurrentReply } from '../../lib/agentMetrics';
 import { ModelTag } from '../../lib/modelTag';
@@ -15,6 +14,7 @@ import { chatAttachmentMarkdown, replAttachmentMarkdown } from '../../lib/attach
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
 import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
+import { toolHeadline } from '../chat/history/lib/toolFormat';
 
 export interface ProjectAgent {
   paneId: string;
@@ -109,10 +109,11 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachment, working, teamId, selected, removable, footer, width, height, onRemove, onOpenGuidance, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, reply, attachments, onRemoveAttachment, working, teamId, selected, removable, footer, width, height, onRemove, onOpenGuidance, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
+  reply?: any;
   attachments: ProjectAttachment[];
   onRemoveAttachment: (id: string) => void;
   working: boolean;
@@ -136,6 +137,7 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
   const identity = teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId);
+  const replyItems = Array.isArray(reply?.items) ? reply.items : [];
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -171,7 +173,7 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
           </div>
         </div>
         <div data-id="project-agent-card-header-actions" className="flex shrink-0 items-center gap-0.5">
-        <div data-id="project-agent-card-menu-wrap" ref={menuRef} className="relative">
+        <div data-id="project-agent-card-menu-wrap" ref={menuRef} className="relative order-2">
           <button
             type="button"
             data-id={`project-agent-card-menu-${shortPaneId(agent.paneId)}`}
@@ -200,9 +202,9 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
           type="button"
           data-id={`project-agent-card-guidance-${shortPaneId(agent.paneId)}`}
           onClick={(event) => { event.stopPropagation(); onOpenGuidance(); }}
-          className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
-          title={guidanceFilenameForAgentType(agent.agentType) || 'AGENTS.md'}
-          aria-label={guidanceFilenameForAgentType(agent.agentType) || 'AGENTS.md'}
+          className="order-1 grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
+          title={t('projectAgentPersona', { defaultValue: '人设' })}
+          aria-label={t('projectAgentPersona', { defaultValue: '人设' })}
         >
           <FileText className="h-4 w-4" />
         </button>
@@ -233,19 +235,68 @@ function ProjectAgentCard({ agent, metrics, latest, attachments, onRemoveAttachm
         ) : null}
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
-      <div data-id="project-agent-card-live-body" onWheel={(event) => event.stopPropagation()} className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-2 text-[14px] leading-[21px] [scrollbar-width:thin]">
-        {latest?.latest_question ? (
-          <div data-id="project-agent-card-latest-question" className="ml-auto max-w-[92%] rounded-xl rounded-br-sm bg-blue-500/10 px-3 py-2 text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
-            <MarkdownBlock text={previewableMarkdown(latest.latest_question)} />
+      <div
+        data-id="project-agent-card-live-body"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
+        className="mt-3 min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-2 text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
+      >
+        {(reply?.question || latest?.latest_question) ? (
+          <div data-id="project-agent-card-latest-question" className="mr-auto max-w-[92%] rounded-xl rounded-bl-sm bg-blue-500/10 px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
+            <MarkdownBlock text={previewableMarkdown(reply?.question || latest.latest_question)} />
           </div>
         ) : null}
-        {latest?.latest_response ? (
+        {replyItems.length ? replyItems.map((item: any, index: number) => {
+          const type = String(item?.type || '');
+          if (type === 'thinking' && item?.thinking) return (
+            <div key={`thinking-${index}`} data-id="project-agent-card-reply-thinking" className="flex min-w-0 items-start gap-2 text-zinc-500">
+              <Atom className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="shrink-0 font-medium text-zinc-400">Think</span>
+              <span aria-hidden="true">·</span>
+              <div className="min-w-0 flex-1"><MarkdownBlock text={previewableMarkdown(String(item.thinking))} /></div>
+            </div>
+          );
+          if (type === 'text' && item?.text) return (
+            <div key={`text-${index}`} data-id="project-agent-card-latest-response" className="text-zinc-300"><MarkdownBlock text={previewableMarkdown(String(item.text))} /></div>
+          );
+          if (type === 'tool_use') {
+            const input = item?.input == null ? '' : typeof item.input === 'string' ? item.input : JSON.stringify(item.input);
+            const output = item?.output == null ? '' : typeof item.output === 'string' ? item.output : JSON.stringify(item.output);
+            const tool = { name: String(item?.name || 'Tool'), arg: input, result: output, isError: item?.output_is_error === true };
+            const headline = toolHeadline(tool);
+            const parsedInput = item?.input && typeof item.input === 'object' ? item.input : {};
+            const command = String(parsedInput.command || parsedInput.cmd || '').trim();
+            return (
+              <details key={`tool-${index}`} data-id="project-agent-card-reply-tool" className="group text-zinc-500">
+                <summary className="flex cursor-pointer list-none items-center gap-2 py-1 select-none [&::-webkit-details-marker]:hidden">
+                  <SquareTerminal className="h-4 w-4 shrink-0 group-open:hidden" />
+                  <ChevronDown className="hidden h-4 w-4 shrink-0 group-open:block" />
+                  <span className="shrink-0 font-medium text-zinc-400">{tool.name}</span>
+                  {headline ? <><span aria-hidden="true">·</span><span className="min-w-0 truncate">{headline}</span></> : null}
+                </summary>
+                {(command || input || output) ? (
+                  <div className={cn('ml-6 mt-1 overflow-hidden rounded-xl border bg-black/[0.12]', tool.isError ? 'border-red-400/20' : 'border-white/[0.08]')}>
+                    {(command || input) ? (
+                      <div className="flex items-start gap-2 border-b border-white/[0.08] px-3 py-2 font-mono text-[12px] leading-5 text-zinc-400">
+                        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{command || input}</span>
+                        <button type="button" aria-label={t('copy', { defaultValue: '复制' })} title={t('copy', { defaultValue: '复制' })} onClick={(event) => { event.preventDefault(); event.stopPropagation(); void copyToClipboard(command || input); }} className="shrink-0 rounded p-1 hover:bg-white/[0.06] hover:text-zinc-200"><Copy className="h-3.5 w-3.5" /></button>
+                      </div>
+                    ) : null}
+                    {output ? <pre className={cn('max-h-52 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[12px] leading-5', tool.isError ? 'text-red-300/80' : 'text-zinc-400')}>{output}</pre> : null}
+                  </div>
+                ) : null}
+              </details>
+            );
+          }
+          return null;
+        }) : latest?.latest_response ? (
           <div data-id="project-agent-card-latest-response" className="text-zinc-400 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
             <MarkdownBlock text={previewableMarkdown(latest.latest_response)} />
           </div>
         ) : null}
-        {latest?.latest_tool?.name ? (
-          <div data-id="project-agent-card-latest-tool" className="min-w-0 line-clamp-2 rounded-lg border border-white/[0.06] bg-white/[0.025] px-2.5 py-2 font-mono text-[12px] leading-4 text-zinc-500">
+        {!replyItems.length && latest?.latest_tool?.name ? (
+          <div data-id="project-agent-card-latest-tool" className="min-w-0 line-clamp-2 font-mono text-[13px] leading-5 text-zinc-500">
             {`${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}`}
           </div>
         ) : null}
@@ -324,6 +375,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
   const [agentAttachments, setAgentAttachments] = useState<Record<string, ProjectAttachment[]>>({});
+  const [agentReplies, setAgentReplies] = useState<Record<string, any>>({});
   const [sendingAgentIds, setSendingAgentIds] = useState<Set<string>>(new Set());
   const [cancelingAgentIds, setCancelingAgentIds] = useState<Set<string>>(new Set());
   const [agentLayouts, setAgentLayouts] = useState<Record<string, ProjectAgentLayout>>({});
@@ -445,6 +497,33 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     agent.workspace,
   ].some((value) => String(value || '').toLowerCase().includes(normalizedAddSearch)));
   const paneMembershipKey = selectedProject.pane_ids.map(shortPaneId).sort().join('|');
+  const replyUpdateKey = visibleAgents.map((agent) => {
+    const id = shortPaneId(agent.paneId);
+    const summary = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id] || {};
+    return `${id}:${String(summary?.updated_at || '')}`;
+  }).join('|');
+
+  useEffect(() => {
+    let cancelled = false;
+    const ids = visibleAgents.map((agent) => shortPaneId(agent.paneId));
+    if (!ids.length) { setAgentReplies({}); return () => { cancelled = true; }; }
+    void Promise.all(ids.map(async (id) => {
+      try {
+        const response = await apiService.getAgentCurrentReply(id);
+        return [id, response?.data || {}] as const;
+      } catch {
+        return [id, null] as const;
+      }
+    })).then((rows) => {
+      if (cancelled) return;
+      setAgentReplies((current) => {
+        const next = { ...current };
+        for (const [id, reply] of rows) if (reply) next[id] = reply;
+        return next;
+      });
+    });
+    return () => { cancelled = true; };
+  }, [paneMembershipKey, replyUpdateKey]);
 
   useEffect(() => {
     const checkKey = `${selectedProject.id}:${paneMembershipKey}`;
@@ -711,9 +790,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
   const toggleAgentSelection = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
-    setSelectedAgentIds((current) => {
-      return current.has(id) ? new Set() : new Set([id]);
-    });
+    setSelectedAgentIds((current) => current.has(id) ? current : new Set([id]));
   };
 
   const addAgentFiles = (agent: ProjectAgent, files: FileList | File[]) => {
@@ -768,9 +845,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         next.delete(id);
         return next;
       });
-      window.setTimeout(() => {
-        document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-input-${id}"]`)?.focus();
-      }, 0);
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-input-${id}"]`)?.focus({ preventScroll: true });
+        });
+      });
     }
   };
 
@@ -1045,6 +1124,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     agent={agent}
                     metrics={cardMetrics}
                     latest={cardLatest}
+                    reply={agentReplies[cardShortId]}
                     attachments={agentAttachments[cardShortId] || []}
                     onRemoveAttachment={(attachmentId) => removeAgentAttachment(cardShortId, attachmentId)}
                     working={cardBusy}
@@ -1056,6 +1136,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 footer={selectedAgentIds.has(shortPaneId(agent.paneId)) ? (
                   <footer
                     data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`}
+                    onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
                     className="flex h-12 min-h-12 shrink-0 items-center rounded-b-2xl border-t border-white/[0.08] bg-[#15161b] px-3"
                   >
