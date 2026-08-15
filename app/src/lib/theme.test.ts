@@ -37,6 +37,10 @@ describe('global theme', () => {
     expect(css).toContain('[data-id="knowledge-graph-canvas"]');
     expect(css).toContain('[data-id="knowledge-graph-search"]');
     expect(css).toContain('html[data-theme="light"] .cm-editor');
+    expect(css).toContain('.cm-cicy-search-field');
+    expect(css).toContain(':is(input, textarea, select)[class*="bg-black"]');
+    expect(css).toContain('[class~="bg-zinc-900/50"]');
+    expect(css).toContain('[class~="hover:bg-zinc-800/60"]:hover');
     expect(css).toContain('rgba(63,63,70,0.14)');
   });
 });

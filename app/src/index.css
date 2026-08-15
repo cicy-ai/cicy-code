@@ -196,6 +196,55 @@ html[data-theme="light"] [data-id="knowledge-graph-canvas"] { background-color: 
 html[data-theme="light"] [data-id="knowledge-graph-search"] { background-color: #ffffff !important; color: #27272a !important; border-color: #d4d4d8 !important; }
 html[data-theme="light"] [data-id="knowledge-graph-refresh"] { background-color: rgba(255,255,255,0.9) !important; color: #52525b !important; border-color: #d4d4d8 !important; }
 
+html[data-theme="light"] :is(input, textarea, select)[class*="bg-black"] {
+  background-color: #ffffff !important;
+  color: #27272a !important;
+  border-color: #d4d4d8 !important;
+}
+html[data-theme="light"] :is(pre, code)[class*="bg-black"] {
+  background-color: #f4f4f5 !important;
+  color: #3f3f46 !important;
+  border-color: #d4d4d8 !important;
+}
+html[data-theme="light"] [data-id="terminal-view"],
+html[data-theme="light"] [data-id^="agent-stack-card-body-"] { background-color: #fafafa !important; }
+
+html[data-theme="light"] .cm-panels,
+html[data-theme="light"] .cm-cicy-search { background-color: #fafafa !important; color: #27272a !important; }
+html[data-theme="light"] .cm-panels.cm-panels-top { border-bottom-color: #d4d4d8 !important; }
+html[data-theme="light"] .cm-cicy-search-field,
+html[data-theme="light"] .cm-cicy-search-btn {
+  background-color: #ffffff !important;
+  border-color: #d4d4d8 !important;
+  color: #3f3f46 !important;
+}
+html[data-theme="light"] .cm-cicy-search-count,
+html[data-theme="light"] .cm-cicy-search-toggle,
+html[data-theme="light"] .cm-cicy-search-expand { color: #71717a !important; }
+html[data-theme="light"] .cm-cicy-search-btn:hover,
+html[data-theme="light"] .cm-cicy-search-toggle:hover,
+html[data-theme="light"] .cm-cicy-search-expand:hover { background-color: #e4e4e7 !important; color: #18181b !important; }
+
+html[data-theme="light"] :is(div, nav, header, aside, section, main, ul, table, thead, tr, button)[class~="bg-zinc-950"],
+html[data-theme="light"] :is(div, nav, header, aside, section, main, ul, table, thead, tr, button)[class~="bg-zinc-950/80"],
+html[data-theme="light"] :is(div, nav, header, aside, section, main, ul, table, thead, tr, button)[class~="bg-zinc-900"],
+html[data-theme="light"] :is(div, nav, header, aside, section, main, ul, table, thead, tr, button)[class~="bg-zinc-900/30"],
+html[data-theme="light"] :is(div, nav, header, aside, section, main, ul, table, thead, tr, button)[class~="bg-zinc-900/40"],
+html[data-theme="light"] :is(div, nav, header, aside, section, main, ul, table, thead, tr, button)[class~="bg-zinc-900/50"],
+html[data-theme="light"] :is(div, nav, header, aside, section, main, ul, table, thead, tr, button)[class~="bg-zinc-900/70"],
+html[data-theme="light"] :is(div, nav, header, aside, section, main, ul, table, thead, tr, button)[class~="bg-zinc-900/90"] { background-color: #fafafa !important; }
+html[data-theme="light"] :is(div, nav, header, aside, section, main, ul, table, thead, tr, button)[class~="bg-zinc-800"],
+html[data-theme="light"] :is(div, nav, header, aside, section, main, ul, table, thead, tr, button)[class~="bg-zinc-800/60"],
+html[data-theme="light"] :is(div, nav, header, aside, section, main, ul, table, thead, tr, button)[class~="bg-zinc-800/70"],
+html[data-theme="light"] :is(div, nav, header, aside, section, main, ul, table, thead, tr, button)[class~="bg-zinc-800/80"] { background-color: #e4e4e7 !important; }
+html[data-theme="light"] [class~="border-zinc-800"],
+html[data-theme="light"] [class~="border-zinc-700"],
+html[data-theme="light"] [class~="border-zinc-700/40"],
+html[data-theme="light"] [class~="border-zinc-700/60"] { border-color: #d4d4d8 !important; }
+html[data-theme="light"] [class~="hover:bg-zinc-800"]:hover,
+html[data-theme="light"] [class~="hover:bg-zinc-800/60"]:hover,
+html[data-theme="light"] [class~="hover:bg-zinc-700"]:hover { background-color: #e4e4e7 !important; }
+
 @layer utilities {
   .cicy-btn {
     padding: 4px 6px;
