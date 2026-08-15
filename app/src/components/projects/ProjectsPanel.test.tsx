@@ -30,10 +30,31 @@ const defaultGroups = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal('ResizeObserver', class {
+    observe() {}
+    disconnect() {}
+  });
   localStorage.clear();
   api.listGroups.mockResolvedValue({ data: { groups: defaultGroups } });
   api.getGroup.mockResolvedValue({ data: { panes: [] } });
   api.createGroup.mockResolvedValue({ data: { id: 3 } });
+});
+
+describe('<ProjectsPanel /> floating action button', () => {
+  it('hides while the bottom dock is open and returns collapsed after it closes', async () => {
+    const { rerender } = render(<ProjectsPanel agents={[]} dockOpen={false} onOpenAgent={vi.fn()} />);
+    await screen.findByText('projectDefault');
+
+    fireEvent.click(document.querySelector('[data-id="project-add-agent"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-fab-menu"]')).toHaveClass('pointer-events-auto');
+
+    rerender(<ProjectsPanel agents={[]} dockOpen onOpenAgent={vi.fn()} />);
+    expect(document.querySelector('[data-id="project-fab-wrap"]')).not.toBeInTheDocument();
+
+    rerender(<ProjectsPanel agents={[]} dockOpen={false} onOpenAgent={vi.fn()} />);
+    expect(document.querySelector('[data-id="project-fab-wrap"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-fab-menu"]')).toHaveClass('pointer-events-none');
+  });
 });
 
 describe('<ProjectsPanel /> project view cache', () => {

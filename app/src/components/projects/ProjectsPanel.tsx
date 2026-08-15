@@ -333,6 +333,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const panDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
 
   useEffect(() => {
+    if (dockOpen) setFabOpen(false);
+  }, [dockOpen]);
+
+  useEffect(() => {
     if (!dockOpen) { setDockHeight(0); return; }
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1125,7 +1129,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           </div>
         ) : null}
         </div>
-        <div data-id="project-fab-wrap" className="absolute right-5 z-[60] flex flex-col items-end gap-2 transition-[bottom] duration-200" style={{ bottom: dockOpen ? 60 + dockHeight : 64 }}>
+        {!dockOpen ? <div data-id="project-fab-wrap" className="absolute right-5 z-[60] flex flex-col items-end gap-2" style={{ bottom: 64 }}>
           <div
             data-id="project-fab-menu"
             className={cn(
@@ -1164,7 +1168,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           >
             <Plus data-id="project-add-agent-icon" className={cn('h-5 w-5 transition-transform duration-200', fabOpen && 'rotate-45')} />
           </button>
-        </div>
+        </div> : null}
         </div>
 
       </main>
