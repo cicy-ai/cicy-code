@@ -90,9 +90,31 @@ html[data-theme="light"] [class~="bg-[#1a1a1a]"],
 html[data-theme="light"] [class~="bg-[#1c1c1e]/95"],
 html[data-theme="light"] [class~="bg-[#202126]"] { background-color: #fafafa !important; }
 
+/* Catch arbitrary-opacity Tailwind forms such as bg-[#141416]/[0.98]. The
+   legacy surfaces use only near-black 0x/1x/2x values; semantic colored fills
+   are handled separately below. */
+html[data-theme="light"] [class^="bg-[#0"],
+html[data-theme="light"] [class*=" bg-[#0"],
+html[data-theme="light"] [class^="bg-[#1"],
+html[data-theme="light"] [class*=" bg-[#1"],
+html[data-theme="light"] [class^="bg-[#2"],
+html[data-theme="light"] [class*=" bg-[#2"] { background-color: #fafafa !important; }
+
 html[data-theme="light"] [class~="bg-zinc-950"],
 html[data-theme="light"] [class~="bg-zinc-900"],
 html[data-theme="light"] [class~="bg-black"] { background-color: #f4f4f5 !important; }
+
+/* Low-opacity black is also used as a dark content inset. Convert those
+   insets in light mode while preserving full-screen modal/lightbox backdrops. */
+html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/20"]:not([class*="fixed"][class*="inset-0"]):not([class*="absolute"][class*="inset-0"]),
+html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/30"]:not([class*="fixed"][class*="inset-0"]):not([class*="absolute"][class*="inset-0"]),
+html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/40"]:not([class*="fixed"][class*="inset-0"]):not([class*="absolute"][class*="inset-0"]),
+html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/[0.12]"]:not([class*="fixed"][class*="inset-0"]):not([class*="absolute"][class*="inset-0"]),
+html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/[0.18]"]:not([class*="fixed"][class*="inset-0"]):not([class*="absolute"][class*="inset-0"]),
+html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/[0.20]"]:not([class*="fixed"][class*="inset-0"]):not([class*="absolute"][class*="inset-0"]),
+html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/[0.25]"]:not([class*="fixed"][class*="inset-0"]):not([class*="absolute"][class*="inset-0"]),
+html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/[0.28]"]:not([class*="fixed"][class*="inset-0"]):not([class*="absolute"][class*="inset-0"]),
+html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/[0.35]"]:not([class*="fixed"][class*="inset-0"]):not([class*="absolute"][class*="inset-0"]) { background-color: #f4f4f5 !important; }
 
 html[data-theme="light"] [class~="text-white"]:not([class*="bg-"]),
 html[data-theme="light"] [class~="text-zinc-100"],
@@ -169,6 +191,7 @@ html[data-theme="light"] [class~="border-white/10"],
 html[data-theme="light"] [class~="border-white/15"],
 html[data-theme="light"] [class~="border-white/20"],
 html[data-theme="light"] [class~="border-white/25"] { border-color: #d4d4d8 !important; }
+html[data-theme="light"] [class*="divide-white"] > :not(:last-child) { border-color: #e4e4e7 !important; }
 html[data-theme="light"] [class~="bg-white/[0.02]"],
 html[data-theme="light"] [class~="bg-white/[0.03]"],
 html[data-theme="light"] [class~="bg-white/[0.04]"],

@@ -42,6 +42,9 @@ describe('global theme', () => {
     expect(css).toContain('.cm-cicy-search-field');
     expect(css).toContain(':is(input, textarea, select)[class*="bg-black"]');
     expect(css).toContain('[class~="bg-zinc-900/50"]');
+    expect(css).toContain('[class*=" bg-[#0"]');
+    expect(css).toContain('[class~="bg-black/30"]:not([class*="fixed"][class*="inset-0"])');
+    expect(css).toContain('[class*="divide-white"] > :not(:last-child)');
     expect(css).toContain('[class~="hover:bg-zinc-800/60"]:hover');
     expect(css).toContain('[class*="text-amber-2"]');
     expect(css).toContain('[class*="bg-amber-900"]');
