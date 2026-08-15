@@ -34,6 +34,9 @@ describe('global theme', () => {
     expect(css).toContain('[data-id="projects-agent-header"]');
     expect(css).toContain('[data-id="project-infinite-canvas"]');
     expect(css).toContain('[data-id="project-canvas-footer"]');
+    expect(css).toContain('[data-id="knowledge-graph-canvas"]');
+    expect(css).toContain('[data-id="knowledge-graph-search"]');
+    expect(css).toContain('html[data-theme="light"] .cm-editor');
     expect(css).toContain('rgba(63,63,70,0.14)');
   });
 });

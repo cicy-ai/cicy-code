@@ -180,7 +180,21 @@ html[data-theme="light"] .chat-markdown code { background: #e4e4e7; color: #2727
 html[data-theme="light"] .chat-markdown pre { background: #f4f4f5; }
 html[data-theme="light"] .chat-markdown blockquote { border-left-color: #d4d4d8; color: #71717a; }
 
-html[data-theme="light"] :is(.xterm, .cm-editor, .cm-editor *) { color-scheme: dark; }
+html[data-theme="light"] .cm-editor,
+html[data-theme="light"] .cm-scroller,
+html[data-theme="light"] .cm-content { background-color: transparent !important; color: #27272a !important; color-scheme: light; }
+html[data-theme="light"] .cm-gutters { background-color: #f4f4f5 !important; border-right-color: #d4d4d8 !important; color: #a1a1aa !important; }
+html[data-theme="light"] .cm-lineNumbers .cm-gutterElement { color: #a1a1aa !important; }
+html[data-theme="light"] .cm-activeLine,
+html[data-theme="light"] .cm-activeLineGutter { background-color: #e4e4e7 !important; }
+html[data-theme="light"] .cm-cursor { border-left-color: #18181b !important; }
+html[data-theme="light"] .cm-line span { color: #3f3f46 !important; }
+html[data-theme="light"] .cm-selectionBackground { background-color: rgba(59,130,246,0.22) !important; }
+html[data-theme="light"] .xterm { color-scheme: light; }
+html[data-theme="light"] [data-id="knowledge-graph-toolbar"],
+html[data-theme="light"] [data-id="knowledge-graph-canvas"] { background-color: #fafafa !important; }
+html[data-theme="light"] [data-id="knowledge-graph-search"] { background-color: #ffffff !important; color: #27272a !important; border-color: #d4d4d8 !important; }
+html[data-theme="light"] [data-id="knowledge-graph-refresh"] { background-color: rgba(255,255,255,0.9) !important; color: #52525b !important; border-color: #d4d4d8 !important; }
 
 @layer utilities {
   .cicy-btn {

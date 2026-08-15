@@ -6,6 +6,7 @@ import ForceGraph2D from 'react-force-graph-2d';
 import { Loader2, RefreshCw, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
+import { getCicyTheme, type CicyTheme } from '../../lib/theme';
 
 // Knowledge graph: a BIPARTITE force graph over ~/cicy-ai/knowledge — entry nodes
 // (colored by governance status) linked to their tag nodes (hubs). The store has
@@ -39,6 +40,14 @@ export default function KnowledgeGraphView({ className, onOpenEntry }: Props) {
   const [offDomains, setOffDomains] = useState<Set<string>>(new Set());
   const [offStatus, setOffStatus] = useState<Set<string>>(new Set());
   const [hoverId, setHoverId] = useState<string | null>(null);
+  const [theme, setTheme] = useState<CicyTheme>(getCicyTheme);
+  const light = theme === 'light';
+
+  useEffect(() => {
+    const onTheme = () => setTheme(getCicyTheme());
+    window.addEventListener('cicy-theme-change', onTheme);
+    return () => window.removeEventListener('cicy-theme-change', onTheme);
+  }, []);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -155,7 +164,7 @@ export default function KnowledgeGraphView({ className, onOpenEntry }: Props) {
               width={size.w}
               height={size.h}
               graphData={graph}
-              backgroundColor="#08080a"
+              backgroundColor={light ? '#fafafa' : '#08080a'}
               nodeRelSize={4}
               d3VelocityDecay={0.28}
               cooldownTicks={140}
@@ -165,7 +174,9 @@ export default function KnowledgeGraphView({ className, onOpenEntry }: Props) {
               linkColor={(l: any) => {
                 const a = typeof l.source === 'object' ? l.source.id : l.source, b = typeof l.target === 'object' ? l.target.id : l.target;
                 if (hiSet && hiSet.has(a) && hiSet.has(b)) return 'rgba(96,165,250,0.55)';
-                return hiSet ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.07)';
+                return light
+                  ? (hiSet ? 'rgba(63,63,70,0.05)' : 'rgba(63,63,70,0.14)')
+                  : (hiSet ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.07)');
               }}
               linkWidth={(l: any) => { const a = typeof l.source === 'object' ? l.source.id : l.source, b = typeof l.target === 'object' ? l.target.id : l.target; return hiSet && hiSet.has(a) && hiSet.has(b) ? 1.4 : 0.5; }}
               linkDirectionalParticles={(l: any) => { const a = typeof l.source === 'object' ? l.source.id : l.source, b = typeof l.target === 'object' ? l.target.id : l.target; return hiSet && hiSet.has(a) && hiSet.has(b) ? 2 : 0; }}
@@ -188,7 +199,7 @@ export default function KnowledgeGraphView({ className, onOpenEntry }: Props) {
                 if (node.kind === 'tag') { ctx.fillStyle = 'rgba(96,165,250,0.16)'; ctx.fill(); ctx.lineWidth = 1 / scale; ctx.strokeStyle = TAG_COLOR; ctx.stroke(); }
                 else { ctx.fillStyle = node.color; ctx.fill(); }
                 ctx.shadowBlur = 0;
-                if (isSel || isHover) { ctx.lineWidth = 1.6 / scale; ctx.strokeStyle = '#ffffff'; ctx.stroke(); }
+                if (isSel || isHover) { ctx.lineWidth = 1.6 / scale; ctx.strokeStyle = light ? '#18181b' : '#ffffff'; ctx.stroke(); }
                 // label: tags when zoomed; entries when hover/selected/neighbor/matched
                 const showLabel = !dim && (node.kind === 'tag'
                   ? scale > 1.15
@@ -199,8 +210,8 @@ export default function KnowledgeGraphView({ className, onOpenEntry }: Props) {
                   ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
                   const txt = String(node.label).slice(0, 30);
                   const w = ctx.measureText(txt).width;
-                  ctx.fillStyle = 'rgba(8,8,10,0.72)'; ctx.fillRect(node.x - w / 2 - 2, node.y - r - 4 - fs, w + 4, fs + 2);
-                  ctx.fillStyle = node.kind === 'tag' ? '#93c5fd' : '#e4e4e7';
+                  ctx.fillStyle = light ? 'rgba(250,250,250,0.84)' : 'rgba(8,8,10,0.72)'; ctx.fillRect(node.x - w / 2 - 2, node.y - r - 4 - fs, w + 4, fs + 2);
+                  ctx.fillStyle = node.kind === 'tag' ? (light ? '#1d4ed8' : '#93c5fd') : (light ? '#27272a' : '#e4e4e7');
                   ctx.fillText(txt, node.x, node.y - r - 3);
                 }
                 ctx.globalAlpha = 1;

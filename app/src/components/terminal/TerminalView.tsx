@@ -24,6 +24,7 @@ import '@xterm/xterm/css/xterm.css'
 import { replAttachmentMarkdown } from '../../lib/attachmentMarkdown'
 import apiService from '../../services/api'
 import { scanLinksOnText, type LinkKind } from './linkDetect'
+import { getCicyTheme } from '../../lib/theme'
 
 // ── 逻辑行重建(移植自 api/js/src/xterm.ts)──
 // xterm 的 link provider 按"物理行"询问;URL/路径经常跨软换行,必须把 wrap
@@ -80,7 +81,14 @@ const isWindows = /windows/i.test(navigator.userAgent)
 const MONO_FONT = isWindows
   ? `"Cascadia Mono", "Cascadia Code", "Sarasa Mono SC", "Sarasa Term SC", Consolas, ${EMOJI_FALLBACK}, monospace`
   : `"SF Mono", Menlo, Consolas, ${EMOJI_FALLBACK}, monospace`
-const TERM_THEME = { background: '#000000', foreground: '#b9adad' }
+const TERM_THEMES = {
+  dark: { background: '#000000', foreground: '#d4d4d8', cursor: '#e4e4e7', selectionBackground: '#3b82f640' },
+  light: {
+    background: '#fafafa', foreground: '#27272a', cursor: '#18181b', selectionBackground: '#93c5fd80',
+    black: '#18181b', red: '#b91c1c', green: '#047857', yellow: '#a16207', blue: '#1d4ed8', magenta: '#a21caf', cyan: '#0e7490', white: '#d4d4d8',
+    brightBlack: '#71717a', brightRed: '#dc2626', brightGreen: '#059669', brightYellow: '#ca8a04', brightBlue: '#2563eb', brightMagenta: '#c026d3', brightCyan: '#0891b2', brightWhite: '#18181b',
+  },
+}
 
 const MSG_IN_INPUT = '1'
 const MSG_IN_PING = '2'
@@ -244,7 +252,7 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
       scrollback: 5000,
       fontSize: 13,
       fontFamily: MONO_FONT,
-      theme: TERM_THEME,
+      theme: TERM_THEMES[getCicyTheme()],
       allowProposedApi: true,
     })
     const fit = new FitAddon()
@@ -254,6 +262,8 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
     term.loadAddon(new Unicode11Addon())
     term.unicode.activeVersion = '11'
     term.open(host)
+    const onThemeChange = () => { term.options.theme = TERM_THEMES[getCicyTheme()] }
+    window.addEventListener('cicy-theme-change', onThemeChange)
     fit.fit()
     term.focus()
 
@@ -505,6 +515,7 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
       host.removeEventListener('mousedown', onClickRetry)
       host.removeEventListener('mousedown', onHostMouseDown)
       host.removeEventListener('paste', onPaste, true)
+      window.removeEventListener('cicy-theme-change', onThemeChange)
       document.removeEventListener('mouseup', endSelecting, true)
       if (ws) { ws.onclose = null; ws.close() }
       ro.disconnect()
