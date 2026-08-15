@@ -202,6 +202,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(await screen.findByText('上一回答续段')).toBeInTheDocument();
     expect(screen.queryByText('更早问题')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('agent-avatar')).toHaveLength(1);
+    expect((document.querySelector('[data-id="project-agent-card-live-body"]') as HTMLElement).scrollTop).toBe(44);
     expect(api.getAgentCurrentHistory).toHaveBeenCalledTimes(1);
   });
 

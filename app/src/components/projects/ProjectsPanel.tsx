@@ -196,6 +196,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const loadingRef = useRef<HTMLDivElement>(null);
   const followLoadingRef = useRef(true);
   const historyLoadingRef = useRef(false);
+  const parkBelowSentinelRef = useRef(false);
   const initialBottomKeyRef = useRef('');
   const [renderedHistory, setRenderedHistory] = useState<HistoryTurn[]>([]);
   const [historyBefore, setHistoryBefore] = useState<number | null>(null);
@@ -275,6 +276,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         setHistoryBefore(0);
         return;
       }
+      parkBelowSentinelRef.current = true;
       setRenderedHistory((current) => [...group, ...current]);
       setHistoryBefore(Number(group[0]?.history_id || 0));
     } catch {
@@ -285,6 +287,18 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       setHistoryLoading(false);
     }
   }, [agent.paneId, historyBefore, historyConversationId, optimisticQuestion]);
+
+  useLayoutEffect(() => {
+    if (!parkBelowSentinelRef.current) return;
+    const node = bodyScrollRef.current;
+    const sentinel = historySentinelRef.current;
+    if (!node || !sentinel) return;
+    // Park immediately below the 44px sentinel after each prepend. The newly
+    // loaded QA starts at the top of the viewport, while the sentinel must be
+    // deliberately revealed again by a fresh upward scroll before another load.
+    node.scrollTop = sentinel.offsetHeight || 44;
+    parkBelowSentinelRef.current = false;
+  }, [renderedHistory]);
 
   useEffect(() => {
     const root = bodyScrollRef.current;
