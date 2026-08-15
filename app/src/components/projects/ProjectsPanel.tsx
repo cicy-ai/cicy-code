@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { ArrowDown, Atom, Check, ChevronDown, Copy, FileText, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
@@ -16,6 +16,12 @@ import AgentAvatar from '../AgentAvatar';
 import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
 import { formatToolResult, toolHeadline } from '../chat/history/lib/toolFormat';
 import TerminalView from '../terminal/TerminalView';
+import type { HistoryTurn } from '../chat/history/types';
+import { historyMemCache } from '../chat/history/lib/cache';
+import { getHistoryIDs, loadWindowItems } from '../chat/history/lib/dataAccess';
+import { buildTurnsFromRawItems } from '../chat/history/lib/turns';
+import { CollapsibleQ } from '../chat/history/shared/CollapsibleQ';
+import { AssistantTurnView } from '../chat/history/shared/AssistantTurnView';
 
 export interface ProjectAgent {
   paneId: string;
@@ -103,6 +109,18 @@ const projectIdFromURL = () => {
   return match ? decodeURIComponent(match[1]) : DEFAULT_PROJECT_ID;
 };
 
+const previousQATurns = (turns: HistoryTurn[], beforeId: number) => {
+  const eligible = turns.filter((turn) => Number(turn.history_id || 0) < beforeId);
+  let questionIndex = -1;
+  for (let index = eligible.length - 1; index >= 0; index -= 1) {
+    if (eligible[index]?.role === 'user' && String(eligible[index]?.q || eligible[index]?.text || '').trim()) {
+      questionIndex = index;
+      break;
+    }
+  }
+  return questionIndex < 0 ? [] : eligible.slice(questionIndex);
+};
+
 interface ProjectViewCache {
   zoom: number;
   pan: { x: number; y: number };
@@ -174,8 +192,15 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const bodyScrollRef = useRef<HTMLDivElement>(null);
+  const historySentinelRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef<HTMLDivElement>(null);
   const followLoadingRef = useRef(true);
+  const historyLoadingRef = useRef(false);
+  const prependMetricsRef = useRef<{ top: number; height: number } | null>(null);
+  const [renderedHistory, setRenderedHistory] = useState<HistoryTurn[]>([]);
+  const [historyBefore, setHistoryBefore] = useState<number | null>(null);
+  const [historyConversationId, setHistoryConversationId] = useState('');
+  const [historyLoading, setHistoryLoading] = useState(false);
   const status = String(agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
@@ -189,6 +214,86 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const rawQuestion = String(optimisticQuestion || freshestQuestion);
   const visibleQuestion = questionWithoutUploadedAttachments(rawQuestion);
   const visibleQuestionAttachments = uploadedAttachmentsFromQuestion(rawQuestion);
+
+  // A newly-sent idle question owns the live area immediately. Older history
+  // stays in window._cacheHistory/IndexedDB, but is removed from the rendered
+  // rows until the user scrolls upward into the sentinel again.
+  useLayoutEffect(() => {
+    if (!optimisticQuestion) return;
+    setRenderedHistory([]);
+    setHistoryBefore(null);
+    setHistoryConversationId('');
+    followLoadingRef.current = true;
+  }, [optimisticQuestion]);
+
+  const loadPreviousQA = useCallback(async () => {
+    if (historyLoadingRef.current) return;
+    historyLoadingRef.current = true;
+    setHistoryLoading(true);
+    try {
+      let conversationId = historyConversationId;
+      let before = historyBefore;
+      const snapshot = historyMemCache().get(agent.paneId) || historyMemCache().get(shortPaneId(agent.paneId));
+      if (!conversationId || before == null) {
+        if (snapshot?.conversationId && snapshot.maxId > 0) {
+          conversationId = snapshot.conversationId;
+          before = snapshot.maxId + (optimisticQuestion ? 2 : 0);
+        } else {
+          const meta = await getHistoryIDs(agent.paneId);
+          conversationId = String(meta?.conversation_id || '').trim();
+          before = Number(meta?.id || 0) + (optimisticQuestion ? 2 : 0);
+        }
+        setHistoryConversationId(conversationId);
+      }
+      if (!conversationId || !before || before <= 1) {
+        setHistoryBefore(0);
+        return;
+      }
+      let turns = snapshot?.conversationId === conversationId
+        ? [...snapshot.items, ...(snapshot.liveTurn ? [snapshot.liveTurn] : [])]
+        : [];
+      let group = previousQATurns(turns, before);
+      if (!group.length) {
+        const hi = before - 1;
+        const loaded = await loadWindowItems(agent.paneId, conversationId, hi, 24);
+        turns = buildTurnsFromRawItems(loaded.items);
+        group = previousQATurns(turns, before);
+      }
+      if (!group.length) {
+        setHistoryBefore(0);
+        return;
+      }
+      const node = bodyScrollRef.current;
+      if (node) prependMetricsRef.current = { top: node.scrollTop, height: node.scrollHeight };
+      setRenderedHistory((current) => [...group, ...current]);
+      setHistoryBefore(Number(group[0]?.history_id || 0));
+    } catch {
+      // Keep the sentinel available: a transient history read failure can retry
+      // the next time it enters the viewport.
+    } finally {
+      historyLoadingRef.current = false;
+      setHistoryLoading(false);
+    }
+  }, [agent.paneId, historyBefore, historyConversationId, optimisticQuestion]);
+
+  useLayoutEffect(() => {
+    const metrics = prependMetricsRef.current;
+    const node = bodyScrollRef.current;
+    if (!metrics || !node) return;
+    node.scrollTop = metrics.top + (node.scrollHeight - metrics.height);
+    prependMetricsRef.current = null;
+  }, [renderedHistory]);
+
+  useEffect(() => {
+    const root = bodyScrollRef.current;
+    const target = historySentinelRef.current;
+    if (!root || !target || historyBefore === 0 || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) void loadPreviousQA();
+    }, { root, threshold: 0.01 });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [historyBefore, loadPreviousQA]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -355,6 +460,23 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         onScroll={handleBodyScroll}
         className="h-full min-h-0 w-full cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
       >
+        {historyBefore !== 0 ? (
+          <div ref={historySentinelRef} data-id="project-agent-card-history-sentinel" className="flex h-11 min-h-11 items-center justify-center text-[11px] text-zinc-600">
+            {historyLoading ? <Loader2 data-id="project-agent-card-history-loading" className="h-3.5 w-3.5 animate-spin" /> : null}
+          </div>
+        ) : null}
+        {renderedHistory.map((turn, index) => {
+          const key = Number(turn.history_id || 0) || `history-${index}`;
+          if (turn.role === 'user') return (
+            <div key={key} data-id="project-agent-card-history-question" className="[&_[data-id=current-history-view-q]]:mb-0"><CollapsibleQ text={turn.text || turn.q} /></div>
+          );
+          if (turn.role === 'assistant') return (
+            <div key={key} data-id="project-agent-card-history-answer">
+              <AssistantTurnView turn={turn} turnKey={key} isLatestTurn={false} showAvatar agentType={String(agent.agentType || '')} paneId={agent.paneId} hideTools={false} />
+            </div>
+          );
+          return null;
+        })}
         {visibleQuestion || visibleQuestionAttachments.length ? (
           <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown mr-auto max-w-[92%] rounded-xl rounded-bl-sm bg-blue-500/10 px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-1 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-16 [&_[data-id=current-history-md-img]]:!max-h-16 [&_[data-id=current-history-md-img]]:!w-16 [&_[data-id=current-history-md-img]]:!max-w-16 [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-cover">
             {visibleQuestion ? <MarkdownBlock text={previewableMarkdown(visibleQuestion)} /> : null}
