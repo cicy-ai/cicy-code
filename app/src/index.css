@@ -407,6 +407,24 @@ html[data-theme="light"] :is(pre, code)[class*="bg-black"] {
 html[data-theme="light"] [data-id="terminal-view"],
 html[data-theme="light"] [data-id^="agent-stack-card-body-"] { background-color: #fafafa !important; }
 
+/* Settings uses translucent white layers for its dark surfaces. In Light
+   mode those should become crisp cards, not medium-gray slabs. */
+html[data-theme="light"] [data-id="settings-modal-content"] { background-color: #fafafa !important; }
+html[data-theme="light"] [data-id="settings-section-general"] section {
+  background-color: #ffffff !important;
+  border-color: #e4e4e7 !important;
+  box-shadow: 0 1px 2px rgba(24, 24, 27, 0.04);
+}
+html[data-theme="light"] [data-id="settings-theme-selector"] {
+  background-color: #f4f4f5 !important;
+  border-color: #e4e4e7 !important;
+}
+html[data-theme="light"] [data-id="settings-theme-selector"] button[aria-pressed="true"] {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(24, 24, 27, 0.10);
+}
+html[data-theme="light"] [data-id="settings-public-url-input"] { background-color: #ffffff !important; }
+
 html[data-theme="light"] .cm-panels,
 html[data-theme="light"] .cm-cicy-search { background-color: #fafafa !important; color: #27272a !important; }
 html[data-theme="light"] .cm-panels.cm-panels-top { border-bottom-color: #d4d4d8 !important; }
