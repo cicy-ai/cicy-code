@@ -890,7 +890,7 @@ function DesktopSnapshotView({ clientId, onSendToAgent }: { clientId: string; on
       )}
 
       {loading && !latest ? (
-        <div className="p-2.5"><div className="aspect-video rounded-xl bg-gradient-to-b from-[#222228] to-[#16161a] animate-pulse" /></div>
+        <div className="p-2.5"><div data-id="desktop-snapshot-loading" className="aspect-video rounded-xl bg-gradient-to-b from-[#222228] to-[#16161a] animate-pulse" /></div>
       ) : !latest ? (
         <div data-id="desktop-snapshot-empty" className="flex-1 flex flex-col items-center justify-center text-center px-6 py-10 gap-2 text-zinc-600">
           <Monitor className="w-6 h-6 text-zinc-700" />

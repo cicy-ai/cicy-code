@@ -353,6 +353,16 @@ html[data-theme="light"] [data-id="knowledge-graph-toolbar"],
 html[data-theme="light"] [data-id="knowledge-graph-canvas"] { background-color: #fafafa !important; }
 html[data-theme="light"] [data-id="knowledge-graph-search"] { background-color: #ffffff !important; color: #27272a !important; border-color: #d4d4d8 !important; }
 html[data-theme="light"] [data-id="knowledge-graph-refresh"] { background-color: rgba(255,255,255,0.9) !important; color: #52525b !important; border-color: #d4d4d8 !important; }
+html[data-theme="light"] [data-id="mobile-qr-modal"] {
+  background: linear-gradient(to bottom, #ffffff, #f4f4f5) !important;
+}
+html[data-theme="light"] [data-id="mobile-qr-divider"] > span:not(:nth-child(2)) {
+  background: #d4d4d8 !important;
+}
+html[data-theme="light"] [data-id="desktop-snapshot-loading"],
+html[data-theme="light"] [data-id="browser-window-shot"] {
+  background: linear-gradient(to bottom, #f4f4f5, #e4e4e7) !important;
+}
 
 /* Skill detail markdown uses dark translucent table/code containers that are
    structural content, not modal backdrops. Give those named surfaces an
