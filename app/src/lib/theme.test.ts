@@ -60,6 +60,8 @@ describe('global theme', () => {
     expect(css).toContain('[class~="text-zinc-400/85"]');
     expect(css).toContain('html[data-theme="light"] .inspector-markdown pre');
     expect(css).toContain('html[data-theme="light"] ::-webkit-scrollbar-thumb');
+    expect(css).toContain('html[data-theme="light"] .markdown-body .hljs');
+    expect(css).toContain('.hljs-template-variable');
     expect(css).toContain('rgba(63,63,70,0.14)');
   });
 });
