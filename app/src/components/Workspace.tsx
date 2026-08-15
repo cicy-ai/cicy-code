@@ -2044,6 +2044,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     // the authoritative poll_data payload; the short-id entry is compatibility
     // fallback and may contain status-only data without model/context/cost.
     const live = pollStatuses[fullPaneId] || pollStatuses[shortId] || {};
+    const isApiOnly = detail?.capabilities?.supports_tmux === false;
     return {
       paneId: fullPaneId,
       title: String(agent?.title || detail?.title || shortId),
@@ -2052,8 +2053,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       defaultModel: String(agent?.default_model || detail?.default_model || ''),
       workspace: String(agent?.workspace || detail?.workspace || ''),
       machineLabel: String(agent?.machine_label || detail?.machine_label || ''),
+      ttydSrc: token && !isApiOnly ? urls.ttydOpen(shortId, token, currentLang) : '',
+      isApiOnly,
     };
-  }).filter((agent) => agent.paneId), [agents, paneDetails, pollStatuses]);
+  }).filter((agent) => agent.paneId), [agents, paneDetails, pollStatuses, token, currentLang]);
   const handleStackOpenSession = useCallback((targetPaneId: string) => {
     openPaneRequestView(targetPaneId, lastSessionSubTab);
   }, [openPaneRequestView, lastSessionSubTab]);

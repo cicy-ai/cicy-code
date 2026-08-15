@@ -23,6 +23,7 @@ const agentSend = vi.hoisted(() => ({ sendToAgent: vi.fn() }));
 vi.mock('../../services/api', () => ({ default: api }));
 vi.mock('../../services/agentSend', () => agentSend);
 vi.mock('../AgentAvatar', () => ({ default: () => <span data-testid="agent-avatar" /> }));
+vi.mock('../terminal/TerminalView', () => ({ default: ({ ttydSrc }: { ttydSrc: string }) => <div data-id="mock-project-terminal">{ttydSrc}</div> }));
 
 import ProjectsPanel from './ProjectsPanel';
 
@@ -162,6 +163,24 @@ describe('<ProjectsPanel /> project creation', () => {
 });
 
 describe('<ProjectsPanel /> agent prompt footer', () => {
+  it('toggles an inline terminal for non-cicy agents only', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0'], pane_count: 2 }] },
+    });
+    render(<ProjectsPanel agents={[
+      { paneId: 'w-101:main.0', title: 'Codex', agentType: 'codex', ttydSrc: '/ttyd/w-101/?token=test' },
+      { paneId: 'w-102:main.0', title: 'CiCy', agentType: 'cicy', ttydSrc: '/ttyd/w-102/?token=test' },
+    ]} onOpenAgent={vi.fn()} />);
+
+    const toggle = await screen.findByRole('button', { name: '终端' });
+    expect(document.querySelector('[data-id="project-agent-card-terminal-w-102"]')).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="mock-project-terminal"]')).toHaveTextContent('/ttyd/w-101/');
+    fireEvent.click(toggle);
+    expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).not.toBeInTheDocument();
+  });
+
   it('shows the realtime latest question instead of a stale reply snapshot', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },

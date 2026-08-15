@@ -15,6 +15,7 @@ import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
 import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
 import { formatToolResult, toolHeadline } from '../chat/history/lib/toolFormat';
+import TerminalView from '../terminal/TerminalView';
 
 export interface ProjectAgent {
   paneId: string;
@@ -24,6 +25,8 @@ export interface ProjectAgent {
   defaultModel?: string;
   workspace?: string;
   machineLabel?: string;
+  ttydSrc?: string;
+  isApiOnly?: boolean;
 }
 
 interface AgentProject {
@@ -143,12 +146,13 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, working, teamId, selected, removable, footer, width, height, onSelect, onRemove, onOpenGuidance, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, terminalOpen, working, teamId, selected, removable, footer, width, height, onSelect, onRemove, onOpenGuidance, onToggleTerminal, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
   reply?: any;
   optimisticQuestion?: string;
+  terminalOpen?: boolean;
   working: boolean;
   teamId?: string;
   selected: boolean;
@@ -159,6 +163,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, w
   onSelect: () => void;
   onRemove: () => void;
   onOpenGuidance: () => void;
+  onToggleTerminal: () => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizePointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -287,6 +292,18 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, w
             </div>
           ) : null}
         </div>
+        {String(agent.agentType || '').toLowerCase() !== 'cicy' && agent.ttydSrc && !agent.isApiOnly ? (
+          <button
+            type="button"
+            data-id={`project-agent-card-terminal-${shortPaneId(agent.paneId)}`}
+            onClick={(event) => { event.stopPropagation(); onToggleTerminal(); }}
+            className={cn('order-1 grid h-8 w-8 place-items-center rounded-lg transition-colors hover:bg-white/[0.06] hover:text-zinc-200', terminalOpen ? 'bg-white/[0.06] text-zinc-200' : 'text-zinc-500')}
+            title="终端"
+            aria-label="终端"
+          >
+            <SquareTerminal className="h-4 w-4" />
+          </button>
+        ) : null}
         <button
           type="button"
           data-id={`project-agent-card-guidance-${shortPaneId(agent.paneId)}`}
@@ -324,6 +341,11 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, w
         ) : null}
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
+      {terminalOpen && agent.ttydSrc ? (
+        <div data-id={`project-agent-card-terminal-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mr-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-lg bg-black pr-4">
+          <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" />
+        </div>
+      ) : (
       <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 min-h-0 flex-1">
       <div
         ref={bodyScrollRef}
@@ -410,6 +432,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, w
         </button>
       ) : null}
       </div>
+      )}
       </div>
       {footer}
       <div
@@ -462,6 +485,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [queuedAgentMessages, setQueuedAgentMessages] = useState<Record<string, QueuedAgentMessage[]>>({});
   const [sendingAgentIds, setSendingAgentIds] = useState<Set<string>>(new Set());
   const [cancelingAgentIds, setCancelingAgentIds] = useState<Set<string>>(new Set());
+  const [terminalAgentIds, setTerminalAgentIds] = useState<Set<string>>(new Set());
   const [agentLayouts, setAgentLayouts] = useState<Record<string, ProjectAgentLayout>>({});
   const [layoutReadyProjectId, setLayoutReadyProjectId] = useState('');
   const [canvasPan, setCanvasPan] = useState({ x: 60, y: 60 });
@@ -669,6 +693,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setAgentMessages({});
     setQueuedAgentMessages({});
     setSendingAgentIds(new Set());
+    setTerminalAgentIds(new Set());
     optimisticQuestionsRef.current = {};
   }, [selectedProject.id]);
 
@@ -1294,6 +1319,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     latest={cardLatest}
                     reply={agentReplies[cardShortId]}
                     optimisticQuestion={optimisticQuestionsRef.current[cardShortId]}
+                    terminalOpen={terminalAgentIds.has(cardShortId)}
                     working={cardBusy}
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
@@ -1446,6 +1472,12 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 )}
                 onRemove={() => { void removeAgent(agent); }}
                 onOpenGuidance={() => onOpenGuidance(agent.paneId)}
+                onToggleTerminal={() => setTerminalAgentIds((current) => {
+                  const next = new Set(current);
+                  if (next.has(cardShortId)) next.delete(cardShortId);
+                  else next.add(cardShortId);
+                  return next;
+                })}
                 onResizePointerDown={(event) => beginAgentResize(event, agent, index)}
                 onResizePointerMove={resizeAgent}
                 onResizePointerUp={(event) => endAgentResize(event, agent)}
