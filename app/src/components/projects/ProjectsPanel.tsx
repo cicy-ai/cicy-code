@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { Atom, Check, ChevronDown, Copy, FileText, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { ArrowDown, Atom, Check, ChevronDown, Copy, FileText, FolderKanban, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -109,13 +109,11 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, reply, attachments, onRemoveAttachment, working, teamId, selected, removable, footer, width, height, onRemove, onOpenGuidance, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, reply, working, teamId, selected, removable, footer, width, height, onRemove, onOpenGuidance, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
   reply?: any;
-  attachments: ProjectAttachment[];
-  onRemoveAttachment: (id: string) => void;
   working: boolean;
   teamId?: string;
   selected: boolean;
@@ -132,7 +130,9 @@ function ProjectAgentCard({ agent, metrics, latest, reply, attachments, onRemove
   const { t } = useTranslation('workspace');
   const [menuOpen, setMenuOpen] = useState(false);
   const [identityCopied, setIdentityCopied] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const bodyScrollRef = useRef<HTMLDivElement>(null);
   const status = String(agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
@@ -147,6 +147,23 @@ function ProjectAgentCard({ agent, metrics, latest, reply, attachments, onRemove
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen]);
+
+  const updateBodyScrollButton = useCallback(() => {
+    const node = bodyScrollRef.current;
+    if (!node) return;
+    const overflow = node.scrollHeight > node.clientHeight + 2;
+    const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 8;
+    setShowScrollToBottom(overflow && !atBottom);
+  }, []);
+
+  useEffect(() => {
+    const node = bodyScrollRef.current;
+    if (!node) return;
+    const observer = new ResizeObserver(updateBodyScrollButton);
+    observer.observe(node);
+    const frame = window.requestAnimationFrame(updateBodyScrollButton);
+    return () => { observer.disconnect(); window.cancelAnimationFrame(frame); };
+  }, [reply, latest, updateBodyScrollButton]);
 
   const toggleMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -235,12 +252,15 @@ function ProjectAgentCard({ agent, metrics, latest, reply, attachments, onRemove
         ) : null}
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
+      <div data-id="project-agent-card-live-body-wrap" className="relative mt-3 min-h-0 flex-1">
       <div
+        ref={bodyScrollRef}
         data-id="project-agent-card-live-body"
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
-        className="mt-3 min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-2 text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
+        onScroll={updateBodyScrollButton}
+        className="h-full min-h-0 w-full cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-0.5 text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
       >
         {(reply?.question || latest?.latest_question) ? (
           <div data-id="project-agent-card-latest-question" className="mr-auto max-w-[92%] rounded-xl rounded-bl-sm bg-blue-500/10 px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
@@ -300,32 +320,17 @@ function ProjectAgentCard({ agent, metrics, latest, reply, attachments, onRemove
             {`${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}`}
           </div>
         ) : null}
-        {attachments.length ? (
-          <div data-id="project-agent-card-attachments" className="flex flex-wrap gap-2 overflow-hidden pt-1">
-            {attachments.map((attachment) => (
-              <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className={cn('group relative flex flex-col overflow-visible rounded-lg border border-white/10 bg-white/[0.04]', attachment.mediaType === 'audio' ? 'w-36' : 'w-20')}>
-                {attachment.mediaType === 'image' && attachment.previewURL ? (
-                  <span data-id="project-agent-card-attachment-media" className="h-14 w-full overflow-hidden [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-14 [&_[data-id=current-history-md-img]]:!w-full [&_[data-id=current-history-md-img]]:rounded-none [&_[data-id=current-history-md-img]]:object-cover">
-                    <MarkdownImg src={attachment.previewURL} alt={attachment.name} />
-                  </span>
-                ) : attachment.mediaType === 'video' && attachment.previewURL ? (
-                  <video data-id="project-agent-card-attachment-media" src={attachment.previewURL} className="h-14 w-full cursor-zoom-in object-cover" controls onClick={(event) => { event.stopPropagation(); void event.currentTarget.requestFullscreen?.(); }} />
-                ) : attachment.mediaType === 'audio' && attachment.previewURL ? (
-                  <audio data-id="project-agent-card-attachment-media" src={attachment.previewURL} className="h-10 w-full" controls />
-                ) : (
-                  <span className="grid h-14 w-full place-items-center"><FileText className="h-5 w-5 text-zinc-500" /></span>
-                )}
-                <span className="w-full truncate border-t border-white/[0.07] px-2 py-1 text-center text-[10px] text-zinc-300">{attachment.status === 'uploading' ? `${attachment.progress}%` : attachment.name}</span>
-                <button type="button" data-id="project-agent-card-attachment-remove" aria-label="Remove attachment" onClick={(event) => { event.stopPropagation(); onRemoveAttachment(attachment.id); }} className="absolute -right-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-black/70 text-zinc-300 opacity-0 shadow-md transition group-hover:opacity-100"><X className="h-3 w-3" /></button>
-              </div>
-            ))}
-          </div>
-        ) : null}
         {working ? (
           <div data-id="project-agent-card-output-loading" className="mt-auto flex h-5 items-end gap-1 pt-2" aria-label="Loading">
             {[0, 1, 2].map((index) => <span key={index} className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />)}
           </div>
         ) : null}
+      </div>
+      {showScrollToBottom ? (
+        <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-2 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur hover:bg-[#292a30] hover:text-white">
+          <ArrowDown className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
       </div>
       </div>
       {footer}
@@ -1125,8 +1130,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     metrics={cardMetrics}
                     latest={cardLatest}
                     reply={agentReplies[cardShortId]}
-                    attachments={agentAttachments[cardShortId] || []}
-                    onRemoveAttachment={(attachmentId) => removeAgentAttachment(cardShortId, attachmentId)}
                     working={cardBusy}
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
@@ -1138,24 +1141,26 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
-                    className="flex h-12 min-h-12 shrink-0 items-center rounded-b-2xl border-t border-white/[0.08] bg-[#15161b] px-3"
+                    className="flex shrink-0 flex-col rounded-b-2xl border-t border-white/[0.08] bg-[#15161b]"
                   >
-                    <input
-                      data-id={`project-agent-prompt-file-input-${cardShortId}`}
-                      type="file"
-                      multiple
-                      className="hidden"
-                      onChange={(event) => { if (event.target.files?.length) addAgentFiles(agent, event.target.files); event.target.value = ''; }}
-                    />
-                    <button
-                      type="button"
-                      data-id={`project-agent-prompt-attach-${cardShortId}`}
-                      onClick={() => document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-file-input-${cardShortId}"]`)?.click()}
-                      aria-label="Attach"
-                      className="mr-2 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.06] text-zinc-300 hover:border-white/20 hover:bg-white/[0.10] hover:text-white"
-                    >
-                      <Paperclip className="h-4 w-4" strokeWidth={2.25} />
-                    </button>
+                    {(agentAttachments[cardShortId] || []).length ? (
+                      <div data-id="project-agent-card-attachments" className="flex w-full gap-2 overflow-x-auto border-b border-white/[0.06] px-3 py-2">
+                        {(agentAttachments[cardShortId] || []).map((attachment) => (
+                          <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className="group relative h-12 w-12 shrink-0 overflow-visible rounded-lg border border-white/10 bg-white/[0.04]">
+                            {attachment.mediaType === 'image' && attachment.previewURL ? (
+                              <span data-id="project-agent-card-attachment-media" className="block h-full w-full overflow-hidden rounded-lg [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-full [&_[data-id=current-history-md-img]]:!rounded-lg [&_[data-id=current-history-md-img]]:object-cover">
+                                <MarkdownImg src={attachment.previewURL} alt={attachment.name} />
+                              </span>
+                            ) : (
+                              <span className="grid h-full w-full place-items-center"><FileText className="h-5 w-5 text-zinc-500" /></span>
+                            )}
+                            {attachment.status === 'uploading' ? <span className="absolute inset-x-1 bottom-1 rounded bg-black/70 text-center text-[9px] text-white">{attachment.progress}%</span> : null}
+                            <button type="button" data-id="project-agent-card-attachment-remove" aria-label="Remove attachment" onClick={(event) => { event.stopPropagation(); removeAgentAttachment(cardShortId, attachment.id); }} className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-zinc-800 text-zinc-200 shadow-md"><X className="h-3 w-3" /></button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div data-id={`project-agent-card-prompt-row-${cardShortId}`} className="flex h-10 min-h-10 w-full items-center px-3 pt-1">
                     <input
                       data-id={`project-agent-prompt-input-${shortPaneId(agent.paneId)}`}
                       value={agentMessages[shortPaneId(agent.paneId)] || ''}
@@ -1178,13 +1183,31 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       autoFocus
                       className="min-w-0 flex-1 bg-transparent text-[14px] leading-5 text-zinc-200 outline-none placeholder:text-zinc-600"
                     />
+                    </div>
+                    <div data-id={`project-agent-card-prompt-actions-${cardShortId}`} className="flex h-10 min-h-10 w-full items-center justify-between px-3 pb-1">
+                    <input
+                      data-id={`project-agent-prompt-file-input-${cardShortId}`}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(event) => { if (event.target.files?.length) addAgentFiles(agent, event.target.files); event.target.value = ''; }}
+                    />
+                    <button
+                      type="button"
+                      data-id={`project-agent-prompt-attach-${cardShortId}`}
+                      onClick={() => document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-file-input-${cardShortId}"]`)?.click()}
+                      aria-label="Attach"
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-white/[0.08] hover:text-zinc-100"
+                    >
+                      <Paperclip className="h-4 w-4" strokeWidth={2.25} />
+                    </button>
                     {cardBusy ? (
                       <button
                         type="button"
                         data-id={`project-agent-prompt-cancel-${shortPaneId(agent.paneId)}`}
                         onClick={() => { void cancelAgentMessage(agent); }}
                         disabled={cancelingAgentIds.has(shortPaneId(agent.paneId))}
-                        className="ml-2 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/[0.10] text-zinc-200 hover:bg-white/[0.16] disabled:opacity-50"
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-900 hover:bg-white disabled:opacity-50"
                         title={t('composerStop', { ns: 'chat', defaultValue: '停止' })}
                       >
                         {cancelingAgentIds.has(shortPaneId(agent.paneId)) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : (
@@ -1200,13 +1223,14 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                         data-id={`project-agent-prompt-send-${shortPaneId(agent.paneId)}`}
                         onClick={() => { void sendAgentMessage(agent); }}
                         disabled={!(agentMessages[shortPaneId(agent.paneId)] || '').trim() && !(agentAttachments[cardShortId] || []).length}
-                        className="ml-2 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-600 text-white transition hover:bg-blue-500 disabled:bg-white/[0.06] disabled:text-zinc-600"
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-900 transition hover:bg-white disabled:bg-white/[0.06] disabled:text-zinc-600"
                         title={t('send', { defaultValue: '发送' })}
                         aria-label={t('send', { defaultValue: '发送' })}
                       >
                         <SendHorizontal className="h-4 w-4" />
                       </button>
                     )}
+                    </div>
                   </footer>
                 ) : null}
                 onRemove={() => { void removeAgent(agent); }}
