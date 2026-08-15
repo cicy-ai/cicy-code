@@ -16,12 +16,9 @@ const api = vi.hoisted(() => ({
   removeGroupPane: vi.fn(),
   updateGroupPaneLayout: vi.fn(),
   getAgentCurrentReply: vi.fn(),
-  getAgentHistoryIDs: vi.fn(),
-  getAgentCurrentHistory: vi.fn(),
   uploadAssetFile: vi.fn(),
 }));
 const agentSend = vi.hoisted(() => ({ sendToAgent: vi.fn() }));
-let triggerHistoryIntersection: (() => void) | undefined;
 
 vi.mock('../../services/api', () => ({ default: api }));
 vi.mock('../../services/agentSend', () => agentSend);
@@ -41,21 +38,11 @@ beforeEach(() => {
     observe() {}
     disconnect() {}
   });
-  triggerHistoryIntersection = undefined;
-  vi.stubGlobal('IntersectionObserver', class {
-    callback: IntersectionObserverCallback;
-    constructor(callback: IntersectionObserverCallback) { this.callback = callback; triggerHistoryIntersection = () => callback([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver); }
-    observe() {}
-    disconnect() {}
-  });
   localStorage.clear();
-  delete (window as any)._cacheHistory;
   api.listGroups.mockResolvedValue({ data: { groups: defaultGroups } });
   api.getGroup.mockResolvedValue({ data: { panes: [] } });
   api.createGroup.mockResolvedValue({ data: { id: 3 } });
   api.getAgentCurrentReply.mockResolvedValue({ data: { question: '', items: [], status: 'completed' } });
-  api.getAgentHistoryIDs.mockResolvedValue({ data: { conversation_id: 'conversation-1', id: 1 } });
-  api.getAgentCurrentHistory.mockResolvedValue({ data: { items: [] } });
   api.uploadAssetFile.mockResolvedValue({ data: { file: { file_ref: '/home/cicy/cicy-ai/assets/queued.png' } } });
   vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:queued-image'), revokeObjectURL: vi.fn() });
 });
@@ -176,56 +163,16 @@ describe('<ProjectsPanel /> project creation', () => {
 });
 
 describe('<ProjectsPanel /> agent prompt footer', () => {
-  it('fetches and prepends exactly one previous QA when the 44px history sentinel appears', async () => {
-    api.listGroups.mockResolvedValue({
-      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
-    });
-    api.getAgentCurrentReply.mockResolvedValue({ data: { question: '当前问题', items: [{ type: 'text', text: '当前回答' }], status: 'completed' } });
-    api.getAgentHistoryIDs.mockResolvedValue({ data: { conversation_id: 'conversation-1', id: 6 } });
-    api.getAgentCurrentHistory.mockResolvedValue({
-      data: { items: [
-        { history_id: 1, conversation_id: 'conversation-1', role: 'user', content: '更早问题' },
-        { history_id: 2, conversation_id: 'conversation-1', role: 'assistant', content: '更早回答' },
-        { history_id: 3, conversation_id: 'conversation-1', role: 'user', content: '上一问题' },
-        { history_id: 4, conversation_id: 'conversation-1', role: 'assistant', content: '上一回答' },
-        { history_id: 5, conversation_id: 'conversation-1', role: 'assistant', content: '上一回答续段' },
-      ] },
-    });
-
-    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
-    await screen.findByText('当前问题');
-    expect(document.querySelector('[data-id="project-agent-card-history-sentinel"]')).toHaveClass('h-11');
-    triggerHistoryIntersection?.();
-
-    expect(await screen.findByText('上一问题')).toBeInTheDocument();
-    expect(await screen.findByText('上一回答')).toBeInTheDocument();
-    expect(await screen.findByText('上一回答续段')).toBeInTheDocument();
-    expect(screen.queryByText('更早问题')).not.toBeInTheDocument();
-    expect(screen.getAllByTestId('agent-avatar')).toHaveLength(1);
-    expect((document.querySelector('[data-id="project-agent-card-live-body"]') as HTMLElement).scrollTop).toBe(44);
-    expect(api.getAgentCurrentHistory).toHaveBeenCalledTimes(1);
-  });
-
-  it('uses window._cacheHistory before history metadata or range requests', async () => {
+  it('opens the agent history in the right panel from the header icon', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
-    (window as any)._cacheHistory = new Map([['w-101:main.0', {
-      items: [
-        { history_id: 1, conversation_id: 'conversation-cache', role: 'user', q: '缓存问题', text: '缓存问题' },
-        { history_id: 2, conversation_id: 'conversation-cache', role: 'assistant', q: '', a: '缓存回答', steps: [{ type: 'text', text: '缓存回答' }] },
-        { history_id: 3, conversation_id: 'conversation-cache', role: 'user', q: '当前问题', text: '当前问题' },
-      ],
-      conversationId: 'conversation-cache', model: 'codex', hasMore: false, nextBefore: null, maxId: 3, updatedAt: Date.now(), liveTurn: null,
-    }]]);
-    api.getAgentCurrentReply.mockResolvedValue({ data: { question: '当前问题', items: [], status: 'completed' } });
+    const onOpenHistory = vi.fn();
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} onOpenHistory={onOpenHistory} />);
 
-    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
-    await screen.findByText('当前问题');
-    triggerHistoryIntersection?.();
-
-    expect(await screen.findByText('缓存问题')).toBeInTheDocument();
-    expect(await screen.findByText('缓存回答')).toBeInTheDocument();
-    expect(api.getAgentHistoryIDs).not.toHaveBeenCalled();
-    expect(api.getAgentCurrentHistory).not.toHaveBeenCalled();
+    const toggle = await screen.findByRole('button', { name: '历史' });
+    expect(document.querySelector('[data-id="project-agent-card-history-sentinel"]')).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(onOpenHistory).toHaveBeenCalledWith('w-101:main.0');
+    expect(document.querySelector('[data-id="project-agent-card-history-body-w-101"]')).not.toBeInTheDocument();
   });
 
   it('toggles an inline terminal for non-cicy agents only', async () => {
@@ -354,7 +301,6 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('中文任务')).toBeInTheDocument();
     expect(screen.queryByText('上一轮回答')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-current-turn"]')).toHaveClass('min-h-full');
     expect(input).toHaveValue('');
     await waitFor(() => expect(input).toHaveFocus());
   });
