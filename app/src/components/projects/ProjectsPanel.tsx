@@ -102,7 +102,7 @@ function CtxRing({ pct }: { pct: number }) {
   const circumference = 2 * Math.PI * radius;
   const color = pct > 80 ? '#b91c1c' : pct > 50 ? '#ca8a04' : '#71717a';
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" className="-rotate-90 shrink-0">
+    <svg data-id="project-context-ring" width="12" height="12" viewBox="0 0 12 12" className="-rotate-90 shrink-0">
       <circle cx="6" cy="6" r={radius} fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="2.5" />
       <circle cx="6" cy="6" r={radius} fill="none" stroke={color} strokeWidth="2.5" strokeDasharray={`${Math.max(0.5, (pct / 100) * circumference)} ${circumference}`} strokeLinecap="round" />
     </svg>

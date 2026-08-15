@@ -149,6 +149,46 @@ html[data-theme="light"] [class*="text-emerald-1"],
 html[data-theme="light"] [class*="text-emerald-2"],
 html[data-theme="light"] [class*="text-emerald-3"],
 html[data-theme="light"] [class*="text-emerald-4"] { color: #047857 !important; }
+html[data-theme="light"] [class*="text-blue-1"],
+html[data-theme="light"] [class*="text-blue-2"],
+html[data-theme="light"] [class*="text-blue-3"],
+html[data-theme="light"] [class*="text-blue-4"] { color: #1d4ed8 !important; }
+html[data-theme="light"] [class*="text-cyan-1"],
+html[data-theme="light"] [class*="text-cyan-2"],
+html[data-theme="light"] [class*="text-cyan-3"],
+html[data-theme="light"] [class*="text-cyan-4"] { color: #0e7490 !important; }
+html[data-theme="light"] [class*="text-teal-1"],
+html[data-theme="light"] [class*="text-teal-2"],
+html[data-theme="light"] [class*="text-teal-3"],
+html[data-theme="light"] [class*="text-teal-4"] { color: #0f766e !important; }
+html[data-theme="light"] [class*="text-indigo-1"],
+html[data-theme="light"] [class*="text-indigo-2"],
+html[data-theme="light"] [class*="text-indigo-3"],
+html[data-theme="light"] [class*="text-indigo-4"] { color: #4338ca !important; }
+html[data-theme="light"] [class*="text-violet-1"],
+html[data-theme="light"] [class*="text-violet-2"],
+html[data-theme="light"] [class*="text-violet-3"],
+html[data-theme="light"] [class*="text-violet-4"] { color: #6d28d9 !important; }
+html[data-theme="light"] [class*="text-purple-1"],
+html[data-theme="light"] [class*="text-purple-2"],
+html[data-theme="light"] [class*="text-purple-3"],
+html[data-theme="light"] [class*="text-purple-4"] { color: #7e22ce !important; }
+html[data-theme="light"] [class*="text-fuchsia-1"],
+html[data-theme="light"] [class*="text-fuchsia-2"],
+html[data-theme="light"] [class*="text-fuchsia-3"],
+html[data-theme="light"] [class*="text-fuchsia-4"] { color: #a21caf !important; }
+html[data-theme="light"] [class*="text-pink-1"],
+html[data-theme="light"] [class*="text-pink-2"],
+html[data-theme="light"] [class*="text-pink-3"],
+html[data-theme="light"] [class*="text-pink-4"] { color: #be185d !important; }
+html[data-theme="light"] [class*="text-orange-1"],
+html[data-theme="light"] [class*="text-orange-2"],
+html[data-theme="light"] [class*="text-orange-3"],
+html[data-theme="light"] [class*="text-orange-4"] { color: #c2410c !important; }
+html[data-theme="light"] [class*="text-yellow-1"],
+html[data-theme="light"] [class*="text-yellow-2"],
+html[data-theme="light"] [class*="text-yellow-3"],
+html[data-theme="light"] [class*="text-yellow-4"] { color: #854d0e !important; }
 
 /* Preserve semantic status surfaces without carrying dark-only 800-950
    backgrounds into the light palette. */
@@ -163,6 +203,17 @@ html[data-theme="light"] [class*="bg-rose-900"],
 html[data-theme="light"] [class*="bg-rose-950"] { background-color: #ffe4e6 !important; }
 html[data-theme="light"] [class*="bg-emerald-900"],
 html[data-theme="light"] [class*="bg-emerald-950"] { background-color: #d1fae5 !important; }
+html[data-theme="light"] [class*="bg-blue-900"] { background-color: #dbeafe !important; }
+html[data-theme="light"] [class*="bg-cyan-900"] { background-color: #cffafe !important; }
+html[data-theme="light"] [class*="bg-teal-900"] { background-color: #ccfbf1 !important; }
+html[data-theme="light"] [class*="bg-indigo-900"] { background-color: #e0e7ff !important; }
+html[data-theme="light"] [class*="bg-violet-900"] { background-color: #ede9fe !important; }
+html[data-theme="light"] [class*="bg-purple-900"] { background-color: #f3e8ff !important; }
+html[data-theme="light"] [class*="bg-fuchsia-900"] { background-color: #fae8ff !important; }
+html[data-theme="light"] [class*="bg-pink-900"] { background-color: #fce7f3 !important; }
+html[data-theme="light"] [class*="bg-orange-900"] { background-color: #ffedd5 !important; }
+html[data-theme="light"] [class*="bg-yellow-900"] { background-color: #fef9c3 !important; }
+html[data-theme="light"] [class*="bg-lime-900"] { background-color: #ecfccb !important; }
 html[data-theme="light"] [class*="border-sky-7"],
 html[data-theme="light"] [class*="border-sky-8"] { border-color: #7dd3fc !important; }
 html[data-theme="light"] [class*="border-amber-7"],
@@ -282,6 +333,11 @@ html[data-theme="light"] [data-id="skill-md-content"] code {
   background-color: #fef3c7 !important;
   color: #92400e !important;
 }
+html[data-theme="light"] [data-id="ModelTag"] { color: #3f3f46 !important; }
+html[data-theme="light"] [data-id="agent-usage-analysis-breakdown"] .fill-zinc-100 { fill: #18181b !important; }
+html[data-theme="light"] [data-id="agent-usage-analysis-breakdown"] .fill-zinc-500 { fill: #71717a !important; }
+html[data-theme="light"] [data-id="agent-usage-analysis-breakdown"] svg circle:first-child { stroke: #e4e4e7 !important; }
+html[data-theme="light"] :is([data-id="project-context-ring"], [data-id="team-context-ring"]) circle:first-child { stroke: #d4d4d8 !important; }
 
 html[data-theme="light"] :is(input, textarea, select)[class*="bg-black"] {
   background-color: #ffffff !important;

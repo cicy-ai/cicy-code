@@ -51,6 +51,11 @@ describe('global theme', () => {
     expect(css).toContain('[class*="bg-sky-800"]');
     expect(css).toContain('[class*="bg-red-950"]');
     expect(css).toContain('[class*="bg-emerald-950"]');
+    expect(css).toContain('[class*="text-blue-3"]');
+    expect(css).toContain('[class*="text-violet-3"]');
+    expect(css).toContain('[data-id="ModelTag"]');
+    expect(css).toContain('[data-id="agent-usage-analysis-breakdown"] .fill-zinc-100');
+    expect(css).toContain('[data-id="team-context-ring"]');
     expect(css).toContain('rgba(63,63,70,0.14)');
   });
 });

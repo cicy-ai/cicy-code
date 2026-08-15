@@ -156,7 +156,7 @@ function CtxRing({ pct }: { pct: number }) {
   // (yellow-600 / red-700),和状态点一个亮度档。
   const color = pct > 80 ? '#b91c1c' : pct > 50 ? '#ca8a04' : '#71717a';
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" className="-rotate-90 shrink-0">
+    <svg data-id="team-context-ring" width="12" height="12" viewBox="0 0 12 12" className="-rotate-90 shrink-0">
       <circle cx="6" cy="6" r={r} fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="2.5" />
       <circle cx="6" cy="6" r={r} fill="none" stroke={color} strokeWidth="2.5" strokeDasharray={`${Math.max(0.5, (pct / 100) * c)} ${c}`} strokeLinecap="round" />
     </svg>
