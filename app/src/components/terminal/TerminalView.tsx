@@ -84,7 +84,7 @@ const MONO_FONT = isWindows
 const TERM_THEMES = {
   dark: { background: '#000000', foreground: '#d4d4d8', cursor: '#e4e4e7', selectionBackground: '#3b82f640' },
   light: {
-    background: '#fafafa', foreground: '#27272a', cursor: '#18181b', selectionBackground: '#93c5fd80',
+    background: '#fafafa', foreground: '#27272a', cursor: '#18181b', selectionBackground: '#93c5fd80', selectionForeground: '#18181b',
     black: '#18181b', red: '#b91c1c', green: '#047857', yellow: '#a16207', blue: '#1d4ed8', magenta: '#a21caf', cyan: '#0e7490', white: '#d4d4d8',
     brightBlack: '#71717a', brightRed: '#dc2626', brightGreen: '#059669', brightYellow: '#ca8a04', brightBlue: '#2563eb', brightMagenta: '#c026d3', brightCyan: '#0891b2', brightWhite: '#18181b',
   },
@@ -384,6 +384,7 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
     let ws: WebSocket | null = null
     let pingTimer = 0
     let reconnectTimer = 0
+    let switchVisualTimer = 0
     let attempts = 0
     let disposed = false
 
@@ -397,6 +398,17 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
       if (disposed) return
       setConnState(attempts > 0 ? 'retrying' : 'connecting')
       host.classList.add('cicy-term-switching')
+      window.clearTimeout(switchVisualTimer)
+      // An idle/brand-new shell may have no tty backfill at all. Waiting only
+      // for the first output frame leaves the light terminal permanently under
+      // brightness(0.45), which renders as a solid gray canvas. Keep the
+      // no-flash handoff for active terminals, but release the dimmer shortly
+      // after a successful connection even when the pane is silent.
+      switchVisualTimer = window.setTimeout(() => {
+        if (!disposed && ws?.readyState === WebSocket.OPEN) {
+          host.classList.remove('cicy-term-switching')
+        }
+      }, 500)
       const sock = new WebSocket(wsUrlFromTtydSrc(ttydSrc), 'webtty')
       ws = sock
       let first = true
@@ -426,6 +438,7 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
           // First frame = server backfill (or full repaint): swap the old
           // picture for the new one in a single tick — no blank flash.
           term.reset()
+          window.clearTimeout(switchVisualTimer)
           host.classList.remove('cicy-term-switching')
         }
         term.write(bytes)
@@ -511,6 +524,7 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
       if (rowHideObserver) rowHideObserver.disconnect()
       window.clearInterval(pingTimer)
       window.clearTimeout(reconnectTimer)
+      window.clearTimeout(switchVisualTimer)
       window.clearTimeout(selTimer)
       host.removeEventListener('mousedown', onClickRetry)
       host.removeEventListener('mousedown', onHostMouseDown)
