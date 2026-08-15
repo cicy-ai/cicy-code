@@ -54,6 +54,7 @@ describe('global theme', () => {
     expect(css).toContain('[class*="text-blue-3"]');
     expect(css).toContain('[class*="text-violet-3"]');
     expect(css).toContain('[data-id="ModelTag"]');
+    expect(css).toContain('[data-id="chatgpt-icon"]');
     expect(css).toContain('[data-id="agent-usage-analysis-breakdown"] .fill-zinc-100');
     expect(css).toContain('[data-id="team-context-ring"]');
     expect(css).toContain('[class~="text-zinc-400/85"]');

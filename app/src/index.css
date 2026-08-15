@@ -357,6 +357,7 @@ html[data-theme="light"] [data-id="skill-md-content"] code {
   color: #92400e !important;
 }
 html[data-theme="light"] [data-id="ModelTag"] { color: #3f3f46 !important; }
+html[data-theme="light"] [data-id="chatgpt-icon"] { filter: none !important; }
 html[data-theme="light"] [data-id="agent-usage-analysis-breakdown"] .fill-zinc-100 { fill: #18181b !important; }
 html[data-theme="light"] [data-id="agent-usage-analysis-breakdown"] .fill-zinc-500 { fill: #71717a !important; }
 html[data-theme="light"] [data-id="agent-usage-analysis-breakdown"] svg circle:first-child { stroke: #e4e4e7 !important; }
