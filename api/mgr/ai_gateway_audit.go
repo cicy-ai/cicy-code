@@ -1520,9 +1520,56 @@ func aiGatewayFilterTechnicalTransportFailures(items []map[string]interface{}) [
 		if strings.EqualFold(strings.TrimSpace(aiGatewayString(item["type"])), "text") && isTechnicalTransportFailure(aiGatewayString(item["text"])) {
 			continue
 		}
+		if strings.EqualFold(strings.TrimSpace(aiGatewayString(item["type"])), "tool_use") && aiGatewayIsNoopPollingTool(item) {
+			continue
+		}
 		filtered = append(filtered, item)
 	}
 	return filtered
+}
+
+var codexWrappedToolCallPattern = regexp.MustCompile(`tools\.([A-Za-z0-9_]+)\s*\(`)
+var codexCharsFieldPattern = regexp.MustCompile(`\bchars\s*:`)
+var codexEmptyCharsPattern = regexp.MustCompile(`(?s)\bchars\s*:\s*(?:""|''|` + "``" + `)\s*[,}]`)
+
+// aiGatewayIsNoopPollingTool recognizes tool calls that only wait for an
+// already-running process. They carry no user-facing information and can occur
+// dozens of times during one build. Keep write_stdin calls with real input.
+func aiGatewayIsNoopPollingTool(item map[string]interface{}) bool {
+	name := strings.ToLower(strings.TrimSpace(aiGatewayString(item["name"])))
+	input := item["input"]
+	switch name {
+	case "wait":
+		return true
+	case "write_stdin":
+		if m, ok := input.(map[string]interface{}); ok {
+			chars, exists := m["chars"]
+			return !exists || aiGatewayString(chars) == ""
+		}
+		var decoded map[string]interface{}
+		if json.Unmarshal([]byte(aiGatewayString(input)), &decoded) == nil {
+			chars, exists := decoded["chars"]
+			return !exists || aiGatewayString(chars) == ""
+		}
+		return false
+	case "exec":
+		source := aiGatewayString(input)
+		matches := codexWrappedToolCallPattern.FindAllStringSubmatch(source, -1)
+		if len(matches) == 0 {
+			return false
+		}
+		for _, match := range matches {
+			wrapped := strings.ToLower(match[1])
+			if wrapped != "wait" && wrapped != "write_stdin" {
+				return false
+			}
+		}
+		if strings.Contains(source, "tools.write_stdin") && codexCharsFieldPattern.MatchString(source) && !codexEmptyCharsPattern.MatchString(source) {
+			return false
+		}
+		return true
+	}
+	return false
 }
 
 // aiGatewaySanitizeReplySnapshot is the final write boundary for reply.json
@@ -3882,13 +3929,17 @@ func (s *aiGatewayAuditSession) flushPendingItemLocked() {
 		if exposedToolID == "" {
 			exposedToolID = pi.ToolID
 		}
-		s.reply.Items = append(s.reply.Items, map[string]interface{}{
+		item := map[string]interface{}{
 			"id":      len(s.reply.Items) + 1,
 			"type":    "tool_use",
 			"tool_id": exposedToolID,
 			"name":    pi.ToolName,
 			"input":   input,
-		})
+		}
+		if aiGatewayIsNoopPollingTool(item) {
+			return
+		}
+		s.reply.Items = append(s.reply.Items, item)
 	default:
 		return
 	}
@@ -3946,7 +3997,11 @@ func (s *aiGatewayAuditSession) pendingItemAsMapLocked(nextID int) map[string]in
 		if exposedToolID == "" {
 			exposedToolID = pi.ToolID
 		}
-		return map[string]interface{}{"id": nextID, "type": "tool_use", "tool_id": exposedToolID, "name": pi.ToolName, "input": input}
+		item := map[string]interface{}{"id": nextID, "type": "tool_use", "tool_id": exposedToolID, "name": pi.ToolName, "input": input}
+		if aiGatewayIsNoopPollingTool(item) {
+			return nil
+		}
+		return item
 	}
 	return nil
 }

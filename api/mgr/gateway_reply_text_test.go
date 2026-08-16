@@ -85,6 +85,38 @@ func TestGatewaySanitizesTechnicalTransportFailureAtReplyWriteBoundary(t *testin
 	}
 }
 
+func TestGatewayFiltersNoopPollingToolsAtSource(t *testing.T) {
+	cases := []struct {
+		name string
+		item map[string]interface{}
+		hide bool
+	}{
+		{"wait", map[string]interface{}{"type": "tool_use", "name": "wait", "input": map[string]interface{}{"cell_id": "51"}}, true},
+		{"empty write stdin", map[string]interface{}{"type": "tool_use", "name": "write_stdin", "input": map[string]interface{}{"session_id": 7, "chars": ""}}, true},
+		{"wrapped empty write stdin", map[string]interface{}{"type": "tool_use", "name": "exec", "input": `const r = await tools.write_stdin({session_id:79666,chars:"",yield_time_ms:1000}); text(r.output);`}, true},
+		{"wrapped wait", map[string]interface{}{"type": "tool_use", "name": "exec", "input": `const r = await tools.wait({cell_id:"51",yield_time_ms:10000}); text(r.output);`}, true},
+		{"write stdin with input", map[string]interface{}{"type": "tool_use", "name": "write_stdin", "input": map[string]interface{}{"session_id": 7, "chars": "yes\n"}}, false},
+		{"wrapped write stdin with input", map[string]interface{}{"type": "tool_use", "name": "exec", "input": `const r = await tools.write_stdin({session_id:7,chars:"yes\\n"}); text(r.output);`}, false},
+		{"real command", map[string]interface{}{"type": "tool_use", "name": "exec", "input": `const r = await tools.exec_command({cmd:"npm run build"}); text(r.output);`}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := aiGatewayIsNoopPollingTool(tc.item); got != tc.hide {
+				t.Fatalf("hide = %v, want %v", got, tc.hide)
+			}
+		})
+	}
+
+	items := []map[string]interface{}{
+		cases[2].item,
+		cases[4].item,
+	}
+	got := aiGatewayFilterTechnicalTransportFailures(items)
+	if len(got) != 1 || got[0]["name"] != "write_stdin" {
+		t.Fatalf("noop polling tool reached conversation items: %#v", got)
+	}
+}
+
 func TestRenderReplyItemForIMHidesTechnicalToolError(t *testing.T) {
 	got := renderReplyItemForIM(map[string]interface{}{
 		"type": "tool_error", "name": "fetch", "error": "dial tcp 127.0.0.1:9001: connection reset by peer",
