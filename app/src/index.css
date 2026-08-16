@@ -1028,3 +1028,35 @@ select optgroup {
 [data-id="cli-content-fixed"]:hover * {
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
+
+/* Current-history tool rows are neutral work-log entries. In the light theme,
+   mapping the dark emerald surface to a solid mint made every successful tool
+   call compete with the actual answer. Keep status in the icon and use a quiet
+   zinc surface for the row itself. */
+html[data-theme="light"] [data-id="current-history-tool-card"] {
+  border-color: #e4e4e7 !important;
+  background: #f7f7f8 !important;
+  box-shadow: 0 1px 1px rgba(24, 24, 27, 0.03);
+}
+html[data-theme="light"] [data-id="current-history-tool-card"][data-tool-state="error"] {
+  border-color: #fecaca !important;
+  background: #fff7f7 !important;
+}
+html[data-theme="light"] [data-id="current-history-tool-toggle"] {
+  color: #52525b !important;
+}
+html[data-theme="light"] [data-id="current-history-tool-toggle"]:hover {
+  background: #f0f0f2 !important;
+  color: #27272a !important;
+}
+html[data-theme="light"] [data-id="current-history-tool-toggle-name"] {
+  border-color: #d4d4d8 !important;
+  background: #ffffff !important;
+  color: #3f3f46 !important;
+}
+html[data-theme="light"] [data-id="current-history-tool-toggle-arg-preview"] {
+  color: #52525b !important;
+}
+html[data-theme="light"] [data-id="current-history-tool-toggle-expand"] {
+  color: #71717a !important;
+}
