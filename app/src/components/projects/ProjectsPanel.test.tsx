@@ -112,6 +112,35 @@ describe('<ProjectsPanel /> project view cache', () => {
       expect(cached.pan.x).not.toBe(60);
     });
   });
+
+  it('rechecks visibility when a late server layout replaces visible cached cards', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    let resolveLayout: (value: any) => void = () => {};
+    api.getGroup.mockReturnValue(new Promise((resolve) => { resolveLayout = resolve; }));
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({
+      zoom: 1,
+      pan: { x: 60, y: 60 },
+      layouts: { 'w-101': { x: 40, y: 40, z: 1, width: 300, height: 320 } },
+    }));
+
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' }]} onOpenAgent={vi.fn()} />);
+    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-node-w-101"]')).toHaveStyle({ left: '40px', top: '40px' }));
+    const canvas = document.querySelector('[data-id="project-infinite-canvas"]') as HTMLElement;
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 700 });
+
+    resolveLayout({ data: { panes: [{ pane_id: 'w-101:main.0', pos_x: -1600, pos_y: -1000, width: 300, height: 320, z_index: 1 }] } });
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-node-w-101"]')).toHaveStyle({ left: '-1600px', top: '-1000px' }));
+    await waitFor(() => {
+      const cached = JSON.parse(localStorage.getItem('cicy_project_view:default') || '{}');
+      expect(cached.pan).not.toEqual({ x: 60, y: 60 });
+      expect(cached.pan.x).toBeGreaterThan(1000);
+      expect(cached.pan.y).toBeGreaterThan(700);
+    });
+  });
 });
 
 async function openCreateModal() {

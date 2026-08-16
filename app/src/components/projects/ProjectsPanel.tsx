@@ -516,6 +516,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [terminalAgentIds, setTerminalAgentIds] = useState<Set<string>>(new Set());
   const [agentLayouts, setAgentLayouts] = useState<Record<string, ProjectAgentLayout>>({});
   const [layoutReadyProjectId, setLayoutReadyProjectId] = useState('');
+  const [layoutVisibilityRevision, setLayoutVisibilityRevision] = useState(0);
   const [canvasPan, setCanvasPan] = useState({ x: 60, y: 60 });
   const [canvasZoom, setCanvasZoom] = useState(1);
   const [dockHeight, setDockHeight] = useState(0);
@@ -674,7 +675,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   }, [visibleAgentKey]);
 
   useEffect(() => {
-    const checkKey = `${selectedProject.id}:${paneMembershipKey}:${visibleAgentKey}`;
+    const checkKey = `${selectedProject.id}:${paneMembershipKey}:${visibleAgentKey}:${layoutVisibilityRevision}`;
     if (layoutReadyProjectId !== String(selectedProject.id) || visibilityCheckedKeyRef.current === checkKey || !visibleAgents.length) return;
     const frame = window.requestAnimationFrame(() => {
       const canvas = canvasRef.current;
@@ -708,7 +709,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       writeProjectViewCache(selectedProject.id, { zoom: nextZoom, pan: nextPan });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [layoutReadyProjectId, paneMembershipKey, selectedProject.id, visibleAgentKey]);
+  }, [layoutReadyProjectId, layoutVisibilityRevision, paneMembershipKey, selectedProject.id, visibleAgentKey]);
 
   useEffect(() => {
     visibilityCheckedKeyRef.current = '';
@@ -734,6 +735,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         setCanvasPan(cached.pan);
         setCanvasZoom(cached.zoom);
         setLayoutReadyProjectId(String(selectedProject.id));
+        setLayoutVisibilityRevision((value) => value + 1);
       }
       if (!selectedProject.api_id) {
         if (!cached) setAgentLayouts({});
@@ -776,14 +778,19 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           placed.push(layout);
         });
         if (!cancelled) {
+          // A late server layout replaces the initially visible/default layout.
+          // Re-run the one-shot visibility check against these real coordinates;
+          // otherwise an offscreen server layout makes cards flash, then vanish.
           setAgentLayouts(next);
           setLayoutReadyProjectId(String(selectedProject.id));
+          setLayoutVisibilityRevision((value) => value + 1);
           writeProjectViewCache(selectedProject.id, { layouts: next });
         }
       } catch {
         if (!cancelled) {
           setAgentLayouts({});
           setLayoutReadyProjectId(String(selectedProject.id));
+          setLayoutVisibilityRevision((value) => value + 1);
         }
       }
     };
