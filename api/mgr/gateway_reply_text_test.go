@@ -51,6 +51,40 @@ func TestGatewayFiltersEveryTechnicalTransportFailureBeforePublishing(t *testing
 	}
 }
 
+func TestGatewayDropsTechnicalTransportFailureBeforeStreamingFlush(t *testing.T) {
+	s := &aiGatewayAuditSession{
+		auxiliary: true,
+		pendingItem: &aiGatewayPendingItem{
+			Kind: "text",
+			Text: "⚠️ 生成失败（HTTP 502）\n\nlocal error: tls: bad record MAC",
+		},
+	}
+
+	if item := s.pendingItemAsMapLocked(1); item != nil {
+		t.Fatalf("technical failure reached live reply snapshot: %#v", item)
+	}
+	s.flushPendingItemLocked()
+	if len(s.reply.Items) != 0 {
+		t.Fatalf("technical failure reached flushed reply items: %#v", s.reply.Items)
+	}
+}
+
+func TestGatewaySanitizesTechnicalTransportFailureAtReplyWriteBoundary(t *testing.T) {
+	reply := aiGatewaySanitizeReplySnapshot(aiGatewayReplySnapshot{
+		Answer: "local error: tls: bad record MAC",
+		Items: []map[string]interface{}{
+			{"type": "text", "text": "正常回答"},
+			{"type": "text", "text": "⚠️ 生成失败（HTTP 502）\n\nlocal error: tls: bad record MAC"},
+		},
+	})
+	if reply.Answer != "" {
+		t.Fatalf("technical failure answer reached reply writer: %q", reply.Answer)
+	}
+	if len(reply.Items) != 1 || reply.Items[0]["text"] != "正常回答" {
+		t.Fatalf("reply writer kept technical failure: %#v", reply.Items)
+	}
+}
+
 func TestRenderReplyItemForIMHidesTechnicalToolError(t *testing.T) {
 	got := renderReplyItemForIM(map[string]interface{}{
 		"type": "tool_error", "name": "fetch", "error": "dial tcp 127.0.0.1:9001: connection reset by peer",

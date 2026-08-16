@@ -1199,7 +1199,7 @@ func checkEnv() {
 	if !isAPIOnlyRuntime() {
 		go startCicyMihomoIfNeeded()
 	}
-	ensureBuiltinAgents(selectedAgents)
+	runAgentStartup(selectedAgents, ensureAgentFacingSkills, ensureBuiltinAgents)
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
 	// audit-v2: no w-6001 singleton pane to bootstrap/remove anymore — the audit
@@ -1240,7 +1240,29 @@ var preinstalledSkills = []string{
 	"email",
 }
 
+// agentFacingSkills must be present in each agent's native skill directory
+// before its process starts. Agent CLIs such as Codex snapshot their skill
+// inventory at startup and do not notice skills surfaced later in the session.
+var agentFacingSkills = []string{
+	"agent-chrome", "agent-electron", "agent-editor", "agent-desktop", "agent-webpage",
+}
+
+// runAgentStartup keeps the skill preparation barrier explicit and testable.
+// prepare must return before launch is allowed to create/start agent sessions.
+func runAgentStartup(selected []string, prepare func(), launch func([]string)) {
+	prepare()
+	launch(selected)
+}
+
+func ensureAgentFacingSkills() {
+	ensureSkillsInstalledAndSurfaced(agentFacingSkills)
+}
+
 func ensurePreinstalledSkills() {
+	ensureSkillsInstalledAndSurfaced(preinstalledSkills)
+}
+
+func ensureSkillsInstalledAndSurfaced(skills []string) {
 	installed, err := skillcmd.InstalledSkills()
 	if err != nil {
 		log.Printf("[startup] failed to read installed skills: %v", err)
@@ -1250,7 +1272,7 @@ func ensurePreinstalledSkills() {
 	for _, s := range installed.Skills {
 		installedMap[s.Name] = true
 	}
-	for _, name := range preinstalledSkills {
+	for _, name := range skills {
 		if installedMap[name] {
 			continue
 		}

@@ -1525,6 +1525,18 @@ func aiGatewayFilterTechnicalTransportFailures(items []map[string]interface{}) [
 	return filtered
 }
 
+// aiGatewaySanitizeReplySnapshot is the final write boundary for reply.json
+// and the in-memory live snapshot. Transport diagnostics stay in gateway logs,
+// never in conversation state, even if streaming reaches the writer before the
+// response finalizer cleans the parsed response.
+func aiGatewaySanitizeReplySnapshot(reply aiGatewayReplySnapshot) aiGatewayReplySnapshot {
+	reply.Items = aiGatewayFilterTechnicalTransportFailures(reply.Items)
+	if isTechnicalTransportFailure("生成失败 " + reply.Answer) {
+		reply.Answer = ""
+	}
+	return reply
+}
+
 // aiGatewayHistoryDir resolves where an agent's conversation store lives:
 // <workspace>/.cicy/history — the agent's CONFIGURED workspace when set (it can
 // differ from workers/<id>: w-1001 works out of workers/w-10001), falling back
@@ -2097,6 +2109,7 @@ func aiGatewaySweepStaleReplies() {
 }
 
 func aiGatewayWriteReplySnapshot(agentID string, reply aiGatewayReplySnapshot) error {
+	reply = aiGatewaySanitizeReplySnapshot(reply)
 	aiGatewayStoreLiveReplySnapshot(agentID, reply)
 	lite := aiGatewayReplySnapshotLite{
 		TurnID:                   reply.TurnID,
@@ -3842,6 +3855,12 @@ func (s *aiGatewayAuditSession) flushPendingItemLocked() {
 		if strings.TrimSpace(pi.Text) == "" {
 			return
 		}
+		// Error bodies can arrive as ordinary streaming text before the HTTP
+		// failure finalizer runs. Drop the transport diagnostic here so it is
+		// neither persisted nor delivered through reply hooks.
+		if isTechnicalTransportFailure(pi.Text) {
+			return
+		}
 		s.reply.Items = append(s.reply.Items, map[string]interface{}{
 			"id":   len(s.reply.Items) + 1,
 			"type": "text",
@@ -3907,6 +3926,9 @@ func (s *aiGatewayAuditSession) pendingItemAsMapLocked(nextID int) map[string]in
 		return map[string]interface{}{"id": nextID, "type": "thinking", "thinking": pi.Thinking}
 	case "text":
 		if strings.TrimSpace(pi.Text) == "" {
+			return nil
+		}
+		if isTechnicalTransportFailure(pi.Text) {
 			return nil
 		}
 		return map[string]interface{}{"id": nextID, "type": "text", "text": pi.Text}
