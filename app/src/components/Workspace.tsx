@@ -46,6 +46,7 @@ import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentPro
 import AgentUsageLogView from './layout/AgentUsageLogView';
 import PolicyTab from './audit/PolicyTab';
 import AgentUsageAnalysisView from './layout/AgentUsageAnalysisView';
+import CurrentHistoryView from './chat/CurrentHistoryView';
 import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
 import type { AgentCanvasItem } from './layout/AgentStack';
@@ -1814,20 +1815,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           style={{ display: cliContentTab === 'history' ? 'block' : 'none' }}
         >
           {cliContentOpen && cliContentTab === 'history' && (
-            <AgentInspector
+            <CurrentHistoryView
               paneId={activeCliPaneId}
-              paneTitle={
-                paneDetails[activeCliPaneId]?.title
-                || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
-                || activeCliPaneId
-              }
               open
-              embedded
-              requestedTab="history"
-              liveStatus={chatWsLiveStatus}
               inspectorVersion={chatWsInspectorVersion}
-              onPanePatch={applyPanePatch}
-              onClose={() => {}}
+              fullWidth
+              leftAlignQuestions
+              agentType={String(
+                paneDetails[activeCliPaneId]?.agent_type
+                || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.agent_type
+                || ''
+              )}
             />
           )}
         </div>
