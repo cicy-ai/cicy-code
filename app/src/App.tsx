@@ -17,28 +17,14 @@ import { chatWs } from './services/chatWs';
 import { Spinner } from './components/ui/Spinner';
 import SpeedUp from './components/SpeedUp';
 import WSLInstall from './components/WSLInstall';
+import { parseAppHash, type AppViewType } from './lib/appRoute';
 
-type ViewType = 'desktop' | 'workspace' | 'audit' | 'speedup' | 'wsl-install';
-
-function parseHash(): { view: ViewType; agentId: string } {
-  const hash = window.location.hash;
-  if (hash.startsWith('#/audit')) {
-    return { view: 'audit', agentId: '' };
+function parseHash(): { view: AppViewType; agentId: string } {
+  const { canonicalHash, ...route } = parseAppHash(window.location.hash);
+  if (canonicalHash && window.location.hash !== canonicalHash) {
+    window.history.replaceState(null, '', canonicalHash);
   }
-  if (hash.startsWith('#/speedup')) {
-    return { view: 'speedup', agentId: '' };
-  }
-  if (hash.startsWith('#/wsl-install')) {
-    return { view: 'wsl-install', agentId: '' };
-  }
-  if (hash.startsWith('#/project/')) {
-    return { view: 'workspace', agentId: 'w-1001' };
-  }
-  if (hash.startsWith('#/agent/')) {
-    const m = hash.match(/\/agent\/([^/]+)/);
-    return { view: 'workspace', agentId: m ? decodeURIComponent(m[1]).replace(/:.*$/, '') : 'w-1001' };
-  }
-  return { view: 'desktop', agentId: 'w-1001' };
+  return route;
 }
 
 // After login + token verify, the workspace is only usable once the realtime
