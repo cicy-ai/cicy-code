@@ -1476,7 +1476,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                           {(queuedAgentMessages[cardShortId] || []).flatMap((queued) => queued.attachments).length ? (
                             <div data-id="project-agent-message-queue-attachments" className="mb-1.5 flex gap-2 overflow-x-auto">
                               {(queuedAgentMessages[cardShortId] || []).flatMap((queued) => queued.attachments).map((attachment) => (
-                                <div key={attachment.id} data-id={`project-agent-message-queue-attachment-${attachment.id}`} className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
+                                <div key={attachment.id} data-id={`project-agent-message-queue-attachment-${attachment.id}`} className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
                                   {attachment.mediaType === 'image' && (attachment.previewURL || attachment.fileRef) ? (
                                     <span data-id="project-agent-message-queue-attachment-media" className="block h-full w-full [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-full [&_[data-id=current-history-md-img]]:object-cover">
                                       <MarkdownImg src={attachment.previewURL || attachment.fileRef || ''} alt={attachment.name} />
@@ -1502,7 +1502,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     {(agentAttachments[cardShortId] || []).length ? (
                       <div data-id="project-agent-card-attachments" className="flex w-full gap-2 overflow-x-auto border-b border-white/[0.06] px-3 py-2">
                         {(agentAttachments[cardShortId] || []).map((attachment) => (
-                          <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className="group relative h-12 w-12 shrink-0 overflow-visible rounded-lg border border-white/10 bg-white/[0.04]">
+                          <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className="group relative h-16 w-16 shrink-0 overflow-visible rounded-lg border border-white/10 bg-white/[0.04]">
                             {attachment.mediaType === 'image' && attachment.previewURL ? (
                               <span data-id="project-agent-card-attachment-media" className="block h-full w-full overflow-hidden rounded-lg [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-full [&_[data-id=current-history-md-img]]:!rounded-lg [&_[data-id=current-history-md-img]]:object-cover">
                                 <MarkdownImg src={attachment.previewURL} alt={attachment.name} />
