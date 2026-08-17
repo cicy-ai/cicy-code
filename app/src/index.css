@@ -39,8 +39,8 @@ html[data-theme="light"] {
   --vsc-text-secondary: #52525b;
   --vsc-text-muted: #71717a;
   --vsc-text-disabled: #a1a1aa;
-  --chat-question-bg: #ffffff;
-  --chat-question-border: #e5e7eb;
+  --chat-question-bg: #f3f7fa;
+  --chat-question-border: #d8e3ea;
 }
 
 html[data-theme="light"],
