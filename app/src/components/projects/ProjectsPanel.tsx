@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { ArrowDown, Atom, Check, ChevronDown, Copy, FileText, FolderKanban, History, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
@@ -16,6 +16,8 @@ import AgentAvatar from '../AgentAvatar';
 import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
 import { formatToolResult, toolHeadline } from '../chat/history/lib/toolFormat';
 import TerminalView from '../terminal/TerminalView';
+
+const AgentDocRoleEditor = lazy(() => import('../layout/AgentDocRoleEditor'));
 
 export interface ProjectAgent {
   paneId: string;
@@ -372,11 +374,14 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" />
         </div>
       ) : activeBodyTab === 'role' ? (
-        <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="mt-3 flex min-h-0 flex-1 flex-col rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
-          <div data-id="project-agent-card-role-title" className="text-[15px] font-medium text-zinc-200">{agent.title || agent.paneId}</div>
-          <div data-id="project-agent-card-role-meta" className="mt-1 font-mono text-[12px] text-zinc-500">{agent.agentType || 'agent'} · {identity}</div>
-          <p data-id="project-agent-card-role-description" className="mt-4 text-[13px] leading-5 text-zinc-500">查看和编辑这个 Agent 的角色、职责与指导文档。</p>
-          <button type="button" data-id={`project-agent-card-role-open-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenGuidance(); }} className="mt-auto w-fit rounded-lg border border-white/[0.08] bg-white/[0.05] px-3 py-1.5 text-[12px] font-medium text-zinc-300 transition hover:bg-white/[0.09] hover:text-white">打开角色配置</button>
+        <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mx-5 flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0b0b0d]">
+          <div data-id="project-agent-card-role-toolbar" className="flex h-8 items-center justify-between border-b border-white/[0.06] px-3">
+            <span className="truncate font-mono text-[10px] text-zinc-600">{agent.agentType || 'agent'} · {identity}</span>
+            <button type="button" data-id={`project-agent-card-role-open-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenGuidance(); }} className="rounded px-2 py-1 text-[10px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200">完整编辑</button>
+          </div>
+          <Suspense fallback={<div data-id="project-agent-card-role-loading" className="flex h-full items-center justify-center text-[11px] text-zinc-600">Loading…</div>}>
+            <AgentDocRoleEditor paneId={agent.paneId} className="min-h-0 flex-1" />
+          </Suspense>
         </div>
       ) : (
       <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 min-h-0 flex-1">

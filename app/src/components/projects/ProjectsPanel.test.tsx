@@ -226,14 +226,15 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).not.toBeInTheDocument();
   });
 
-  it('shows role details in the card body and opens role configuration', async () => {
+  it('shows the agent role editor in the card body and opens its full editor', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
     const onOpenGuidance = vi.fn();
     render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} onOpenGuidance={onOpenGuidance} />);
 
     fireEvent.click(await screen.findByRole('tab', { name: '角色' }));
-    expect(document.querySelector('[data-id="project-agent-card-role-body-w-101"]')).toHaveTextContent('架构师');
-    fireEvent.click(screen.getByRole('button', { name: '打开角色配置' }));
+    expect(document.querySelector('[data-id="project-agent-card-role-body-w-101"]')).toBeInTheDocument();
+    expect(await screen.findByText('完整编辑')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '完整编辑' }));
     expect(onOpenGuidance).toHaveBeenCalledWith('w-101:main.0');
   });
 
