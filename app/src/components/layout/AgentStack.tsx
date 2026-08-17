@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { Brain, Check, CircleHelp, Columns2, Copy, CornerDownLeft, ExternalLink, Folder, Grid3X3, History, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, X } from 'lucide-react'
+import { Brain, Check, CircleHelp, Columns2, Copy, CornerDownLeft, ExternalLink, Folder, Grid3X3, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -1203,8 +1203,6 @@ function AgentStackCard({
             </div>
           </div>
         </div>
-        {/* The terminal/history view switch lives floating at the top-center of
-            the card body now (see agent-stack-card-view-tabs below). */}
         {!globalVar?.helper_mode && (
         <div data-id={`agent-stack-card-header-right-${item.paneId}`} className="ml-2 flex items-center gap-1">
           {showHeaderButtons ? (
@@ -1222,21 +1220,6 @@ function AgentStackCard({
             >
               {kouboBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
               <span>{kouboBusy ? '启动中' : kouboHealthy ? '打开口播' : '启动口播'}</span>
-            </button>
-          ) : null}
-          {/* 历史入口:与分屏 ib 同排。沿用原悬浮按钮的 data-id。仅非 cicy
-              (cicy 卡本身就是 chat/历史优先,没有终端⇄历史切换)。 */}
-          {showHeaderButtons && !isCicyLiteAgent(item.agentType) ? (
-            <button
-              type="button"
-              data-id={`agent-stack-card-view-tab-history-${item.paneId}`}
-              onClick={(event) => { event.stopPropagation(); onToggleHistory() }}
-              title={t('agentStackViewSession', { defaultValue: '历史' })}
-              aria-label={t('agentStackViewSession', { defaultValue: '历史' })}
-              aria-pressed={historyActive}
-              className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${historyActive ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100'}`}
-            >
-              <History className="h-4 w-4" />
             </button>
           ) : null}
           {showHeaderButtons && splitControl.show && (splitControl.candidates.length > 0 || splitControl.isSplit) ? (
