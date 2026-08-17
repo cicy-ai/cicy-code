@@ -470,11 +470,11 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             const headline = toolHeadline(tool);
             return (
               <button key={`tool-${index}`} type="button" data-id="project-agent-card-reply-tool" onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="group/tool flex w-full cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left text-zinc-500 transition hover:bg-white/[0.035] hover:text-zinc-300">
-                  <span data-id="project-agent-card-tool-count" className="grid h-4 min-w-4 shrink-0 place-items-center rounded bg-white/[0.07] px-1 font-mono text-[9px] font-semibold text-zinc-400">{toolGroupCount}</span>
                   <SquareTerminal className="h-4 w-4 shrink-0" />
                   <span className="shrink-0 font-medium text-zinc-400">{tool.name}</span>
                   {headline ? <><span aria-hidden="true">·</span><span className="min-w-0 truncate">{headline}</span></> : null}
-                  <ArrowRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-50 transition group-hover/tool:translate-x-0.5 group-hover/tool:opacity-100" />
+                  <span data-id="project-agent-card-tool-count" className="ml-auto inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded bg-white/[0.07] px-1 font-mono text-[9px] font-semibold leading-none text-zinc-400">{toolGroupCount}</span>
+                  <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-50 transition group-hover/tool:translate-x-0.5 group-hover/tool:opacity-100" />
               </button>
             );
           }

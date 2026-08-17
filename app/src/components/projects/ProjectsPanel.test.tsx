@@ -295,8 +295,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     });
     expect(response.querySelector('strong')).toHaveTextContent('结论');
     expect(await screen.findByText('检查输出')).toBeInTheDocument();
-    expect(await screen.findByText('image.png')).toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-latest-question"] img')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-latest-question"]')).not.toHaveTextContent('image.png');
     expect(document.querySelector('[data-id="project-agent-card-question-attachment"]')).not.toHaveTextContent('/home/cicy/cicy-ai/assets/');
     expect(response.querySelectorAll('li')).toHaveLength(2);
     expect(await screen.findByText('exec_command')).toBeInTheDocument();

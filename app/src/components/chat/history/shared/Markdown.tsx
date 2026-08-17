@@ -38,13 +38,15 @@ function AttachmentLink({ href, children }: { href: string; children: any }) {
     event.stopPropagation();
     window.dispatchEvent(new CustomEvent('cicy:open-file', { detail: { path: info.source } }));
   };
+  if (info.media === 'image') return (
+    <span data-id="current-history-attachment" className="my-2 block w-fit max-w-full overflow-hidden rounded-lg">
+      <span data-id="current-history-attachment-image" className="block">
+        <MarkdownImg src={info.source} alt={info.filename} reserveSpace />
+      </span>
+    </span>
+  );
   return (
     <span data-id="current-history-attachment" className="my-2 block max-w-2xl overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.025]">
-      {info.media === 'image' ? (
-        <span data-id="current-history-attachment-image" className="block px-2 pt-2">
-          <MarkdownImg src={info.source} alt={info.filename} reserveSpace />
-        </span>
-      ) : null}
       {info.media === 'audio' ? (
         <span data-id="current-history-attachment-audio" className="block px-3 pt-3">
           <audio data-id="current-history-attachment-audio-player" src={info.url} controls preload="metadata" className="w-full" />
@@ -128,8 +130,8 @@ export function MarkdownImg({ src, alt, reserveSpace = false, ...props }: any) {
         alt={alt || ''}
         loading="lazy"
         className={reserveSpace
-          ? 'my-1 h-64 w-full cursor-zoom-in rounded-md border border-white/5 bg-black/20 object-contain'
-          : 'my-1 h-auto max-h-80 max-w-full cursor-zoom-in rounded-md border border-white/5 object-contain'}
+          ? 'h-64 w-full cursor-zoom-in rounded-lg bg-black/10 object-contain'
+          : 'h-auto max-h-80 max-w-full cursor-zoom-in rounded-lg object-contain'}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setZoom(true); }}
       />
       {zoom && createPortal(
