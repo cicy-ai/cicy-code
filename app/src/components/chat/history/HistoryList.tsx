@@ -197,7 +197,7 @@ export function HistoryList(props: HistoryListProps) {
       }
       const continuesAssistant = nextRole === 'assistant';
       return (
-        <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} data-assistant-continuation={continuesAssistant ? 'true' : 'false'} key={turnKey} className={continuesAssistant ? 'mb-1.5' : 'mb-5'}>
+        <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} data-assistant-continuation={continuesAssistant ? 'true' : 'false'} key={turnKey} className={`${continuesAssistant ? 'mb-1.5' : 'mb-5'} empty:hidden`}>
           {/* ChatGPT 式回复头像:agent_type 的 logo 在答案左侧,与首行顶对齐;
               同一轮的后续 assistant item 不重复头像,用同宽空位对齐内容列 */}
           <AssistantTurnView turn={turn} turnKey={turnKey} isLatestTurn={isLatestTurn} showAvatar={showAvatar} agentType={agentType} paneId={paneId} hideTools={hideTools} />

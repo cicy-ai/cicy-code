@@ -20,7 +20,12 @@ export const AssistantTurnView = memo(function AssistantTurnView({ turn, turnKey
   agentType: string; paneId: string; hideTools: boolean;
 }) {
   const allSteps = getVisibleHistorySteps(turn, isLatestTurn);
-  const steps = hideTools ? (allSteps || []).filter((s: any) => s?.type !== 'tool') : allSteps;
+  const displaySteps = (allSteps || []).map((step: any) => {
+    if (step?.type !== 'tool') return step;
+    const tools = (Array.isArray(step.tools) ? step.tools : []).map(normalizeToolForDisplay).filter(Boolean);
+    return tools.length ? { ...step, tools } : null;
+  }).filter(Boolean) as any[];
+  const steps = hideTools ? displaySteps.filter((s: any) => s?.type !== 'tool') : displaySteps;
   const showThinkingPlaceholder = isLatestTurn && String(turn?.status || '').trim() === 'thinking' && !String(turn?.a || '').trim() && !steps.length;
   // A tool with no result in the LAST tool step of a still-active latest turn is
   // running right now (the CLI is executing it) — render a spinner, not a ✓.
@@ -33,6 +38,7 @@ export const AssistantTurnView = memo(function AssistantTurnView({ turn, turnKey
     return false;
   });
   const fallbackAnswer = String(turn?.a || '').trim();
+  if (!hasRenderableAssistantStep && !fallbackAnswer && !showThinkingPlaceholder) return null;
   return (
     <div data-id={`current-history-turn-assistant-${turnKey}`} className="flex items-start gap-2.5">
       {showAvatar
@@ -46,8 +52,7 @@ export const AssistantTurnView = memo(function AssistantTurnView({ turn, turnKey
           if (step.type === 'text') {
             return <div key={stepIndex} data-id={`current-history-turn-step-text-${turnKey}-${stepIndex}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><MarkdownBlock text={step.text} /></div>;
           }
-          const tools = (Array.isArray(step.tools) ? step.tools : []).map(normalizeToolForDisplay).filter(Boolean);
-          if (!tools.length) return null;
+          const tools = Array.isArray(step.tools) ? step.tools : [];
           return <div key={stepIndex} data-id={`current-history-turn-step-tools-${turnKey}-${stepIndex}`} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
             const toolId = buildToolCardId(turnKey, stepIndex, tool, toolIndex);
             const running = stepIndex === lastToolStepIndex && !String(tool?.result || '').trim() && tool?.isError !== true;
