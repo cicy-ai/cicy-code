@@ -22,7 +22,7 @@ var defaultAgents = AgentsConfig{
 		},
 		{
 			ID: "codex", Name: "Codex CLI",
-			SkillsDir: "~/.codex/skills", ManifestFile: "SKILL.md",
+			SkillsDir: "~/.agents/skills", ManifestFile: "SKILL.md",
 			Detect: &AgentDetect{Command: "codex", VersionFlag: "--version"},
 		},
 		{
@@ -97,33 +97,37 @@ func syncToAgents(name, sourceDir string, manifest *Manifest, cfg *AgentsConfig)
 		if !skillCompatibleWith(manifest, a.ID) {
 			continue
 		}
-		dst := filepath.Join(expandHome(a.SkillsDir), name)
-		if err := os.RemoveAll(dst); err == nil {
-			// continue
-		}
-		if err := os.MkdirAll(dst, 0o755); err != nil {
-			continue
-		}
-		ok := true
-		for _, rel := range docFiles {
-			srcPath := filepath.Join(sourceDir, rel)
-			if _, err := os.Stat(srcPath); err != nil {
+		ok := false
+		for _, skillsDir := range agentSkillDirs(a) {
+			dst := filepath.Join(skillsDir, name)
+			_ = os.RemoveAll(dst)
+			if err := os.MkdirAll(dst, 0o755); err != nil {
 				continue
 			}
-			dstPath := filepath.Join(dst, rel)
-			_ = os.MkdirAll(filepath.Dir(dstPath), 0o755)
-			_ = os.Remove(dstPath)
-			if err := os.Symlink(srcPath, dstPath); err != nil {
-				ok = false
-				break
+			dirOK := true
+			for _, rel := range docFiles {
+				srcPath := filepath.Join(sourceDir, rel)
+				if _, err := os.Stat(srcPath); err != nil {
+					continue
+				}
+				dstPath := filepath.Join(dst, rel)
+				_ = os.MkdirAll(filepath.Dir(dstPath), 0o755)
+				_ = os.Remove(dstPath)
+				if err := os.Symlink(srcPath, dstPath); err != nil {
+					dirOK = false
+					break
+				}
 			}
-		}
-		// also link references/ if it exists
-		refSrc := filepath.Join(sourceDir, "references")
-		if st, err := os.Stat(refSrc); err == nil && st.IsDir() {
-			refDst := filepath.Join(dst, "references")
-			_ = os.RemoveAll(refDst)
-			_ = os.Symlink(refSrc, refDst)
+			// also link references/ if it exists
+			refSrc := filepath.Join(sourceDir, "references")
+			if st, err := os.Stat(refSrc); err == nil && st.IsDir() {
+				refDst := filepath.Join(dst, "references")
+				_ = os.RemoveAll(refDst)
+				if err := os.Symlink(refSrc, refDst); err != nil {
+					dirOK = false
+				}
+			}
+			ok = ok || dirOK
 		}
 		if ok {
 			synced = append(synced, a.ID)
@@ -135,9 +139,31 @@ func syncToAgents(name, sourceDir string, manifest *Manifest, cfg *AgentsConfig)
 // removeFromAgents deletes <skills_dir>/<name>/ from every agent.
 func removeFromAgents(name string, cfg *AgentsConfig) {
 	for _, a := range cfg.Agents {
-		dst := filepath.Join(expandHome(a.SkillsDir), name)
-		_ = os.RemoveAll(dst)
+		for _, skillsDir := range agentSkillDirs(a) {
+			_ = os.RemoveAll(filepath.Join(skillsDir, name))
+		}
 	}
+}
+
+// agentSkillDirs returns every discovery root that should receive a skill.
+// Codex 0.144+ follows the Agent Skills standard at ~/.agents/skills; older
+// releases used ~/.codex/skills. Surface to both so upgrades do not make an
+// already-installed CiCy skill disappear from the Codex @ picker.
+func agentSkillDirs(a Agent) []string {
+	dirs := []string{expandHome(a.SkillsDir)}
+	if a.ID == "codex" {
+		dirs = append(dirs, expandHome("~/.agents/skills"), expandHome("~/.codex/skills"))
+	}
+	out := make([]string, 0, len(dirs))
+	seen := map[string]bool{}
+	for _, dir := range dirs {
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		out = append(out, dir)
+	}
+	return out
 }
 
 func manifestDocFiles(m *Manifest) []string {
