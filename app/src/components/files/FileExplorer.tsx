@@ -852,8 +852,8 @@ function TreeSkeleton({ rows = 6, dense = false }: { rows?: number; dense?: bool
         return (
           <div key={i} className={`flex items-center gap-2 px-2 ${dense ? 'py-1' : 'py-1.5'}`}>
             <span style={{ paddingLeft: s.indent * 12 }} />
-            <span className="w-3.5 h-3.5 rounded-sm bg-zinc-800 shrink-0" />
-            <span className={`h-3 rounded bg-zinc-800 ${s.w}`} />
+            <span data-id="file-explorer-skeleton-icon" className="h-3.5 w-3.5 shrink-0 rounded-sm bg-[var(--vsc-border)]" />
+            <span data-id="file-explorer-skeleton-label" className={`h-3 rounded bg-[var(--vsc-border)] ${s.w}`} />
           </div>
         );
       })}
