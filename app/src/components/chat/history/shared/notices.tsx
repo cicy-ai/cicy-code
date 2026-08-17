@@ -180,7 +180,6 @@ export function PendingThinkingPlaceholder() {
         <span data-id="current-history-view-pending-placeholder-dot-2" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/55 [animation-delay:180ms]" />
         <span data-id="current-history-view-pending-placeholder-dot-3" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/40 [animation-delay:360ms]" />
       </div>
-      <span data-id="current-history-view-pending-placeholder-label">Thinking...</span>
     </div>
   );
 }
