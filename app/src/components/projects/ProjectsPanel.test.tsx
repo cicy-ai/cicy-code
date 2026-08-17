@@ -256,6 +256,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(await screen.findByText('最新消息')).toBeInTheDocument();
     expect(screen.queryByText('上一条消息')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-output-loading"]')).toHaveTextContent('Working· 0s');
+    expect(document.querySelector('[data-id="project-agent-card-live-body"] [data-id="project-agent-card-stream-loading"]')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-id="project-agent-card-stream-loading-dot"]')).toHaveLength(3);
   });
 
   it('renders reply markdown and unwraps Codex exec tool calls', async () => {
