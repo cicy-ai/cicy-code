@@ -192,14 +192,15 @@ describe('<ProjectsPanel /> project creation', () => {
 });
 
 describe('<ProjectsPanel /> agent prompt footer', () => {
-  it('opens the agent history in the right panel from the header icon', async () => {
+  it('switches card body tabs and opens the full history in the right panel', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
     const onOpenHistory = vi.fn();
     render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} onOpenHistory={onOpenHistory} />);
 
-    const toggle = await screen.findByRole('button', { name: '历史' });
+    const historyTab = await screen.findByRole('tab', { name: '历史' });
+    expect(historyTab).toHaveAttribute('aria-selected', 'true');
     expect(document.querySelector('[data-id="project-agent-card-history-sentinel"]')).not.toBeInTheDocument();
-    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: '完整历史' }));
     expect(onOpenHistory).toHaveBeenCalledWith('w-101:main.0');
     expect(document.querySelector('[data-id="project-agent-card-history-body-w-101"]')).not.toBeInTheDocument();
   });
@@ -213,13 +214,27 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       { paneId: 'w-102:main.0', title: 'CiCy', agentType: 'cicy', ttydSrc: '/ttyd/w-102/?token=test' },
     ]} onOpenAgent={vi.fn()} />);
 
-    const toggle = await screen.findByRole('button', { name: '终端' });
-    expect(document.querySelector('[data-id="project-agent-card-terminal-w-102"]')).not.toBeInTheDocument();
+    const toggles = await screen.findAllByRole('tab', { name: 'Terminal' });
+    const toggle = toggles.find((node) => !node.hasAttribute('disabled')) as HTMLElement;
+    expect(document.querySelector('[data-id="project-agent-card-tab-terminal-w-102"]')).toBeDisabled();
     fireEvent.click(toggle);
     expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="mock-project-terminal"]')).toHaveTextContent('/ttyd/w-101/');
     fireEvent.click(toggle);
+    expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).toBeInTheDocument();
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-tab-history-w-101"]') as HTMLElement);
     expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).not.toBeInTheDocument();
+  });
+
+  it('shows role details in the card body and opens role configuration', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    const onOpenGuidance = vi.fn();
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} onOpenGuidance={onOpenGuidance} />);
+
+    fireEvent.click(await screen.findByRole('tab', { name: '角色' }));
+    expect(document.querySelector('[data-id="project-agent-card-role-body-w-101"]')).toHaveTextContent('架构师');
+    fireEvent.click(screen.getByRole('button', { name: '打开角色配置' }));
+    expect(onOpenGuidance).toHaveBeenCalledWith('w-101:main.0');
   });
 
   it('shows the realtime latest question instead of a stale reply snapshot', async () => {
@@ -280,19 +295,6 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(await screen.findAllByText('cicy-knowledge recall "tool use"')).toHaveLength(2);
     const result = document.querySelector('[data-id="project-agent-card-tool-result-markdown"]') as HTMLElement;
     expect(result.querySelectorAll('li')).toHaveLength(2);
-  });
-
-  it('opens the selected agent guidance document from the header action', async () => {
-    api.listGroups.mockResolvedValue({
-      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
-    });
-    const onOpenGuidance = vi.fn();
-    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' }]} onOpenAgent={vi.fn()} onOpenGuidance={onOpenGuidance} />);
-
-    const button = await screen.findByRole('button', { name: '人设' });
-    fireEvent.click(button);
-
-    expect(onOpenGuidance).toHaveBeenCalledWith('w-101:main.0');
   });
 
   it('always shows the footer and ignores IME confirmation Enter', async () => {

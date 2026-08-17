@@ -171,6 +171,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
 }) {
   const { t } = useTranslation('workspace');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [activeBodyTab, setActiveBodyTab] = useState<'history' | 'terminal' | 'role'>('history');
   const [identityCopied, setIdentityCopied] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -258,6 +259,12 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     setMenuOpen((value) => !value);
   };
 
+  const selectBodyTab = (tab: 'history' | 'terminal' | 'role') => {
+    if (tab === 'terminal' && !terminalOpen) onToggleTerminal();
+    if (tab !== 'terminal' && terminalOpen) onToggleTerminal();
+    setActiveBodyTab(tab);
+  };
+
   return (
     <article
       data-id={`project-agent-card-${shortPaneId(agent.paneId)}`}
@@ -304,41 +311,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             </div>
           ) : null}
         </div>
-        {String(agent.agentType || '').toLowerCase() !== 'cicy' && agent.ttydSrc && !agent.isApiOnly ? (
-          <button
-            type="button"
-            data-id={`project-agent-card-terminal-${shortPaneId(agent.paneId)}`}
-            onClick={(event) => { event.stopPropagation(); onToggleTerminal(); }}
-            className={cn('order-1 grid h-8 w-8 place-items-center rounded-lg transition-colors hover:bg-white/[0.06] hover:text-zinc-200', terminalOpen ? 'bg-white/[0.06] text-zinc-200' : 'text-zinc-500')}
-            title="终端"
-            aria-label="终端"
-          >
-            <SquareTerminal className="h-4 w-4" />
-          </button>
-        ) : null}
-        <button
-          type="button"
-          data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenHistory();
-          }}
-          className="order-1 grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
-          title={t('history', { ns: 'chat', defaultValue: '历史' })}
-          aria-label={t('history', { ns: 'chat', defaultValue: '历史' })}
-        >
-          <History className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          data-id={`project-agent-card-guidance-${shortPaneId(agent.paneId)}`}
-          onClick={(event) => { event.stopPropagation(); onOpenGuidance(); }}
-          className="order-1 grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
-          title={t('projectAgentPersona', { defaultValue: '人设' })}
-          aria-label={t('projectAgentPersona', { defaultValue: '人设' })}
-        >
-          <FileText className="h-4 w-4" />
-        </button>
         </div>
       </div>
 
@@ -366,9 +338,42 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         ) : null}
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
-      {terminalOpen && agent.ttydSrc ? (
+      <div data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`} role="tablist" className="flex h-9 shrink-0 items-end gap-5 border-b border-white/[0.08]">
+        {([
+          ['history', t('history', { ns: 'chat', defaultValue: '历史' })],
+          ['terminal', 'Terminal'],
+          ['role', '角色'],
+        ] as const).map(([tab, label]) => {
+          const unavailable = tab === 'terminal' && (String(agent.agentType || '').toLowerCase() === 'cicy' || !agent.ttydSrc || agent.isApiOnly);
+          return (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              aria-selected={activeBodyTab === tab}
+              disabled={unavailable}
+              data-id={`project-agent-card-tab-${tab}-${shortPaneId(agent.paneId)}`}
+              onClick={(event) => { event.stopPropagation(); selectBodyTab(tab); }}
+              className={cn('relative h-9 text-[12px] font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full', activeBodyTab === tab ? 'text-zinc-100 after:bg-blue-500' : 'text-zinc-500 after:bg-transparent hover:text-zinc-300', unavailable && 'cursor-not-allowed opacity-30 hover:text-zinc-500')}
+            >
+              {label}
+            </button>
+          );
+        })}
+        {activeBodyTab === 'history' ? (
+          <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="ml-auto mb-1.5 rounded-md px-2 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史</button>
+        ) : null}
+      </div>
+      {activeBodyTab === 'terminal' && terminalOpen && agent.ttydSrc ? (
         <div data-id={`project-agent-card-terminal-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mr-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-lg bg-black pr-4">
           <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" />
+        </div>
+      ) : activeBodyTab === 'role' ? (
+        <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="mt-3 flex min-h-0 flex-1 flex-col rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
+          <div data-id="project-agent-card-role-title" className="text-[15px] font-medium text-zinc-200">{agent.title || agent.paneId}</div>
+          <div data-id="project-agent-card-role-meta" className="mt-1 font-mono text-[12px] text-zinc-500">{agent.agentType || 'agent'} · {identity}</div>
+          <p data-id="project-agent-card-role-description" className="mt-4 text-[13px] leading-5 text-zinc-500">查看和编辑这个 Agent 的角色、职责与指导文档。</p>
+          <button type="button" data-id={`project-agent-card-role-open-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenGuidance(); }} className="mt-auto w-fit rounded-lg border border-white/[0.08] bg-white/[0.05] px-3 py-1.5 text-[12px] font-medium text-zinc-300 transition hover:bg-white/[0.09] hover:text-white">打开角色配置</button>
         </div>
       ) : (
       <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 min-h-0 flex-1">
