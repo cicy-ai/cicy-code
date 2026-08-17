@@ -122,6 +122,14 @@ const SLASH_COMMANDS: { cmd: string; label: string; desc: string }[] = [
   { cmd: '/compact', label: '压缩对话', desc: '压缩历史以释放上下文,保留摘要' },
 ];
 
+const dispatcherQueueKey = (paneId: string) => `cicy_dispatcher_queue:v1:${paneId}`;
+const readDispatcherQueue = (paneId: string): { id: number; text: string }[] => {
+  try {
+    const value = JSON.parse(localStorage.getItem(dispatcherQueueKey(paneId)) || '[]');
+    return Array.isArray(value) ? value.filter((item) => Number.isFinite(Number(item?.id)) && typeof item?.text === 'string') : [];
+  } catch { return []; }
+};
+
 export default function DispatcherChat({ paneId, active, agentType = 'cicy', title = '' }: { paneId: string; active: boolean; agentType?: string; title?: string }) {
   const { t } = useTranslation('chat');
   // placeholder 跟当前 agent 的 title 走(产品经理→「问问你的产品经理」),不再写死「项目经理」。
@@ -138,8 +146,9 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
   // 不发后端,先堆在 prompt 上方(逐条可删),空闲时按顺序自动放行 —— 队首连续的
   // 普通消息合并成一条发出;斜杠命令(/clear /compact)独占一轮,绝不在 busy 时执行。
   // 停止生成只取消当前回复,队列保留(不再静默丢弃)。
-  const [queue, setQueue] = useState<{ id: number; text: string }[]>([]);
+  const [queue, setQueue] = useState<{ id: number; text: string }[]>(() => readDispatcherQueue(paneId));
   const queueSeqRef = useRef(1);
+  const queueHydratingRef = useRef(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const composingRef = useRef(false);
@@ -417,8 +426,21 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     void send(batch.map((b) => b.text).join('\n'));
   }, [busy, sending, uploading, queue, send]);
 
-  // 切换 agent → 队列不跨 pane。
-  useEffect(() => { setQueue([]); }, [paneId]);
+  // 每个 pane 独立持久化队列；刷新或切回来时恢复，绝不跨 pane。
+  useEffect(() => {
+    const restored = readDispatcherQueue(paneId);
+    queueHydratingRef.current = true;
+    queueSeqRef.current = Math.max(1, ...restored.map((item) => item.id + 1));
+    setQueue(restored);
+  }, [paneId]);
+
+  useEffect(() => {
+    if (queueHydratingRef.current) {
+      queueHydratingRef.current = false;
+      return;
+    }
+    try { localStorage.setItem(dispatcherQueueKey(paneId), JSON.stringify(queue)); } catch {}
+  }, [paneId, queue]);
 
   // 取消生成,按 agent 形态分流:
   // - cicy 是 headless(无 tmux pane)→ /api/cicy/cancel,服务端取消正在跑的网关请求。

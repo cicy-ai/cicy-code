@@ -72,7 +72,15 @@ interface QueuedAgentMessage {
 
 const DEFAULT_PROJECT_ID = 'default';
 const PROJECT_VIEW_CACHE_PREFIX = 'cicy_project_view:';
+const PROJECT_AGENT_QUEUE_KEY = 'cicy_project_agent_queue:v1';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
+
+const readProjectAgentQueue = (): Record<string, QueuedAgentMessage[]> => {
+  try {
+    const value = JSON.parse(localStorage.getItem(PROJECT_AGENT_QUEUE_KEY) || '{}');
+    return value && typeof value === 'object' ? value : {};
+  } catch { return {}; }
+};
 const previewableMarkdown = (value: unknown) => String(value || '').replace(/\(file:\/\/(\/?[^)]+)\)/g, (_match, path: string) => `(/${path.replace(/^\/+/, '')})`);
 const questionWithoutUploadedAttachments = (value: unknown) => String(value || '')
   .replace(/!?\[[^\]]*\]\((?:file:\/\/)?\/?[^)\n]*\/cicy-ai\/assets\/[^)\n]+\)/gi, '')
@@ -556,7 +564,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
   const [agentAttachments, setAgentAttachments] = useState<Record<string, ProjectAttachment[]>>({});
   const [agentReplies, setAgentReplies] = useState<Record<string, any>>({});
-  const [queuedAgentMessages, setQueuedAgentMessages] = useState<Record<string, QueuedAgentMessage[]>>({});
+  const [queuedAgentMessages, setQueuedAgentMessages] = useState<Record<string, QueuedAgentMessage[]>>(readProjectAgentQueue);
   const [sendingAgentIds, setSendingAgentIds] = useState<Set<string>>(new Set());
   const [cancelingAgentIds, setCancelingAgentIds] = useState<Set<string>>(new Set());
   const [terminalAgentIds, setTerminalAgentIds] = useState<Set<string>>(new Set());
@@ -578,6 +586,14 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   }, [agents, statuses]);
   const canvasRef = useRef<HTMLDivElement>(null);
   const visibilityCheckedKeyRef = useRef('');
+
+  useEffect(() => {
+    const persisted = Object.fromEntries(Object.entries(queuedAgentMessages).map(([paneId, messages]) => [paneId, messages.map((message) => ({
+      ...message,
+      attachments: message.attachments.map(({ previewURL: _previewURL, ...attachment }) => attachment),
+    }))]));
+    try { localStorage.setItem(PROJECT_AGENT_QUEUE_KEY, JSON.stringify(persisted)); } catch {}
+  }, [queuedAgentMessages]);
   const agentDragRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
   const agentResizeRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originWidth: number; originHeight: number } | null>(null);
   const panDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
@@ -1450,9 +1466,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                             <div data-id="project-agent-message-queue-attachments" className="mb-1.5 flex gap-2 overflow-x-auto">
                               {(queuedAgentMessages[cardShortId] || []).flatMap((queued) => queued.attachments).map((attachment) => (
                                 <div key={attachment.id} data-id={`project-agent-message-queue-attachment-${attachment.id}`} className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
-                                  {attachment.mediaType === 'image' && attachment.previewURL ? (
+                                  {attachment.mediaType === 'image' && (attachment.previewURL || attachment.fileRef) ? (
                                     <span data-id="project-agent-message-queue-attachment-media" className="block h-full w-full [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-full [&_[data-id=current-history-md-img]]:object-cover">
-                                      <MarkdownImg src={attachment.previewURL} alt={attachment.name} />
+                                      <MarkdownImg src={attachment.previewURL || attachment.fileRef || ''} alt={attachment.name} />
                                     </span>
                                   ) : (
                                     <span data-id="project-agent-message-queue-attachment-file" className="grid h-full w-full place-items-center"><FileText className="h-5 w-5 text-zinc-500" /></span>
