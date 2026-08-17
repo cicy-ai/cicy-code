@@ -40,7 +40,7 @@ function AttachmentLink({ href, children }: { href: string; children: any }) {
   };
   if (info.media === 'image') return (
     <span data-id="current-history-attachment" className="my-2 block w-fit max-w-full overflow-hidden rounded-lg">
-      <span data-id="current-history-attachment-image" className="block">
+      <span data-id="current-history-attachment-image" className="block overflow-hidden rounded-lg">
         <MarkdownImg src={info.source} alt={info.filename} reserveSpace />
       </span>
     </span>

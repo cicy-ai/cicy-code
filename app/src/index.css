@@ -870,6 +870,19 @@ html[data-theme="light"] [data-id="current-history-list"] {
   color: #27272a;
 }
 
+[data-id="current-history-attachment-image"] {
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #27272a;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+html[data-theme="light"] [data-id="current-history-attachment-image"] {
+  border-color: #d4d4d8;
+  background: #e4e4e7;
+  box-shadow: 0 2px 8px rgba(24, 24, 27, 0.10);
+}
+
 html[data-theme="light"] [data-id="current-history-user-avatar"] {
   background: #f5f5f5 !important;
   color: #52525b !important;
