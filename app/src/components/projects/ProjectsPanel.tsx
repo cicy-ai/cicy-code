@@ -1531,12 +1531,12 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                         data-id={`project-agent-prompt-cancel-${shortPaneId(agent.paneId)}`}
                         onClick={() => { void cancelAgentMessage(agent); }}
                         disabled={cancelingAgentIds.has(shortPaneId(agent.paneId))}
-                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-900 hover:bg-white disabled:opacity-50"
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-amber-400/20 bg-amber-400/10 text-amber-300 transition hover:bg-amber-400/15 disabled:opacity-50"
                         title={t('composerStop', { ns: 'chat', defaultValue: '停止' })}
                       >
                         {cancelingAgentIds.has(shortPaneId(agent.paneId)) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : (
                           <span data-id={`project-agent-prompt-sending-${cardShortId}`} className="relative grid h-4 w-4 place-items-center">
-                            <Loader2 className="absolute h-4 w-4 animate-spin text-blue-400" />
+                            <Loader2 className="absolute h-4 w-4 animate-spin text-amber-300" />
                             <Square className="h-2 w-2 fill-current" />
                           </span>
                         )}
@@ -1547,7 +1547,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       data-id={`project-agent-prompt-send-${shortPaneId(agent.paneId)}`}
                       onClick={() => { void sendAgentMessage(agent); }}
                       disabled={!(agentMessages[shortPaneId(agent.paneId)] || '').trim() && !(agentAttachments[cardShortId] || []).length}
-                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-900 transition hover:bg-white disabled:bg-white/[0.06] disabled:text-zinc-600"
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-blue-400/20 bg-blue-500/15 text-blue-300 transition hover:bg-blue-500/25 disabled:border-transparent disabled:bg-white/[0.04] disabled:text-zinc-600"
                       title={cardBusy ? t('projectQueueMessage', { defaultValue: '加入队列' }) : t('send', { defaultValue: '发送' })}
                       aria-label={cardBusy ? t('projectQueueMessage', { defaultValue: '加入队列' }) : t('send', { defaultValue: '发送' })}
                     >
