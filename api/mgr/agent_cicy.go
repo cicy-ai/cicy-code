@@ -323,6 +323,25 @@ func cicyOutcomeMessage(kind, detail string) M {
 	return M{"role": "assistant", "content": []M{{"type": "text", "text": cicyOutcomeMarkerText(kind)}}}
 }
 
+// cicyPublicOutcomeDetail is the single boundary between runtime/gateway errors
+// and user-visible outcome payloads. Low-level socket/TLS diagnostics remain in
+// server logs and usage records, but must not enter current.json or SSE events.
+func cicyPublicOutcomeDetail(kind, detail string) string {
+	detail = strings.TrimSpace(detail)
+	if kind == "error" && isTechnicalTransportFailure("生成失败 " + detail) {
+		return ""
+	}
+	return detail
+}
+
+func cicyOutcomeErrorEvent(kind, detail string) M {
+	publicDetail := cicyPublicOutcomeDetail(kind, detail)
+	if publicDetail == "" && kind == "error" {
+		publicDetail = "generation failed"
+	}
+	return M{"type": "error", "error": publicDetail}
+}
+
 // cicyAttachOutcomeToSnapshot appends the outcome marker to the web's committed
 // snapshot (current.json) so a cancelled/failed turn shows up IMMEDIATELY, not
 // only after the next successful turn re-snapshots history. The web reads
@@ -335,6 +354,7 @@ func cicyOutcomeMessage(kind, detail string) M {
 // incrementally and re-pages the entire history = a jarring full-reload flash on
 // every send). With a stable +1 id it reads as one normal new turn.
 func cicyAttachOutcomeToSnapshot(shortID, kind, detail string) {
+	detail = cicyPublicOutcomeDetail(kind, detail)
 	current := agentInspectorLoadCurrent(shortID)
 	body := aiGatewayMap(current.Body)
 	if len(body) == 0 {
@@ -2958,7 +2978,7 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 				kind, detail = "cancelled", "cancelled"
 			}
 			session.messages = append(session.messages, cicyOutcomeMessage(kind, detail))
-			emit(M{"type": "error", "error": detail})
+			emit(cicyOutcomeErrorEvent(kind, detail))
 			session.persistLocked(workspace)
 			cicyAttachOutcomeToSnapshot(shortID, kind, detail)
 			// reply.json 收尾成终态,同上:让 UI 解锁并改渲染 current.json 的 outcome marker

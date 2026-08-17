@@ -85,6 +85,20 @@ func TestGatewaySanitizesTechnicalTransportFailureAtReplyWriteBoundary(t *testin
 	}
 }
 
+func TestCicyOutcomeDropsTechnicalTransportDetailBeforePublish(t *testing.T) {
+	detail := "HTTP 502: local error: tls: bad record MAC"
+	if got := cicyPublicOutcomeDetail("error", detail); got != "" {
+		t.Fatalf("technical detail reached current/history boundary: %q", got)
+	}
+	event := cicyOutcomeErrorEvent("error", detail)
+	if got := event["error"]; got != "generation failed" {
+		t.Fatalf("technical detail reached SSE event: %#v", event)
+	}
+	if got := cicyPublicOutcomeDetail("error", "gateway 429: quota exceeded"); got != "gateway 429: quota exceeded" {
+		t.Fatalf("non-transport error was hidden: %q", got)
+	}
+}
+
 func TestGatewayFiltersNoopPollingToolsAtSource(t *testing.T) {
 	cases := []struct {
 		name string
