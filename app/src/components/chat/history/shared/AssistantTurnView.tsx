@@ -31,6 +31,7 @@ export const AssistantTurnView = memo(function AssistantTurnView({ turn, turnKey
   // running right now (the CLI is executing it) — render a spinner, not a ✓.
   const turnActive = isLatestTurn && /^(thinking|streaming|pending|tool_use|running|in_progress|working)$/.test(String(turn?.status || '').trim());
   const lastToolStepIndex = turnActive ? steps.reduce((acc: number, s: any, i: number) => (s?.type === 'tool' ? i : acc), -1) : -1;
+  const toolOnlyTurn = steps.length > 0 && steps.every((step: any) => step?.type === 'tool');
   const hasRenderableAssistantStep = steps.some((step: any) => {
     if (step?.type === 'thinking' && String(step?.text || '').trim()) return true;
     if (step?.type === 'text' && String(step?.text || '').trim()) return true;
@@ -53,7 +54,7 @@ export const AssistantTurnView = memo(function AssistantTurnView({ turn, turnKey
             return <div key={stepIndex} data-id={`current-history-turn-step-text-${turnKey}-${stepIndex}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><MarkdownBlock text={step.text} /></div>;
           }
           const tools = Array.isArray(step.tools) ? step.tools : [];
-          return <div key={stepIndex} data-id={`current-history-turn-step-tools-${turnKey}-${stepIndex}`} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
+          return <div key={stepIndex} data-id={`current-history-turn-step-tools-${turnKey}-${stepIndex}`} className={`${toolOnlyTurn ? '' : 'my-2'} space-y-1.5`}>{tools.map((tool: any, toolIndex: number) => {
             const toolId = buildToolCardId(turnKey, stepIndex, tool, toolIndex);
             const running = stepIndex === lastToolStepIndex && !String(tool?.result || '').trim() && tool?.isError !== true;
             return <ToolCard key={toolId} tool={tool} toolId={toolId} running={running} />;
