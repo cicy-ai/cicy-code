@@ -279,7 +279,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       },
     });
 
-    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+    const onOpenHistory = vi.fn();
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} onOpenHistory={onOpenHistory} />);
 
     const response = await waitFor(() => {
       const node = document.querySelector('[data-id="project-agent-card-latest-response"]');
@@ -300,10 +301,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(screen.queryByText(/cell_id/)).not.toBeInTheDocument();
     expect(screen.queryByText(/const r = await tools\.exec_command/)).not.toBeInTheDocument();
 
-    fireEvent.click(document.querySelector('[data-id="project-agent-card-reply-tool"] summary') as HTMLElement);
-    expect(await screen.findAllByText('cicy-knowledge recall "tool use"')).toHaveLength(2);
-    const result = document.querySelector('[data-id="project-agent-card-tool-result-markdown"]') as HTMLElement;
-    expect(result.querySelectorAll('li')).toHaveLength(2);
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-reply-tool"]') as HTMLElement);
+    expect(onOpenHistory).toHaveBeenCalledWith('w-101:main.0');
+    expect(document.querySelector('[data-id="project-agent-card-tool-result-markdown"]')).not.toBeInTheDocument();
   });
 
   it('always shows the footer and ignores IME confirmation Enter', async () => {

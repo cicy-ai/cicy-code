@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowRight, Atom, Check, ChevronDown, Copy, FileText, FolderKanban, History, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, Atom, Check, FileText, FolderKanban, History, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -14,7 +14,7 @@ import { chatAttachmentMarkdown, replAttachmentMarkdown } from '../../lib/attach
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
 import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
-import { formatToolResult, toolHeadline } from '../chat/history/lib/toolFormat';
+import { toolHeadline } from '../chat/history/lib/toolFormat';
 import TerminalView from '../terminal/TerminalView';
 
 const AgentDocRoleEditor = lazy(() => import('../layout/AgentDocRoleEditor'));
@@ -415,32 +415,16 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           if (type === 'tool_use') {
             if (index !== latestVisibleToolIndex) return null;
             const input = item?.input == null ? '' : typeof item.input === 'string' ? item.input : JSON.stringify(item.input);
-            const output = item?.output == null ? '' : typeof item.output === 'string' ? item.output : JSON.stringify(item.output);
             const commands = String(item?.name || '') === 'exec' ? codexExecCommands(input) : [];
-            const tool = { name: commands.length ? 'exec_command' : String(item?.name || 'Tool'), arg: commands.length ? JSON.stringify({ command: commands.join('\n\n') }) : input, result: output, isError: item?.output_is_error === true };
+            const tool = { name: commands.length ? 'exec_command' : String(item?.name || 'Tool'), arg: commands.length ? JSON.stringify({ command: commands.join('\n\n') }) : input };
             const headline = toolHeadline(tool);
-            const command = commands.join('\n\n') || String(item?.input?.command || item?.input?.cmd || '').trim();
-            const result = formatToolResult(tool);
             return (
-              <details key={`tool-${index}`} data-id="project-agent-card-reply-tool" className="group text-zinc-500">
-                <summary className="flex cursor-pointer list-none items-center gap-2 py-1 select-none [&::-webkit-details-marker]:hidden">
-                  <SquareTerminal className="h-4 w-4 shrink-0 group-open:hidden" />
-                  <ChevronDown className="hidden h-4 w-4 shrink-0 group-open:block" />
+              <button key={`tool-${index}`} type="button" data-id="project-agent-card-reply-tool" onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex w-full cursor-pointer items-center gap-2 rounded-lg py-1 text-left text-zinc-500 transition hover:bg-white/[0.04] hover:text-zinc-300">
+                  <SquareTerminal className="h-4 w-4 shrink-0" />
                   <span className="shrink-0 font-medium text-zinc-400">{tool.name}</span>
                   {headline ? <><span aria-hidden="true">·</span><span className="min-w-0 truncate">{headline}</span></> : null}
-                </summary>
-                {(command || input || result) ? (
-                  <div className={cn('ml-6 mt-1 overflow-hidden rounded-xl border bg-black/[0.12]', tool.isError ? 'border-red-400/20' : 'border-white/[0.08]')}>
-                    {(command || input) ? (
-                      <div className="flex items-start gap-2 border-b border-white/[0.08] px-3 py-2 font-mono text-[12px] leading-5 text-zinc-400">
-                        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{command || input}</span>
-                        <button type="button" aria-label={t('copy', { defaultValue: '复制' })} title={t('copy', { defaultValue: '复制' })} onClick={(event) => { event.preventDefault(); event.stopPropagation(); void copyToClipboard(command || input); }} className="shrink-0 rounded p-1 hover:bg-white/[0.06] hover:text-zinc-200"><Copy className="h-3.5 w-3.5" /></button>
-                      </div>
-                    ) : null}
-                    {result ? <div data-id="project-agent-card-tool-result-markdown" className={cn('chat-markdown current-history-markdown max-h-52 overflow-auto px-3 py-2 text-[13px] leading-5', tool.isError ? 'text-red-300/80' : 'text-zinc-400')}><MarkdownBlock text={previewableMarkdown(result)} /></div> : null}
-                  </div>
-                ) : null}
-              </details>
+                  <ArrowRight className="ml-auto h-3.5 w-3.5 shrink-0" />
+              </button>
             );
           }
           return null;
