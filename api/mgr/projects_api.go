@@ -35,6 +35,14 @@ func ensureGroupProjectDefinition(groupID int64, name string, isDefault bool) (s
 	return slug, loadTemplateFile(path), nil
 }
 
+func groupProjectDefinitionPath(groupID int64, isDefault bool) string {
+	slug := fmt.Sprintf("project-%d", groupID)
+	if isDefault {
+		slug = defaultProjectSlug
+	}
+	return projectTemplatePath(slug)
+}
+
 func writeGroupProjectDefinition(groupID int64, name string, isDefault bool, content string) (string, error) {
 	slug, _, err := ensureGroupProjectDefinition(groupID, name, isDefault)
 	if err != nil {

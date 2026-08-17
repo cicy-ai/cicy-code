@@ -32,6 +32,7 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 			g := M{"id": id, "name": name, "description": desc, "is_default": isDefault == 1, "is_pinned": isPinned == 1, "name_customized": nameCustomized == 1}
 			if slug, rules, e := ensureGroupProjectDefinition(int64(id), name, isDefault == 1); e == nil {
 				g["project_template"], g["project_rules"] = slug, rules
+				g["project_file"] = groupProjectDefinitionPath(int64(id), isDefault == 1)
 			}
 			if createdAt.Valid {
 				g["created_at"] = createdAt.String
@@ -81,7 +82,7 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 500, defErr.Error())
 			return
 		}
-		J(w, M{"id": id, "name": name, "description": desc, "is_default": false, "is_pinned": false, "name_customized": true, "project_template": slug, "project_rules": rules, "pane_ids": []string{}, "pane_count": 0})
+		J(w, M{"id": id, "name": name, "description": desc, "is_default": false, "is_pinned": false, "name_customized": true, "project_template": slug, "project_file": groupProjectDefinitionPath(id, false), "project_rules": rules, "pane_ids": []string{}, "pane_count": 0})
 	}
 }
 
@@ -124,6 +125,7 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 		g := M{"id": id, "name": name, "description": desc, "is_default": isDefault == 1, "is_pinned": isPinned == 1, "name_customized": nameCustomized == 1}
 		if slug, rules, e := ensureGroupProjectDefinition(int64(id), name, isDefault == 1); e == nil {
 			g["project_template"], g["project_rules"] = slug, rules
+			g["project_file"] = groupProjectDefinitionPath(int64(id), isDefault == 1)
 		}
 		if createdAt.Valid {
 			g["created_at"] = createdAt.String

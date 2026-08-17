@@ -43,6 +43,7 @@ interface AgentProject {
   builtin?: boolean;
   pinned?: boolean;
   project_template?: string;
+  project_file?: string;
   project_rules?: string;
 }
 
@@ -651,6 +652,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           builtin: isDefault,
           pinned: Boolean(group.is_pinned),
           project_template: String(group.project_template || ''),
+          project_file: String(group.project_file || ''),
           project_rules: String(group.project_rules || ''),
         };
       }));
@@ -1840,6 +1842,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       <AppModal open={Boolean(definitionProject)} title={t('projectDefinitionTitle', { name: definitionProject?.name || '' })} onClose={() => { if (!definitionSaving) setDefinitionProject(null); }} maxWidth="720px">
         <div data-id="project-definition-modal" className="space-y-4">
           <p data-id="project-definition-hint" className="text-[12px] leading-5 text-zinc-500">{t('projectDefinitionHint')}</p>
+          {definitionProject?.project_file ? <div data-id="project-definition-file" className="rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 font-mono text-[11px] text-zinc-400">{definitionProject.project_file}</div> : null}
           <textarea data-id="project-definition-input" value={definitionRules} onChange={(event) => setDefinitionRules(event.target.value)} rows={18} spellCheck={false} className="w-full resize-y rounded-xl border border-white/[0.09] bg-black/20 px-3 py-3 font-mono text-[13px] leading-5 text-zinc-100 outline-none focus:border-zinc-500" />
           <div data-id="project-definition-actions" className="flex justify-end gap-2 border-t border-white/[0.07] pt-4">
             <button type="button" data-id="project-definition-cancel" onClick={() => setDefinitionProject(null)} disabled={definitionSaving} className="h-9 rounded-lg px-3.5 text-[12px] text-zinc-400 hover:bg-white/[0.05]">{t('cancel', { ns: 'common' })}</button>
