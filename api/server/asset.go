@@ -97,7 +97,7 @@ func staticCssIndexCss() (*asset, error) {
 		return nil, err
 	}
 
-	info := bindataFileInfo{name: "static/css/index.css", size: 181, mode: os.FileMode(509), modTime: time.Unix(1786928488, 0)}
+	info := bindataFileInfo{name: "static/css/index.css", size: 181, mode: os.FileMode(509), modTime: time.Unix(1786929453, 0)}
 	a := &asset{bytes: bytes, info: info}
 	return a, nil
 }
@@ -117,7 +117,7 @@ func staticCssXtermCss() (*asset, error) {
 		return nil, err
 	}
 
-	info := bindataFileInfo{name: "static/css/xterm.css", size: 7112, mode: os.FileMode(436), modTime: time.Unix(1786928488, 0)}
+	info := bindataFileInfo{name: "static/css/xterm.css", size: 7112, mode: os.FileMode(436), modTime: time.Unix(1786929453, 0)}
 	a := &asset{bytes: bytes, info: info}
 	return a, nil
 }
@@ -157,7 +157,7 @@ func staticFaviconPng() (*asset, error) {
 		return nil, err
 	}
 
-	info := bindataFileInfo{name: "static/favicon.png", size: 863, mode: os.FileMode(509), modTime: time.Unix(1786928488, 0)}
+	info := bindataFileInfo{name: "static/favicon.png", size: 863, mode: os.FileMode(509), modTime: time.Unix(1786929453, 0)}
 	a := &asset{bytes: bytes, info: info}
 	return a, nil
 }
@@ -177,7 +177,7 @@ func staticIndexHtml() (*asset, error) {
 		return nil, err
 	}
 
-	info := bindataFileInfo{name: "static/index.html", size: 605, mode: os.FileMode(509), modTime: time.Unix(1786928488, 0)}
+	info := bindataFileInfo{name: "static/index.html", size: 605, mode: os.FileMode(509), modTime: time.Unix(1786929453, 0)}
 	a := &asset{bytes: bytes, info: info}
 	return a, nil
 }
