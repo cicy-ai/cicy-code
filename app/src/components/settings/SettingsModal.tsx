@@ -412,7 +412,7 @@ export default function SettingsModal({
                         onClick={() => void setAuditEnabled(!auditEnabled)}
                         className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors ${auditEnabled ? 'bg-blue-500' : 'bg-zinc-700'} ${auditSaving ? 'cursor-wait opacity-60' : ''}`}
                       >
-                        <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${auditEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                        <span data-id="settings-audit-toggle-thumb" className={`absolute left-0 top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${auditEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                       </button>
                     </div>
                   </section>
