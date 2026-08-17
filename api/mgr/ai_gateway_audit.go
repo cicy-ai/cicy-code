@@ -1379,6 +1379,11 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	s.current.Status = statusMap.Primary
 	s.reply.Status = statusMap.Primary
 	s.reply.StatusMap = statusMap
+	// Sanitize the session-owned snapshot itself before any downstream consumer
+	// sees it. aiGatewayWriteReplySnapshot also sanitizes, but it receives reply
+	// by value; relying on that left s.reply dirty and current_updated / reply
+	// hooks could still publish transport diagnostics after the clean file write.
+	s.reply = aiGatewaySanitizeReplySnapshot(s.reply)
 
 	if !s.auxiliary {
 		if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
@@ -5529,14 +5534,16 @@ func aiGatewayEstimateCostCredit(model string, usage map[string]interface{}) flo
 
 func aiGatewayLoadReplySnapshot(agentID string) aiGatewayReplySnapshot {
 	if reply, err := aiGatewayReadReplySnapshotFile(agentID); err == nil {
+		reply = aiGatewaySanitizeReplySnapshot(reply)
 		aiGatewayStoreLiveReplySnapshot(agentID, reply)
 		reply.StatusMap = aiGatewayBuildStatusMap(aiGatewayCurrentSnapshot{}, reply)
 		return reply
 	}
 	if reply, ok := aiGatewayGetLiveReplySnapshot(agentID); ok {
-		return reply
+		return aiGatewaySanitizeReplySnapshot(reply)
 	}
 	reply := aiGatewayBuildReplySnapshotFromCurrent(agentID)
+	reply = aiGatewaySanitizeReplySnapshot(reply)
 	if strings.TrimSpace(reply.TurnID) == "" &&
 		strings.TrimSpace(reply.Status) == "" &&
 		strings.TrimSpace(reply.Answer) == "" &&
