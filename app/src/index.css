@@ -22,8 +22,8 @@
   --vsc-success: #4ec9b0;
   --vsc-warning: #cca700;
   --vsc-error: #f14c4c;
-  --chat-question-bg: rgba(255, 255, 255, 0.055);
-  --chat-question-border: rgba(255, 255, 255, 0.075);
+  --chat-question-bg: rgba(255, 255, 255, 0.035);
+  --chat-question-border: rgba(255, 255, 255, 0.065);
 }
 
 html[data-theme="light"] {
@@ -39,8 +39,8 @@ html[data-theme="light"] {
   --vsc-text-secondary: #52525b;
   --vsc-text-muted: #71717a;
   --vsc-text-disabled: #a1a1aa;
-  --chat-question-bg: #f1f3f5;
-  --chat-question-border: #e1e4e8;
+  --chat-question-bg: #ffffff;
+  --chat-question-border: #e5e7eb;
 }
 
 html[data-theme="light"],
