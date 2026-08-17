@@ -469,7 +469,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       </div>
       )}
       </div>
-      {footer}
+      {activeBodyTab === 'history' ? footer : null}
       <div
         data-id={`project-agent-card-resize-${shortPaneId(agent.paneId)}`}
         onPointerDown={onResizePointerDown}

@@ -218,11 +218,13 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-tab-terminal-w-102"]')).not.toBeInTheDocument();
     fireEvent.click(toggle);
     expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="mock-project-terminal"]')).toHaveTextContent('/ttyd/w-101/');
     fireEvent.click(toggle);
     expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).toBeInTheDocument();
     fireEvent.click(document.querySelector('[data-id="project-agent-card-tab-history-w-101"]') as HTMLElement);
     expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
   });
 
   it('shows the agent role editor without a redundant toolbar and isolates its scrolling', async () => {
@@ -232,6 +234,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     fireEvent.click(await screen.findByRole('tab', { name: '角色' }));
     const roleBody = document.querySelector('[data-id="project-agent-card-role-body-w-101"]') as HTMLElement;
     expect(roleBody).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-role-toolbar"]')).not.toBeInTheDocument();
     const zoom = document.querySelector('[data-id="project-canvas-zoom-value"]');
     expect(zoom).toHaveTextContent('100%');
