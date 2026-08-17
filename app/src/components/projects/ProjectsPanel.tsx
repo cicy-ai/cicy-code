@@ -15,6 +15,7 @@ import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
 import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
 import { toolHeadline } from '../chat/history/lib/toolFormat';
+import { isTechnicalTransportFailureText } from '../chat/history/lib/normalizeItem';
 import TerminalView from '../terminal/TerminalView';
 
 const AgentDocRoleEditor = lazy(() => import('../layout/AgentDocRoleEditor'));
@@ -81,11 +82,6 @@ const questionWithoutUploadedAttachments = (value: unknown) => String(value || '
 const uploadedAttachmentsFromQuestion = (value: unknown) => String(value || '').match(
   /!?\[[^\]]*\]\((?:file:\/\/)?\/?[^)\n]*(?:\/cicy-ai\/assets\/|\/assets\/files\/)[^)\n]+\)/gi,
 ) || [];
-const isTechnicalTransportFailureText = (value: unknown) => {
-  const text = String(value || '').trim().toLowerCase();
-  if (!text.includes('生成失败') && !text.includes('http 5')) return false;
-  return ['broken pipe', 'closed network connection', 'connection reset by peer', 'write tcp', 'read tcp', 'dial tcp', 'tls: bad record mac', 'upstream tls handshake', '\neof'].some((marker) => text.includes(marker));
-};
 const decodeJSString = (literal: string) => {
   const value = String(literal || '');
   if (value.startsWith('"')) {

@@ -53,6 +53,16 @@ export function cicyCompactSummaryOf(text: string | undefined | null): string | 
   return s.slice(m[0].length).trim();
 }
 
+export function isTechnicalTransportFailureText(value: unknown): boolean {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text.includes('生成失败') && !text.includes('http 5')) return false;
+  return [
+    'broken pipe', 'closed network connection', 'connection reset by peer',
+    'write tcp', 'read tcp', 'dial tcp', 'tls: bad record mac',
+    'upstream tls handshake', '\neof',
+  ].some((marker) => text.includes(marker));
+}
+
 export function splitLeadingHarnessBlocks(text: string): { blocks: string[]; remaining: string } {
   let remaining = String(text || '');
   const blocks: string[] = [];
@@ -252,7 +262,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
   const reasoningText = String((item as any).reasoning_content || (item as any).reasoning || '').trim();
   if (reasoningText) steps.push({ type: 'thinking', text: reasoningText });
   const assistantText = extractContentText(item.content);
-  if (assistantText) {
+  if (assistantText && !isTechnicalTransportFailureText(assistantText)) {
     steps.push({ type: 'text', text: assistantText });
   }
   if (itemType === 'custom_tool_call') {
