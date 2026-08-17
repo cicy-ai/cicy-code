@@ -2,7 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest';
-import { formatToolResult, normalizeToolForDisplay, toolHeadline } from './toolFormat';
+import { buildToolCardId, formatToolResult, normalizeToolForDisplay, toolHeadline } from './toolFormat';
+
+describe('buildToolCardId', () => {
+  it('keeps a native tool id stable across live and committed rendering', () => {
+    expect(buildToolCardId('live-42', 1, { name: 'exec_command', tool_id: 'call_abc' }, 0))
+      .toBe(buildToolCardId('42', 3, { name: 'exec_command', tool_id: 'call_abc' }, 2));
+  });
+
+  it('canonicalizes the live prefix when no native id exists', () => {
+    expect(buildToolCardId('live-42', 1, { name: 'exec_command' }, 0))
+      .toBe(buildToolCardId('42', 1, { name: 'exec_command' }, 0));
+  });
+});
 
 describe('Codex tool display normalization', () => {
   it('shows the real command instead of the JavaScript orchestration wrapper', () => {

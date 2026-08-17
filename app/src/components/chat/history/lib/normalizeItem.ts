@@ -270,6 +270,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
       type: 'tool',
       tools: [{
         name: String(item.name || 'tool'),
+        tool_id: String((item as any).call_id || (item as any).tool_id || item.id || '').trim(),
         arg: String(item.input || '').trim(),
         // Folded from the paired custom_tool_call_output (apply_patch result).
         result: String((item as any)._tool_output || '').trim(),
@@ -281,6 +282,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
       type: 'tool',
       tools: [{
         name: String(item.name || item.tool_name || 'tool'),
+        tool_id: String((item as any).call_id || (item as any).tool_id || item.id || '').trim(),
         arg: '',
         result: String(item.output || item.result || '').trim(),
       }],
@@ -295,6 +297,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
       type: 'tool',
       tools: [{
         name: String(item.name || 'tool'),
+        tool_id: String((item as any).call_id || (item as any).tool_id || item.id || '').trim(),
         arg: typeof (item as any).arguments === 'string'
           ? (item as any).arguments.trim()
           : ((item as any).arguments ? JSON.stringify((item as any).arguments).trim()
@@ -315,6 +318,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
       type: 'tool',
       tools: [{
         name,
+        tool_id: callId,
         arg: '',
         result: String((item as any).output || (item as any).result || '').trim(),
       }],
@@ -333,6 +337,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
         type: 'tool',
         tools: [{
           name: String(fn.name || tc?.name || 'tool'),
+          tool_id: callId,
           arg: typeof fn.arguments === 'string'
             ? fn.arguments.trim()
             : (fn.arguments ? JSON.stringify(fn.arguments).trim() : ''),
@@ -350,6 +355,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
           type: 'tool',
           tools: [{
             name: String(part.name || 'tool'),
+            tool_id: String(part?.id || part?.tool_id || part?.call_id || '').trim(),
             arg: typeof part.input === 'string' ? part.input.trim() : (part.input ? JSON.stringify(part.input).trim() : ''),
             result: toolResult,
             isError: part?._tool_is_error === true,
@@ -367,6 +373,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
           type: 'tool',
           tools: [{
             name,
+            tool_id: callId,
             arg: '',
             result: typeof part.content === 'string' ? part.content.trim() : (part.content ? JSON.stringify(part.content).trim() : ''),
             isError: part?.is_error === true,

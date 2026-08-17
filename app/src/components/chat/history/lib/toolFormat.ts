@@ -239,5 +239,8 @@ export function formatToolResult(tool: any) {
 
 export function buildToolCardId(turnKey: string | number, stepIndex: number, tool: any, toolIndex: number) {
   const name = String(tool?.name || 'tool').trim();
-  return `${turnKey}:${stepIndex}:${toolIndex}:${name}`;
+  const nativeId = String(tool?.tool_id || tool?.call_id || tool?.callId || tool?.id || '').trim();
+  if (nativeId) return `tool:${nativeId}`;
+  const stableTurnKey = String(turnKey).replace(/^live-/, '');
+  return `${stableTurnKey}:${stepIndex}:${toolIndex}:${name}`;
 }
