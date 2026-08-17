@@ -45,6 +45,16 @@ function codexWrappedCommands(source: string): string[] {
   return commands;
 }
 
+function codexWrappedPatch(source: string): string {
+  if (!/tools\.apply_patch\s*\(/.test(source)) return '';
+  const literals = source.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/g) || [];
+  for (const literal of literals) {
+    const decoded = decodeJSStringLiteral(literal);
+    if (decoded.includes('*** Begin Patch') && decoded.includes('*** End Patch')) return decoded.trim();
+  }
+  return '';
+}
+
 // Codex exposes orchestration calls as a generic `exec` whose input is
 // JavaScript (`tools.exec_command(...)`). The user cares about the shell command,
 // not that transport wrapper. Pure wait/empty-poll calls carry no user-facing
@@ -56,6 +66,8 @@ export function normalizeToolForDisplay(tool: any): any | null {
   if (name === 'wait') return null;
   if (name === 'write_stdin' && (!parsed || String(parsed.chars || '') === '')) return null;
   if (name !== 'exec') return tool;
+  const patch = codexWrappedPatch(raw);
+  if (patch) return { ...tool, name: 'apply_patch', arg: patch };
   if (/tools\.wait\s*\(/.test(raw)) return null;
   if (/tools\.write_stdin\s*\(/.test(raw)) {
     const chars = raw.match(/\bchars\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)/);
@@ -200,6 +212,7 @@ export function formatToolResult(tool: any) {
   }
   const parsed = tryParseJSONObject(raw);
   if (parsed != null) {
+    if (name === 'apply_patch' && parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).length === 0) return '';
     if (name === 'exec_command' && parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'output' in parsed) {
       return shortenToolPath(String((parsed as any).output || '').trim());
     }

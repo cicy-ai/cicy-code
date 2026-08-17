@@ -30,4 +30,17 @@ describe('Codex tool display normalization', () => {
       result: 'Script completed\nWall time 0.1 seconds\nProcess exited with code 0\nFinal output:',
     })).toBe('');
   });
+
+  it('extracts an apply_patch diff from the Codex JavaScript wrapper', () => {
+    const patch = '*** Begin Patch\n*** Update File: /tmp/example.ts\n@@\n-old\n+new\n*** End Patch';
+    const tool = normalizeToolForDisplay({
+      name: 'exec',
+      arg: `const patch = ${JSON.stringify(patch)}; text(await tools.apply_patch(patch));`,
+      result: '{}',
+    });
+    expect(tool?.name).toBe('apply_patch');
+    expect(tool?.arg).toBe(patch);
+    expect(toolHeadline(tool)).toBe('Update /tmp/example.ts');
+    expect(formatToolResult(tool)).toBe('');
+  });
 });
