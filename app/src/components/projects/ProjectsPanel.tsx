@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from 'react';
 import { ArrowDown, ArrowRight, Atom, Check, FileText, FolderKanban, History, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
@@ -17,6 +17,7 @@ import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
 import { toolHeadline } from '../chat/history/lib/toolFormat';
 import { isTechnicalTransportFailureText } from '../chat/history/lib/normalizeItem';
 import TerminalView from '../terminal/TerminalView';
+import { resolveCardScrollFollow } from './cardScrollFollow';
 
 const AgentDocRoleEditor = lazy(() => import('../layout/AgentDocRoleEditor'));
 
@@ -191,6 +192,11 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const bodyScrollRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef<HTMLDivElement>(null);
   const followLoadingRef = useRef(true);
+  // Scroll events also fire for scrollTop writes and browser anchoring. Only
+  // sample sentinel visibility while an actual wheel/pointer scroll is active;
+  // content growth must consume the previously sampled value.
+  const bodyWheelScrollRef = useRef(false);
+  const bodyPointerScrollRef = useRef(false);
   const initialBottomKeyRef = useRef('');
   const status = String(agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
@@ -266,17 +272,46 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     const node = bodyScrollRef.current;
     if (!node) return;
     const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 8;
-    if (!working) {
+    const userDriven = bodyWheelScrollRef.current || bodyPointerScrollRef.current;
+    if (userDriven && !working) {
       followLoadingRef.current = atBottom;
-    } else {
+    } else if (userDriven) {
       const loading = loadingRef.current;
       const bodyRect = node.getBoundingClientRect();
       const loadingRect = loading?.getBoundingClientRect();
       const loadingVisible = Boolean(loadingRect && loadingRect.bottom > bodyRect.top && loadingRect.top < bodyRect.bottom);
-      followLoadingRef.current = atBottom || loadingVisible;
+      followLoadingRef.current = resolveCardScrollFollow(followLoadingRef.current, loadingVisible, true);
     }
+    bodyWheelScrollRef.current = false;
     updateBodyScrollButton();
   }, [updateBodyScrollButton, working]);
+
+  const handleBodyWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    bodyWheelScrollRef.current = true;
+    if (event.deltaY < 0) {
+      // Disengage before the browser applies the wheel and before any stream
+      // growth can race its resulting scroll event.
+      followLoadingRef.current = false;
+    }
+  }, []);
+
+  const handleBodyPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    if (event.target === event.currentTarget) {
+      bodyPointerScrollRef.current = true;
+    }
+  }, []);
+
+  useEffect(() => {
+    const release = () => { bodyPointerScrollRef.current = false; };
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+    return () => {
+      window.removeEventListener('pointerup', release);
+      window.removeEventListener('pointercancel', release);
+    };
+  }, []);
 
   useEffect(() => {
     const node = bodyScrollRef.current;
@@ -441,8 +476,8 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       <div
         ref={bodyScrollRef}
         data-id="project-agent-card-live-body"
-        onPointerDown={(event) => event.stopPropagation()}
-        onWheel={(event) => event.stopPropagation()}
+        onPointerDown={handleBodyPointerDown}
+        onWheel={handleBodyWheel}
         onScroll={handleBodyScroll}
         className="min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
       >
@@ -499,7 +534,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </div>
       </div>
       {showScrollToBottom ? (
-        <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-2 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur hover:bg-[#292a30] hover:text-white">
+        <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); followLoadingRef.current = true; bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-2 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur hover:bg-[#292a30] hover:text-white">
           <ArrowDown className="h-3.5 w-3.5" />
         </button>
       ) : null}
