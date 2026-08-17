@@ -580,7 +580,7 @@
   "projectMessageFailed": "Failed to send message",
   "projectZoomOut": "Zoom out",
   "projectZoomIn": "Zoom in",
-  "projectResetView": "Fit all Agent Cards",
+  "projectResetView": "Arrange Agent Cards",
   "projectAddAgentTitle": "Add agents to {{name}}",
   "projectAddSelected": "Add {{count}}",
   "projectNoAgents": "No agents in this project",

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowRight, Atom, Check, FileText, FolderKanban, History, Loader2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Scan, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, Atom, Check, FileText, FolderKanban, History, LayoutGrid, Loader2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -1310,7 +1310,25 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const resetCanvasView = () => {
     const canvas = canvasRef.current;
     if (!canvas || !visibleAgents.length) return;
-    const layouts = visibleAgents.map(layoutForAgent);
+    const gap = 24;
+    const targetRowWidth = Math.max(1, canvas.clientWidth - 80);
+    let cursorX = 0;
+    let cursorY = 0;
+    let rowHeight = 0;
+    const arrangedLayouts = { ...agentLayouts };
+    const layouts = visibleAgents.map((agent, index) => {
+      const current = layoutForAgent(agent, index);
+      if (cursorX > 0 && cursorX + current.width > targetRowWidth) {
+        cursorX = 0;
+        cursorY += rowHeight + gap;
+        rowHeight = 0;
+      }
+      const layout = { ...current, x: cursorX, y: cursorY };
+      arrangedLayouts[shortPaneId(agent.paneId)] = layout;
+      cursorX += current.width + gap;
+      rowHeight = Math.max(rowHeight, current.height);
+      return layout;
+    });
     const minX = Math.min(...layouts.map((layout) => layout.x));
     const minY = Math.min(...layouts.map((layout) => layout.y));
     const maxX = Math.max(...layouts.map((layout) => layout.x + layout.width));
@@ -1323,9 +1341,19 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       availableHeight / Math.max(1, maxY - minY),
     ))).toFixed(2));
     const pan = { x: margin - minX * zoom, y: margin - minY * zoom };
+    setAgentLayouts(arrangedLayouts);
     setCanvasPan(pan);
     setCanvasZoom(zoom);
-    writeProjectViewCache(selectedProject.id, { pan, zoom });
+    writeProjectViewCache(selectedProject.id, { layouts: arrangedLayouts, pan, zoom });
+    if (selectedProject.api_id) {
+      for (let index = 0; index < visibleAgents.length; index += 1) {
+        const agent = visibleAgents[index];
+        const layout = layouts[index];
+        void apiService.updateGroupPaneLayout(selectedProject.api_id, agent.paneId, {
+          pos_x: layout.x, pos_y: layout.y, width: layout.width, height: layout.height, z_index: layout.z,
+        });
+      }
+    }
   };
 
   return (
@@ -1650,7 +1678,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
           <span data-id="project-canvas-zoom-value" className="w-9 text-center font-mono text-[9px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
           <button type="button" data-id="project-canvas-zoom-in" onClick={() => changeZoom(0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomIn')}><Plus className="h-3.5 w-3.5" /></button>
-          <button type="button" data-id="project-canvas-reset" onClick={resetCanvasView} className="grid h-7 w-7 place-items-center rounded-md text-zinc-500 hover:bg-white/[0.08] hover:text-white" title={t('projectResetView')}><Scan className="h-3.5 w-3.5" /></button>
+          <button type="button" data-id="project-canvas-reset" onClick={resetCanvasView} className="grid h-7 w-7 place-items-center rounded-md text-zinc-500 hover:bg-white/[0.08] hover:text-white" title={t('projectResetView')}><LayoutGrid className="h-3.5 w-3.5" /></button>
         </div>
         {footerControls ? (
           <div data-id="project-canvas-footer-controls" className="absolute bottom-1.5 right-4 flex items-center gap-2 px-2 py-1">
