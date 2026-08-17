@@ -255,6 +255,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
     expect(await screen.findByText('最新消息')).toBeInTheDocument();
     expect(screen.queryByText('上一条消息')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-output-loading"]')).toHaveTextContent('Working·0s');
   });
 
   it('renders reply markdown and unwraps Codex exec tool calls', async () => {
@@ -266,6 +267,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
         question: '检查输出\n\n[image.png](/home/cicy/cicy-ai/assets/2026/08/15/example.png)',
         items: [
           { type: 'text', text: '**结论**\n\n- 第一项\n- 第二项' },
+          { type: 'text', text: '⚠️ 生成失败（HTTP 502）\n\nlocal error: tls: bad record MAC' },
           { type: 'tool_use', name: 'read', input: '{"path":"/tmp/old.txt"}', output: '旧工具结果' },
           {
             type: 'tool_use',
@@ -307,6 +309,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(screen.queryByText('旧工具结果')).not.toBeInTheDocument();
     expect(screen.queryByText('wait')).not.toBeInTheDocument();
     expect(screen.queryByText(/cell_id/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/bad record MAC/)).not.toBeInTheDocument();
     expect(screen.queryByText(/const r = await tools\.exec_command/)).not.toBeInTheDocument();
 
     fireEvent.click(document.querySelector('[data-id="project-agent-card-reply-tool"]') as HTMLElement);

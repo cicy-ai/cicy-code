@@ -178,7 +178,8 @@ export const markdownComponents = { a: MarkdownLink, img: MarkdownImg } as const
 // 引用 + memo:只有文本真变的那个块才重 parse。
 export const REMARK_PLUGINS = [remarkGfm];
 export const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
-  return <Markdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>{text}</Markdown>;
+  const previewable = String(text || '').replace(/\(file:\/\/(\/?[^)]+)\)/g, (_match, path: string) => `(/${path.replace(/^\/+/, '')})`);
+  return <Markdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>{previewable}</Markdown>;
 });
 
 // Confirm-before-leaving modal for external URLs. Opening goes to a NEW window.

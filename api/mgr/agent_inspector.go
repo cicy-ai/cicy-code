@@ -2490,16 +2490,17 @@ func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
 	// while reply.Items still carries that same block plus the continuation —
 	// without this the committed turn AND the live tail render the same paragraph.
 	committed := aiGatewayCommittedAssistantTexts(current)
+	displayItems := aiGatewayFilterTechnicalTransportFailures(reply.Items)
 	answer := strings.TrimSpace(reply.Answer)
 	if answer == "" {
-		answer = aiGatewayReplyItemsText(reply.Items, "text", committed)
+		answer = aiGatewayReplyItemsText(displayItems, "text", committed)
 	}
 	// Exclude the current turn's already-committed thinking so the live tail
 	// doesn't duplicate the thinking the committed turn already renders.
 	committedThinking := aiGatewayCommittedAssistantThinking(current)
 	thinking := strings.TrimSpace(reply.Thinking)
 	if thinking == "" {
-		thinking = aiGatewayReplyItemsText(reply.Items, "thinking", committedThinking)
+		thinking = aiGatewayReplyItemsText(displayItems, "thinking", committedThinking)
 	}
 	ctxUsedPct, ctxWindowSize := agentInspectorReadContextWindow(paneID)
 	J(w, M{
@@ -2520,7 +2521,7 @@ func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
 		// Whole in-flight turn as ORDERED blocks (thinking/tool_use/text), as the
 		// serial SSE produced them — live turn renders this in order so a multi-round
 		// turn shows thinking→tool→tool→thinking→text instead of tools jumping above.
-		"items":                       reply.Items,
+		"items":                       displayItems,
 		"started_at":                  aiGatewayFirstNonEmpty(strings.TrimSpace(reply.StartedAt), strings.TrimSpace(current.StartedAt)),
 		"updated_at":                  strings.TrimSpace(reply.UpdatedAt),
 		"model":                       aiGatewayFirstNonEmpty(aiGatewayReplyPrimaryModel(reply), strings.TrimSpace(current.Model)),

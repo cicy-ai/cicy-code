@@ -81,6 +81,11 @@ const questionWithoutUploadedAttachments = (value: unknown) => String(value || '
 const uploadedAttachmentsFromQuestion = (value: unknown) => String(value || '').match(
   /!?\[[^\]]*\]\((?:file:\/\/)?\/?[^)\n]*(?:\/cicy-ai\/assets\/|\/assets\/files\/)[^)\n]+\)/gi,
 ) || [];
+const isTechnicalTransportFailureText = (value: unknown) => {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text.includes('生成失败') && !text.includes('http 5')) return false;
+  return ['broken pipe', 'closed network connection', 'connection reset by peer', 'write tcp', 'read tcp', 'dial tcp', 'tls: bad record mac', 'upstream tls handshake', '\neof'].some((marker) => text.includes(marker));
+};
 const decodeJSString = (literal: string) => {
   const value = String(literal || '');
   if (value.startsWith('"')) {
@@ -185,6 +190,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const [identityCopied, setIdentityCopied] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [clockNow, setClockNow] = useState(Date.now());
+  const localTurnStartRef = useRef({ question: '', startedAt: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
   const bodyScrollRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef<HTMLDivElement>(null);
@@ -219,7 +225,10 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const visibleQuestionAttachments = uploadedAttachmentsFromQuestion(rawQuestion);
   const replyStatus = String(reply?.status || latest?.status || status).toLowerCase();
   const completed = /completed|complete|done/.test(replyStatus);
-  const startedAt = Date.parse(String(reply?.started_at || latest?.started_at || '')) || 0;
+  const serverStartedAt = Date.parse(String(reply?.started_at || latest?.started_at || '')) || 0;
+  if (serverStartedAt && rawQuestion) localTurnStartRef.current = { question: rawQuestion, startedAt: serverStartedAt };
+  else if (working && rawQuestion && localTurnStartRef.current.question !== rawQuestion) localTurnStartRef.current = { question: rawQuestion, startedAt: Date.now() };
+  const startedAt = serverStartedAt || (localTurnStartRef.current.question === rawQuestion ? localTurnStartRef.current.startedAt : 0);
   const finishedAt = Date.parse(String(reply?.updated_at || latest?.updated_at || '')) || 0;
   const elapsedMs = startedAt ? Math.max(0, (working ? clockNow : finishedAt || clockNow) - startedAt) : 0;
 
@@ -445,6 +454,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             </div>
           );
           if (type === 'text' && item?.text) return (
+            isTechnicalTransportFailureText(item.text) ? null :
             <div key={`text-${index}`} data-id="project-agent-card-latest-response" className="chat-markdown current-history-markdown text-zinc-300"><MarkdownBlock text={previewableMarkdown(String(item.text))} /></div>
           );
           if (type === 'tool_use') {
@@ -465,7 +475,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             );
           }
           return null;
-        }) : !reply?.question && latest?.latest_response ? (
+        }) : !reply?.question && latest?.latest_response && !isTechnicalTransportFailureText(latest.latest_response) ? (
           <div data-id="project-agent-card-latest-response" className="chat-markdown current-history-markdown text-zinc-400 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
             <MarkdownBlock text={previewableMarkdown(latest.latest_response)} />
           </div>
