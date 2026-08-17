@@ -136,6 +136,13 @@ const fmtCost = (cost: number) =>
           : cost >= 0.001 ? `$${cost.toFixed(3)}`
             : `$${cost.toFixed(4)}`;
 
+const fmtElapsed = (elapsedMs: number) => {
+  const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s`;
+};
+
 function CtxRing({ pct }: { pct: number }) {
   const radius = 4.5;
   const circumference = 2 * Math.PI * radius;
@@ -175,6 +182,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const [activeBodyTab, setActiveBodyTab] = useState<'history' | 'terminal' | 'role'>('history');
   const [identityCopied, setIdentityCopied] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [clockNow, setClockNow] = useState(Date.now());
   const menuRef = useRef<HTMLDivElement>(null);
   const bodyScrollRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef<HTMLDivElement>(null);
@@ -185,9 +193,20 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const busy = /running|working|thinking|streaming/.test(status);
   const identity = teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId);
   const replyItems = Array.isArray(reply?.items) ? reply.items : [];
-  const latestVisibleToolIndex = replyItems.reduce((latestIndex: number, item: any, index: number) => (
-    String(item?.type || '') === 'tool_use' && String(item?.name || '').toLowerCase() !== 'wait' ? index : latestIndex
-  ), -1);
+  const toolGroupsByLastIndex = new Map<number, number>();
+  let currentToolGroup: number[] = [];
+  const finishToolGroup = () => {
+    if (currentToolGroup.length) toolGroupsByLastIndex.set(currentToolGroup[currentToolGroup.length - 1], currentToolGroup.length);
+    currentToolGroup = [];
+  };
+  replyItems.forEach((item: any, index: number) => {
+    if (String(item?.type || '') === 'tool_use') {
+      if (String(item?.name || '').toLowerCase() !== 'wait') currentToolGroup.push(index);
+      return;
+    }
+    finishToolGroup();
+  });
+  finishToolGroup();
   const latestQuestion = String(latest?.latest_question || '');
   const replyQuestion = String(reply?.question || '');
   const latestUpdatedAt = Date.parse(String(latest?.updated_at || '')) || 0;
@@ -196,6 +215,18 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const rawQuestion = String(optimisticQuestion || freshestQuestion);
   const visibleQuestion = questionWithoutUploadedAttachments(rawQuestion);
   const visibleQuestionAttachments = uploadedAttachmentsFromQuestion(rawQuestion);
+  const replyStatus = String(reply?.status || latest?.status || status).toLowerCase();
+  const completed = /completed|complete|done/.test(replyStatus);
+  const startedAt = Date.parse(String(reply?.started_at || latest?.started_at || '')) || 0;
+  const finishedAt = Date.parse(String(reply?.updated_at || latest?.updated_at || '')) || 0;
+  const elapsedMs = startedAt ? Math.max(0, (working ? clockNow : finishedAt || clockNow) - startedAt) : 0;
+
+  useEffect(() => {
+    if (!working || !startedAt) return;
+    setClockNow(Date.now());
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [working, startedAt]);
 
   // Keep the latest turn visible when a card opens or receives a new question.
   useLayoutEffect(() => {
@@ -376,16 +407,8 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           </Suspense>
         </div>
       ) : (
-      <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 min-h-0 flex-1">
-      <div
-        ref={bodyScrollRef}
-        data-id="project-agent-card-live-body"
-        onPointerDown={(event) => event.stopPropagation()}
-        onWheel={(event) => event.stopPropagation()}
-        onScroll={handleBodyScroll}
-        className="h-full min-h-0 w-full cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
-      >
-        <div data-id="project-agent-card-current-turn" className="space-y-3.5">
+      <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 flex min-h-0 flex-1 flex-col">
+      <div data-id="project-agent-card-question-fixed" onPointerDown={(event) => event.stopPropagation()} className="shrink-0 space-y-2.5 pr-[18px] pb-2.5">
         <div data-id="project-agent-card-history-link-row" className="flex justify-end">
           <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史<ArrowRight className="h-3 w-3" /></button>
         </div>
@@ -399,6 +422,16 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             ))}
           </div>
         ) : null}
+      </div>
+      <div
+        ref={bodyScrollRef}
+        data-id="project-agent-card-live-body"
+        onPointerDown={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
+        onScroll={handleBodyScroll}
+        className="min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
+      >
+        <div data-id="project-agent-card-current-turn" className="space-y-3.5">
         {replyItems.length ? replyItems.map((item: any, index: number) => {
           const type = String(item?.type || '');
           if (type === 'thinking' && item?.thinking) return (
@@ -413,13 +446,15 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             <div key={`text-${index}`} data-id="project-agent-card-latest-response" className="chat-markdown current-history-markdown text-zinc-300"><MarkdownBlock text={previewableMarkdown(String(item.text))} /></div>
           );
           if (type === 'tool_use') {
-            if (index !== latestVisibleToolIndex) return null;
+            const toolGroupCount = toolGroupsByLastIndex.get(index);
+            if (!toolGroupCount) return null;
             const input = item?.input == null ? '' : typeof item.input === 'string' ? item.input : JSON.stringify(item.input);
             const commands = String(item?.name || '') === 'exec' ? codexExecCommands(input) : [];
             const tool = { name: commands.length ? 'exec_command' : String(item?.name || 'Tool'), arg: commands.length ? JSON.stringify({ command: commands.join('\n\n') }) : input };
             const headline = toolHeadline(tool);
             return (
               <button key={`tool-${index}`} type="button" data-id="project-agent-card-reply-tool" onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex w-full cursor-pointer items-center gap-2 rounded-lg py-1 text-left text-zinc-500 transition hover:bg-white/[0.04] hover:text-zinc-300">
+                  <span data-id="project-agent-card-tool-count" className="grid h-4 min-w-4 shrink-0 place-items-center rounded bg-white/[0.07] px-1 font-mono text-[9px] font-semibold text-zinc-400">{toolGroupCount}</span>
                   <SquareTerminal className="h-4 w-4 shrink-0" />
                   <span className="shrink-0 font-medium text-zinc-400">{tool.name}</span>
                   {headline ? <><span aria-hidden="true">·</span><span className="min-w-0 truncate">{headline}</span></> : null}
@@ -438,17 +473,18 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             {`${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}`}
           </div>
         ) : null}
-        {working ? (
-          <div ref={loadingRef} data-id="project-agent-card-output-loading" className="mt-auto flex h-5 items-end gap-1 pt-2" aria-label="Loading">
-            {[0, 1, 2].map((index) => <span key={index} className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />)}
-          </div>
-        ) : null}
         </div>
       </div>
       {showScrollToBottom ? (
         <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-2 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur hover:bg-[#292a30] hover:text-white">
           <ArrowDown className="h-3.5 w-3.5" />
         </button>
+      ) : null}
+      {rawQuestion && (working || completed) ? (
+        <div ref={loadingRef} data-id="project-agent-card-output-loading" className="flex h-8 shrink-0 items-center gap-2 border-t border-white/[0.06] pr-[18px] pt-1 font-mono text-[11px] text-zinc-500" aria-label={working ? 'Loading' : 'Worked'}>
+          {working ? <span data-id="project-agent-card-loading-dot" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" /> : <Check className="h-3.5 w-3.5 text-emerald-500" />}
+          <span>{working ? 'Working' : 'Worked'}{startedAt ? ` · ${fmtElapsed(elapsedMs)}` : ''}</span>
+        </div>
       ) : null}
       </div>
       )}
@@ -985,7 +1021,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     optimisticQuestionsRef.current[id] = displayQuestion;
     setAgentReplies((current) => ({
       ...current,
-      [id]: { question: displayQuestion, items: [], answer: '', thinking: '', status: 'pending' },
+      [id]: { question: displayQuestion, items: [], answer: '', thinking: '', status: 'pending', started_at: new Date().toISOString() },
     }));
     try {
       await sendToAgent(agent.paneId, message, { submit: true, agentType: agent.agentType });
