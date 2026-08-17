@@ -1307,6 +1307,28 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     writeProjectViewCache(selectedProject.id, { zoom: next });
     return next;
   });
+  const zoomCanvasAt = (clientX: number, clientY: number, delta: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const pointerX = clientX - rect.left;
+    const pointerY = clientY - rect.top;
+    setCanvasZoom((currentZoom) => {
+      const nextZoom = Math.min(2, Math.max(0.1, Number((currentZoom + delta).toFixed(2))));
+      if (nextZoom === currentZoom) return currentZoom;
+      setCanvasPan((currentPan) => {
+        const worldX = (pointerX - currentPan.x) / currentZoom;
+        const worldY = (pointerY - currentPan.y) / currentZoom;
+        const nextPan = {
+          x: pointerX - worldX * nextZoom,
+          y: pointerY - worldY * nextZoom,
+        };
+        writeProjectViewCache(selectedProject.id, { zoom: nextZoom, pan: nextPan });
+        return nextPan;
+      });
+      return nextZoom;
+    });
+  };
   const resetCanvasView = () => {
     const canvas = canvasRef.current;
     if (!canvas || !visibleAgents.length) return;
@@ -1426,12 +1448,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           onPointerCancel={endCanvasPan}
           onWheel={(event) => {
             event.preventDefault();
-            if (event.ctrlKey || event.metaKey) changeZoom(event.deltaY > 0 ? -0.08 : 0.08);
-            else setCanvasPan((current) => {
-              const next = { x: current.x - event.deltaX, y: current.y - event.deltaY };
-              writeProjectViewCache(selectedProject.id, { pan: next });
-              return next;
-            });
+            zoomCanvasAt(event.clientX, event.clientY, event.deltaY > 0 ? -0.08 : 0.08);
           }}
           className="relative min-h-0 flex-1 touch-none overflow-hidden cursor-grab active:cursor-grabbing"
           style={{
