@@ -1,8 +1,9 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ArrowDown } from 'lucide-react';
 import { Spinner } from '../../ui/Spinner';
 import AgentAvatar from '../../AgentAvatar';
 import type { HistoryTurn } from './types';
@@ -61,9 +62,30 @@ export function HistoryList(props: HistoryListProps) {
     greeting,
   } = props;
   const { t } = useTranslation('chat');
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   // Content column width: full-bleed when embedded (AgentStack popover), else a
   // centered reading column.
   const listWidthClass = fullWidth ? 'w-full' : 'mx-auto w-full max-w-4xl';
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    const update = () => {
+      const overflow = node.scrollHeight > node.clientHeight + 2;
+      const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 8;
+      setShowScrollToBottom(overflow && !atBottom);
+    };
+    node.addEventListener('scroll', update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    if (node.firstElementChild) observer.observe(node.firstElementChild);
+    const frame = window.requestAnimationFrame(update);
+    return () => {
+      node.removeEventListener('scroll', update);
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
+  }, [scrollRef, loading, displayItems.length, liveTurn?.history_id, optimisticQ?.text]);
 
   // Memoized on `displayItems`: while a turn streams (only `liveTurn` changes),
   // these element refs stay identical, so React skips re-rendering every
@@ -256,7 +278,7 @@ export function HistoryList(props: HistoryListProps) {
   return (
     <QAlignContext.Provider value={leftAlignQuestions ? 'left' : 'right'}>
     <OpenUrlContext.Provider value={setPendingUrl}>
-    <div data-id="current-history-view" className="flex h-full flex-col bg-[#0b0b0d]">
+    <div data-id="current-history-view" className="relative flex h-full flex-col bg-[#0b0b0d]">
       {pendingUrl ? <LinkConfirmModal url={pendingUrl} onClose={() => setPendingUrl(null)} /> : null}
       {!loading && displayItems.length === 0 && !liveVisible && !optimisticQ && !compacting ? (
         greeting ? (
@@ -383,6 +405,18 @@ export function HistoryList(props: HistoryListProps) {
           </>}
         </div>
       </div>
+      {showScrollToBottom ? (
+        <button
+          type="button"
+          data-id="current-history-scroll-bottom"
+          aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })}
+          title={t('scrollToBottom', { defaultValue: '滚动到底部' })}
+          onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
+          className="absolute bottom-3 right-4 z-10 grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur transition hover:bg-[#292a30] hover:text-white"
+        >
+          <ArrowDown className="h-4 w-4" />
+        </button>
+      ) : null}
       </>
       )}
     </div>
