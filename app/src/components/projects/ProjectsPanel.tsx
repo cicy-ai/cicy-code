@@ -419,18 +419,22 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </div>
       ) : (
       <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 flex min-h-0 flex-1 flex-col">
-      <div data-id="project-agent-card-question-fixed" onPointerDown={(event) => event.stopPropagation()} className="shrink-0 space-y-2.5 pr-[18px] pb-2.5">
+      <div data-id="project-agent-card-question-fixed" onPointerDown={(event) => event.stopPropagation()} className="shrink-0 space-y-2 pr-[18px] pb-3">
         <div data-id="project-agent-card-history-link-row" className="flex justify-end">
           <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史<ArrowRight className="h-3 w-3" /></button>
         </div>
         {visibleQuestion || visibleQuestionAttachments.length ? (
-          <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown mr-auto max-w-[92%] rounded-xl rounded-bl-sm bg-blue-500/10 px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-1 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-16 [&_[data-id=current-history-md-img]]:!max-h-16 [&_[data-id=current-history-md-img]]:!w-16 [&_[data-id=current-history-md-img]]:!max-w-16 [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-cover">
+          <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown mr-auto w-fit max-w-[92%] rounded-xl rounded-bl-sm bg-blue-500/10 px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-16 [&_[data-id=current-history-md-img]]:!max-h-16 [&_[data-id=current-history-md-img]]:!w-16 [&_[data-id=current-history-md-img]]:!max-w-16 [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-cover">
             {visibleQuestion ? <MarkdownBlock text={previewableMarkdown(visibleQuestion)} /> : null}
-            {visibleQuestionAttachments.map((attachment, index) => (
-              <div key={`${attachment}-${index}`} data-id="project-agent-card-question-attachment">
-                <MarkdownBlock text={previewableMarkdown(attachment)} />
+            {visibleQuestionAttachments.length ? (
+              <div data-id="project-agent-card-question-attachments" className="mt-2 flex max-w-full flex-wrap gap-2">
+                {visibleQuestionAttachments.map((attachment, index) => (
+                  <div key={`${attachment}-${index}`} data-id="project-agent-card-question-attachment" className="min-w-0">
+                    <MarkdownBlock text={previewableMarkdown(attachment)} />
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -465,12 +469,12 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             const tool = { name: commands.length ? 'exec_command' : String(item?.name || 'Tool'), arg: commands.length ? JSON.stringify({ command: commands.join('\n\n') }) : input };
             const headline = toolHeadline(tool);
             return (
-              <button key={`tool-${index}`} type="button" data-id="project-agent-card-reply-tool" onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex w-full cursor-pointer items-center gap-2 rounded-lg py-1 text-left text-zinc-500 transition hover:bg-white/[0.04] hover:text-zinc-300">
+              <button key={`tool-${index}`} type="button" data-id="project-agent-card-reply-tool" onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="group/tool flex w-full cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left text-zinc-500 transition hover:bg-white/[0.035] hover:text-zinc-300">
                   <span data-id="project-agent-card-tool-count" className="grid h-4 min-w-4 shrink-0 place-items-center rounded bg-white/[0.07] px-1 font-mono text-[9px] font-semibold text-zinc-400">{toolGroupCount}</span>
                   <SquareTerminal className="h-4 w-4 shrink-0" />
                   <span className="shrink-0 font-medium text-zinc-400">{tool.name}</span>
                   {headline ? <><span aria-hidden="true">·</span><span className="min-w-0 truncate">{headline}</span></> : null}
-                  <ArrowRight className="ml-auto h-3.5 w-3.5 shrink-0" />
+                  <ArrowRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-50 transition group-hover/tool:translate-x-0.5 group-hover/tool:opacity-100" />
               </button>
             );
           }
