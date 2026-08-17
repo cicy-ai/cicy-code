@@ -493,12 +493,10 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </button>
       ) : null}
       {rawQuestion && (working || completed) ? (
-        <div ref={loadingRef} data-id="project-agent-card-output-loading" className="flex h-7 shrink-0 items-center pr-[18px] font-mono text-[10px]" aria-label={working ? 'Loading' : 'Worked'}>
-          <div className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 ${working ? 'border-amber-400/15 bg-amber-400/[0.05] text-amber-300/80' : 'border-emerald-400/15 bg-emerald-400/[0.05] text-zinc-400'}`}>
-            {working ? <span data-id="project-agent-card-loading-dot" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" /> : <Check className="h-3 w-3 text-emerald-400" />}
-            <span className="font-medium">{working ? 'Working' : 'Worked'}</span>
-            {startedAt ? <><span className="text-zinc-600">·</span><span className="tabular-nums text-zinc-500">{working ? fmtElapsed(elapsedMs) : `for ${fmtElapsed(elapsedMs)}`}</span></> : null}
-          </div>
+        <div ref={loadingRef} data-id="project-agent-card-output-loading" className="flex h-7 shrink-0 items-center gap-1.5 pr-[18px] font-mono text-[11px] text-zinc-500" aria-label={working ? 'Loading' : 'Worked'}>
+          {working ? <span data-id="project-agent-card-loading-dot" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" /> : <Check className="h-3.5 w-3.5 text-emerald-500" />}
+          <span className="font-medium text-zinc-400">{working ? 'Working' : 'Worked'}</span>
+          {startedAt ? <span className="tabular-nums text-zinc-500">{working ? `· ${fmtElapsed(elapsedMs)}` : `for ${fmtElapsed(elapsedMs)}`}</span> : null}
         </div>
       ) : null}
       </div>

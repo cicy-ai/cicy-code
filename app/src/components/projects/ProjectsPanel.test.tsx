@@ -255,7 +255,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
     expect(await screen.findByText('最新消息')).toBeInTheDocument();
     expect(screen.queryByText('上一条消息')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-output-loading"]')).toHaveTextContent('Working·0s');
+    expect(document.querySelector('[data-id="project-agent-card-output-loading"]')).toHaveTextContent('Working· 0s');
   });
 
   it('renders reply markdown and unwraps Codex exec tool calls', async () => {
@@ -302,7 +302,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(await screen.findByText('exec_command')).toBeInTheDocument();
     expect(document.querySelectorAll('[data-id="project-agent-card-reply-tool"]')).toHaveLength(2);
     expect(Array.from(document.querySelectorAll('[data-id="project-agent-card-tool-count"]')).map((node) => node.textContent)).toEqual(['2', '1']);
-    expect(document.querySelector('[data-id="project-agent-card-output-loading"]')).toHaveTextContent('Worked·for 5s');
+    expect(document.querySelector('[data-id="project-agent-card-output-loading"]')).toHaveTextContent('Workedfor 5s');
     expect(document.querySelector('[data-id="project-agent-card-live-body"]')).not.toContainElement(document.querySelector('[data-id="project-agent-card-latest-question"]'));
     expect(document.querySelector('[data-id="project-agent-card-live-body"]')).not.toContainElement(document.querySelector('[data-id="project-agent-card-output-loading"]'));
     expect(screen.queryByText('read')).not.toBeInTheDocument();
