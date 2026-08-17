@@ -2485,6 +2485,27 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <div data-id="membership-settings-group" className="mt-1 border-t border-white/[0.06] pt-1">
             <button
               type="button"
+              data-id="membership-settings-general"
+              onClick={() => openSettings('general')}
+              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+            >
+              <span data-id="membership-settings-general-label" className="inline-flex items-center gap-1.5">
+                {t('settingsNavGeneral', { defaultValue: '通用' })}
+                {emailNeedsSetup && <span data-id="membership-settings-general-badge" className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title={t('emailNeedsSetup', { defaultValue: '未配置令牌投递邮箱 / SMTP' })} />}
+              </span>
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              data-id="membership-settings-im"
+              onClick={() => openSettings('im')}
+              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+            >
+              <span data-id="membership-settings-im-label">{t('settingsNavIM', { defaultValue: 'IM 通知' })}</span>
+              <MessageCircle className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
               data-id="membership-timer"
               onClick={() => openSettings('timer')}
               className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
@@ -2507,27 +2528,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 <Smartphone className="h-3.5 w-3.5" />
               </button>
             ) : null}
-            <button
-              type="button"
-              data-id="membership-settings-general"
-              onClick={() => openSettings('general')}
-              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
-            >
-              <span data-id="membership-settings-general-label" className="inline-flex items-center gap-1.5">
-                {t('settingsNavGeneral', { defaultValue: '通用' })}
-                {emailNeedsSetup && <span data-id="membership-settings-general-badge" className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title={t('emailNeedsSetup', { defaultValue: '未配置令牌投递邮箱 / SMTP' })} />}
-              </span>
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              data-id="membership-settings-im"
-              onClick={() => openSettings('im')}
-              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
-            >
-              <span data-id="membership-settings-im-label">{t('settingsNavIM', { defaultValue: 'IM 通知' })}</span>
-              <MessageCircle className="h-3.5 w-3.5" />
-            </button>
             <button
               type="button"
               data-id="membership-settings-routing"
