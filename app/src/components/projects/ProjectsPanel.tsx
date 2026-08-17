@@ -227,6 +227,19 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const visibleQuestionAttachments = uploadedAttachmentsFromQuestion(rawQuestion);
   const replyStatus = String(reply?.status || latest?.status || status).toLowerCase();
   const completed = /completed|complete|done/.test(replyStatus);
+  // Reply containers are sometimes mutated in place by the polling/WS merge,
+  // so object identity is not a reliable growth dependency. Track the rendered
+  // payload size and run the follow write in a layout effect before paint.
+  const bodyStreamSize = replyItems.reduce((total: number, item: any) => {
+    const input = item?.input == null ? '' : (typeof item.input === 'string' ? item.input : JSON.stringify(item.input));
+    const output = item?.output ?? item?.result ?? '';
+    return total
+      + String(item?.thinking || '').length
+      + String(item?.text || '').length
+      + String(input).length
+      + String(typeof output === 'string' ? output : JSON.stringify(output)).length;
+  }, 0);
+  const bodyGrowthKey = `${replyItems.length}:${bodyStreamSize}:${String(latest?.latest_response || '').length}:${working ? 1 : 0}`;
   const serverStartedAt = Date.parse(String(reply?.started_at || latest?.started_at || '')) || 0;
   if (serverStartedAt && rawQuestion) localTurnStartRef.current = { question: rawQuestion, startedAt: serverStartedAt };
   else if (working && rawQuestion && localTurnStartRef.current.question !== rawQuestion) localTurnStartRef.current = { question: rawQuestion, startedAt: Date.now() };
@@ -313,14 +326,11 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = bodyScrollRef.current;
     if (!node || !working || !followLoadingRef.current) return;
-    const frame = window.requestAnimationFrame(() => {
-      if (followLoadingRef.current) node.scrollTop = node.scrollHeight;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [latest, reply, working]);
+    node.scrollTop = node.scrollHeight;
+  }, [bodyGrowthKey, working]);
 
   useEffect(() => {
     const node = bodyScrollRef.current;
