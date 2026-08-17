@@ -1467,7 +1467,14 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                               ))}
                             </div>
                           ) : null}
-                          {(queuedAgentMessages[cardShortId] || []).map((queued) => questionWithoutUploadedAttachments(queued.display)).filter(Boolean).join('\n')}
+                          <div
+                            data-id="project-agent-message-queue-text"
+                            onPointerDown={(event) => event.stopPropagation()}
+                            className="cursor-text select-text"
+                            style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
+                          >
+                            {(queuedAgentMessages[cardShortId] || []).map((queued) => questionWithoutUploadedAttachments(queued.display)).filter(Boolean).join('\n')}
+                          </div>
                         </div>
                       </div>
                     ) : null}

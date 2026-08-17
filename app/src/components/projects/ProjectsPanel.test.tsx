@@ -400,6 +400,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(agentSend.sendToAgent).not.toHaveBeenCalled();
     expect(document.querySelectorAll('[data-id="project-agent-message-queue-item"]')).toHaveLength(1);
     expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).toHaveTextContent('第一条 第二条');
+    expect(document.querySelector('[data-id="project-agent-message-queue-text"]')).toHaveStyle({ userSelect: 'text' });
 
     // The pane list can lag and still say thinking. The fresher status snapshot
     // reaching completed must release the queue.
