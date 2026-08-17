@@ -340,13 +340,16 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     const input = await waitFor(() => {
       const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
       if (!node) throw new Error('agent prompt footer did not open');
-      return node as HTMLInputElement;
+      return node as HTMLTextAreaElement;
     });
+    expect(input.tagName).toBe('TEXTAREA');
     fireEvent.click(card);
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: '中文任务' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', keyCode: 229, isComposing: true });
+    expect(agentSend.sendToAgent).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', shiftKey: true });
     expect(agentSend.sendToAgent).not.toHaveBeenCalled();
 
     input.blur();

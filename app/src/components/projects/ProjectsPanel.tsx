@@ -1486,9 +1486,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                         ))}
                       </div>
                     ) : null}
-                    <div data-id={`project-agent-card-prompt-row-${cardShortId}`} className="flex h-10 min-h-10 w-full items-center px-3 pt-1">
-                    <input
+                    <div data-id={`project-agent-card-prompt-row-${cardShortId}`} className="flex min-h-10 w-full items-center px-3 py-2">
+                    <textarea
                       data-id={`project-agent-prompt-input-${shortPaneId(agent.paneId)}`}
+                      rows={1}
                       value={agentMessages[shortPaneId(agent.paneId)] || ''}
                       onChange={(event) => {
                         const id = shortPaneId(agent.paneId);
@@ -1500,14 +1501,14 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       }}
                       onKeyDown={(event) => {
                         if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-                        if (event.key === 'Enter') {
+                        if (event.key === 'Enter' && !event.shiftKey) {
                           event.preventDefault();
                           void sendAgentMessage(agent);
                         }
                       }}
                       placeholder={t('projectMessagePlaceholder')}
                       autoFocus={selectedAgentIds.has(cardShortId)}
-                      className="min-w-0 flex-1 bg-transparent text-[14px] leading-5 text-zinc-200 outline-none placeholder:text-zinc-500/40"
+                      className="min-h-5 max-h-24 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent text-[14px] leading-5 text-zinc-200 outline-none [field-sizing:content] placeholder:text-zinc-500/40"
                     />
                     </div>
                     <div data-id={`project-agent-card-prompt-actions-${cardShortId}`} className="flex h-10 min-h-10 w-full items-center justify-between px-3 pb-1">

@@ -233,20 +233,21 @@ export function useCurrentHistory(opts: {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // Position-based (authoritative) follow: the view sticks to the bottom ONLY
-    // while the user is within STICK_THRESHOLD_PX of it. Scrolling up past that
-    // detaches. Crucially the streaming auto-scroll below is gated on this flag,
-    // so once detached NO programmatic scroll runs — the user is never yanked back
-    // mid-output while reading earlier history; they re-attach by scrolling to the
-    // bottom themselves. Direction-sniffing (`top < last-2`) was replaced because
-    // it went stale under reflow / slow trackpad scrolls and let the yank through.
+    // During streaming the three-dot sentinel is authoritative: follow only while
+    // it remains inside the viewport. Once the user scrolls it out of view, no
+    // incremental update may yank history back to the bottom. Outside streaming,
+    // retain the small bottom threshold for normal history navigation.
     const STICK_THRESHOLD_PX = 48;
     const updateStickBottom = () => {
       const top = el.scrollTop;
       const distanceToBottom = el.scrollHeight - top - el.clientHeight;
       const atBottom = distanceToBottom <= STICK_THRESHOLD_PX;
-      shouldStickBottomRef.current = atBottom;
-      if (!atBottom) clearScheduledScrolls();
+      const loading = el.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
+      const viewportRect = el.getBoundingClientRect();
+      const loadingRect = loading?.getBoundingClientRect();
+      const loadingVisible = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
+      shouldStickBottomRef.current = loading ? loadingVisible : atBottom;
+      if (!shouldStickBottomRef.current) clearScheduledScrolls();
       lastScrollTopRef.current = top;
     };
     updateStickBottom();
