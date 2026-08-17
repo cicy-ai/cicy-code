@@ -61,6 +61,7 @@ export function useCurrentHistory(opts: {
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);   // sentinel: when it scrolls into view, auto-load earlier
   const loadMoreFnRef = useRef<() => void>(() => {});  // latest loadMore, so the observer never calls a stale closure
+  const loadMoreInFlightRef = useRef(false);          // synchronous guard: IO + scroll fallback can fire in one frame
   const preserveScrollOffsetRef = useRef(false);
   // 「加载更早」前插时的滚动补偿数据(setItems 前一刻的 scrollTop/scrollHeight)。
   // 补偿必须在 useLayoutEffect(paint 前)同步完成 —— 之前放在 requestAnimationFrame
@@ -751,9 +752,10 @@ export function useCurrentHistory(opts: {
   }, [promptsOnly, open]);
 
   const loadMore = async () => {
-    if (loadingMore || loading || !nextBefore || Number(nextBefore) <= 1 || !conversationId) return;
+    if (loadMoreInFlightRef.current || loadingMore || loading || !nextBefore || Number(nextBefore) <= 1 || !conversationId) return;
     const requestPaneId = paneId;
     const requestSeq = ++requestSeqRef.current;
+    loadMoreInFlightRef.current = true;
     setLoadingMore(true);
     try {
       // fresh: history_id is a POSITIONAL index into current.json, so for an
@@ -794,6 +796,7 @@ export function useCurrentHistory(opts: {
     } catch {
       setHasMore(false);
     } finally {
+      loadMoreInFlightRef.current = false;
       setLoadingMore(false);
     }
   };
@@ -803,8 +806,10 @@ export function useCurrentHistory(opts: {
 
   // Infinite scroll: auto-load earlier turns when the "加载更早" sentinel scrolls
   // into view (root = the scroll container), so the user doesn't have to click.
-  // loadMore() self-guards against re-entrancy / no-more, so repeated intersection
-  // callbacks during the fetch are harmless. rootMargin pre-loads a bit early.
+  // Electron suspends IntersectionObserver while a BrowserView's document is
+  // hidden, even when that tab is marked active. Keep IO as the normal path, but
+  // also check scrollTop directly on mount, scroll, and visibility restoration.
+  // The synchronous in-flight ref above prevents IO + fallback from double-firing.
   useEffect(() => {
     // Prompts-only: NO auto-load-earlier. The filtered q list can be shorter than
     // the viewport, which would keep this sentinel permanently intersecting and
@@ -815,6 +820,9 @@ export function useCurrentHistory(opts: {
     const root = scrollRef.current;
     const target = loadMoreRef.current;
     if (!root || !target) return;
+    const checkNearTop = () => {
+      if (root.scrollTop <= 200) loadMoreFnRef.current();
+    };
     const io = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) loadMoreFnRef.current();
@@ -822,7 +830,17 @@ export function useCurrentHistory(opts: {
       { root, rootMargin: '200px 0px 0px 0px', threshold: 0 },
     );
     io.observe(target);
-    return () => io.disconnect();
+    root.addEventListener('scroll', checkNearTop, { passive: true });
+    const onVisible = () => { if (!document.hidden) checkNearTop(); };
+    document.addEventListener('visibilitychange', onVisible);
+    // Do not wait for IO's first callback: hidden Electron webContents may never
+    // receive one. This also handles a short first page whose sentinel starts in view.
+    checkNearTop();
+    return () => {
+      io.disconnect();
+      root.removeEventListener('scroll', checkNearTop);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [open, canLoadMore, conversationId, nextBefore, promptsOnly]);
 
   // committedMaxId == max history id in the loaded window (== q_last id). Defined
