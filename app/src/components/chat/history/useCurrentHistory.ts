@@ -244,13 +244,13 @@ export function useCurrentHistory(opts: {
       const top = el.scrollTop;
       const distanceToBottom = el.scrollHeight - top - el.clientHeight;
       const atBottom = distanceToBottom <= STICK_THRESHOLD_PX;
-      const loading = el.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
+      const loadingSentinel = el.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
       const viewportRect = el.getBoundingClientRect();
-      const loadingRect = loading?.getBoundingClientRect();
+      const loadingRect = loadingSentinel?.getBoundingClientRect();
       const loadingVisible = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
-      if (loading) streamDetachedRef.current = !loadingVisible;
+      if (loadingSentinel) streamDetachedRef.current = !loadingVisible;
       streamLoadingVisibleRef.current = loadingVisible;
-      shouldStickBottomRef.current = loading ? loadingVisible : (streamDetachedRef.current ? false : atBottom);
+      shouldStickBottomRef.current = loadingSentinel ? loadingVisible : (streamDetachedRef.current ? false : atBottom);
       if (!shouldStickBottomRef.current) clearScheduledScrolls();
       lastScrollTopRef.current = top;
     };
@@ -844,16 +844,16 @@ export function useCurrentHistory(opts: {
       el.scrollTop = el.scrollHeight;
       shouldStickBottomRef.current = true;
       streamDetachedRef.current = false;
-      const loading = el.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
+      const loadingSentinel = el.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
       const viewportRect = el.getBoundingClientRect();
-      const loadingRect = loading?.getBoundingClientRect();
+      const loadingRect = loadingSentinel?.getBoundingClientRect();
       streamLoadingVisibleRef.current = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
       didInitialScrollRef.current = true;
       return;
     }
-    const loading = el.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
+    const loadingSentinel = el.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
     const viewportRect = el.getBoundingClientRect();
-    const loadingRect = loading?.getBoundingClientRect();
+    const loadingRect = loadingSentinel?.getBoundingClientRect();
     const loadingVisible = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
     const followLoading = streamLoadingVisibleRef.current || loadingVisible;
     streamLoadingVisibleRef.current = followLoading;
