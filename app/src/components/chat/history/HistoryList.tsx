@@ -376,7 +376,7 @@ export function HistoryList(props: HistoryListProps) {
             </div>
           ) : <>
             {canLoadMore ? (
-              <div ref={loadMoreRef} data-id="current-history-load-more-wrap" className="mb-4 flex justify-center">
+              <div ref={loadMoreRef} data-id="current-history-load-more-wrap" className="-mt-3 mb-4 flex justify-center">
                 <button
                   type="button"
                   data-id="current-history-load-more"
