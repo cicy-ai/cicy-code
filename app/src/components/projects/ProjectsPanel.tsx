@@ -260,7 +260,11 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     }
     const viewport = node.getBoundingClientRect();
     const marker = loading.getBoundingClientRect();
-    loadingVisibleRef.current = marker.bottom > viewport.top && marker.top < viewport.bottom;
+    const visible = marker.bottom > viewport.top && marker.top < viewport.bottom;
+    loadingVisibleRef.current = visible;
+    if (visible && node.scrollHeight - node.scrollTop - node.clientHeight >= 1) {
+      node.scrollTop = node.scrollHeight;
+    }
   }, []);
 
   useEffect(() => {
