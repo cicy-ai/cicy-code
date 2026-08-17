@@ -422,7 +422,12 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </div>
       ) : (
       <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 flex min-h-0 flex-1 flex-col">
-      <div data-id="project-agent-card-question-fixed" onPointerDown={(event) => event.stopPropagation()} className="shrink-0 space-y-2 pr-[18px] pb-3">
+      <div
+        data-id="project-agent-card-question-fixed"
+        onPointerDown={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
+        className="max-h-[45%] shrink-0 space-y-2 overflow-y-auto overscroll-contain pr-[18px] pb-3 [scrollbar-width:thin]"
+      >
         <div data-id="project-agent-card-history-link-row" className="flex justify-end">
           <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史<ArrowRight className="h-3 w-3" /></button>
         </div>
