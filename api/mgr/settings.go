@@ -62,6 +62,10 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 	case "POST":
 		var req M
 		readBody(r, &req)
+		// Settings updates are patches. Start from the persisted blob so changing
+		// one General switch cannot erase unrelated settings such as routing or
+		// provider preferences.
+		merged := globalSettingsBlob()
 		delete(req, "home")
 		delete(req, "lab_mode")
 		delete(req, "helper_mode")
@@ -109,7 +113,10 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 			delete(req, "max_attachment_mb") // don't duplicate into the DB blob
 		}
-		data, _ := json.Marshal(req)
+		for key, value := range req {
+			merged[key] = value
+		}
+		data, _ := json.Marshal(merged)
 		store.Exec(store.Upsert("global_vars", "key_name", []string{"key_name", "value"}, []string{"value"}), "global_settings", string(data))
 		// If the user is configuring global settings with CJK content
 		// (workspace dir names, custom titles, etc.), opportunistically

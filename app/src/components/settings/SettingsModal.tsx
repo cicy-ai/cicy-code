@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { SlidersHorizontal, Globe, MessageCircle, Route, Boxes, Timer, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle, Paperclip, Sun, Moon } from 'lucide-react';
+import { SlidersHorizontal, Globe, MessageCircle, Route, Boxes, Timer, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle, Paperclip, Sun, Moon, ShieldCheck } from 'lucide-react';
 import { useApp } from '../../contexts/AppContext';
 import ProviderDashboard from '../providers/ProviderDashboard';
 import IMDashboard from '../im/IMDashboard';
@@ -99,6 +99,8 @@ export default function SettingsModal({
   const [attachSaving, setAttachSaving] = useState(false);
   const [attachSaved, setAttachSaved] = useState(false);
   const [theme, setTheme] = useState<CicyTheme>(getCicyTheme);
+  const [auditSaving, setAuditSaving] = useState(false);
+  const auditEnabled = globalVar?.audit_enabled === true;
   const attachClean = Math.max(1, Math.round(Number(attachDraft) || 0));
   const attachDirty = attachClean !== currentMaxAttach;
   useEffect(() => {
@@ -113,6 +115,14 @@ export default function SettingsModal({
       setAttachSaved(true);
     } finally {
       setAttachSaving(false);
+    }
+  };
+  const setAuditEnabled = async (enabled: boolean) => {
+    setAuditSaving(true);
+    try {
+      await updateGlobalVar({ audit_enabled: enabled });
+    } finally {
+      setAuditSaving(false);
     }
   };
   // Re-seed the draft whenever the modal (re)opens or the saved value changes.
@@ -385,6 +395,27 @@ export default function SettingsModal({
                   </header>
 
                   <div className="space-y-4">
+                  <section data-id="settings-audit-block" className={card}>
+                    <div className="flex items-start gap-3">
+                      <span className={iconTile}><ShieldCheck className="h-4 w-4" /></span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-semibold text-zinc-100">{t('settingsAuditTitle', { defaultValue: '审计' })}</div>
+                        <div className="mt-0.5 text-[11px] leading-5 text-zinc-500">{t('settingsAuditHint', { defaultValue: '开启后在工作区详情栏显示审计入口；关闭后隐藏。' })}</div>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={auditEnabled}
+                        aria-label={t('settingsAuditTitle', { defaultValue: '审计' })}
+                        data-id="settings-audit-toggle"
+                        disabled={auditSaving}
+                        onClick={() => void setAuditEnabled(!auditEnabled)}
+                        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors ${auditEnabled ? 'bg-blue-500' : 'bg-zinc-700'} ${auditSaving ? 'cursor-wait opacity-60' : ''}`}
+                      >
+                        <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${auditEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
+                  </section>
                   <section data-id="settings-theme-block" className={card}>
                     <div className="flex items-start gap-3">
                       <span className={iconTile}>{theme === 'light' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</span>

@@ -1672,12 +1672,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     { id: 'files', label: t('tabFiles'), icon: <Folder className="h-3.5 w-3.5" /> },
     { id: 'session', label: t('tabSession'), icon: <LineChart className="h-3.5 w-3.5" /> },
     { id: 'memory', label: t('tabMemory'), icon: <Brain className="h-3.5 w-3.5" /> },
-    // Audit as a single security tab — opens an embedded dashboard with three
-    // sub-tabs (守护 / 日志 / 策略). Always shown (no audit_enabled gate).
-    { id: 'audit', label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }), icon: <ShieldCheck className="h-3.5 w-3.5" /> },
+    ...(globalVar?.audit_enabled === true ? [{ id: 'audit', label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }), icon: <ShieldCheck className="h-3.5 w-3.5" /> }] : []),
     { id: 'github', label: t('accountMatrixTitle', { defaultValue: '账号矩阵' }), icon: <Grid3X3 className="h-3.5 w-3.5" /> },
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
+  useEffect(() => {
+    if (globalVar?.audit_enabled !== true && cliContentTab === 'audit') {
+      setCliContentTab('files');
+    }
+  }, [globalVar?.audit_enabled, cliContentTab]);
   const sessionSubTabs: { id: RequestViewTab; label: string }[] = [
     { id: 'analysis', label: t('tabAnalysis', '分析') },
     { id: 'usage', label: t('tabUsage', '用量') },
