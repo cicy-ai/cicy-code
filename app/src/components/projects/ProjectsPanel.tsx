@@ -1250,7 +1250,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     if (!resize || resize.pointerId !== event.pointerId) return;
     event.stopPropagation();
     const width = Math.max(260, Math.min(900, resize.originWidth + (event.clientX - resize.startX) / canvasZoom));
-    const height = Math.max(240, Math.min(700, resize.originHeight + (event.clientY - resize.startY) / canvasZoom));
+    const height = Math.max(240, resize.originHeight + (event.clientY - resize.startY) / canvasZoom);
     setAgentLayouts((current) => ({ ...current, [resize.id]: { ...current[resize.id], width, height } }));
   };
 
@@ -1263,7 +1263,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     const layout = {
       ...current,
       width: Math.max(260, Math.min(900, resize.originWidth + (event.clientX - resize.startX) / canvasZoom)),
-      height: Math.max(240, Math.min(700, resize.originHeight + (event.clientY - resize.startY) / canvasZoom)),
+      height: Math.max(240, resize.originHeight + (event.clientY - resize.startY) / canvasZoom),
     };
     setAgentLayouts((layouts) => {
       const next = { ...layouts, [resize.id]: layout };
