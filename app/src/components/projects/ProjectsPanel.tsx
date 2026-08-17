@@ -1439,8 +1439,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               >
                 {project.pinned ? <Pin data-id="project-list-item-pinned" className="h-3 w-3 shrink-0 text-amber-400" /> : null}
                 <span data-id="project-list-item-name" className="min-w-0 flex-1 truncate text-[13px] font-medium">{project.name}</span>
-                <div data-id="project-list-item-actions" className="relative flex shrink-0 items-center gap-0.5">
-                  <button type="button" data-id={`project-definition-edit-${project.api_id}`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); openProjectDefinition(project); }} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 opacity-0 transition-opacity hover:bg-white/[0.08] hover:text-zinc-200 group-hover:opacity-100 group-focus-within:opacity-100" title={t('projectDefinitionEdit')} aria-label={t('projectDefinitionEdit')}><BookOpen className="h-4 w-4" /></button>
+                <div data-id="project-list-item-actions" className="relative w-7 shrink-0">
                   <button type="button" data-id="project-more" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setProjectMenuId(String(project.id)); setProjectMenuAnchor(String(project.id)); }} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 opacity-0 transition-opacity hover:bg-white/[0.08] hover:text-zinc-200 group-hover:opacity-100 group-focus-within:opacity-100" title={t('projectMore')}><MoreHorizontal className="h-4 w-4" /></button>
                   {projectMenuId === String(project.id) && projectMenuAnchor === String(project.id) ? (
                     <div data-id="project-more-menu" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} className="absolute right-0 top-8 z-50 min-w-[150px] rounded-xl border border-white/10 bg-[#18191e] p-1 shadow-2xl">
@@ -1462,6 +1461,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             <h2 data-id="projects-agent-title" className="truncate text-[15px] font-semibold text-zinc-100">{selectedProject.name}</h2>
             <p data-id="projects-agent-count" className="text-[11px] text-zinc-600">{t('projectAgentCount', { count: visibleAgents.length })}</p>
           </div>
+          <button type="button" data-id={`project-definition-edit-${selectedProject.api_id}`} onClick={(event) => { event.stopPropagation(); openProjectDefinition(selectedProject); }} className="mr-1 grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100" title={t('projectDefinitionEdit')} aria-label={t('projectDefinitionEdit')}><BookOpen className="h-4 w-4" /></button>
           {topRightControls}
         </header>
 
