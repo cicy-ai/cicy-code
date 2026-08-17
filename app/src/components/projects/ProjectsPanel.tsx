@@ -490,7 +490,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           </div>
         ) : null}
         {working ? (
-          <div ref={loadingRef} data-id="project-agent-card-stream-loading" className="flex h-5 items-center gap-1 pl-3 pt-1" aria-label="Loading reply">
+          <div ref={loadingRef} data-id="project-agent-card-stream-loading" className="flex h-5 items-center gap-1 pt-1" aria-label="Loading reply">
             {[0, 1, 2].map((index) => (
               <span key={index} data-id="project-agent-card-stream-loading-dot" className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />
             ))}
@@ -504,7 +504,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </button>
       ) : null}
       {rawQuestion && (working || completed) ? (
-        <div data-id="project-agent-card-output-loading" className="flex h-6 shrink-0 translate-y-1 items-center gap-1.5 pl-3 pr-[18px] font-mono text-[11px] text-zinc-500" aria-label={working ? 'Loading' : 'Worked'}>
+        <div data-id="project-agent-card-output-loading" className="flex h-6 shrink-0 translate-y-1 items-center gap-1.5 pr-[18px] font-mono text-[11px] text-zinc-500" aria-label={working ? 'Loading' : 'Worked'}>
           {working ? <span data-id="project-agent-card-loading-dot" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" /> : <Check className="h-3.5 w-3.5 text-emerald-500" />}
           <span className="font-medium text-zinc-400">{working ? 'Working' : 'Worked'}</span>
           {startedAt ? <span className="tabular-nums text-zinc-500">{working ? `· ${fmtElapsed(elapsedMs)}` : `for ${fmtElapsed(elapsedMs)}`}</span> : null}
