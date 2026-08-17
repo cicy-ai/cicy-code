@@ -427,7 +427,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史<ArrowRight className="h-3 w-3" /></button>
         </div>
         {visibleQuestion || visibleQuestionAttachments.length ? (
-          <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown mr-auto w-fit max-w-[92%] rounded-xl rounded-bl-sm border border-[var(--chat-question-border)] bg-[var(--chat-question-bg)] px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-16 [&_[data-id=current-history-md-img]]:!max-h-16 [&_[data-id=current-history-md-img]]:!w-16 [&_[data-id=current-history-md-img]]:!max-w-16 [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-cover">
+          <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown mr-auto w-fit max-w-[92%] rounded-xl rounded-bl-sm border border-[var(--chat-question-border)] bg-[var(--chat-question-bg)] px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-contain">
             {visibleQuestion ? <MarkdownBlock text={previewableMarkdown(visibleQuestion)} /> : null}
             {visibleQuestionAttachments.length ? (
               <div data-id="project-agent-card-question-attachments" className="mt-2 flex max-w-full flex-wrap gap-2">
@@ -1471,9 +1471,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                           {(queuedAgentMessages[cardShortId] || []).flatMap((queued) => queued.attachments).length ? (
                             <div data-id="project-agent-message-queue-attachments" className="mb-1.5 flex gap-2 overflow-x-auto">
                               {(queuedAgentMessages[cardShortId] || []).flatMap((queued) => queued.attachments).map((attachment) => (
-                                <div key={attachment.id} data-id={`project-agent-message-queue-attachment-${attachment.id}`} className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
+                                <div key={attachment.id} data-id={`project-agent-message-queue-attachment-${attachment.id}`} className="flex h-12 w-fit min-w-12 max-w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
                                   {attachment.mediaType === 'image' && (attachment.previewURL || attachment.fileRef) ? (
-                                    <span data-id="project-agent-message-queue-attachment-media" className="block h-full w-full [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-full [&_[data-id=current-history-md-img]]:object-cover">
+                                    <span data-id="project-agent-message-queue-attachment-media" className="inline-flex h-full max-w-full items-center justify-center [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-24 [&_[data-id=current-history-md-img]]:object-contain">
                                       <MarkdownImg src={attachment.previewURL || attachment.fileRef || ''} alt={attachment.name} />
                                     </span>
                                   ) : (
@@ -1497,9 +1497,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     {(agentAttachments[cardShortId] || []).length ? (
                       <div data-id="project-agent-card-attachments" className="flex w-full gap-2 overflow-x-auto border-b border-white/[0.06] px-3 py-2">
                         {(agentAttachments[cardShortId] || []).map((attachment) => (
-                          <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className="group relative h-12 w-12 shrink-0 overflow-visible rounded-lg border border-white/10 bg-white/[0.04]">
+                          <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className="group relative flex h-12 w-fit min-w-12 max-w-24 shrink-0 items-center justify-center overflow-visible rounded-lg border border-white/10 bg-white/[0.04]">
                             {attachment.mediaType === 'image' && attachment.previewURL ? (
-                              <span data-id="project-agent-card-attachment-media" className="block h-full w-full overflow-hidden rounded-lg [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-full [&_[data-id=current-history-md-img]]:!rounded-lg [&_[data-id=current-history-md-img]]:object-cover">
+                              <span data-id="project-agent-card-attachment-media" className="inline-flex h-full max-w-full items-center justify-center overflow-hidden rounded-lg [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-24 [&_[data-id=current-history-md-img]]:!rounded-lg [&_[data-id=current-history-md-img]]:object-contain">
                                 <MarkdownImg src={attachment.previewURL} alt={attachment.name} />
                               </span>
                             ) : (
