@@ -871,22 +871,22 @@ html[data-theme="light"] [data-id="current-history-list"] {
 }
 
 html[data-theme="light"] [data-id="current-history-user-avatar"] {
-  background: #e0f2fe !important;
-  color: #0369a1 !important;
-  box-shadow: inset 0 0 0 1px #bae6fd;
+  background: #f5f5f5 !important;
+  color: #52525b !important;
+  box-shadow: inset 0 0 0 1px #e5e5e5;
 }
 
 html[data-theme="light"] [data-id="current-history-view-q-body"],
 html[data-theme="light"] [data-id="current-history-view-q-xml-trailing"] {
-  background: #eaf6ff !important;
-  border-color: #c7e8fb !important;
-  color: #164e63 !important;
+  background: #f5f5f5 !important;
+  border-color: #e5e5e5 !important;
+  color: #27272a !important;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08) !important;
 }
 
 html[data-theme="light"] [data-id="current-history-view-q-body"] .chat-markdown,
 html[data-theme="light"] [data-id="current-history-view-q-xml-trailing"] .chat-markdown {
-  color: #164e63;
+  color: #27272a;
   font-weight: 500;
 }
 
