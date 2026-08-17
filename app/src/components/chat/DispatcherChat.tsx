@@ -11,6 +11,7 @@ import { MAX_ATTACHMENT_MB } from '../../config';
 import { useApp } from '../../contexts/AppContext';
 import LineStrip from '../line/LineStrip';
 import { chatAttachmentMarkdown } from '../../lib/attachmentMarkdown';
+import { appendPromptHistory, canNavigatePromptHistory, readPromptHistory } from '../../lib/promptHistory';
 
 /*
  * DispatcherChat — dispatcher(PM) agent 的专属卡片主体(data-id="dispatcher-chat")。
@@ -149,6 +150,8 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
   const [queue, setQueue] = useState<{ id: number; text: string }[]>(() => readDispatcherQueue(paneId));
   const queueSeqRef = useRef(1);
   const queueHydratingRef = useRef(false);
+  const promptHistoryIndexRef = useRef<number | null>(null);
+  const promptHistoryDraftRef = useRef('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const composingRef = useRef(false);
@@ -354,12 +357,15 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     });
   }, []);
 
-  const send = useCallback(async (override?: string) => {
+  const send = useCallback(async (override?: string, recordHistory = true) => {
     const value = (override ?? text).trim();
     // 斜杠命令(override 直发)是纯指令,不挂附件。
     const done = override ? [] : attachmentsRef.current.filter((a) => a.status === 'done');
     // 无内容(既无文本也无已传附件)、发送中、或还有附件在上传 → 不发。
     if ((!value && done.length === 0) || sending || uploading) return;
+    if (recordHistory) appendPromptHistory(paneId, value);
+    promptHistoryIndexRef.current = null;
+    promptHistoryDraftRef.current = '';
     // 已上传附件用**标准 markdown** 拼进消息,URL 用文件的**绝对路径**(从 FileRef 取):
     // 这样 LLM/agent 拿到真实路径、能用文件工具 Read、真正"用"这个文档;UI 渲染时再据路径
     // 解析成预览/下载地址(见 CurrentHistoryView 的 img/a 组件)。绝对路径不含任何 token,
@@ -423,13 +429,15 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     }
     const ids = new Set(batch.map((b) => b.id));
     setQueue((prev) => prev.filter((it) => !ids.has(it.id)));
-    void send(batch.map((b) => b.text).join('\n'));
+    void send(batch.map((b) => b.text).join('\n'), false);
   }, [busy, sending, uploading, queue, send]);
 
   // 每个 pane 独立持久化队列；刷新或切回来时恢复，绝不跨 pane。
   useEffect(() => {
     const restored = readDispatcherQueue(paneId);
     queueHydratingRef.current = true;
+    promptHistoryIndexRef.current = null;
+    promptHistoryDraftRef.current = '';
     queueSeqRef.current = Math.max(1, ...restored.map((item) => item.id + 1));
     setQueue(restored);
   }, [paneId]);
@@ -586,7 +594,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
             rows={inputExpanded ? undefined : Math.min(8, Math.max(1, text.split('\n').length))}
             style={inputExpanded ? { height: `${expandedHeight()}px` } : undefined}
             placeholder={busy ? t('composerBusyPlaceholder') : idlePlaceholder}
-            onChange={(e) => { setText(e.target.value); setSlashSel(0); }}
+            onChange={(e) => { promptHistoryIndexRef.current = null; setText(e.target.value); setSlashSel(0); }}
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={() => { composingRef.current = false; }}
             onPaste={(e) => {
@@ -611,6 +619,21 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
                 if (e.key === 'Tab') { e.preventDefault(); setText(slashMatches[slashSelClamped].cmd + ' '); setSlashSel(0); return; }
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(slashMatches[slashSelClamped].cmd); setSlashSel(0); return; }
                 if (e.key === 'Escape') { e.preventDefault(); setText(''); setSlashSel(0); return; }
+              }
+              if (!composing && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && canNavigatePromptHistory(e.currentTarget, e.key === 'ArrowUp' ? 'up' : 'down')) {
+                const history = readPromptHistory(paneId);
+                if (history.length) {
+                  e.preventDefault();
+                  let index = promptHistoryIndexRef.current;
+                  if (index == null) {
+                    promptHistoryDraftRef.current = e.currentTarget.value;
+                    index = history.length;
+                  }
+                  index = e.key === 'ArrowUp' ? Math.max(0, index - 1) : Math.min(history.length, index + 1);
+                  promptHistoryIndexRef.current = index;
+                  setText(index === history.length ? promptHistoryDraftRef.current : history[index]);
+                }
+                return;
               }
               if (e.key === 'Escape' && busy && !composing) {
                 e.preventDefault();

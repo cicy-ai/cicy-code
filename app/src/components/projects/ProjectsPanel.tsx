@@ -11,6 +11,7 @@ import type { AgentLiveMetrics } from '../../lib/agentMetrics';
 import { metricsFromCurrentReply } from '../../lib/agentMetrics';
 import { ModelTag } from '../../lib/modelTag';
 import { chatAttachmentMarkdown, replAttachmentMarkdown } from '../../lib/attachmentMarkdown';
+import { appendPromptHistory, canNavigatePromptHistory, readPromptHistory } from '../../lib/promptHistory';
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
 import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
@@ -586,6 +587,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   }, [agents, statuses]);
   const canvasRef = useRef<HTMLDivElement>(null);
   const visibilityCheckedKeyRef = useRef('');
+  const promptHistoryIndexRef = useRef<Record<string, number | null>>({});
+  const promptHistoryDraftRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     const persisted = Object.fromEntries(Object.entries(queuedAgentMessages).map(([paneId, messages]) => [paneId, messages.map((message) => ({
@@ -1085,6 +1088,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     const text = String(agentMessages[id] || '').trim();
     const attachments = agentAttachments[id] || [];
     if ((!text && !attachments.some((item) => item.status === 'done')) || attachments.some((item) => item.status === 'uploading')) return;
+    appendPromptHistory(id, text);
+    promptHistoryIndexRef.current[id] = null;
+    promptHistoryDraftRef.current[id] = '';
     const attachmentText = attachments.filter((item) => item.status === 'done' && item.fileRef).map((item) => agent.agentType === 'cicy' ? chatAttachmentMarkdown(item.name, item.fileRef!, item.isImage) : replAttachmentMarkdown(item.name, item.fileRef!)).join('\n\n');
     const message = [text, attachmentText].filter(Boolean).join('\n\n');
     const displayQuestion = message;
@@ -1512,6 +1518,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       value={agentMessages[shortPaneId(agent.paneId)] || ''}
                       onChange={(event) => {
                         const id = shortPaneId(agent.paneId);
+                        promptHistoryIndexRef.current[id] = null;
                         setAgentMessages((current) => ({ ...current, [id]: event.target.value }));
                       }}
                       onPaste={(event) => {
@@ -1520,6 +1527,22 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       }}
                       onKeyDown={(event) => {
                         if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                        if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && canNavigatePromptHistory(event.currentTarget, event.key === 'ArrowUp' ? 'up' : 'down')) {
+                          const id = shortPaneId(agent.paneId);
+                          const history = readPromptHistory(id);
+                          if (history.length) {
+                            event.preventDefault();
+                            let index = promptHistoryIndexRef.current[id];
+                            if (index == null) {
+                              promptHistoryDraftRef.current[id] = event.currentTarget.value;
+                              index = history.length;
+                            }
+                            index = event.key === 'ArrowUp' ? Math.max(0, index - 1) : Math.min(history.length, index + 1);
+                            promptHistoryIndexRef.current[id] = index;
+                            setAgentMessages((current) => ({ ...current, [id]: index === history.length ? (promptHistoryDraftRef.current[id] || '') : history[index] }));
+                          }
+                          return;
+                        }
                         if (event.key === 'Enter' && !event.shiftKey) {
                           event.preventDefault();
                           void sendAgentMessage(agent);
