@@ -580,7 +580,7 @@
   "projectMessageFailed": "消息发送失败",
   "projectZoomOut": "缩小画布",
   "projectZoomIn": "放大画布",
-  "projectResetView": "重置画布视图",
+  "projectResetView": "显示全部 Agent Card",
   "projectAddAgentTitle": "添加 Agent 到 {{name}}",
   "projectAddSelected": "添加 {{count}} 个",
   "projectNoAgents": "这个项目还没有 Agent",

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowRight, Atom, Check, FileText, FolderKanban, History, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, Atom, Check, FileText, FolderKanban, History, Loader2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Scan, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -127,7 +127,7 @@ const readProjectViewCache = (projectId: number | string): ProjectViewCache | nu
     const value = JSON.parse(localStorage.getItem(projectViewCacheKey(projectId)) || 'null');
     if (!value || typeof value !== 'object') return null;
     return {
-      zoom: Math.min(2, Math.max(0.35, Number(value.zoom) || 1)),
+      zoom: Math.min(2, Math.max(0.1, Number(value.zoom) || 1)),
       pan: { x: Number(value.pan?.x) || 0, y: Number(value.pan?.y) || 0 },
       layouts: value.layouts && typeof value.layouts === 'object' ? value.layouts : {},
     };
@@ -771,7 +771,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       const maxX = Math.max(...layouts.map((layout) => layout.x + layout.width));
       const maxY = Math.max(...layouts.map((layout) => layout.y + layout.height));
       const margin = 40;
-      const zoom = Math.min(1, Math.max(0.35, Math.min((viewportWidth - margin * 2) / Math.max(1, maxX - minX), (viewportHeight - margin * 2) / Math.max(1, maxY - minY))));
+      const zoom = Math.min(1, Math.max(0.1, Math.min((viewportWidth - margin * 2) / Math.max(1, maxX - minX), (viewportHeight - margin * 2) / Math.max(1, maxY - minY))));
       const nextZoom = Number(zoom.toFixed(2));
       const nextPan = { x: margin - minX * zoom, y: margin - minY * zoom };
       setCanvasZoom(nextZoom);
@@ -1303,15 +1303,29 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   };
 
   const changeZoom = (delta: number) => setCanvasZoom((current) => {
-    const next = Math.min(2, Math.max(0.35, Number((current + delta).toFixed(2))));
+    const next = Math.min(2, Math.max(0.1, Number((current + delta).toFixed(2))));
     writeProjectViewCache(selectedProject.id, { zoom: next });
     return next;
   });
   const resetCanvasView = () => {
-    const pan = { x: 60, y: 60 };
+    const canvas = canvasRef.current;
+    if (!canvas || !visibleAgents.length) return;
+    const layouts = visibleAgents.map(layoutForAgent);
+    const minX = Math.min(...layouts.map((layout) => layout.x));
+    const minY = Math.min(...layouts.map((layout) => layout.y));
+    const maxX = Math.max(...layouts.map((layout) => layout.x + layout.width));
+    const maxY = Math.max(...layouts.map((layout) => layout.y + layout.height));
+    const margin = 40;
+    const availableWidth = Math.max(1, canvas.clientWidth - margin * 2);
+    const availableHeight = Math.max(1, canvas.clientHeight - margin * 2);
+    const zoom = Number(Math.min(1, Math.max(0.1, Math.min(
+      availableWidth / Math.max(1, maxX - minX),
+      availableHeight / Math.max(1, maxY - minY),
+    ))).toFixed(2));
+    const pan = { x: margin - minX * zoom, y: margin - minY * zoom };
     setCanvasPan(pan);
-    setCanvasZoom(1);
-    writeProjectViewCache(selectedProject.id, { pan, zoom: 1 });
+    setCanvasZoom(zoom);
+    writeProjectViewCache(selectedProject.id, { pan, zoom });
   };
 
   return (
@@ -1636,7 +1650,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
           <span data-id="project-canvas-zoom-value" className="w-9 text-center font-mono text-[9px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
           <button type="button" data-id="project-canvas-zoom-in" onClick={() => changeZoom(0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomIn')}><Plus className="h-3.5 w-3.5" /></button>
-          <button type="button" data-id="project-canvas-reset" onClick={resetCanvasView} className="grid h-7 w-7 place-items-center rounded-md text-zinc-500 hover:bg-white/[0.08] hover:text-white" title={t('projectResetView')}><Maximize2 className="h-3.5 w-3.5" /></button>
+          <button type="button" data-id="project-canvas-reset" onClick={resetCanvasView} className="grid h-7 w-7 place-items-center rounded-md text-zinc-500 hover:bg-white/[0.08] hover:text-white" title={t('projectResetView')}><Scan className="h-3.5 w-3.5" /></button>
         </div>
         {footerControls ? (
           <div data-id="project-canvas-footer-controls" className="absolute bottom-1.5 right-4 flex items-center gap-2 px-2 py-1">
