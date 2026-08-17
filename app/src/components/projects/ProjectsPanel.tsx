@@ -1448,7 +1448,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           onPointerCancel={endCanvasPan}
           onWheel={(event) => {
             event.preventDefault();
-            zoomCanvasAt(event.clientX, event.clientY, event.deltaY > 0 ? -0.08 : 0.08);
+            zoomCanvasAt(event.clientX, event.clientY, event.deltaY > 0 ? -0.02 : 0.02);
           }}
           className="relative min-h-0 flex-1 touch-none overflow-hidden cursor-grab active:cursor-grabbing"
           style={{
