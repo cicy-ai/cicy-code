@@ -130,7 +130,7 @@ export function MarkdownImg({ src, alt, reserveSpace = false, ...props }: any) {
         alt={alt || ''}
         loading="lazy"
         className={reserveSpace
-          ? 'h-64 w-full cursor-zoom-in rounded-lg bg-transparent object-contain'
+          ? 'h-auto max-h-64 w-auto max-w-full cursor-zoom-in rounded-lg bg-transparent object-contain'
           : 'h-auto max-h-80 max-w-full cursor-zoom-in rounded-lg object-contain'}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setZoom(true); }}
       />
