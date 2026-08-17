@@ -64,6 +64,11 @@ export function useCurrentHistory(opts: {
   // shouldStickBottomRef while replacing the live tail; it must never override
   // explicit history browsing. Only seeing the three-dot sentinel again clears it.
   const streamDetachedRef = useRef(false);
+  // A scroll event alone cannot prove user intent: scrollTop assignments,
+  // browser anchoring and DOM reconciliation all emit scroll events too. Only
+  // explicit input in the direction of the live tail grants permission to
+  // reattach after the user has detached.
+  const streamReattachIntentRef = useRef(false);
   // The sole authority for streaming follow. It is updated from the actual
   // three-dot sentinel geometry, never from reply/tool/polling state.
   const streamLoadingVisibleRef = useRef(false);
@@ -248,9 +253,25 @@ export function useCurrentHistory(opts: {
       const viewportRect = el.getBoundingClientRect();
       const loadingRect = loadingSentinel?.getBoundingClientRect();
       const loadingVisible = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
-      if (loadingSentinel) streamDetachedRef.current = !loadingVisible;
-      streamLoadingVisibleRef.current = loadingVisible;
-      shouldStickBottomRef.current = loadingSentinel ? loadingVisible : (streamDetachedRef.current ? false : atBottom);
+      if (loadingSentinel) {
+        if (!loadingVisible) {
+          streamDetachedRef.current = true;
+          streamLoadingVisibleRef.current = false;
+        } else if (!streamDetachedRef.current || streamReattachIntentRef.current) {
+          streamDetachedRef.current = false;
+          streamLoadingVisibleRef.current = true;
+          streamReattachIntentRef.current = false;
+        } else {
+          // The sentinel became visible because layout moved, not because the
+          // user navigated back to it. Preserve the browsing lock.
+          streamLoadingVisibleRef.current = false;
+        }
+      } else {
+        streamLoadingVisibleRef.current = false;
+      }
+      shouldStickBottomRef.current = loadingSentinel
+        ? (!streamDetachedRef.current && streamLoadingVisibleRef.current)
+        : (streamDetachedRef.current ? false : atBottom);
       if (!shouldStickBottomRef.current) clearScheduledScrolls();
       lastScrollTopRef.current = top;
     };
@@ -261,21 +282,29 @@ export function useCurrentHistory(opts: {
     const disengage = () => {
       shouldStickBottomRef.current = false;
       streamDetachedRef.current = true;
+      streamReattachIntentRef.current = false;
       streamLoadingVisibleRef.current = false;
       clearScheduledScrolls();
     };
     const onWheel = (e: WheelEvent) => {
       if (e.deltaY < 0) disengage();
+      else if (e.deltaY > 0) streamReattachIntentRef.current = true;
     };
     let touchY = 0;
     const onTouchStart = (e: TouchEvent) => {
       touchY = e.touches[0]?.clientY ?? 0;
       disengage();
     };
-    const onPointerDown = () => disengage();
+    const onPointerDown = (e: PointerEvent) => {
+      disengage();
+      // Scrollbar track/thumb events target the scroll container itself. Keep
+      // reattach permission through the drag until the sentinel is reached.
+      if (e.target === el) streamReattachIntentRef.current = true;
+    };
     const onTouchMove = (e: TouchEvent) => {
       const y = e.touches[0]?.clientY ?? 0;
       if (y > touchY + 2) disengage(); // 手指向下拖 = 内容向上滚
+      else if (y < touchY - 2) streamReattachIntentRef.current = true;
       touchY = y;
     };
     el.addEventListener('scroll', updateStickBottom, { passive: true });
@@ -299,6 +328,7 @@ export function useCurrentHistory(opts: {
     didInitialScrollRef.current = false;
     shouldStickBottomRef.current = true;
     streamDetachedRef.current = false;
+    streamReattachIntentRef.current = false;
     streamLoadingVisibleRef.current = false;
     // 内存快照先上屏(window._cacheHistory):同一 pane 上次打开的整页内容**同步**渲染,
     // 不出 loading 骨架;下面的 fresh 加载照常进行,回来后整体覆盖。快照只填渲染态,不置
@@ -1158,6 +1188,7 @@ export function useCurrentHistory(opts: {
     scrollRef,
     loadMoreRef,
     streamDetachedRef,
+    streamReattachIntentRef,
     streamLoadingVisibleRef,
     optimisticBaselineUserIdRef,
   };

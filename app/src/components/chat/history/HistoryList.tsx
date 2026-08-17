@@ -52,6 +52,7 @@ export function HistoryList(props: HistoryListProps) {
     scrollRef,
     loadMoreRef,
     streamDetachedRef,
+    streamReattachIntentRef,
     streamLoadingVisibleRef,
     optimisticBaselineUserIdRef,
     paneId,
@@ -414,7 +415,12 @@ export function HistoryList(props: HistoryListProps) {
           data-id="current-history-scroll-bottom"
           aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })}
           title={t('scrollToBottom', { defaultValue: '滚动到底部' })}
-          onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
+          onClick={() => {
+            streamReattachIntentRef.current = true;
+            streamDetachedRef.current = false;
+            streamLoadingVisibleRef.current = true;
+            scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+          }}
           className="absolute bottom-3 right-4 z-10 grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur transition hover:bg-[#292a30] hover:text-white"
         >
           <ArrowDown className="h-4 w-4" />
