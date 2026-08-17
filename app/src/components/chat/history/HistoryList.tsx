@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowDown } from 'lucide-react';
 import { Spinner } from '../../ui/Spinner';
@@ -63,9 +63,22 @@ export function HistoryList(props: HistoryListProps) {
   } = props;
   const { t } = useTranslation('chat');
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const loadingVisibleRef = useRef(false);
   // Content column width: full-bleed when embedded (AgentStack popover), else a
   // centered reading column.
   const listWidthClass = fullWidth ? 'w-full' : 'mx-auto w-full max-w-4xl';
+
+  const updateLoadingVisibility = useCallback(() => {
+    const node = scrollRef.current;
+    const loadingMarker = node?.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
+    if (!node || !loadingMarker) {
+      loadingVisibleRef.current = false;
+      return;
+    }
+    const viewport = node.getBoundingClientRect();
+    const marker = loadingMarker.getBoundingClientRect();
+    loadingVisibleRef.current = marker.bottom > viewport.top && marker.top < viewport.bottom;
+  }, [scrollRef]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -74,6 +87,7 @@ export function HistoryList(props: HistoryListProps) {
       const overflow = node.scrollHeight > node.clientHeight + 2;
       const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 8;
       setShowScrollToBottom(overflow && !atBottom);
+      updateLoadingVisibility();
     };
     node.addEventListener('scroll', update, { passive: true });
     const observer = new ResizeObserver(update);
@@ -84,7 +98,23 @@ export function HistoryList(props: HistoryListProps) {
       node.removeEventListener('scroll', update);
       observer.disconnect();
     };
-  }, [scrollRef, loading, displayItems.length, liveTurn?.history_id, optimisticQ?.text]);
+  }, [scrollRef, loading, displayItems.length, liveTurn?.history_id, optimisticQ?.text, updateLoadingVisibility]);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    const content = node?.firstElementChild;
+    if (!node || !content || !replyPending) {
+      loadingVisibleRef.current = false;
+      return;
+    }
+    updateLoadingVisibility();
+    const observer = new ResizeObserver(() => {
+      if (loadingVisibleRef.current) node.scrollTop = node.scrollHeight;
+      updateLoadingVisibility();
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [scrollRef, replyPending, optimisticQ?.text, liveTurn?.history_id, updateLoadingVisibility]);
 
   // Memoized on `displayItems`: while a turn streams (only `liveTurn` changes),
   // these element refs stay identical, so React skips re-rendering every

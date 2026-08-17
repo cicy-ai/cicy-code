@@ -189,6 +189,8 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const localTurnStartRef = useRef({ question: '', startedAt: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
   const bodyScrollRef = useRef<HTMLDivElement>(null);
+  const loadingRef = useRef<HTMLDivElement>(null);
+  const loadingVisibleRef = useRef(false);
   const status = String(agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
@@ -249,6 +251,18 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     setShowScrollToBottom(overflow && !atBottom);
   }, []);
 
+  const updateLoadingVisibility = useCallback(() => {
+    const node = bodyScrollRef.current;
+    const loading = loadingRef.current;
+    if (!node || !loading) {
+      loadingVisibleRef.current = false;
+      return;
+    }
+    const viewport = node.getBoundingClientRect();
+    const marker = loading.getBoundingClientRect();
+    loadingVisibleRef.current = marker.bottom > viewport.top && marker.top < viewport.bottom;
+  }, []);
+
   useEffect(() => {
     const node = bodyScrollRef.current;
     if (!node) return;
@@ -258,6 +272,22 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     updateScrollToBottomButton();
     return () => observer.disconnect();
   }, [reply, latest, updateScrollToBottomButton]);
+
+  useEffect(() => {
+    const node = bodyScrollRef.current;
+    const content = node?.firstElementChild;
+    if (!node || !content || !working) {
+      loadingVisibleRef.current = false;
+      return;
+    }
+    updateLoadingVisibility();
+    const observer = new ResizeObserver(() => {
+      if (loadingVisibleRef.current) node.scrollTop = node.scrollHeight;
+      updateLoadingVisibility();
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [working, rawQuestion, updateLoadingVisibility]);
 
   const toggleMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -402,7 +432,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         data-id="project-agent-card-live-body"
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
-        onScroll={updateScrollToBottomButton}
+        onScroll={() => { updateScrollToBottomButton(); updateLoadingVisibility(); }}
         className="min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
       >
         <div data-id="project-agent-card-current-turn" className="space-y-3.5">
@@ -449,7 +479,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           </div>
         ) : null}
         {working ? (
-          <div data-id="project-agent-card-stream-loading" className="flex h-5 items-center gap-1 pt-1" aria-label="Loading reply">
+          <div ref={loadingRef} data-id="project-agent-card-stream-loading" className="flex h-5 items-center gap-1 pt-1" aria-label="Loading reply">
             {[0, 1, 2].map((index) => (
               <span key={index} data-id="project-agent-card-stream-loading-dot" className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />
             ))}
