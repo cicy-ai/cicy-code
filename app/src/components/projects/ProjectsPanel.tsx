@@ -208,6 +208,20 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const busy = /running|working|thinking|streaming/.test(status);
   const identity = teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId);
   const replyItems = Array.isArray(reply?.items) ? reply.items : [];
+  const toolGroupsByLastIndex = new Map<number, number>();
+  let currentToolGroup: number[] = [];
+  const finishToolGroup = () => {
+    if (currentToolGroup.length) toolGroupsByLastIndex.set(currentToolGroup[currentToolGroup.length - 1], currentToolGroup.length);
+    currentToolGroup = [];
+  };
+  replyItems.forEach((item: any, index: number) => {
+    if (String(item?.type || '') === 'tool_use') {
+      if (String(item?.name || '').toLowerCase() !== 'wait') currentToolGroup.push(index);
+      return;
+    }
+    finishToolGroup();
+  });
+  finishToolGroup();
   const latestQuestion = String(latest?.latest_question || '');
   const replyQuestion = String(reply?.question || '');
   const latestUpdatedAt = Date.parse(String(latest?.updated_at || '')) || 0;
@@ -458,7 +472,8 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             <div key={`text-${index}`} data-id="project-agent-card-latest-response" className="chat-markdown current-history-markdown text-zinc-300"><MarkdownBlock text={previewableMarkdown(String(item.text))} /></div>
           );
           if (type === 'tool_use') {
-            if (String(item?.name || '').toLowerCase() === 'wait') return null;
+            const toolGroupCount = toolGroupsByLastIndex.get(index);
+            if (!toolGroupCount) return null;
             const input = item?.input == null ? '' : typeof item.input === 'string' ? item.input : JSON.stringify(item.input);
             const commands = String(item?.name || '') === 'exec' ? codexExecCommands(input) : [];
             const tool = { name: commands.length ? 'exec_command' : String(item?.name || 'Tool'), arg: commands.length ? JSON.stringify({ command: commands.join('\n\n') }) : input };
@@ -468,7 +483,8 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
                   <SquareTerminal className="h-4 w-4 shrink-0" />
                   <span className="shrink-0 font-medium text-zinc-400">{tool.name}</span>
                   {headline ? <><span aria-hidden="true">·</span><span className="min-w-0 truncate">{headline}</span></> : null}
-                  <ArrowRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-50 transition group-hover/tool:translate-x-0.5 group-hover/tool:opacity-100" />
+                  <span data-id="project-agent-card-tool-count" className="ml-auto inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded bg-white/[0.07] px-1 font-mono text-[9px] font-semibold leading-none text-zinc-400">{toolGroupCount}</span>
+                  <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-50 transition group-hover/tool:translate-x-0.5 group-hover/tool:opacity-100" />
               </button>
             );
           }
