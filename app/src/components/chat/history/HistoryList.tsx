@@ -51,6 +51,7 @@ export function HistoryList(props: HistoryListProps) {
     scrollRef,
     loadMoreRef,
     shouldStickBottomRef,
+    streamDetachedRef,
     optimisticBaselineUserIdRef,
     paneId,
     agentType,
@@ -205,8 +206,8 @@ export function HistoryList(props: HistoryListProps) {
   // useCallback([]):引用恒定,memo 化的 LiveStreamStep 对未生长的块才能命中缓存。
   const pinBottomIfSticking = useCallback(() => {
     const el = scrollRef.current;
-    if (el && shouldStickBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, []);
+    if (el && shouldStickBottomRef.current && !streamDetachedRef.current) el.scrollTop = el.scrollHeight;
+  }, [shouldStickBottomRef, streamDetachedRef]);
   // live 尾巴的头像同样按"每轮一个":它前面(committed 末尾,跳过 system)已是同轮的
   // assistant item 时不重复,只留空位对齐。
   const liveShowAvatar = (() => {

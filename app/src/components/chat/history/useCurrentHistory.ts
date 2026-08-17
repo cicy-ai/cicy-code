@@ -60,6 +60,10 @@ export function useCurrentHistory(opts: {
   // ChatGPT 式跟随:用户贴在底部时,新内容 / reply 流式增长就自动滚到底;一旦往上滚离开
   // 底部就放手,不再拽回。没有 spacer、不把问题钉到顶 —— 就是一条普通从下往上长的聊天流。
   const shouldStickBottomRef = useRef(true);
+  // Strong streaming detach lock. Polling/reconciliation may legitimately set
+  // shouldStickBottomRef while replacing the live tail; it must never override
+  // explicit history browsing. Only seeing the three-dot sentinel again clears it.
+  const streamDetachedRef = useRef(false);
   // 上一次观测到的 scrollTop,用来判方向:用户**向上**滚一下就放手(disengage),
   // 直到自己滚回底部才重新跟随。靠方向而不是"距底阈值",否则流式期每 700ms 一次的
   // 强制落底会把人按在底部——小幅上滚还没出阈值就被拽回。
@@ -212,6 +216,7 @@ export function useCurrentHistory(opts: {
 
   useEffect(() => {
     shouldStickBottomRef.current = true;
+    streamDetachedRef.current = false;
     lastScrollTopRef.current = 0;
     preserveScrollOffsetRef.current = false;
     maxLoadedIdRef.current = 0;
@@ -246,7 +251,8 @@ export function useCurrentHistory(opts: {
       const viewportRect = el.getBoundingClientRect();
       const loadingRect = loading?.getBoundingClientRect();
       const loadingVisible = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
-      shouldStickBottomRef.current = loading ? loadingVisible : atBottom;
+      if (loading) streamDetachedRef.current = !loadingVisible;
+      shouldStickBottomRef.current = loading ? loadingVisible : (streamDetachedRef.current ? false : atBottom);
       if (!shouldStickBottomRef.current) clearScheduledScrolls();
       lastScrollTopRef.current = top;
     };
@@ -256,6 +262,7 @@ export function useCurrentHistory(opts: {
     // 反复拽回底部 ——「滚动的时候也在跳」就是这个。wheel/touch 直接表达意图,不丢。
     const disengage = () => {
       shouldStickBottomRef.current = false;
+      streamDetachedRef.current = true;
       clearScheduledScrolls();
     };
     const onWheel = (e: WheelEvent) => {
@@ -292,6 +299,7 @@ export function useCurrentHistory(opts: {
     const requestSeq = ++requestSeqRef.current;
     didInitialScrollRef.current = false;
     shouldStickBottomRef.current = true;
+    streamDetachedRef.current = false;
     // 内存快照先上屏(window._cacheHistory):同一 pane 上次打开的整页内容**同步**渲染,
     // 不出 loading 骨架;下面的 fresh 加载照常进行,回来后整体覆盖。快照只填渲染态,不置
     // committedReadyRef —— live tail 的轮询仍等真实窗口落定,避免旧快照和新 live 混拼。
@@ -769,6 +777,7 @@ export function useCurrentHistory(opts: {
         setOptimisticQ({ text: qText, ts: Date.now() });
         // 自己发消息 → 重新贴底跟随(ChatGPT:发送后视图回到底部看自己的问题和回复)。
         shouldStickBottomRef.current = true;
+        streamDetachedRef.current = false;
       }
       if (timer != null) { window.clearTimeout(timer); timer = null; }
       void poll();
@@ -835,10 +844,11 @@ export function useCurrentHistory(opts: {
     if (!didInitialScrollRef.current) {
       runScheduledScroll(scheduleScrollToBottom(el));
       shouldStickBottomRef.current = true;
+      streamDetachedRef.current = false;
       didInitialScrollRef.current = true;
       return;
     }
-    if (shouldStickBottomRef.current) el.scrollTop = el.scrollHeight;
+    if (shouldStickBottomRef.current && !streamDetachedRef.current) el.scrollTop = el.scrollHeight;
   }, [open, loading, items, liveTurn, optimisticQ]);
 
   // prompts-only 过滤瞬间换掉大半内容 → 重新定位:只看问题时滚到顶(从头读问题),
@@ -1098,6 +1108,7 @@ export function useCurrentHistory(opts: {
     if (!paneId || retryingKey) return;
     setRetryingKey(key);
     shouldStickBottomRef.current = true;
+    streamDetachedRef.current = false;
     Promise.resolve(apiService.retryCicyReply(paneId))
       .catch(() => {})
       .finally(() => {
@@ -1130,6 +1141,7 @@ export function useCurrentHistory(opts: {
     scrollRef,
     loadMoreRef,
     shouldStickBottomRef,
+    streamDetachedRef,
     optimisticBaselineUserIdRef,
   };
 }
