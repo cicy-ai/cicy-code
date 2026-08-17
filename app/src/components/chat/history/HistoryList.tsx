@@ -242,7 +242,7 @@ export function HistoryList(props: HistoryListProps) {
           <div data-id="current-history-stream-loading"><PendingThinkingPlaceholder /></div>
         ) : null}
         {liveStreaming && liveTurnSteps.length ? (
-          <div data-id="current-history-stream-loading" className="flex h-6 items-center gap-1 pt-1" aria-label="Loading reply">
+          <div data-id="current-history-stream-loading" className="flex h-6 items-center gap-1 pl-1.5 pt-1" aria-label="Loading reply">
             {[0, 1, 2].map((index) => (
               <span key={index} data-id="current-history-stream-loading-dot" className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />
             ))}

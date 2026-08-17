@@ -174,7 +174,7 @@ export function OutcomeNoticeCard({
 
 export function PendingThinkingPlaceholder() {
   return (
-    <div data-id="current-history-view-pending-placeholder" className="flex items-center gap-2 px-0.5 py-1 text-sm text-amber-100/65">
+    <div data-id="current-history-view-pending-placeholder" className="flex items-center gap-2 py-1 pl-2 pr-0.5 text-sm text-amber-100/65">
       <div data-id="current-history-view-pending-placeholder-dots" className="flex items-center gap-1">
         <span data-id="current-history-view-pending-placeholder-dot-1" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/70 [animation-delay:0ms]" />
         <span data-id="current-history-view-pending-placeholder-dot-2" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/55 [animation-delay:180ms]" />
