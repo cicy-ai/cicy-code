@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { ArrowDown, Atom, Check, ChevronDown, Copy, FileText, FolderKanban, History, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, Atom, Check, ChevronDown, Copy, FileText, FolderKanban, History, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -344,11 +344,11 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       </div>
       <div data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`} role="tablist" className="flex h-9 shrink-0 items-end gap-5 border-b border-white/[0.08]">
         {([
-          ['history', t('history', { ns: 'chat', defaultValue: '历史' })],
-          ['terminal', 'Terminal'],
+          ['history', '会话'],
+          ...(String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
           ['role', '角色'],
-        ] as const).map(([tab, label]) => {
-          const unavailable = tab === 'terminal' && (String(agent.agentType || '').toLowerCase() === 'cicy' || !agent.ttydSrc || agent.isApiOnly);
+        ] as Array<['history' | 'terminal' | 'role', string]>).map(([tab, label]) => {
+          const unavailable = tab === 'terminal' && (!agent.ttydSrc || agent.isApiOnly);
           return (
             <button
               key={tab}
@@ -364,9 +364,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             </button>
           );
         })}
-        {activeBodyTab === 'history' ? (
-          <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="ml-auto mb-1.5 rounded-md px-2 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史</button>
-        ) : null}
       </div>
       {activeBodyTab === 'terminal' && terminalOpen && agent.ttydSrc ? (
         <div data-id={`project-agent-card-terminal-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mr-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-lg bg-black pr-4">
@@ -389,6 +386,9 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         className="h-full min-h-0 w-full cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
       >
         <div data-id="project-agent-card-current-turn" className="space-y-3.5">
+        <div data-id="project-agent-card-history-link-row" className="flex justify-end">
+          <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史<ArrowRight className="h-3 w-3" /></button>
+        </div>
         {visibleQuestion || visibleQuestionAttachments.length ? (
           <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown mr-auto max-w-[92%] rounded-xl rounded-bl-sm bg-blue-500/10 px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-1 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-16 [&_[data-id=current-history-md-img]]:!max-h-16 [&_[data-id=current-history-md-img]]:!w-16 [&_[data-id=current-history-md-img]]:!max-w-16 [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-cover">
             {visibleQuestion ? <MarkdownBlock text={previewableMarkdown(visibleQuestion)} /> : null}

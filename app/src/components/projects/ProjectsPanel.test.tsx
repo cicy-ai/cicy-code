@@ -197,7 +197,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     const onOpenHistory = vi.fn();
     render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} onOpenHistory={onOpenHistory} />);
 
-    const historyTab = await screen.findByRole('tab', { name: '历史' });
+    const historyTab = await screen.findByRole('tab', { name: '会话' });
     expect(historyTab).toHaveAttribute('aria-selected', 'true');
     expect(document.querySelector('[data-id="project-agent-card-history-sentinel"]')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '完整历史' }));
@@ -214,9 +214,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       { paneId: 'w-102:main.0', title: 'CiCy', agentType: 'cicy', ttydSrc: '/ttyd/w-102/?token=test' },
     ]} onOpenAgent={vi.fn()} />);
 
-    const toggles = await screen.findAllByRole('tab', { name: 'Terminal' });
-    const toggle = toggles.find((node) => !node.hasAttribute('disabled')) as HTMLElement;
-    expect(document.querySelector('[data-id="project-agent-card-tab-terminal-w-102"]')).toBeDisabled();
+    const toggle = await screen.findByRole('tab', { name: 'Terminal' });
+    expect(document.querySelector('[data-id="project-agent-card-tab-terminal-w-102"]')).not.toBeInTheDocument();
     fireEvent.click(toggle);
     expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="mock-project-terminal"]')).toHaveTextContent('/ttyd/w-101/');
