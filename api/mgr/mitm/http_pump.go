@@ -71,6 +71,9 @@ func pumpHTTP(
 	}
 	_ = req.Body.Close()
 	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
 	req.ContentLength = int64(len(body))
 	isWebSocketUpgrade := strings.EqualFold(strings.TrimSpace(req.Header.Get("Upgrade")), "websocket") &&
 		headerHasToken(req.Header, "Connection", "upgrade")

@@ -46,7 +46,40 @@ type Dialer struct {
 // response. The caller is responsible for reading + closing resp.Body (which
 // returns the connection to the idle pool for reuse).
 func (d *Dialer) RoundTrip(req *http.Request) (*http.Response, error) {
-	return d.transport.RoundTrip(req)
+	return roundTripWithTLSRecovery(req, d.transport, d.transport.CloseIdleConnections)
+}
+
+// roundTripWithTLSRecovery retries one request on a fresh upstream connection
+// when a pooled TLS stream fails record authentication. This failure has been
+// observed after mihomo route/connection churn: returning it immediately makes
+// the MITM synthesize a user-visible 502 even though a new connection succeeds.
+// CloseIdleConnections evicts every other stale connection from the same pool;
+// the Transport already discards the active connection that returned the error.
+func roundTripWithTLSRecovery(req *http.Request, rt http.RoundTripper, closeIdle func()) (*http.Response, error) {
+	resp, err := rt.RoundTrip(req)
+	if err == nil || !isTLSRecordIntegrityError(err) || req == nil || req.GetBody == nil {
+		return resp, err
+	}
+	if closeIdle != nil {
+		closeIdle()
+	}
+	retry := req.Clone(req.Context())
+	retryBody, bodyErr := req.GetBody()
+	if bodyErr != nil {
+		return nil, err
+	}
+	retry.Body = retryBody
+	log.Printf("[mitm] upstream TLS record integrity failure; evicted idle pool and retrying fresh: %v", err)
+	return rt.RoundTrip(retry)
+}
+
+func isTLSRecordIntegrityError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "tls: bad record mac") ||
+		strings.Contains(text, "tls: decryption failed or bad record mac")
 }
 
 // EgressFunc, when set on a Dialer, is consulted on every DialTCP. If it
