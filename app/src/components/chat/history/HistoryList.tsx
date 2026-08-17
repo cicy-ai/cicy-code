@@ -162,8 +162,20 @@ export function HistoryList(props: HistoryListProps) {
         break;
       }
       const showAvatar = prevRole !== 'assistant';
+      // Providers may persist one tool loop as several consecutive assistant
+      // records, while the live/reply path keeps the same tools in one record.
+      // Use the same 6px rhythm as ToolCard's `space-y-1.5` between consecutive
+      // assistant records; reserve the larger turn gap for the final record.
+      let nextRole = '';
+      for (let j = index + 1; j < displayItems.length; j += 1) {
+        const r = String(displayItems[j]?.role || '');
+        if (r === 'system') continue;
+        nextRole = r;
+        break;
+      }
+      const continuesAssistant = nextRole === 'assistant';
       return (
-        <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey} className="mb-5">
+        <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} data-assistant-continuation={continuesAssistant ? 'true' : 'false'} key={turnKey} className={continuesAssistant ? 'mb-1.5' : 'mb-5'}>
           {/* ChatGPT 式回复头像:agent_type 的 logo 在答案左侧,与首行顶对齐;
               同一轮的后续 assistant item 不重复头像,用同宽空位对齐内容列 */}
           <AssistantTurnView turn={turn} turnKey={turnKey} isLatestTurn={isLatestTurn} showAvatar={showAvatar} agentType={agentType} paneId={paneId} hideTools={hideTools} />
