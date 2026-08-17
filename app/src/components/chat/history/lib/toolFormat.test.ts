@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest';
-import { buildToolCardId, formatToolResult, normalizeToolForDisplay, toolHeadline } from './toolFormat';
+import { buildToolCardId, formatToolResult, normalizeToolForDisplay, normalizeToolStepsForDisplay, toolHeadline } from './toolFormat';
 
 describe('buildToolCardId', () => {
   it('keeps a native tool id stable across live and committed rendering', () => {
@@ -34,6 +34,27 @@ describe('Codex tool display normalization', () => {
       name: 'exec',
       arg: 'const r = await tools.write_stdin({session_id:7,chars:"",yield_time_ms:1000}); text(r.output);',
     })).toBeNull();
+  });
+
+  it('folds hidden wait output into the preceding long-running command', () => {
+    const steps = normalizeToolStepsForDisplay([{ type: 'tool', tools: [
+      {
+        name: 'exec',
+        arg: 'const r = await tools.exec_command({cmd:"npm run build"}); text(r.output);',
+        result: '{"output":"vite build\\ntransforming...\\nSESSION_ID=7"}',
+      },
+      {
+        name: 'wait',
+        arg: '{"cell_id":"12"}',
+        result: '{"output":"✓ 3532 modules transformed.\\n✓ built in 31.42s"}',
+      },
+    ] }]);
+    expect(steps).toHaveLength(1);
+    expect(steps[0].tools).toHaveLength(1);
+    expect(steps[0].tools[0].name).toBe('exec_command');
+    expect(steps[0].tools[0].result).toContain('vite build');
+    expect(steps[0].tools[0].result).toContain('✓ built in 31.42s');
+    expect(steps[0].tools[0].result).not.toContain('SESSION_ID');
   });
 
   it('does not render a result body for a successful command with no stdout', () => {

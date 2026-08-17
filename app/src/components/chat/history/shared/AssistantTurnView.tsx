@@ -5,7 +5,7 @@ import { memo } from 'react';
 import AgentAvatar from '../../../AgentAvatar';
 import type { HistoryTurn } from '../types';
 import { getVisibleHistorySteps } from '../lib/turns';
-import { buildToolCardId, normalizeToolForDisplay } from '../lib/toolFormat';
+import { buildToolCardId, normalizeToolStepsForDisplay } from '../lib/toolFormat';
 import { ThinkingBlock } from './ThinkingBlock';
 import { MarkdownBlock } from './Markdown';
 import { ToolCard } from './ToolCard';
@@ -20,11 +20,7 @@ export const AssistantTurnView = memo(function AssistantTurnView({ turn, turnKey
   agentType: string; paneId: string; hideTools: boolean;
 }) {
   const allSteps = getVisibleHistorySteps(turn, isLatestTurn);
-  const displaySteps = (allSteps || []).map((step: any) => {
-    if (step?.type !== 'tool') return step;
-    const tools = (Array.isArray(step.tools) ? step.tools : []).map(normalizeToolForDisplay).filter(Boolean);
-    return tools.length ? { ...step, tools } : null;
-  }).filter(Boolean) as any[];
+  const displaySteps = normalizeToolStepsForDisplay(allSteps || []);
   const steps = hideTools ? displaySteps.filter((s: any) => s?.type !== 'tool') : displaySteps;
   const showThinkingPlaceholder = isLatestTurn && String(turn?.status || '').trim() === 'thinking' && !String(turn?.a || '').trim() && !steps.length;
   // A tool with no result in the LAST tool step of a still-active latest turn is

@@ -78,6 +78,46 @@ export function normalizeToolForDisplay(tool: any): any | null {
   return { ...tool, name: 'exec_command', arg: JSON.stringify({ command: commands.join('\n\n') }) };
 }
 
+function continuationOutput(tool: any): string {
+  const output = cleanToolResult(formatToolResult({ ...tool, name: 'exec_command' }))
+    .replace(/^Script running with cell ID[^\n]*\n?/gim, '')
+    .replace(/^SESSION_ID=\d+\s*$/gim, '')
+    .trim();
+  return output;
+}
+
+// Codex long-running shell commands return their final stdout through hidden
+// wait/write_stdin transport calls. Fold those results back into the preceding
+// visible exec_command card before omitting the transport rows, otherwise the
+// UI shows the command but silently drops output such as `npm run build` logs.
+export function normalizeToolStepsForDisplay(steps: any[]): any[] {
+  let lastVisibleTool: any | null = null;
+  return (steps || []).map((step: any) => {
+    if (step?.type !== 'tool') {
+      lastVisibleTool = null;
+      return step;
+    }
+    const visible: any[] = [];
+    for (const rawTool of Array.isArray(step.tools) ? step.tools : []) {
+      const normalized = normalizeToolForDisplay(rawTool);
+      if (!normalized) {
+        if (lastVisibleTool && String(lastVisibleTool.name || '').toLowerCase() === 'exec_command') {
+          const nextOutput = continuationOutput(rawTool);
+          if (nextOutput) {
+            const previousOutput = continuationOutput(lastVisibleTool);
+            lastVisibleTool.result = [previousOutput, nextOutput].filter(Boolean).join('\n').trim();
+          }
+        }
+        continue;
+      }
+      const copy = { ...normalized };
+      visible.push(copy);
+      lastVisibleTool = copy;
+    }
+    return visible.length ? { ...step, tools: visible } : null;
+  }).filter(Boolean);
+}
+
 export function humanizeToolPayload(value: any, depth = 0): string {
   if (value == null) return '';
   if (typeof value === 'string') return shortenToolPath(value);

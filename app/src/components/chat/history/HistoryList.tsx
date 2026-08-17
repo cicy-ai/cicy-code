@@ -10,7 +10,7 @@ import type { HistoryTurn } from './types';
 import { OPTIMISTIC_Q_KEY } from './constants';
 import { OpenUrlContext, QAlignContext } from './contexts';
 import { isActiveAssistantStatus } from './lib/misc';
-import { buildToolCardId, normalizeToolForDisplay } from './lib/toolFormat';
+import { buildToolCardId, normalizeToolForDisplay, normalizeToolStepsForDisplay } from './lib/toolFormat';
 import { MarkdownBlock, LinkConfirmModal } from './shared/Markdown';
 import { CollapsibleQ, UserTurnAvatar } from './shared/CollapsibleQ';
 import { ToolCard } from './shared/ToolCard';
@@ -284,7 +284,7 @@ export function HistoryList(props: HistoryListProps) {
           ? <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-live-turn-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
           : <div aria-hidden="true" className="h-7 w-7 shrink-0" />}
         <div data-id="current-history-live-turn-body" className="min-w-0 flex-1">
-        {liveTurnSteps.map((step: any, i: number) => {
+        {normalizeToolStepsForDisplay(liveTurnSteps).map((step: any, i: number) => {
           {/* live 尾巴 = 最新一轮回复(其后还没有新 q)→ thinking 全程展开,不折叠。
               折叠的触发是「出现新 q、本轮迁入 committed」,而不是「流式刚结束」——届时它
               改走 committed 渲染(ThinkingBlock 默认 live=false)自动塌成小标。 */}
