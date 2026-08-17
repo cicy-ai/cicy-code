@@ -35,6 +35,7 @@ export function HistoryList(props: HistoryListProps) {
   const {
     items,
     liveTurn,
+    replyPending,
     optimisticQ,
     compacting,
     displayItems,
@@ -224,6 +225,7 @@ export function HistoryList(props: HistoryListProps) {
   const liveTurnSteps = liveVisible && Array.isArray(liveTurn?.steps) ? liveTurn!.steps : [];
   // 本轮还在流式输出 → 最后一个 thinking/text 块走平滑生长(useSmoothStreamText)。
   const liveStreaming = liveVisible && isActiveAssistantStatus(String(liveTurn?.status || ''));
+  const liveReplyPending = liveVisible && replyPending;
   // 平滑生长的每个 tick 都发生在 LiveStreamStep 内部 state,父级贴底 effect(依赖
   // liveTurn)看不到 —— 用这个回调在每次生长后跟一次底(仅当用户本来就贴底)。
   // useCallback([]):引用恒定,memo 化的 LiveStreamStep 对未生长的块才能命中缓存。
@@ -264,10 +266,10 @@ export function HistoryList(props: HistoryListProps) {
           }
           return null;
         })}
-        {!liveTurnSteps.length ? (
+        {!liveTurnSteps.length && liveReplyPending ? (
           <div data-id="current-history-stream-loading"><PendingThinkingPlaceholder /></div>
         ) : null}
-        {liveStreaming && liveTurnSteps.length ? (
+        {liveReplyPending && liveTurnSteps.length ? (
           <div data-id="current-history-stream-loading" className="flex h-6 items-center gap-1 pl-3 pt-1" aria-label="Loading reply">
             {[0, 1, 2].map((index) => (
               <span key={index} data-id="current-history-stream-loading-dot" className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />
@@ -387,7 +389,7 @@ export function HistoryList(props: HistoryListProps) {
                     - 但上一轮 completed 的答案会赖在 live 尾巴(cicy 懒迁移,liveVisible=true 但
                       status=completed → liveStreaming=false)。此时发新 Q 必须**立刻**画 thinking,
                       不能被上一轮的尾巴误杀 —— 否则 thinking 要等 poll 拉回新一轮才出(“a 半天才显示”)。 */}
-                {!liveStreaming ? (
+                {!liveVisible && replyPending ? (
                   <div data-id="current-history-optimistic-a" className="mb-5 flex items-start gap-2.5">
                     <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-optimistic-a-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
                     <div data-id="current-history-stream-loading" className="min-w-0 flex-1">
@@ -396,6 +398,14 @@ export function HistoryList(props: HistoryListProps) {
                   </div>
                 ) : null}
               </>
+            ) : null}
+            {replyPending && !liveVisible && !showOptimistic ? (
+              <div data-id="current-history-pending-a" className="mb-5 flex items-start gap-2.5">
+                <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-pending-a-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
+                <div data-id="current-history-stream-loading" className="min-w-0 flex-1">
+                  <PendingThinkingPlaceholder />
+                </div>
+              </div>
             ) : null}
             {/* Keep a permanent tail slot after the latest assistant answer.
                 During retry the latest a rapidly swaps between pending, failed

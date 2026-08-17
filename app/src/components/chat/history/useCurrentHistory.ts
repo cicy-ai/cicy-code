@@ -48,6 +48,11 @@ export function useCurrentHistory(opts: {
   // history list. It's reconciled into `items` (via a tail fetch) once the turn
   // completes, then dropped.
   const [liveTurn, setLiveTurn] = useState<HistoryTurn | null>(null);
+  // One uninterrupted pending lifetime for the three-dot sentinel. Provider
+  // statuses legitimately hop through values such as pending/in_progress while
+  // handing a tool result back to the model; those are not terminal and must
+  // never unmount the dots between tool output and the next text chunk.
+  const [replyPending, setReplyPending] = useState(false);
   const liveTurnRef = useRef<HistoryTurn | null>(null);
   const liveTurnIdRef = useRef('');         // backend turn_id of the live turn
   const maxLoadedIdRef = useRef(0);         // largest history id currently in `items`
@@ -233,6 +238,7 @@ export function useCurrentHistory(opts: {
     setOptimisticQ(null);
     optimisticBaselineUserIdRef.current = 0;
     replyInFlightRef.current = false;
+    setReplyPending(false);
     setCompacting(false);
     clearedConvIdRef.current = '';
   }, [paneId, open]);
@@ -495,6 +501,7 @@ export function useCurrentHistory(opts: {
         const replyMaxId = answerId > 0 ? answerId - 1 : 0; // current.json maxID == q_last id
         const replyInFlight = answerId > 0 && !complete && !replyFailed;
         replyInFlightRef.current = replyInFlight;
+        setReplyPending(optimisticActiveRef.current || replyInFlight);
         emitBusy(optimisticActiveRef.current || replyInFlight);
 
         // /clear 发出即清后:被清会话的任何数据一律不收(否则 rotate 完成前老内容
@@ -804,7 +811,9 @@ export function useCurrentHistory(opts: {
         let maxUserId = 0;
         for (const it of base) if (it?.role === 'user') maxUserId = Math.max(maxUserId, Number(it?.history_id || 0));
         optimisticBaselineUserIdRef.current = maxUserId;
+        optimisticActiveRef.current = true;
         setOptimisticQ({ text: qText, ts: Date.now() });
+        setReplyPending(true);
         // 自己发消息 → 重新贴底跟随(ChatGPT:发送后视图回到底部看自己的问题和回复)。
         shouldStickBottomRef.current = true;
         streamDetachedRef.current = false;
@@ -819,6 +828,7 @@ export function useCurrentHistory(opts: {
       if (id && id !== paneId) return;
       setOptimisticQ(null);
       setCompacting(false);
+      if (!replyInFlightRef.current) setReplyPending(false);
     };
     window.addEventListener('cicy:current-history-refresh', onNudge as EventListener);
     window.addEventListener('cicy:current-history-cancel-optimistic', onCancelOptimistic as EventListener);
@@ -1168,6 +1178,7 @@ export function useCurrentHistory(opts: {
     items,
     liveTurn,
     optimisticQ,
+    replyPending,
     compacting,
     displayItems,
     committedMaxId,
