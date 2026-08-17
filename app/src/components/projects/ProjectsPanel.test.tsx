@@ -302,12 +302,12 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-question-attachment"]')).not.toHaveTextContent('/home/cicy/cicy-ai/assets/');
     expect(response.querySelectorAll('li')).toHaveLength(2);
     expect(await screen.findByText('exec_command')).toBeInTheDocument();
-    expect(document.querySelectorAll('[data-id="project-agent-card-reply-tool"]')).toHaveLength(2);
-    expect(Array.from(document.querySelectorAll('[data-id="project-agent-card-tool-count"]')).map((node) => node.textContent)).toEqual(['2', '1']);
+    expect(document.querySelectorAll('[data-id="project-agent-card-reply-tool"]')).toHaveLength(3);
+    expect(document.querySelector('[data-id="project-agent-card-tool-count"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-output-loading"]')).toHaveTextContent('Workedfor 5s');
     expect(document.querySelector('[data-id="project-agent-card-live-body"]')).not.toContainElement(document.querySelector('[data-id="project-agent-card-latest-question"]'));
     expect(document.querySelector('[data-id="project-agent-card-live-body"]')).not.toContainElement(document.querySelector('[data-id="project-agent-card-output-loading"]'));
-    expect(screen.queryByText('read')).not.toBeInTheDocument();
+    expect(screen.getByText('read')).toBeInTheDocument();
     expect(screen.queryByText('旧工具结果')).not.toBeInTheDocument();
     expect(screen.queryByText('wait')).not.toBeInTheDocument();
     expect(screen.queryByText(/cell_id/)).not.toBeInTheDocument();
