@@ -109,7 +109,7 @@ export function CollapsibleQ({ text, bare = false, open = false, onSetOpen }: { 
             onClick={(e) => { e.stopPropagation(); if (!open && onSetOpen) onSetOpen(true); }}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
-            className={`max-w-[95%] select-text overflow-hidden rounded-2xl ${qTail} border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]`}
+            className={`max-w-[95%] select-text overflow-hidden rounded-2xl ${qTail} border border-[var(--chat-question-border)] bg-[var(--chat-question-bg)] px-3.5 py-2 text-base leading-relaxed text-zinc-200 shadow-[0_8px_24px_rgba(0,0,0,0.10)]`}
           >
             <MarkdownBlock text={String(text || '').replace(/^\-\n/, '')} />
           </div>
