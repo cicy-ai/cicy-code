@@ -15,7 +15,7 @@ import { historyMemCache, setHistoryMemCache } from './lib/cache';
 import { getHistoryIDs, loadWindowItems } from './lib/dataAccess';
 import { buildTurnsFromRawItems, normalizeHistoryTurns } from './lib/turns';
 import { splitLeadingHarnessBlocks, cicyCompactSummaryOf } from './lib/normalizeItem';
-import { liveStepsContentSize, scheduleScrollToBottom } from './lib/misc';
+import { liveStepsContentSize } from './lib/misc';
 
 export function useCurrentHistory(opts: {
   paneId: string;
@@ -64,6 +64,9 @@ export function useCurrentHistory(opts: {
   // shouldStickBottomRef while replacing the live tail; it must never override
   // explicit history browsing. Only seeing the three-dot sentinel again clears it.
   const streamDetachedRef = useRef(false);
+  // The sole authority for streaming follow. It is updated from the actual
+  // three-dot sentinel geometry, never from reply/tool/polling state.
+  const streamLoadingVisibleRef = useRef(false);
   // 上一次观测到的 scrollTop,用来判方向:用户**向上**滚一下就放手(disengage),
   // 直到自己滚回底部才重新跟随。靠方向而不是"距底阈值",否则流式期每 700ms 一次的
   // 强制落底会把人按在底部——小幅上滚还没出阈值就被拽回。
@@ -126,12 +129,6 @@ export function useCurrentHistory(opts: {
       window.clearTimeout(timer);
     }
     scheduledScrollTimersRef.current = [];
-  };
-
-  const runScheduledScroll = (scheduled: { raf: number; timers: number[] }) => {
-    clearScheduledScrolls();
-    scheduledScrollRafRef.current = scheduled.raf;
-    scheduledScrollTimersRef.current = scheduled.timers;
   };
 
   const clearLiveTurn = () => {
@@ -252,6 +249,7 @@ export function useCurrentHistory(opts: {
       const loadingRect = loading?.getBoundingClientRect();
       const loadingVisible = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
       if (loading) streamDetachedRef.current = !loadingVisible;
+      streamLoadingVisibleRef.current = loadingVisible;
       shouldStickBottomRef.current = loading ? loadingVisible : (streamDetachedRef.current ? false : atBottom);
       if (!shouldStickBottomRef.current) clearScheduledScrolls();
       lastScrollTopRef.current = top;
@@ -263,6 +261,7 @@ export function useCurrentHistory(opts: {
     const disengage = () => {
       shouldStickBottomRef.current = false;
       streamDetachedRef.current = true;
+      streamLoadingVisibleRef.current = false;
       clearScheduledScrolls();
     };
     const onWheel = (e: WheelEvent) => {
@@ -300,6 +299,7 @@ export function useCurrentHistory(opts: {
     didInitialScrollRef.current = false;
     shouldStickBottomRef.current = true;
     streamDetachedRef.current = false;
+    streamLoadingVisibleRef.current = false;
     // 内存快照先上屏(window._cacheHistory):同一 pane 上次打开的整页内容**同步**渲染,
     // 不出 loading 骨架;下面的 fresh 加载照常进行,回来后整体覆盖。快照只填渲染态,不置
     // committedReadyRef —— live tail 的轮询仍等真实窗口落定,避免旧快照和新 live 混拼。
@@ -822,11 +822,8 @@ export function useCurrentHistory(opts: {
     };
   }, []);
 
-  // ChatGPT 式跟随滚动(就是一条普通从下往上长的聊天流,没有 spacer、不钉问题到顶):
-  // - 首屏:落底显示最新一轮(scheduleScrollToBottom 多次补滚,扛 markdown/图片异步 reflow)。
-  // - 之后:用户贴在底部时,内容一变(committed 增量 / reply 流式增长 / 占位 q+a)就在 paint
-  //   前同步钉到底,逐字增长不跳;用户往上滚离开底部(scroll 监听置 shouldStickBottom=false)
-  //   就放手,绝不拽回。
+  // Streaming follow has ONE condition: the three-dot loading sentinel is/was
+  // visible. State reconciliation is not allowed to re-enable it.
   // - 「加载更早」前插内容:保持用户原滚动位置(loadMore 自己补偿 scrollTop)。
   useLayoutEffect(() => {
     if (!open || loading) return;
@@ -842,22 +839,33 @@ export function useCurrentHistory(opts: {
       return;
     }
     if (!didInitialScrollRef.current) {
-      runScheduledScroll(scheduleScrollToBottom(el));
+      // One-time initial positioning only; unlike the old scheduled retries this
+      // cannot yank the user back after they start browsing.
+      el.scrollTop = el.scrollHeight;
       shouldStickBottomRef.current = true;
       streamDetachedRef.current = false;
+      const loading = el.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
+      const viewportRect = el.getBoundingClientRect();
+      const loadingRect = loading?.getBoundingClientRect();
+      streamLoadingVisibleRef.current = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
       didInitialScrollRef.current = true;
       return;
     }
-    if (shouldStickBottomRef.current && !streamDetachedRef.current) el.scrollTop = el.scrollHeight;
+    const loading = el.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
+    const viewportRect = el.getBoundingClientRect();
+    const loadingRect = loading?.getBoundingClientRect();
+    const loadingVisible = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
+    const followLoading = streamLoadingVisibleRef.current || loadingVisible;
+    streamLoadingVisibleRef.current = followLoading;
+    if (followLoading) el.scrollTop = el.scrollHeight;
   }, [open, loading, items, liveTurn, optimisticQ]);
 
-  // prompts-only 过滤瞬间换掉大半内容 → 重新定位:只看问题时滚到顶(从头读问题),
-  // 关掉时回到底部(回到最新一轮)。
+  // Prompts-only is a user navigation action, not permission to jump to bottom.
   useEffect(() => {
     if (!open) return;
     const frame = window.requestAnimationFrame(() => {
       const node = scrollRef.current;
-      if (node) node.scrollTop = node.scrollHeight;
+      if (node && promptsOnly) node.scrollTop = 0;
     });
     return () => window.cancelAnimationFrame(frame);
   }, [promptsOnly, open]);
@@ -1140,8 +1148,7 @@ export function useCurrentHistory(opts: {
     canLoadMore,
     scrollRef,
     loadMoreRef,
-    shouldStickBottomRef,
-    streamDetachedRef,
+    streamLoadingVisibleRef,
     optimisticBaselineUserIdRef,
   };
 }
