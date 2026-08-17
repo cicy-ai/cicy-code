@@ -64,6 +64,21 @@ describe('Codex tool display normalization', () => {
     })).toBe('');
   });
 
+  it('renders only output text from structured tool result blocks', () => {
+    expect(formatToolResult({
+      name: 'exec_command',
+      result: JSON.stringify([
+        { type: 'input_text', text: 'Script completed\nWall time 1.2 seconds\nOutput:\n' },
+        { type: 'input_text', text: '\n> vite build\ntransforming...\n' },
+        { type: 'input_text', text: 'SESSION_ID=91564' },
+      ]),
+    })).toBe('> vite build\ntransforming...');
+    expect(formatToolResult({
+      name: 'any_tool',
+      result: JSON.stringify({ output: [{ type: 'output_text', text: 'real result' }], wall_time: 1.2 }),
+    })).toBe('real result');
+  });
+
   it('extracts an apply_patch diff from the Codex JavaScript wrapper', () => {
     const patch = '*** Begin Patch\n*** Update File: /tmp/example.ts\n@@\n-old\n+new\n*** End Patch';
     const tool = normalizeToolForDisplay({

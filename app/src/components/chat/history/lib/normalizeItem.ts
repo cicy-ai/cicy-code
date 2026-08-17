@@ -4,6 +4,12 @@
 import type { HistoryTurn, RawHistoryItem, EnvironmentContextData } from '../types';
 import { extractContentText } from './turns';
 
+function serializeToolResult(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (value == null) return '';
+  try { return JSON.stringify(value).trim(); } catch { return String(value).trim(); }
+}
+
 // Harness-injected wrappers that ride along at the START of a role:user message
 // (Claude puts system-reminders / slash-command echoes in the user turn). They
 // are NOT real user input but the user still wants them available — so we peel
@@ -284,7 +290,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
         name: String(item.name || item.tool_name || 'tool'),
         tool_id: String((item as any).call_id || (item as any).tool_id || item.id || '').trim(),
         arg: '',
-        result: String(item.output || item.result || '').trim(),
+        result: serializeToolResult(item.output ?? item.result),
       }],
     });
   }
@@ -320,7 +326,7 @@ export function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string,
         name,
         tool_id: callId,
         arg: '',
-        result: String((item as any).output || (item as any).result || '').trim(),
+        result: serializeToolResult((item as any).output ?? (item as any).result),
       }],
     });
   }

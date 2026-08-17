@@ -244,6 +244,35 @@ export function exitNoOutputNote(raw: string): string {
     : i18n.t('toolExitNoOutput', { ns: 'chat', defaultValue: '退出 · 无输出' });
 }
 
+function structuredOutput(value: any): string | null {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    const parts = value.map(structuredOutput);
+    return parts.every((part) => part !== null) ? parts.filter(Boolean).join('') : null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  if ('output' in value) return structuredOutput(value.output) ?? '';
+  if (typeof value.text === 'string' && /^(?:input|output)_text$/.test(String(value.type || ''))) return value.text;
+  if ('content' in value) return structuredOutput(value.content);
+  return null;
+}
+
+function formatOutputText(value: string, name: string): string {
+  const raw = String(value || '')
+    .replace(/^SESSION_ID=\d+\s*$/gim, '')
+    .replace(/^Script running with cell ID[^\n]*\n?/gim, '')
+    .trim();
+  const marker = '\nOutput:\n';
+  const index = raw.indexOf(marker);
+  if (index >= 0) {
+    const output = raw.slice(index + marker.length).trim();
+    if (output) return shortenToolPath(output);
+    if (/Process exited with code 0\b/.test(raw)) return '';
+  }
+  if (name === 'exec_command' && /Process exited with code 0\b/.test(raw)) return '';
+  return shortenToolPath(raw);
+}
+
 export function formatToolResult(tool: any) {
   const name = String(tool?.name || '').trim();
   const raw = String(tool?.result || '').trim();
@@ -253,28 +282,12 @@ export function formatToolResult(tool: any) {
   const parsed = tryParseJSONObject(raw);
   if (parsed != null) {
     if (name === 'apply_patch' && parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).length === 0) return '';
-    if (name === 'exec_command' && parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'output' in parsed) {
-      return shortenToolPath(String((parsed as any).output || '').trim());
-    }
+    const output = structuredOutput(parsed);
+    if (output !== null) return formatOutputText(output, name);
     const pretty = humanizeToolPayload(parsed);
     if (pretty) return pretty;
   }
-  const marker = '\nOutput:\n';
-  const index = raw.indexOf(marker);
-  if (index >= 0) {
-    const suffix = raw.slice(index + marker.length).trim();
-    if (suffix) {
-      const parsedSuffix = tryParseJSONObject(suffix);
-      if (parsedSuffix != null) {
-        const pretty = humanizeToolPayload(parsedSuffix);
-        if (pretty) return pretty;
-      }
-      return shortenToolPath(suffix);
-    }
-    if (/Process exited with code 0\b/.test(raw)) return '';
-  }
-  if (name === 'exec_command' && /Process exited with code 0\b/.test(raw)) return '';
-  return shortenToolPath(raw);
+  return formatOutputText(raw, name);
 }
 
 export function buildToolCardId(turnKey: string | number, stepIndex: number, tool: any, toolIndex: number) {
