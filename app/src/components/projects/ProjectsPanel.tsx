@@ -1388,7 +1388,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               const cardMetrics = liveMetrics[shortPaneId(agent.paneId)];
               const cardShortId = shortPaneId(agent.paneId);
               const cardLatest = statuses[agent.paneId] || statuses[`${cardShortId}:main.0`] || statuses[cardShortId] || {};
-              const cardBusy = sendingAgentIds.has(shortPaneId(agent.paneId)) || Boolean(cardMetrics?.working) || /running|working|thinking|streaming/.test(String(agent.status || '').toLowerCase());
+              // Keep the loading sentinel continuous across the send handoff:
+              // sendToAgent resolves once input reaches the terminal, before the
+              // server's live status necessarily flips to working. The optimistic
+              // reply is already `pending`, so it bridges that gap until the
+              // current-reply poll replaces it with an authoritative terminal state.
+              const observedReplyStatus = String(agentReplies[cardShortId]?.status || cardLatest?.status || agent.status || '').toLowerCase();
+              const cardBusy = sendingAgentIds.has(cardShortId) || Boolean(cardMetrics?.working) || /running|working|thinking|streaming|pending|tool_use|tool_call|in_progress/.test(observedReplyStatus);
               return (
               <div
                 key={agent.paneId}

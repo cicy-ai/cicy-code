@@ -358,6 +358,12 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(await screen.findByText('中文任务')).toBeInTheDocument();
     expect(screen.queryByText('上一轮回答')).not.toBeInTheDocument();
     expect(input).toHaveValue('');
+    // sendToAgent resolving is only transport acknowledgement. The optimistic
+    // pending reply must keep the three dots mounted until a terminal snapshot
+    // arrives, otherwise the loading indicator disappears and reappears during
+    // the handoff to server-side working status.
+    expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-id="project-agent-card-stream-loading-dot"]')).toHaveLength(3);
     await waitFor(() => expect(input).toHaveFocus());
   });
 
