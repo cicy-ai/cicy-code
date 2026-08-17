@@ -5,7 +5,7 @@ import { memo } from 'react';
 import AgentAvatar from '../../../AgentAvatar';
 import type { HistoryTurn } from '../types';
 import { getVisibleHistorySteps } from '../lib/turns';
-import { buildToolCardId } from '../lib/toolFormat';
+import { buildToolCardId, normalizeToolForDisplay } from '../lib/toolFormat';
 import { ThinkingBlock } from './ThinkingBlock';
 import { MarkdownBlock } from './Markdown';
 import { ToolCard } from './ToolCard';
@@ -46,7 +46,8 @@ export const AssistantTurnView = memo(function AssistantTurnView({ turn, turnKey
           if (step.type === 'text') {
             return <div key={stepIndex} data-id={`current-history-turn-step-text-${turnKey}-${stepIndex}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><MarkdownBlock text={step.text} /></div>;
           }
-          const tools = Array.isArray(step.tools) ? step.tools : [];
+          const tools = (Array.isArray(step.tools) ? step.tools : []).map(normalizeToolForDisplay).filter(Boolean);
+          if (!tools.length) return null;
           return <div key={stepIndex} data-id={`current-history-turn-step-tools-${turnKey}-${stepIndex}`} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
             const toolId = buildToolCardId(turnKey, stepIndex, tool, toolIndex);
             const running = stepIndex === lastToolStepIndex && !String(tool?.result || '').trim() && tool?.isError !== true;

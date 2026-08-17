@@ -18,6 +18,7 @@ import {
   formatToolResult,
   formatToolArg,
   shortenToolPath,
+  normalizeToolForDisplay,
 } from '../lib/toolFormat';
 
 // Remembers each tool card's expand/collapse state across remounts, keyed by a
@@ -83,9 +84,10 @@ export function ShellCommandBlock({ text }: { text: string }) {
 export const ToolCard = memo(function ToolCard({ tool, toolId, running }: { tool: any; toolId: string; running?: boolean }) {
   const { t } = useTranslation('chat');
   const [open, setOpen] = useState(() => toolCardOpenState.get(toolId) ?? false);
-  const toolName = String(tool?.name || '').trim();
+  const normalizedTool = normalizeToolForDisplay(tool);
+  const effectiveTool = normalizedTool || tool;
+  const toolName = String(effectiveTool?.name || '').trim();
   const isError = tool?.isError === true;
-  const effectiveTool = tool;
   const input = parseToolInput(effectiveTool);
   const editDiff = toolEditDiff(effectiveTool);
   const hasDiff = !!editDiff && !!(editDiff.old || editDiff.new);

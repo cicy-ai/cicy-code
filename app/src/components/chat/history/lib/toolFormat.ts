@@ -22,6 +22,50 @@ export function tryParseJSONObject(text: string) {
   }
 }
 
+function decodeJSStringLiteral(literal: string): string {
+  const value = String(literal || '').trim();
+  if (value.startsWith('"')) {
+    try { return JSON.parse(value); } catch { return value.slice(1, -1); }
+  }
+  return value.slice(1, -1)
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\([\\'"`])/g, '$1');
+}
+
+function codexWrappedCommands(source: string): string[] {
+  const commands: string[] = [];
+  const pattern = /tools\.exec_command\s*\(\s*\{[\s\S]*?\bcmd\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(source))) {
+    const command = decodeJSStringLiteral(match[1]).trim();
+    if (command) commands.push(command);
+  }
+  return commands;
+}
+
+// Codex exposes orchestration calls as a generic `exec` whose input is
+// JavaScript (`tools.exec_command(...)`). The user cares about the shell command,
+// not that transport wrapper. Pure wait/empty-poll calls carry no user-facing
+// action and are omitted entirely.
+export function normalizeToolForDisplay(tool: any): any | null {
+  const name = String(tool?.name || '').trim().toLowerCase();
+  const raw = String(tool?.arg || '').trim();
+  const parsed = tryParseJSONObject(raw) as Record<string, any> | null;
+  if (name === 'wait') return null;
+  if (name === 'write_stdin' && (!parsed || String(parsed.chars || '') === '')) return null;
+  if (name !== 'exec') return tool;
+  if (/tools\.wait\s*\(/.test(raw)) return null;
+  if (/tools\.write_stdin\s*\(/.test(raw)) {
+    const chars = raw.match(/\bchars\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)/);
+    if (!chars || decodeJSStringLiteral(chars[1]) === '') return null;
+  }
+  const commands = codexWrappedCommands(raw);
+  if (!commands.length) return tool;
+  return { ...tool, name: 'exec_command', arg: JSON.stringify({ command: commands.join('\n\n') }) };
+}
+
 export function humanizeToolPayload(value: any, depth = 0): string {
   if (value == null) return '';
   if (typeof value === 'string') return shortenToolPath(value);
@@ -156,6 +200,9 @@ export function formatToolResult(tool: any) {
   }
   const parsed = tryParseJSONObject(raw);
   if (parsed != null) {
+    if (name === 'exec_command' && parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'output' in parsed) {
+      return shortenToolPath(String((parsed as any).output || '').trim());
+    }
     const pretty = humanizeToolPayload(parsed);
     if (pretty) return pretty;
   }
@@ -171,13 +218,9 @@ export function formatToolResult(tool: any) {
       }
       return shortenToolPath(suffix);
     }
-    if (/Process exited with code 0\b/.test(raw)) {
-      return exitNoOutputNote(raw);
-    }
+    if (/Process exited with code 0\b/.test(raw)) return '';
   }
-  if (name === 'exec_command' && /Process exited with code 0\b/.test(raw)) {
-    return exitNoOutputNote(raw);
-  }
+  if (name === 'exec_command' && /Process exited with code 0\b/.test(raw)) return '';
   return shortenToolPath(raw);
 }
 

@@ -10,7 +10,7 @@ import type { HistoryTurn } from './types';
 import { OPTIMISTIC_Q_KEY } from './constants';
 import { OpenUrlContext, QAlignContext } from './contexts';
 import { isActiveAssistantStatus } from './lib/misc';
-import { buildToolCardId } from './lib/toolFormat';
+import { buildToolCardId, normalizeToolForDisplay } from './lib/toolFormat';
 import { MarkdownBlock, LinkConfirmModal } from './shared/Markdown';
 import { CollapsibleQ, UserTurnAvatar } from './shared/CollapsibleQ';
 import { ToolCard } from './shared/ToolCard';
@@ -253,7 +253,9 @@ export function HistoryList(props: HistoryListProps) {
           if (step?.type === 'thinking') return <div key={i}><LiveStreamStep kind="thinking" text={step.text} smooth={liveStreaming && i === liveTurnSteps.length - 1} onGrow={pinBottomIfSticking} /></div>;
           if (step?.type === 'text') return <div key={i}><LiveStreamStep kind="text" text={step.text} smooth={liveStreaming && i === liveTurnSteps.length - 1} onGrow={pinBottomIfSticking} /></div>;
           if (step?.type === 'tool' && !hideTools && Array.isArray(step?.tools) && step.tools.length > 0) {
-            return <div key={i} data-id={`current-history-live-turn-step-tools-${i}`} className="my-2 space-y-1.5">{step.tools.map((tool: any, toolIndex: number) => {
+            const visibleTools = step.tools.map(normalizeToolForDisplay).filter(Boolean);
+            if (!visibleTools.length) return null;
+            return <div key={i} data-id={`current-history-live-turn-step-tools-${i}`} className="my-2 space-y-1.5">{visibleTools.map((tool: any, toolIndex: number) => {
               const toolId = buildToolCardId(`live-${liveTurn!.history_id}`, i, tool, toolIndex);
               return <ToolCard key={toolId} tool={tool} toolId={toolId} />;
             })}</div>;
