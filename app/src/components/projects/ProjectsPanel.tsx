@@ -148,7 +148,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, terminalOpen, working, teamId, selected, removable, footer, width, height, onSelect, onRemove, onOpenGuidance, onOpenHistory, onToggleTerminal, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, terminalOpen, working, teamId, selected, removable, footer, width, height, onSelect, onRemove, onOpenHistory, onToggleTerminal, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
@@ -164,7 +164,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   height: number;
   onSelect: () => void;
   onRemove: () => void;
-  onOpenGuidance: () => void;
   onOpenHistory: () => void;
   onToggleTerminal: () => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -374,11 +373,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" />
         </div>
       ) : activeBodyTab === 'role' ? (
-        <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mx-5 flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0b0b0d]">
-          <div data-id="project-agent-card-role-toolbar" className="flex h-8 items-center justify-between border-b border-white/[0.06] px-3">
-            <span className="truncate font-mono text-[10px] text-zinc-600">{agent.agentType || 'agent'} · {identity}</span>
-            <button type="button" data-id={`project-agent-card-role-open-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenGuidance(); }} className="rounded px-2 py-1 text-[10px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200">完整编辑</button>
-          </div>
+        <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()} onTouchStart={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()} className="-mx-5 flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0b0b0d] overscroll-contain">
           <Suspense fallback={<div data-id="project-agent-card-role-loading" className="flex h-full items-center justify-center text-[11px] text-zinc-600">Loading…</div>}>
             <AgentDocRoleEditor paneId={agent.paneId} className="min-h-0 flex-1" />
           </Suspense>
@@ -487,7 +482,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   );
 }
 
-export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, dockOpen = false, onOpenAgent, onCreateAgent = () => {}, onOpenGuidance = () => {}, onOpenHistory = () => {} }: {
+export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, dockOpen = false, onOpenAgent, onCreateAgent = () => {}, onOpenGuidance: _onOpenGuidance = () => {}, onOpenHistory = () => {} }: {
   agents: ProjectAgent[];
   statuses?: Record<string, any>;
   topRightControls?: ReactNode;
@@ -1519,7 +1514,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                   </footer>
                 )}
                 onRemove={() => { void removeAgent(agent); }}
-                    onOpenGuidance={() => onOpenGuidance(agent.paneId)}
                     onOpenHistory={() => onOpenHistory(agent.paneId)}
                 onToggleTerminal={() => setTerminalAgentIds((current) => {
                   const next = new Set(current);

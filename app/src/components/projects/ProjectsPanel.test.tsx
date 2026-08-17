@@ -226,16 +226,18 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).not.toBeInTheDocument();
   });
 
-  it('shows the agent role editor in the card body and opens its full editor', async () => {
+  it('shows the agent role editor without a redundant toolbar and isolates its scrolling', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
-    const onOpenGuidance = vi.fn();
-    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} onOpenGuidance={onOpenGuidance} />);
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('tab', { name: '角色' }));
-    expect(document.querySelector('[data-id="project-agent-card-role-body-w-101"]')).toBeInTheDocument();
-    expect(await screen.findByText('完整编辑')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '完整编辑' }));
-    expect(onOpenGuidance).toHaveBeenCalledWith('w-101:main.0');
+    const roleBody = document.querySelector('[data-id="project-agent-card-role-body-w-101"]') as HTMLElement;
+    expect(roleBody).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-role-toolbar"]')).not.toBeInTheDocument();
+    const zoom = document.querySelector('[data-id="project-canvas-zoom-value"]');
+    expect(zoom).toHaveTextContent('100%');
+    fireEvent.wheel(roleBody, { deltaY: 100 });
+    expect(zoom).toHaveTextContent('100%');
   });
 
   it('shows the realtime latest question instead of a stale reply snapshot', async () => {

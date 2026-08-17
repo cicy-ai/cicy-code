@@ -57,6 +57,7 @@ function useTemplateFile(scope: string | null, name: string | null) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [missing, setMissing] = useState(false);
+  const [saveConfirmed, setSaveConfirmed] = useState(false);
 
   const key = scope && name ? `${scope}::${name}` : '';
   const contentRef = useRef('');
@@ -77,6 +78,7 @@ function useTemplateFile(scope: string | null, name: string | null) {
     try {
       await apiService.saveMemoryTemplate(o.scope, o.name, contentRef.current);
       setSaved(contentRef.current);
+      setSaveConfirmed(true);
     } catch (e: any) {
       setError(e?.message || 'save failed');
     } finally {
@@ -93,6 +95,7 @@ function useTemplateFile(scope: string | null, name: string | null) {
       return;
     }
     setLoading(true); setError(''); setMissing(false);
+    setSaveConfirmed(false);
     apiService.getMemoryTemplate(scope, name)
       .then(({ data }: any) => {
         if (cancelled) return;
@@ -121,7 +124,7 @@ function useTemplateFile(scope: string | null, name: string | null) {
 
   useEffect(() => () => { void saveOwner(); }, [saveOwner]);
 
-  return { content, setContent, loading, saving, error, missing, dirty: content !== saved, save: saveOwner };
+  return { content, setContent, loading, saving, error, missing, saveConfirmed, dirty: content !== saved, save: saveOwner };
 }
 
 interface TabDef { key: string; label: string; scope: 'agent' | 'role'; name: string; shared: boolean; }
@@ -194,9 +197,9 @@ export default function AgentDocRoleEditor({ paneId, className }: Props) {
           <span className="flex items-center gap-1 text-[11px] text-zinc-500"><Loader2 className="h-3 w-3 animate-spin" /> {t('adrSaving')}</span>
         ) : file.dirty ? (
           <span className="text-[11px] text-amber-400/80">{t('adrUnsaved')}</span>
-        ) : (
+        ) : file.saveConfirmed ? (
           <span className="flex items-center gap-1 text-[11px] text-emerald-400/70"><Check className="h-3 w-3" /> {t('adrSaved')}</span>
-        )}
+        ) : null}
       </div>
 
       {/* shared-template notice for meta.yaml / system.md */}
