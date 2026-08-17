@@ -855,6 +855,15 @@ export function useCurrentHistory(opts: {
     const viewportRect = el.getBoundingClientRect();
     const loadingRect = loadingSentinel?.getBoundingClientRect();
     const loadingVisible = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
+    // User intent is a hard lock. A React reconciliation can move/replace the
+    // sentinel and make it geometrically visible for one frame; that must never
+    // re-engage following while the user is browsing older history. Only the
+    // native scroll handler above may clear streamDetachedRef after the user
+    // actually scrolls the sentinel back into view.
+    if (streamDetachedRef.current) {
+      streamLoadingVisibleRef.current = false;
+      return;
+    }
     const followLoading = streamLoadingVisibleRef.current || loadingVisible;
     streamLoadingVisibleRef.current = followLoading;
     if (followLoading) el.scrollTop = el.scrollHeight;
@@ -1148,6 +1157,7 @@ export function useCurrentHistory(opts: {
     canLoadMore,
     scrollRef,
     loadMoreRef,
+    streamDetachedRef,
     streamLoadingVisibleRef,
     optimisticBaselineUserIdRef,
   };
