@@ -191,6 +191,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const bodyScrollRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef<HTMLDivElement>(null);
   const loadingVisibleRef = useRef(false);
+  const loadingDetachedRef = useRef(false);
   const status = String(agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
@@ -262,9 +263,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     const marker = loading.getBoundingClientRect();
     const visible = marker.bottom > viewport.top && marker.top < viewport.bottom;
     loadingVisibleRef.current = visible;
-    if (visible && node.scrollHeight - node.scrollTop - node.clientHeight >= 1) {
-      node.scrollTop = node.scrollHeight;
-    }
   }, []);
 
   useEffect(() => {
@@ -282,11 +280,14 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     const content = node?.firstElementChild;
     if (!node || !content || !working) {
       loadingVisibleRef.current = false;
+      loadingDetachedRef.current = false;
       return;
     }
+    loadingDetachedRef.current = false;
     updateLoadingVisibility();
+    if (loadingVisibleRef.current) node.scrollTop = node.scrollHeight;
     const observer = new ResizeObserver(() => {
-      if (loadingVisibleRef.current) node.scrollTop = node.scrollHeight;
+      if (loadingVisibleRef.current && !loadingDetachedRef.current) node.scrollTop = node.scrollHeight;
       updateLoadingVisibility();
     });
     observer.observe(content);
@@ -435,7 +436,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         ref={bodyScrollRef}
         data-id="project-agent-card-live-body"
         onPointerDown={(event) => event.stopPropagation()}
-        onWheel={(event) => event.stopPropagation()}
+        onWheel={(event) => { event.stopPropagation(); if (event.deltaY < 0) loadingDetachedRef.current = true; }}
         onScroll={() => { updateScrollToBottomButton(); updateLoadingVisibility(); }}
         className="min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
       >
@@ -492,7 +493,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </div>
       </div>
       {showScrollToBottom ? (
-        <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-2 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur hover:bg-[#292a30] hover:text-white">
+        <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); loadingDetachedRef.current = false; bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-2 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur hover:bg-[#292a30] hover:text-white">
           <ArrowDown className="h-3.5 w-3.5" />
         </button>
       ) : null}

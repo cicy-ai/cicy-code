@@ -64,6 +64,7 @@ export function HistoryList(props: HistoryListProps) {
   const { t } = useTranslation('chat');
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const loadingVisibleRef = useRef(false);
+  const loadingDetachedRef = useRef(false);
   // Content column width: full-bleed when embedded (AgentStack popover), else a
   // centered reading column.
   const listWidthClass = fullWidth ? 'w-full' : 'mx-auto w-full max-w-4xl';
@@ -79,9 +80,6 @@ export function HistoryList(props: HistoryListProps) {
     const marker = loadingMarker.getBoundingClientRect();
     const visible = marker.bottom > viewport.top && marker.top < viewport.bottom;
     loadingVisibleRef.current = visible;
-    if (visible && node.scrollHeight - node.scrollTop - node.clientHeight >= 1) {
-      node.scrollTop = node.scrollHeight;
-    }
   }, [scrollRef]);
 
   useEffect(() => {
@@ -109,16 +107,29 @@ export function HistoryList(props: HistoryListProps) {
     const content = node?.firstElementChild;
     if (!node || !content || !replyPending) {
       loadingVisibleRef.current = false;
+      loadingDetachedRef.current = false;
       return;
     }
+    loadingDetachedRef.current = false;
     updateLoadingVisibility();
+    if (loadingVisibleRef.current) node.scrollTop = node.scrollHeight;
     const observer = new ResizeObserver(() => {
-      if (loadingVisibleRef.current) node.scrollTop = node.scrollHeight;
+      if (loadingVisibleRef.current && !loadingDetachedRef.current) node.scrollTop = node.scrollHeight;
       updateLoadingVisibility();
     });
     observer.observe(content);
     return () => observer.disconnect();
   }, [scrollRef, replyPending, optimisticQ?.text, liveTurn?.history_id, updateLoadingVisibility]);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    const detachOnUp = (event: WheelEvent) => {
+      if (event.deltaY < 0) loadingDetachedRef.current = true;
+    };
+    node.addEventListener('wheel', detachOnUp, { passive: true });
+    return () => node.removeEventListener('wheel', detachOnUp);
+  }, [scrollRef]);
 
   // Memoized on `displayItems`: while a turn streams (only `liveTurn` changes),
   // these element refs stay identical, so React skips re-rendering every
@@ -450,7 +461,7 @@ export function HistoryList(props: HistoryListProps) {
           data-id="current-history-scroll-bottom"
           aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })}
           title={t('scrollToBottom', { defaultValue: '滚动到底部' })}
-          onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
+          onClick={() => { loadingDetachedRef.current = false; scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }}
           className="absolute bottom-3 right-4 z-10 grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur transition hover:bg-[#292a30] hover:text-white"
         >
           <ArrowDown className="h-4 w-4" />
