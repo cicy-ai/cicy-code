@@ -174,11 +174,11 @@ export function OutcomeNoticeCard({
 
 export function PendingThinkingPlaceholder() {
   return (
-    <div data-id="current-history-view-pending-placeholder" className="flex items-center gap-2 py-1 pl-3 pr-0.5 text-sm text-amber-100/65">
+    <div data-id="current-history-view-pending-placeholder" className="flex h-6 items-center py-1 pl-3 pr-0.5">
       <div data-id="current-history-view-pending-placeholder-dots" className="flex items-center gap-1">
-        <span data-id="current-history-view-pending-placeholder-dot-1" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/70 [animation-delay:0ms]" />
-        <span data-id="current-history-view-pending-placeholder-dot-2" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/55 [animation-delay:180ms]" />
-        <span data-id="current-history-view-pending-placeholder-dot-3" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/40 [animation-delay:360ms]" />
+        <span data-id="current-history-view-pending-placeholder-dot-1" className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:0ms]" />
+        <span data-id="current-history-view-pending-placeholder-dot-2" className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:140ms]" />
+        <span data-id="current-history-view-pending-placeholder-dot-3" className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:280ms]" />
       </div>
     </div>
   );
