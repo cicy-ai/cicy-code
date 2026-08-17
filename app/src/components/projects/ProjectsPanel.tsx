@@ -184,6 +184,9 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const busy = /running|working|thinking|streaming/.test(status);
   const identity = teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId);
   const replyItems = Array.isArray(reply?.items) ? reply.items : [];
+  const latestVisibleToolIndex = replyItems.reduce((latestIndex: number, item: any, index: number) => (
+    String(item?.type || '') === 'tool_use' && String(item?.name || '').toLowerCase() !== 'wait' ? index : latestIndex
+  ), -1);
   const latestQuestion = String(latest?.latest_question || '');
   const replyQuestion = String(reply?.question || '');
   const latestUpdatedAt = Date.parse(String(latest?.updated_at || '')) || 0;
@@ -410,7 +413,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             <div key={`text-${index}`} data-id="project-agent-card-latest-response" className="chat-markdown current-history-markdown text-zinc-300"><MarkdownBlock text={previewableMarkdown(String(item.text))} /></div>
           );
           if (type === 'tool_use') {
-            if (String(item?.name || '').toLowerCase() === 'wait') return null;
+            if (index !== latestVisibleToolIndex) return null;
             const input = item?.input == null ? '' : typeof item.input === 'string' ? item.input : JSON.stringify(item.input);
             const output = item?.output == null ? '' : typeof item.output === 'string' ? item.output : JSON.stringify(item.output);
             const commands = String(item?.name || '') === 'exec' ? codexExecCommands(input) : [];

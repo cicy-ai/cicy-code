@@ -261,6 +261,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
         question: '检查输出\n\n[image.png](/home/cicy/cicy-ai/assets/2026/08/15/example.png)',
         items: [
           { type: 'text', text: '**结论**\n\n- 第一项\n- 第二项' },
+          { type: 'tool_use', name: 'read', input: '{"path":"/tmp/old.txt"}', output: '旧工具结果' },
           {
             type: 'tool_use',
             name: 'exec',
@@ -287,6 +288,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-question-attachment"]')).not.toHaveTextContent('/home/cicy/cicy-ai/assets/');
     expect(response.querySelectorAll('li')).toHaveLength(2);
     expect(await screen.findByText('exec_command')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-id="project-agent-card-reply-tool"]')).toHaveLength(1);
+    expect(screen.queryByText('read')).not.toBeInTheDocument();
+    expect(screen.queryByText('旧工具结果')).not.toBeInTheDocument();
     expect(screen.queryByText('wait')).not.toBeInTheDocument();
     expect(screen.queryByText(/cell_id/)).not.toBeInTheDocument();
     expect(screen.queryByText(/const r = await tools\.exec_command/)).not.toBeInTheDocument();
