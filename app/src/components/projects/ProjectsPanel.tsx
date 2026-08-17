@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowRight, Atom, Check, FileText, FolderKanban, History, LayoutGrid, Loader2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, Atom, BookOpen, Check, FileText, FolderKanban, History, LayoutGrid, Loader2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -42,6 +42,8 @@ interface AgentProject {
   pane_count: number;
   builtin?: boolean;
   pinned?: boolean;
+  project_template?: string;
+  project_rules?: string;
 }
 
 interface ProjectAgentLayout {
@@ -542,6 +544,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [createName, setCreateName] = useState('');
   const [createDescription, setCreateDescription] = useState('');
   const [createError, setCreateError] = useState('');
+  const [definitionProject, setDefinitionProject] = useState<AgentProject | null>(null);
+  const [definitionRules, setDefinitionRules] = useState('');
+  const [definitionSaving, setDefinitionSaving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [projectMenuId, setProjectMenuId] = useState<string>('');
   const [projectMenuAnchor, setProjectMenuAnchor] = useState<string>('');
@@ -629,6 +634,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           pane_count: Number(group.pane_count || 0),
           builtin: isDefault,
           pinned: Boolean(group.is_pinned),
+          project_template: String(group.project_template || ''),
+          project_rules: String(group.project_rules || ''),
         };
       }));
     } catch (cause: any) {
@@ -910,6 +917,24 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       await load();
     } finally {
       setBusy(false);
+    }
+  };
+
+  const openProjectDefinition = (project: AgentProject) => {
+    setProjectMenuId('');
+    setDefinitionProject(project);
+    setDefinitionRules(String(project.project_rules || ''));
+  };
+
+  const saveProjectDefinition = async () => {
+    if (!definitionProject) return;
+    setDefinitionSaving(true);
+    try {
+      await apiService.updateGroup(definitionProject.api_id, { project_rules: definitionRules });
+      await load(false);
+      setDefinitionProject(null);
+    } finally {
+      setDefinitionSaving(false);
     }
   };
 
@@ -1398,7 +1423,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               >
                 {project.pinned ? <Pin data-id="project-list-item-pinned" className="h-3 w-3 shrink-0 text-amber-400" /> : null}
                 <span data-id="project-list-item-name" className="min-w-0 flex-1 truncate text-[13px] font-medium">{project.name}</span>
-                <div data-id="project-list-item-actions" className="relative w-7 shrink-0">
+                <div data-id="project-list-item-actions" className="relative flex shrink-0 items-center gap-0.5">
+                  <button type="button" data-id={`project-definition-edit-${project.api_id}`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); openProjectDefinition(project); }} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 opacity-0 transition-opacity hover:bg-white/[0.08] hover:text-zinc-200 group-hover:opacity-100 group-focus-within:opacity-100" title={t('projectDefinitionEdit')} aria-label={t('projectDefinitionEdit')}><BookOpen className="h-4 w-4" /></button>
                   <button type="button" data-id="project-more" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setProjectMenuId(String(project.id)); setProjectMenuAnchor(String(project.id)); }} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 opacity-0 transition-opacity hover:bg-white/[0.08] hover:text-zinc-200 group-hover:opacity-100 group-focus-within:opacity-100" title={t('projectMore')}><MoreHorizontal className="h-4 w-4" /></button>
                   {projectMenuId === String(project.id) && projectMenuAnchor === String(project.id) ? (
                     <div data-id="project-more-menu" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} className="absolute right-0 top-8 z-50 min-w-[150px] rounded-xl border border-white/10 bg-[#18191e] p-1 shadow-2xl">
@@ -1791,6 +1817,17 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
               {creating ? t('projectSaving') : t('projectCreateConfirm')}
             </button>
+          </div>
+        </div>
+      </AppModal>
+
+      <AppModal open={Boolean(definitionProject)} title={t('projectDefinitionTitle', { name: definitionProject?.name || '' })} onClose={() => { if (!definitionSaving) setDefinitionProject(null); }} maxWidth="720px">
+        <div data-id="project-definition-modal" className="space-y-4">
+          <p data-id="project-definition-hint" className="text-[12px] leading-5 text-zinc-500">{t('projectDefinitionHint')}</p>
+          <textarea data-id="project-definition-input" value={definitionRules} onChange={(event) => setDefinitionRules(event.target.value)} rows={18} spellCheck={false} className="w-full resize-y rounded-xl border border-white/[0.09] bg-black/20 px-3 py-3 font-mono text-[13px] leading-5 text-zinc-100 outline-none focus:border-zinc-500" />
+          <div data-id="project-definition-actions" className="flex justify-end gap-2 border-t border-white/[0.07] pt-4">
+            <button type="button" data-id="project-definition-cancel" onClick={() => setDefinitionProject(null)} disabled={definitionSaving} className="h-9 rounded-lg px-3.5 text-[12px] text-zinc-400 hover:bg-white/[0.05]">{t('cancel', { ns: 'common' })}</button>
+            <button type="button" data-id="project-definition-save" onClick={() => { void saveProjectDefinition(); }} disabled={definitionSaving} className="h-9 rounded-lg bg-zinc-200 px-4 text-[12px] font-medium text-zinc-900 hover:bg-white disabled:opacity-50">{definitionSaving ? t('projectSaving') : t('projectSave')}</button>
           </div>
         </div>
       </AppModal>

@@ -30,6 +30,9 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			g := M{"id": id, "name": name, "description": desc, "is_default": isDefault == 1, "is_pinned": isPinned == 1, "name_customized": nameCustomized == 1}
+			if slug, rules, e := ensureGroupProjectDefinition(int64(id), name, isDefault == 1); e == nil {
+				g["project_template"], g["project_rules"] = slug, rules
+			}
 			if createdAt.Valid {
 				g["created_at"] = createdAt.String
 			}
@@ -73,7 +76,12 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id, _ := res.LastInsertId()
-		J(w, M{"id": id, "name": name, "description": desc, "is_default": false, "is_pinned": false, "name_customized": true, "pane_ids": []string{}, "pane_count": 0})
+		slug, rules, defErr := ensureGroupProjectDefinition(id, name, false)
+		if defErr != nil {
+			httpErr(w, 500, defErr.Error())
+			return
+		}
+		J(w, M{"id": id, "name": name, "description": desc, "is_default": false, "is_pinned": false, "name_customized": true, "project_template": slug, "project_rules": rules, "pane_ids": []string{}, "pane_count": 0})
 	}
 }
 
@@ -114,6 +122,9 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		g := M{"id": id, "name": name, "description": desc, "is_default": isDefault == 1, "is_pinned": isPinned == 1, "name_customized": nameCustomized == 1}
+		if slug, rules, e := ensureGroupProjectDefinition(int64(id), name, isDefault == 1); e == nil {
+			g["project_template"], g["project_rules"] = slug, rules
+		}
 		if createdAt.Valid {
 			g["created_at"] = createdAt.String
 		}
@@ -157,6 +168,7 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 		readBody(r, &req)
 		var sets []string
 		var vals []interface{}
+		projectRules, hasProjectRules := req["project_rules"].(string)
 		if n, ok := req["name"].(string); ok {
 			sets = append(sets, "name=?", "name_customized=1")
 			vals = append(vals, n)
@@ -173,20 +185,35 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 				vals = append(vals, 0)
 			}
 		}
-		if len(sets) == 0 {
+		if len(sets) == 0 && !hasProjectRules {
 			httpErr(w, 400, "No fields to update")
 			return
 		}
-		sets = append(sets, "updated_at=datetime('now')")
-		vals = append(vals, groupID)
-		res, err := store.Exec("UPDATE agent_groups SET "+strings.Join(sets, ", ")+" WHERE id=?", vals...)
-		if err != nil {
-			httpErr(w, http.StatusInternalServerError, err.Error())
-			return
+		if len(sets) > 0 {
+			sets = append(sets, "updated_at=datetime('now')")
+			vals = append(vals, groupID)
+			res, err := store.Exec("UPDATE agent_groups SET "+strings.Join(sets, ", ")+" WHERE id=?", vals...)
+			if err != nil {
+				httpErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				httpErr(w, http.StatusNotFound, "Group not found")
+				return
+			}
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			httpErr(w, http.StatusNotFound, "Group not found")
-			return
+		if hasProjectRules {
+			var gid int64
+			var currentName string
+			var currentDefault int
+			if err := store.QueryRow("SELECT id, name, COALESCE(is_default,0) FROM agent_groups WHERE id=?", groupID).Scan(&gid, &currentName, &currentDefault); err != nil {
+				httpErr(w, 404, "Group not found")
+				return
+			}
+			if _, err := writeGroupProjectDefinition(gid, currentName, currentDefault == 1, projectRules); err != nil {
+				httpErr(w, 500, err.Error())
+				return
+			}
 		}
 		J(w, M{"success": true, "group_id": groupID, "updated": req})
 	case "DELETE":

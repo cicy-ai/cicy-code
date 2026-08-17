@@ -5,11 +5,46 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+func ensureGroupProjectDefinition(groupID int64, name string, isDefault bool) (string, string, error) {
+	slug := fmt.Sprintf("project-%d", groupID)
+	if isDefault {
+		slug = defaultProjectSlug
+	}
+	path := projectTemplatePath(slug)
+	if path == "" {
+		return "", "", fmt.Errorf("invalid project template path")
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return "", "", err
+		}
+		seed := fmt.Sprintf("## 项目角色\n\n项目：%s\n", strings.TrimSpace(name))
+		if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+			return "", "", err
+		}
+	} else if err != nil {
+		return "", "", err
+	}
+	return slug, loadTemplateFile(path), nil
+}
+
+func writeGroupProjectDefinition(groupID int64, name string, isDefault bool, content string) (string, error) {
+	slug, _, err := ensureGroupProjectDefinition(groupID, name, isDefault)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(projectTemplatePath(slug), []byte(content), 0o644); err != nil {
+		return "", err
+	}
+	return slug, nil
+}
 
 // Project = a first-class, user-created project: name + rules.
 // Stored as ~/cicy-ai/memory/projects/<slug>.md with a YAML frontmatter
@@ -150,4 +185,3 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
 }
-
