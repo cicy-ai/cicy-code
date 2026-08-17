@@ -161,7 +161,7 @@ export const ToolCard = memo(function ToolCard({ tool, toolId, running }: { tool
       {open ? (
         <>
           {showPatchArg ? (
-            <div data-id="current-history-tool-arg" className="border-t border-white/[0.04] overflow-x-auto overflow-y-hidden">
+            <div data-id="current-history-tool-arg" className="max-h-[300px] overflow-auto border-t border-white/[0.04] [scrollbar-width:thin] overscroll-contain">
               <div data-id="current-history-tool-arg-patch" className="min-w-max">
                 {patchArg.split('\n').map((line: string, index: number) => renderPatchLine(line, index))}
               </div>
