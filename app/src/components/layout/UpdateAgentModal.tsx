@@ -30,7 +30,6 @@ export function UpdateAgentModal({ paneId, title, onClose }: {
   const [error, setError] = useState('')
   const [restarting, setRestarting] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
-  const logRef = useRef<HTMLDivElement>(null)
   const lastRegistryRef = useRef('')
 
   const run = useCallback(async (registry: string) => {
@@ -94,11 +93,6 @@ export function UpdateAgentModal({ paneId, title, onClose }: {
   }, [run])
 
   useEffect(() => {
-    const el = logRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [log])
-
-  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && phase !== 'running') onClose()
     }
@@ -155,7 +149,6 @@ export function UpdateAgentModal({ paneId, title, onClose }: {
           />
         </div>
         <div
-          ref={logRef}
           data-id="update-agent-modal-log"
           className="mx-5 mb-3 mt-3 h-48 overflow-y-auto rounded-lg bg-black/50 p-2.5 font-mono text-[11px] leading-relaxed text-zinc-400"
         >

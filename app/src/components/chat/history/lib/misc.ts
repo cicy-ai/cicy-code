@@ -34,16 +34,6 @@ export function liveStepsContentSize(steps: HistoryTurn['steps']): { textLen: nu
   return { textLen, toolCount };
 }
 
-export function scheduleScrollToBottom(el: HTMLDivElement) {
-  const apply = () => {
-    el.scrollTop = el.scrollHeight;
-  };
-  apply();
-  const raf = window.requestAnimationFrame(apply);
-  const timers = [80, 240, 600, 1200, 2000].map((delay) => window.setTimeout(apply, delay));
-  return { raf, timers };
-}
-
 export function isExternalUrl(href: string): boolean {
   return /^(https?:)?\/\//i.test(href) || /^mailto:/i.test(href);
 }

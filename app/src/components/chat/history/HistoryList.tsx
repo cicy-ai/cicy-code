@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowDown } from 'lucide-react';
 import { Spinner } from '../../ui/Spinner';
@@ -52,9 +52,6 @@ export function HistoryList(props: HistoryListProps) {
     canLoadMore,
     scrollRef,
     loadMoreRef,
-    streamDetachedRef,
-    streamReattachIntentRef,
-    streamLoadingVisibleRef,
     optimisticBaselineUserIdRef,
     paneId,
     agentType,
@@ -82,11 +79,10 @@ export function HistoryList(props: HistoryListProps) {
     const observer = new ResizeObserver(update);
     observer.observe(node);
     if (node.firstElementChild) observer.observe(node.firstElementChild);
-    const frame = window.requestAnimationFrame(update);
+    update();
     return () => {
       node.removeEventListener('scroll', update);
       observer.disconnect();
-      window.cancelAnimationFrame(frame);
     };
   }, [scrollRef, loading, displayItems.length, liveTurn?.history_id, optimisticQ?.text]);
 
@@ -226,13 +222,6 @@ export function HistoryList(props: HistoryListProps) {
   // 本轮还在流式输出 → 最后一个 thinking/text 块走平滑生长(useSmoothStreamText)。
   const liveStreaming = liveVisible && isActiveAssistantStatus(String(liveTurn?.status || ''));
   const liveReplyPending = liveVisible && replyPending;
-  // 平滑生长的每个 tick 都发生在 LiveStreamStep 内部 state,父级贴底 effect(依赖
-  // liveTurn)看不到 —— 用这个回调在每次生长后跟一次底(仅当用户本来就贴底)。
-  // useCallback([]):引用恒定,memo 化的 LiveStreamStep 对未生长的块才能命中缓存。
-  const pinBottomIfSticking = useCallback(() => {
-    const el = scrollRef.current;
-    if (el && !streamDetachedRef.current && streamLoadingVisibleRef.current) el.scrollTop = el.scrollHeight;
-  }, [streamDetachedRef, streamLoadingVisibleRef]);
   // live 尾巴的头像同样按"每轮一个":它前面(committed 末尾,跳过 system)已是同轮的
   // assistant item 时不重复,只留空位对齐。
   const liveShowAvatar = (() => {
@@ -254,8 +243,8 @@ export function HistoryList(props: HistoryListProps) {
           {/* live 尾巴 = 最新一轮回复(其后还没有新 q)→ thinking 全程展开,不折叠。
               折叠的触发是「出现新 q、本轮迁入 committed」,而不是「流式刚结束」——届时它
               改走 committed 渲染(ThinkingBlock 默认 live=false)自动塌成小标。 */}
-          if (step?.type === 'thinking') return <div key={i}><LiveStreamStep kind="thinking" text={step.text} smooth={liveStreaming && i === liveTurnSteps.length - 1} onGrow={pinBottomIfSticking} /></div>;
-          if (step?.type === 'text') return <div key={i}><LiveStreamStep kind="text" text={step.text} smooth={liveStreaming && i === liveTurnSteps.length - 1} onGrow={pinBottomIfSticking} /></div>;
+          if (step?.type === 'thinking') return <div key={i}><LiveStreamStep kind="thinking" text={step.text} smooth={liveStreaming && i === liveTurnSteps.length - 1} /></div>;
+          if (step?.type === 'text') return <div key={i}><LiveStreamStep kind="text" text={step.text} smooth={liveStreaming && i === liveTurnSteps.length - 1} /></div>;
           if (step?.type === 'tool' && !hideTools && Array.isArray(step?.tools) && step.tools.length > 0) {
             const visibleTools = step.tools.map(normalizeToolForDisplay).filter(Boolean);
             if (!visibleTools.length) return null;
@@ -419,25 +408,20 @@ export function HistoryList(props: HistoryListProps) {
           </>}
         </div>
       </div>
+      </>
+      )}
       {showScrollToBottom ? (
         <button
           type="button"
           data-id="current-history-scroll-bottom"
           aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })}
           title={t('scrollToBottom', { defaultValue: '滚动到底部' })}
-          onClick={() => {
-            streamReattachIntentRef.current = true;
-            streamDetachedRef.current = false;
-            streamLoadingVisibleRef.current = true;
-            scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-          }}
+          onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
           className="absolute bottom-3 right-4 z-10 grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur transition hover:bg-[#292a30] hover:text-white"
         >
           <ArrowDown className="h-4 w-4" />
         </button>
       ) : null}
-      </>
-      )}
     </div>
     </OpenUrlContext.Provider>
     </QAlignContext.Provider>

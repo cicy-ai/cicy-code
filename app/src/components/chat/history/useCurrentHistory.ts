@@ -61,26 +61,6 @@ export function useCurrentHistory(opts: {
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);   // sentinel: when it scrolls into view, auto-load earlier
   const loadMoreFnRef = useRef<() => void>(() => {});  // latest loadMore, so the observer never calls a stale closure
-  const didInitialScrollRef = useRef(false);
-  // ChatGPT 式跟随:用户贴在底部时,新内容 / reply 流式增长就自动滚到底;一旦往上滚离开
-  // 底部就放手,不再拽回。没有 spacer、不把问题钉到顶 —— 就是一条普通从下往上长的聊天流。
-  const shouldStickBottomRef = useRef(true);
-  // Strong streaming detach lock. Polling/reconciliation may legitimately set
-  // shouldStickBottomRef while replacing the live tail; it must never override
-  // explicit history browsing. Only seeing the three-dot sentinel again clears it.
-  const streamDetachedRef = useRef(false);
-  // A scroll event alone cannot prove user intent: scrollTop assignments,
-  // browser anchoring and DOM reconciliation all emit scroll events too. Only
-  // explicit input in the direction of the live tail grants permission to
-  // reattach after the user has detached.
-  const streamReattachIntentRef = useRef(false);
-  // The sole authority for streaming follow. It is updated from the actual
-  // three-dot sentinel geometry, never from reply/tool/polling state.
-  const streamLoadingVisibleRef = useRef(false);
-  // 上一次观测到的 scrollTop,用来判方向:用户**向上**滚一下就放手(disengage),
-  // 直到自己滚回底部才重新跟随。靠方向而不是"距底阈值",否则流式期每 700ms 一次的
-  // 强制落底会把人按在底部——小幅上滚还没出阈值就被拽回。
-  const lastScrollTopRef = useRef(0);
   const preserveScrollOffsetRef = useRef(false);
   // 「加载更早」前插时的滚动补偿数据(setItems 前一刻的 scrollTop/scrollHeight)。
   // 补偿必须在 useLayoutEffect(paint 前)同步完成 —— 之前放在 requestAnimationFrame
@@ -127,20 +107,6 @@ export function useCurrentHistory(opts: {
   };
   // items 的最新快照,供轮询 effect 的 onNudge(闭包里的 items 是旧的)读取 baseline。
   const itemsRef = useRef<HistoryTurn[]>([]);
-  const scheduledScrollRafRef = useRef<number | null>(null);
-  const scheduledScrollTimersRef = useRef<number[]>([]);
-
-  const clearScheduledScrolls = () => {
-    if (scheduledScrollRafRef.current != null) {
-      window.cancelAnimationFrame(scheduledScrollRafRef.current);
-      scheduledScrollRafRef.current = null;
-    }
-    for (const timer of scheduledScrollTimersRef.current) {
-      window.clearTimeout(timer);
-    }
-    scheduledScrollTimersRef.current = [];
-  };
-
   const clearLiveTurn = () => {
     liveTurnRef.current = null;
     liveTurnIdRef.current = '';
@@ -222,9 +188,6 @@ export function useCurrentHistory(opts: {
   };
 
   useEffect(() => {
-    shouldStickBottomRef.current = true;
-    streamDetachedRef.current = false;
-    lastScrollTopRef.current = 0;
     preserveScrollOffsetRef.current = false;
     maxLoadedIdRef.current = 0;
     committedReadyRef.current = false;
@@ -234,7 +197,6 @@ export function useCurrentHistory(opts: {
     setConversationId('');
     setModel('');
     clearLiveTurn();
-    clearScheduledScrolls();
     setOptimisticQ(null);
     optimisticBaselineUserIdRef.current = 0;
     replyInFlightRef.current = false;
@@ -244,98 +206,9 @@ export function useCurrentHistory(opts: {
   }, [paneId, open]);
 
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    // During streaming the three-dot sentinel is authoritative: follow only while
-    // it remains inside the viewport. Once the user scrolls it out of view, no
-    // incremental update may yank history back to the bottom. Outside streaming,
-    // retain the small bottom threshold for normal history navigation.
-    const STICK_THRESHOLD_PX = 48;
-    const updateStickBottom = () => {
-      const top = el.scrollTop;
-      const distanceToBottom = el.scrollHeight - top - el.clientHeight;
-      const atBottom = distanceToBottom <= STICK_THRESHOLD_PX;
-      const loadingSentinel = el.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
-      const viewportRect = el.getBoundingClientRect();
-      const loadingRect = loadingSentinel?.getBoundingClientRect();
-      const loadingVisible = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
-      if (loadingSentinel) {
-        if (!loadingVisible) {
-          streamDetachedRef.current = true;
-          streamLoadingVisibleRef.current = false;
-        } else if (!streamDetachedRef.current || streamReattachIntentRef.current) {
-          streamDetachedRef.current = false;
-          streamLoadingVisibleRef.current = true;
-          streamReattachIntentRef.current = false;
-        } else {
-          // The sentinel became visible because layout moved, not because the
-          // user navigated back to it. Preserve the browsing lock.
-          streamLoadingVisibleRef.current = false;
-        }
-      } else {
-        streamLoadingVisibleRef.current = false;
-      }
-      shouldStickBottomRef.current = loadingSentinel
-        ? (!streamDetachedRef.current && streamLoadingVisibleRef.current)
-        : (streamDetachedRef.current ? false : atBottom);
-      if (!shouldStickBottomRef.current) clearScheduledScrolls();
-      lastScrollTopRef.current = top;
-    };
-    updateStickBottom();
-    // 用户意图优先:滚轮/触摸板向上滚一格就立即放手。scroll 事件的方向检测对触摸板
-    // 慢速上滚不可靠(单次事件 <2px 不触发),流式期每次内容变更的强制落底会把人
-    // 反复拽回底部 ——「滚动的时候也在跳」就是这个。wheel/touch 直接表达意图,不丢。
-    const disengage = () => {
-      shouldStickBottomRef.current = false;
-      streamDetachedRef.current = true;
-      streamReattachIntentRef.current = false;
-      streamLoadingVisibleRef.current = false;
-      clearScheduledScrolls();
-    };
-    const onWheel = (e: WheelEvent) => {
-      if (e.deltaY < 0) disengage();
-      else if (e.deltaY > 0) streamReattachIntentRef.current = true;
-    };
-    let touchY = 0;
-    const onTouchStart = (e: TouchEvent) => {
-      touchY = e.touches[0]?.clientY ?? 0;
-      disengage();
-    };
-    const onPointerDown = (e: PointerEvent) => {
-      disengage();
-      // Scrollbar track/thumb events target the scroll container itself. Keep
-      // reattach permission through the drag until the sentinel is reached.
-      if (e.target === el) streamReattachIntentRef.current = true;
-    };
-    const onTouchMove = (e: TouchEvent) => {
-      const y = e.touches[0]?.clientY ?? 0;
-      if (y > touchY + 2) disengage(); // 手指向下拖 = 内容向上滚
-      else if (y < touchY - 2) streamReattachIntentRef.current = true;
-      touchY = y;
-    };
-    el.addEventListener('scroll', updateStickBottom, { passive: true });
-    el.addEventListener('wheel', onWheel, { passive: true });
-    el.addEventListener('touchstart', onTouchStart, { passive: true });
-    el.addEventListener('touchmove', onTouchMove, { passive: true });
-    el.addEventListener('pointerdown', onPointerDown, { passive: true });
-    return () => {
-      el.removeEventListener('scroll', updateStickBottom);
-      el.removeEventListener('wheel', onWheel);
-      el.removeEventListener('touchstart', onTouchStart);
-      el.removeEventListener('touchmove', onTouchMove);
-      el.removeEventListener('pointerdown', onPointerDown);
-    };
-  }, [open, paneId]);
-
-  useEffect(() => {
     if (!open || !paneId) return;
     let cancelled = false;
     const requestSeq = ++requestSeqRef.current;
-    didInitialScrollRef.current = false;
-    shouldStickBottomRef.current = true;
-    streamDetachedRef.current = false;
-    streamReattachIntentRef.current = false;
-    streamLoadingVisibleRef.current = false;
     // 内存快照先上屏(window._cacheHistory):同一 pane 上次打开的整页内容**同步**渲染,
     // 不出 loading 骨架;下面的 fresh 加载照常进行,回来后整体覆盖。快照只填渲染态,不置
     // committedReadyRef —— live tail 的轮询仍等真实窗口落定,避免旧快照和新 live 混拼。
@@ -416,7 +289,7 @@ export function useCurrentHistory(opts: {
         if (cancelled) return;
         // Part 1 done → poll may attach the tail. Do NOT reveal yet: keep the
         // skeleton until Part 2's first poll resolves, so committed + the live
-        // tail paint together (single scroll-to-bottom, no open-time flash).
+        // tail paint together with no open-time flash.
         committedReadyRef.current = true;
         if (firstReplyDoneRef.current) setLoading(false);
       });
@@ -814,9 +687,6 @@ export function useCurrentHistory(opts: {
         optimisticActiveRef.current = true;
         setOptimisticQ({ text: qText, ts: Date.now() });
         setReplyPending(true);
-        // 自己发消息 → 重新贴底跟随(ChatGPT:发送后视图回到底部看自己的问题和回复)。
-        shouldStickBottomRef.current = true;
-        streamDetachedRef.current = false;
       }
       if (timer != null) { window.clearTimeout(timer); timer = null; }
       void poll();
@@ -856,57 +726,18 @@ export function useCurrentHistory(opts: {
     };
   }, [conversationId, open, paneId, model, consumeWsDeltas]);
 
-  useEffect(() => {
-    return () => {
-      clearScheduledScrolls();
-    };
-  }, []);
-
-  // Streaming follow has ONE condition: the three-dot loading sentinel is/was
-  // visible. State reconciliation is not allowed to re-enable it.
-  // - 「加载更早」前插内容:保持用户原滚动位置(loadMore 自己补偿 scrollTop)。
+  // 「加载更早」前插内容时保持用户原滚动位置。
   useLayoutEffect(() => {
     if (!open || loading) return;
     const el = scrollRef.current;
     if (!el) return;
     if (preserveScrollOffsetRef.current) {
       preserveScrollOffsetRef.current = false;
-      didInitialScrollRef.current = true;
       // 前插补偿:paint 前同步把视口钉回原来的内容位置,翻页瞬间画面纹丝不动。
       const saved = preservedScrollMetricsRef.current;
       preservedScrollMetricsRef.current = null;
       if (saved) el.scrollTop = saved.top + Math.max(0, el.scrollHeight - saved.height);
-      return;
     }
-    if (!didInitialScrollRef.current) {
-      // One-time initial positioning only; unlike the old scheduled retries this
-      // cannot yank the user back after they start browsing.
-      el.scrollTop = el.scrollHeight;
-      shouldStickBottomRef.current = true;
-      streamDetachedRef.current = false;
-      const loadingSentinel = el.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
-      const viewportRect = el.getBoundingClientRect();
-      const loadingRect = loadingSentinel?.getBoundingClientRect();
-      streamLoadingVisibleRef.current = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
-      didInitialScrollRef.current = true;
-      return;
-    }
-    const loadingSentinel = el.querySelector<HTMLElement>('[data-id="current-history-stream-loading"]');
-    const viewportRect = el.getBoundingClientRect();
-    const loadingRect = loadingSentinel?.getBoundingClientRect();
-    const loadingVisible = Boolean(loadingRect && loadingRect.bottom > viewportRect.top && loadingRect.top < viewportRect.bottom);
-    // User intent is a hard lock. A React reconciliation can move/replace the
-    // sentinel and make it geometrically visible for one frame; that must never
-    // re-engage following while the user is browsing older history. Only the
-    // native scroll handler above may clear streamDetachedRef after the user
-    // actually scrolls the sentinel back into view.
-    if (streamDetachedRef.current) {
-      streamLoadingVisibleRef.current = false;
-      return;
-    }
-    const followLoading = streamLoadingVisibleRef.current || loadingVisible;
-    streamLoadingVisibleRef.current = followLoading;
-    if (followLoading) el.scrollTop = el.scrollHeight;
   }, [open, loading, items, liveTurn, optimisticQ]);
 
   // Prompts-only is a user navigation action, not permission to jump to bottom.
@@ -1158,14 +989,11 @@ export function useCurrentHistory(opts: {
     return;
   }, [open, promptsOnly, paneId, conversationId, committedMaxId, displayItems]);
 
-  // Re-run the latest cancelled/failed turn. Fire the retry, stick to bottom, and
-  // nudge the live-tail poll so the new reply streams straight in; the spinner
-  // clears once the poll surfaces a fresh turn (or after a short fallback).
+  // Re-run the latest cancelled/failed turn and nudge the live-tail poll; the
+  // spinner clears once the poll surfaces a fresh turn (or after a short fallback).
   const handleOutcomeRetry = (key: string) => {
     if (!paneId || retryingKey) return;
     setRetryingKey(key);
-    shouldStickBottomRef.current = true;
-    streamDetachedRef.current = false;
     Promise.resolve(apiService.retryCicyReply(paneId))
       .catch(() => {})
       .finally(() => {
@@ -1198,9 +1026,6 @@ export function useCurrentHistory(opts: {
     canLoadMore,
     scrollRef,
     loadMoreRef,
-    streamDetachedRef,
-    streamReattachIntentRef,
-    streamLoadingVisibleRef,
     optimisticBaselineUserIdRef,
   };
 }

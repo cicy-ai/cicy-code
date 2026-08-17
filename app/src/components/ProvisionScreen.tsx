@@ -24,7 +24,6 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
   const [elapsed, setElapsed] = useState(0);
   const retryRef = useRef(0);
   const startRef = useRef(Date.now());
-  const logEndRef = useRef<HTMLDivElement>(null);
 
   // Timer
   useEffect(() => {
@@ -32,10 +31,6 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
     return () => clearInterval(t);
   }, []);
 
-  // Auto-scroll logs
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
 
   useEffect(() => {
     const token = TokenManager.getToken();
@@ -143,7 +138,7 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
               <div key={i} data-id={`provision-screen-log-${i}`} className="text-zinc-500 leading-5">{l}</div>
             ))
           )}
-          <div data-id="provision-screen-logs-end" ref={logEndRef} />
+          <div data-id="provision-screen-logs-end" />
         </div>
 
         {error && (

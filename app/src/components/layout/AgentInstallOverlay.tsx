@@ -52,7 +52,6 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
   const [dismissed, setDismissed] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const lastRegistryRef = useRef<string>('') // which source the last attempt used → retry switches
-  const logBoxRef = useRef<HTMLDivElement | null>(null)
 
   // cicy lite agents have no CLI to install — never engage.
   const skip = isCicyLiteAgent(agentType)
@@ -72,12 +71,6 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
   useEffect(() => {
     refreshStatus()
   }, [refreshStatus])
-
-  // Tail the log box to the newest line.
-  useEffect(() => {
-    const el = logBoxRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [log])
 
   // Tear down any in-flight install stream on unmount.
   useEffect(() => () => abortRef.current?.abort(), [])
@@ -251,7 +244,6 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
 
         {log.length > 0 && (
           <div
-            ref={logBoxRef}
             data-id={`agent-install-overlay-log-${paneId}`}
             className="mt-3 h-28 overflow-auto rounded-lg bg-black/60 p-2 font-mono text-[11px] leading-relaxed text-zinc-400"
           >

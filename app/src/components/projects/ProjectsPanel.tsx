@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { ArrowDown, ArrowRight, Atom, Check, FileText, FolderKanban, History, Loader2, Maximize2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
@@ -17,7 +17,6 @@ import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
 import { toolHeadline } from '../chat/history/lib/toolFormat';
 import { isTechnicalTransportFailureText } from '../chat/history/lib/normalizeItem';
 import TerminalView from '../terminal/TerminalView';
-import { resolveCardScrollFollow } from './cardScrollFollow';
 
 const AgentDocRoleEditor = lazy(() => import('../layout/AgentDocRoleEditor'));
 
@@ -190,14 +189,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const localTurnStartRef = useRef({ question: '', startedAt: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
   const bodyScrollRef = useRef<HTMLDivElement>(null);
-  const loadingRef = useRef<HTMLDivElement>(null);
-  const followLoadingRef = useRef(true);
-  // Scroll events also fire for scrollTop writes and browser anchoring. Only
-  // sample sentinel visibility while an actual wheel/pointer scroll is active;
-  // content growth must consume the previously sampled value.
-  const bodyWheelScrollRef = useRef(false);
-  const bodyPointerScrollRef = useRef(false);
-  const initialBottomKeyRef = useRef('');
   const status = String(agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
@@ -227,19 +218,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const visibleQuestionAttachments = uploadedAttachmentsFromQuestion(rawQuestion);
   const replyStatus = String(reply?.status || latest?.status || status).toLowerCase();
   const completed = /completed|complete|done/.test(replyStatus);
-  // Reply containers are sometimes mutated in place by the polling/WS merge,
-  // so object identity is not a reliable growth dependency. Track the rendered
-  // payload size and run the follow write in a layout effect before paint.
-  const bodyStreamSize = replyItems.reduce((total: number, item: any) => {
-    const input = item?.input == null ? '' : (typeof item.input === 'string' ? item.input : JSON.stringify(item.input));
-    const output = item?.output ?? item?.result ?? '';
-    return total
-      + String(item?.thinking || '').length
-      + String(item?.text || '').length
-      + String(input).length
-      + String(typeof output === 'string' ? output : JSON.stringify(output)).length;
-  }, 0);
-  const bodyGrowthKey = `${replyItems.length}:${bodyStreamSize}:${String(latest?.latest_response || '').length}:${working ? 1 : 0}`;
   const serverStartedAt = Date.parse(String(reply?.started_at || latest?.started_at || '')) || 0;
   if (serverStartedAt && rawQuestion) localTurnStartRef.current = { question: rawQuestion, startedAt: serverStartedAt };
   else if (working && rawQuestion && localTurnStartRef.current.question !== rawQuestion) localTurnStartRef.current = { question: rawQuestion, startedAt: Date.now() };
@@ -254,16 +232,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     return () => window.clearInterval(timer);
   }, [working, startedAt]);
 
-  // Keep the latest turn visible when a card opens or receives a new question.
-  useLayoutEffect(() => {
-    const node = bodyScrollRef.current;
-    const key = `${agent.paneId}:${rawQuestion}`;
-    if (!node || !rawQuestion || initialBottomKeyRef.current === key) return;
-    initialBottomKeyRef.current = key;
-    node.scrollTop = node.scrollHeight;
-    followLoadingRef.current = true;
-  }, [agent.paneId, rawQuestion]);
-
   useEffect(() => {
     if (!menuOpen) return;
     const close = (event: MouseEvent) => {
@@ -273,7 +241,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen]);
 
-  const updateBodyScrollButton = useCallback(() => {
+  const updateScrollToBottomButton = useCallback(() => {
     const node = bodyScrollRef.current;
     if (!node) return;
     const overflow = node.scrollHeight > node.clientHeight + 2;
@@ -281,69 +249,15 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     setShowScrollToBottom(overflow && !atBottom);
   }, []);
 
-  const handleBodyScroll = useCallback(() => {
-    const node = bodyScrollRef.current;
-    if (!node) return;
-    const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 8;
-    const userDriven = bodyWheelScrollRef.current || bodyPointerScrollRef.current;
-    if (userDriven && !working) {
-      followLoadingRef.current = atBottom;
-    } else if (userDriven) {
-      const loading = loadingRef.current;
-      const bodyRect = node.getBoundingClientRect();
-      const loadingRect = loading?.getBoundingClientRect();
-      const loadingVisible = Boolean(loadingRect && loadingRect.bottom > bodyRect.top && loadingRect.top < bodyRect.bottom);
-      followLoadingRef.current = resolveCardScrollFollow(followLoadingRef.current, loadingVisible, true);
-    }
-    bodyWheelScrollRef.current = false;
-    updateBodyScrollButton();
-  }, [updateBodyScrollButton, working]);
-
-  const handleBodyWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    bodyWheelScrollRef.current = true;
-    if (event.deltaY < 0) {
-      // Disengage before the browser applies the wheel and before any stream
-      // growth can race its resulting scroll event.
-      followLoadingRef.current = false;
-    }
-  }, []);
-
-  const handleBodyPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    if (event.target === event.currentTarget) {
-      bodyPointerScrollRef.current = true;
-    }
-  }, []);
-
-  useEffect(() => {
-    const release = () => { bodyPointerScrollRef.current = false; };
-    window.addEventListener('pointerup', release);
-    window.addEventListener('pointercancel', release);
-    return () => {
-      window.removeEventListener('pointerup', release);
-      window.removeEventListener('pointercancel', release);
-    };
-  }, []);
-
-  useLayoutEffect(() => {
-    const node = bodyScrollRef.current;
-    if (!node || !working || !followLoadingRef.current) return;
-    node.scrollTop = node.scrollHeight;
-  }, [bodyGrowthKey, working]);
-
   useEffect(() => {
     const node = bodyScrollRef.current;
     if (!node) return;
-    const observer = new ResizeObserver(() => {
-      if (working && followLoadingRef.current) node.scrollTop = node.scrollHeight;
-      updateBodyScrollButton();
-    });
+    const observer = new ResizeObserver(updateScrollToBottomButton);
     observer.observe(node);
     if (node.firstElementChild) observer.observe(node.firstElementChild);
-    const frame = window.requestAnimationFrame(updateBodyScrollButton);
-    return () => { observer.disconnect(); window.cancelAnimationFrame(frame); };
-  }, [reply, latest, updateBodyScrollButton, working]);
+    updateScrollToBottomButton();
+    return () => observer.disconnect();
+  }, [reply, latest, updateScrollToBottomButton]);
 
   const toggleMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -453,7 +367,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         })}
       </div>
       {activeBodyTab === 'terminal' && terminalOpen && agent.ttydSrc ? (
-        <div data-id={`project-agent-card-terminal-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mr-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-lg bg-black pr-4">
+        <div data-id={`project-agent-card-terminal-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mx-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-lg bg-black">
           <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" />
         </div>
       ) : activeBodyTab === 'role' ? (
@@ -486,9 +400,9 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       <div
         ref={bodyScrollRef}
         data-id="project-agent-card-live-body"
-        onPointerDown={handleBodyPointerDown}
-        onWheel={handleBodyWheel}
-        onScroll={handleBodyScroll}
+        onPointerDown={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
+        onScroll={updateScrollToBottomButton}
         className="min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
       >
         <div data-id="project-agent-card-current-turn" className="space-y-3.5">
@@ -535,7 +449,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           </div>
         ) : null}
         {working ? (
-          <div ref={loadingRef} data-id="project-agent-card-stream-loading" className="flex h-5 items-center gap-1 pt-1" aria-label="Loading reply">
+          <div data-id="project-agent-card-stream-loading" className="flex h-5 items-center gap-1 pt-1" aria-label="Loading reply">
             {[0, 1, 2].map((index) => (
               <span key={index} data-id="project-agent-card-stream-loading-dot" className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />
             ))}
@@ -544,7 +458,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </div>
       </div>
       {showScrollToBottom ? (
-        <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); followLoadingRef.current = true; bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-2 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur hover:bg-[#292a30] hover:text-white">
+        <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-2 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur hover:bg-[#292a30] hover:text-white">
           <ArrowDown className="h-3.5 w-3.5" />
         </button>
       ) : null}
