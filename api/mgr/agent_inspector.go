@@ -2521,7 +2521,7 @@ func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
 		// serial SSE produced them — live turn renders this in order so a multi-round
 		// turn shows thinking→tool→tool→thinking→text instead of tools jumping above.
 		"items":                       reply.Items,
-		"started_at":                  strings.TrimSpace(reply.StartedAt),
+		"started_at":                  aiGatewayFirstNonEmpty(strings.TrimSpace(reply.StartedAt), strings.TrimSpace(current.StartedAt)),
 		"updated_at":                  strings.TrimSpace(reply.UpdatedAt),
 		"model":                       aiGatewayFirstNonEmpty(aiGatewayReplyPrimaryModel(reply), strings.TrimSpace(current.Model)),
 		"input_tokens":                reply.InputTokens,
