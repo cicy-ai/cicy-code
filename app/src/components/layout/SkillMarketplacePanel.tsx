@@ -476,6 +476,7 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
 
       {selectedName && (
         <SkillDetailModal
+          key={selectedName}
           name={selectedName}
           paneId={paneId}
           onClose={handleDetailClose}
