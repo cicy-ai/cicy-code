@@ -1609,8 +1609,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCanvasLocateRequest({ paneId: clean, nonce: Date.now(), zoomToActual: true });
   }, [paneId]);
   useEffect(() => {
-    document.title = projectsOpen && activeProjectTitle && !projectAgentSelected
-      ? `${activeProjectTitle} | CiCy Code`
+    document.title = projectsOpen && activeProjectTitle
+      ? projectAgentSelected
+        ? `${topBarTitle} | ${activeProjectTitle} | CiCy Code`
+        : `${activeProjectTitle} | CiCy Code`
       : `${topBarTitle} (${topBarPaneId}) | CiCy Code`;
   }, [activeProjectTitle, projectAgentSelected, projectsOpen, topBarPaneId, topBarTitle]);
   useEffect(() => {
