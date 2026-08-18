@@ -515,7 +515,7 @@ func effectiveAgentOptions() []M {
 const primaryWorkerSession = "w-1001"
 const primaryWorkerPaneID = "w-1001:main.0"
 
-// Helper mode (--helper=1): a single cicy "团队助手" anchored at w-1001 (master).
+// Helper mode (--helper=1): a single standalone cicy "团队助手" at w-1001.
 // It runs headless (no tmux pane — works on Windows), uses a real shell to install
 // Docker + cicy-code, then hands the user off to the full team that runs in the
 // container. Helper mode has no official roster, so w-1001 is free for the helper.
@@ -530,7 +530,6 @@ func helperModeBuiltinWorker() builtinWorker {
 		Title:     "团队助手",
 		// No role template anymore (the 团队助手 template was removed) — uses the
 		// default cicy charter.
-		Master: true,
 	}
 }
 
@@ -540,17 +539,14 @@ type builtinWorker struct {
 	Title         string
 	TitleEn       string // official English title; empty for non-localized workers
 	RoleTemplate  string // role template slug (~/cicy-ai/memory/agents/<slug>.md); "" = none
-	Master        bool   // the w-1001 PM master (role="master"); others are "worker"
-	BindToPrimary bool   // attach under w-1001 by default (shown on the master's team)
 }
 
 // officialRoleRoster is the fixed set of agents an official release preinstalls.
-// The PM master anchors at w-1001; every OTHER official agent counts UP from
+// The knowledge specialist uses w-1001; every OTHER official agent counts UP from
 // w-101 (101,102,…). User-created agents count UP from w-1002 (defaultWorkerIndex
 // =1001 → next id 1002), so the 101.. role band never collides with them.
-// ALL roster agents are created (they live in the DB). Only entries explicitly
-// marked BindToPrimary are attached under w-1001; standalone specialists remain
-// available without appearing on the primary's team by default.
+// ALL roster agents are created standalone in the DB. Setup never binds one
+// agent beneath another; every agent is equal in the global Team Panel.
 //
 // Two flavors:
 //   - cicy lite agents: non-coding roles, each with a role template
@@ -558,14 +554,13 @@ type builtinWorker struct {
 //   - CLI coding agents: claude/codex, gateway-routed
 //     (use_custom_gateway via createBuiltinWorker); no role template.
 func officialRoleRoster() []builtinWorker {
-	// Minimal cicy roster: 知识专员 doubles as the master (team knowledge base +
+	// Minimal cicy roster: 知识专员 owns the team knowledge base and
 	// curation of agents' native Layer-1 auto-memory writes into the canon _inbox).
-	// The coding agents (claude/codex) are kept and bind under the
-	// master. All other cicy roles (项目经理/HR/产品经理/…) are NOT preinstalled.
+	// The coding agents (claude/codex) are kept as standalone agents.
 	roster := []builtinWorker{
-		{Port: 1001, AgentType: "cicy", Title: "知识专员", TitleEn: "Knowledge Specialist", RoleTemplate: "knowledge-specialist", Master: true},
-		{Port: 101, AgentType: "claude", Title: "架构师", TitleEn: "Architect", BindToPrimary: true},
-		{Port: 102, AgentType: "codex", Title: "全栈工程师", TitleEn: "Full-stack Engineer", BindToPrimary: true},
+		{Port: 1001, AgentType: "cicy", Title: "知识专员", TitleEn: "Knowledge Specialist", RoleTemplate: "knowledge-specialist"},
+		{Port: 101, AgentType: "claude", Title: "架构师", TitleEn: "Architect"},
+		{Port: 102, AgentType: "codex", Title: "全栈工程师", TitleEn: "Full-stack Engineer"},
 	}
 	return roster
 }
@@ -582,9 +577,9 @@ func usesOfficialRoster() bool {
 }
 
 // selectedBuiltinWorkers returns the builtin worker layout. Official release
-// (usesOfficialRoster) → the fixed role roster (master w-1001 + roles counting
-// down). Helper mode → a single Team Helper on w-6002. Otherwise (explicit
-// --agents / lab / dev) → per-type, ports counting UP from 1001, master first.
+// (usesOfficialRoster) → the fixed standalone role roster. Helper mode → a
+// single Team Helper. Otherwise (explicit --agents / lab / dev) → standalone
+// per-type agents, ports counting UP from 1001.
 func selectedBuiltinWorkers(selected []string) []builtinWorker {
 	if helperMode {
 		return []builtinWorker{helperModeBuiltinWorker()}
@@ -619,8 +614,6 @@ func selectedBuiltinWorkers(selected []string) []builtinWorker {
 				Port:          1001 + i,
 				AgentType:     agentType,
 				Title:         builtinAgentTitle(agentType),
-				Master:        i == 0,
-				BindToPrimary: i > 0, // per-type (dev): keep attaching all non-master under w-1001
 			})
 		}
 	}
@@ -632,24 +625,14 @@ func selectedBuiltinWorkers(selected []string) []builtinWorker {
 	return workers
 }
 
-// cicyOnlyWorkers keeps just the headless cicy workers, preserving the Master
-// flag: if the master happened to be a (now-dropped) CLI agent, the first
-// surviving cicy worker is promoted so the team still has an anchor at w-1001.
+// cicyOnlyWorkers keeps just the headless cicy workers.
 func cicyOnlyWorkers(in []builtinWorker) []builtinWorker {
 	out := make([]builtinWorker, 0, len(in))
-	hadMaster := false
 	for _, w := range in {
 		if normalizeAgentType(w.AgentType) != "cicy" {
 			continue
 		}
-		if w.Master {
-			hadMaster = true
-		}
 		out = append(out, w)
-	}
-	if !hadMaster && len(out) > 0 {
-		out[0].Master = true
-		out[0].BindToPrimary = false
 	}
 	return out
 }
@@ -863,25 +846,6 @@ func builtinWorkerSession(port int) string {
 func ensurePrimaryWorkerForBindings(selected []string) {
 }
 
-// ensureWorkerBoundToPrimary inserts a pane_agents row attaching workerSession
-// under primaryWorkerSession (w-1001). Idempotent thanks to the
-// UNIQUE(pane_id, agent_name) constraint. No-op when workerSession is the
-// primary itself.
-func ensureWorkerBoundToPrimary(workerSession string) {
-	workerSession = shortPaneID(strings.TrimSpace(workerSession))
-	if workerSession == "" || workerSession == primaryWorkerSession {
-		return
-	}
-	res, err := bindAgentCore(primaryWorkerSession, workerSession, true, "")
-	if err != nil {
-		log.Printf("[startup] failed to bind %s under %s: %v", workerSession, primaryWorkerSession, err)
-		return
-	}
-	if !res.AlreadyBound {
-		log.Printf("[startup] bound %s under %s", workerSession, primaryWorkerSession)
-	}
-}
-
 func createSelectedWorkers(selected []string) {
 	fmt.Println("\n🚀 创建选中的 Workers...")
 	workers := selectedBuiltinWorkers(selected)
@@ -903,13 +867,6 @@ func createSelectedWorkers(selected []string) {
 			fmt.Printf("  ⏭ %s - 已存在，已更新\n", w.Title)
 		} else {
 			createBuiltinWorker(w)
-		}
-		// Only agents flagged BindToPrimary attach under w-1001 by default (HR +
-		// Token优化 + 架构师/全栈/UI设计师 for the official roster). The rest are
-		// created standalone; the user brings them onto the team on demand (HR
-		// helps). Master never binds.
-		if w.BindToPrimary && !w.Master {
-			ensureWorkerBoundToPrimary(builtinWorkerSession(w.Port))
 		}
 	}
 	if len(workers) > 0 {
@@ -934,9 +891,6 @@ func ensureMissingRosterMembers(selected []string) {
 		}
 		log.Printf("[startup] top-up missing preinstalled agent: %s (%s)", w.Title, paneID)
 		createBuiltinWorker(w)
-		if w.BindToPrimary && !w.Master {
-			ensureWorkerBoundToPrimary(builtinWorkerSession(w.Port))
-		}
 	}
 }
 
@@ -985,14 +939,10 @@ func createBuiltinWorker(w builtinWorker) {
 	// the helper without the user having configured a gateway/token yet. Non-helper
 	// builtins use our gateway as normal.
 	useCustomGateway := !helperMode
-	role := "worker"
-	if w.Master {
-		role = "master"
-	}
 	if _, err := createManagedPane(paneCreateOpts{
 		session:          session,
 		title:            w.Title,
-		role:             role,
+		role:             "worker",
 		defaultModel:     "",
 		agentType:        w.AgentType,
 		workspace:        builtinWorkerWorkspace(session),
@@ -1003,9 +953,6 @@ func createBuiltinWorker(w builtinWorker) {
 		useCustomGateway: useCustomGateway,
 		useProxy:         false,
 		roleTemplate:     w.RoleTemplate,
-		// Only BindToPrimary members (HR + Token优化) attach under w-1001; the rest
-		// are created standalone (in the DB, off the master's team) until added.
-		skipPrimaryBind: !w.BindToPrimary,
 		// Roster builtins are created config-only (no pane). cicy members run
 		// headless (warmCicySessions) — including the helper-mode 团队助手, which
 		// must stay headless so it works on Windows without tmux. Non-cicy members

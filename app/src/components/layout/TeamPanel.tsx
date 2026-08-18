@@ -302,7 +302,6 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   const createAndBind = async (values: CreateAgentValues) => {
     setCreating(true);
     try {
-      // master_pane_id 让后端 create 时直接完成绑定 + 写入 master 引用到子 agent 的 CLAUDE.md/AGENTS.md。
       const { data } = await apiService.createPane({
         role: 'worker',
         title: values.title,
@@ -310,7 +309,6 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         allow_all_actions: values.allow_all_actions,
         use_custom_gateway: values.use_custom_gateway,
         use_proxy: values.use_proxy,
-        master_pane_id: paneId,
         inherit_guidance: values.inherit_guidance,
         project_template: values.project_template,
         role_template: values.role_template,

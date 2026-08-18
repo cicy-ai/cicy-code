@@ -92,10 +92,6 @@ type paneCreateOpts struct {
 	roleTemplate     string
 	lang             string // UI language at creation (selects EN/ZH role persona + greeting)
 	apiStyle         string // immutable provider protocol for cicy agents
-	// skipPrimaryBind suppresses the default "bind under w-1001" when no master is
-	// named — used by official-roster members that are created standalone (in the
-	// DB, but not on the master's team until the user/HR adds them).
-	skipPrimaryBind bool
 	// configOnly creates the agent_config row (+ optional bind) WITHOUT launching a
 	// tmux pane or booting the agent. Used for roster builtins: cicy members run
 	// headless (warmed server-side), non-cicy members are launched only when bound
@@ -953,12 +949,6 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 			log.Printf("[create] auto-bind sub=%s under master=%s failed: %v",
 				opts.session, opts.masterPaneID, err)
 		}
-	} else if !opts.skipPrimaryBind {
-		// The master console discovers agents through pane_agents — an unbound
-		// worker is invisible there. When the caller names no master, default
-		// the new worker under the primary (w-1001); no-op for the primary
-		// itself. skipPrimaryBind opts out (standalone roster members).
-		ensureWorkerBoundToPrimary(opts.session)
 	}
 	// ttyd is served on demand inline (no per-pane port/server); nothing to
 	// start or wait for here.
