@@ -1997,8 +1997,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       </AppModal>
 
       <AppModal open={addOpen} title={t('projectAddAgentTitle', { name: selectedProject.name })} onClose={() => setAddOpen(false)} maxWidth="620px">
-        <div data-id="project-add-agent-modal" className="space-y-2">
-          <label data-id="project-add-agent-search-wrap" className="mb-3 flex h-9 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 focus-within:border-sky-500/40">
+        <div data-id="project-add-agent-modal" className="flex h-[620px] max-h-[calc(82vh-88px)] min-h-0 flex-col">
+          <label data-id="project-add-agent-search-wrap" className="mb-3 flex h-9 shrink-0 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 focus-within:border-sky-500/40">
             <Search className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
             <input
               data-id="project-add-agent-search"
@@ -2009,7 +2009,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               autoFocus
             />
           </label>
-          <div data-id="project-add-agent-results" className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+          <div data-id="project-add-agent-results" className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
           {filteredAvailableAgents.length ? filteredAvailableAgents.map((agent) => {
             const checked = selectedToAdd.has(agent.paneId);
             return (
@@ -2031,8 +2031,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             );
           }) : <div data-id="project-add-agent-empty" className="py-10 text-center text-sm text-zinc-600">{t('projectNoAvailableAgents')}</div>}
           </div>
-          {addError ? <p data-id="project-add-agent-error" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{addError}</p> : null}
-          <div data-id="project-add-agent-actions" className="flex justify-end gap-2 pt-4">
+          {addError ? <p data-id="project-add-agent-error" className="mt-2 shrink-0 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{addError}</p> : null}
+          <div data-id="project-add-agent-actions" className="flex shrink-0 justify-end gap-2 pt-4">
             <button type="button" data-id="project-add-agent-cancel" onClick={() => setAddOpen(false)} className="h-8 rounded-lg px-3 text-[12px] text-zinc-400 hover:bg-white/[0.05]">{t('cancel', { ns: 'common' })}</button>
             <button type="button" data-id="project-add-agent-confirm" onClick={() => { void addSelectedAgents(); }} disabled={selectedToAdd.size === 0 || busy} className="h-8 rounded-lg bg-blue-500 px-3 text-[12px] font-medium text-white hover:bg-blue-400 disabled:opacity-40">{busy ? t('projectSaving') : t('projectAddSelected', { count: selectedToAdd.size })}</button>
           </div>
