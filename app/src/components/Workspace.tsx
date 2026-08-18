@@ -346,6 +346,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(() => /^#\/project\/[^/?#]+/.test(window.location.hash) || cache.get(projectsOpenKey(paneId), false) === true);
+  const [activeProjectTitle, setActiveProjectTitle] = useState('');
   const [portsOpen, setPortsOpen] = useState(false);
   const [fixedDomain, setFixedDomain] = useState('');
   const [proxyAvailable, setProxyAvailable] = useState(false);
@@ -1607,8 +1608,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCanvasLocateRequest({ paneId: clean, nonce: Date.now(), zoomToActual: true });
   }, [paneId]);
   useEffect(() => {
-    document.title = `${topBarTitle} (${topBarPaneId}) | CiCy Code`;
-  }, [topBarPaneId, topBarTitle]);
+    document.title = projectsOpen && activeProjectTitle
+      ? `${activeProjectTitle} | CiCy Code`
+      : `${topBarTitle} (${topBarPaneId}) | CiCy Code`;
+  }, [activeProjectTitle, projectsOpen, topBarPaneId, topBarTitle]);
   useEffect(() => {
     if (!token) return;
   }, [token]);
@@ -2064,6 +2067,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       isApiOnly,
     };
   }).filter((agent) => agent.paneId), [agents, paneDetails, pollStatuses, token, currentLang]);
+  const handleActiveProjectChange = useCallback((project: { name: string }) => {
+    setActiveProjectTitle(project.name);
+  }, []);
   const handleStackOpenSession = useCallback((targetPaneId: string) => {
     openPaneRequestView(targetPaneId, lastSessionSubTab);
   }, [openPaneRequestView, lastSessionSubTab]);
@@ -2202,6 +2208,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <ProjectsPanel
                 agents={projectAgents}
                 statuses={pollStatuses}
+                onActiveProjectChange={handleActiveProjectChange}
                 topRightControls={!cliContentOpen ? (
                   <CardMoreMenu
                     paneId={activeCliPaneId}

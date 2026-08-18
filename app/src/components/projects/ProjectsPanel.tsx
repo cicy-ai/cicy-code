@@ -537,7 +537,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   );
 }
 
-export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, dockOpen = false, onOpenAgent, onCreateAgent = () => {}, onOpenGuidance: _onOpenGuidance = () => {}, onOpenHistory = () => {} }: {
+export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, dockOpen = false, onOpenAgent, onCreateAgent = () => {}, onOpenGuidance: _onOpenGuidance = () => {}, onOpenHistory = () => {}, onActiveProjectChange = () => {} }: {
   agents: ProjectAgent[];
   statuses?: Record<string, any>;
   topRightControls?: ReactNode;
@@ -548,6 +548,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   onCreateAgent?: (projectTemplate: string) => void;
   onOpenGuidance?: (paneId: string) => void;
   onOpenHistory?: (paneId: string) => void;
+  onActiveProjectChange?: (project: { id: number | string; name: string }) => void;
 }) {
   const { t } = useTranslation('workspace');
   const { confirm, prompt, node: dialogsNode } = useDialogs();
@@ -708,6 +709,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     pane_count: 0,
     builtin: true,
   };
+  useEffect(() => {
+    onActiveProjectChange({ id: selectedProject.id, name: selectedProject.name });
+  }, [onActiveProjectChange, selectedProject.id, selectedProject.name]);
   const memberIds = useMemo(() => new Set(selectedProject.pane_ids.map(shortPaneId)), [selectedProject.pane_ids]);
   const visibleAgents = agents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
   const assignedAgentIds = useMemo(() => new Set(groups.flatMap((group) => group.pane_ids.map(shortPaneId))), [groups]);
