@@ -337,6 +337,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [createAgentSubmitting, setCreateAgentSubmitting] = useState(false);
   const [createAgentInitialValues, setCreateAgentInitialValues] = useState<Partial<CreateAgentValues> | undefined>();
   const [createAgentProjectLocked, setCreateAgentProjectLocked] = useState(false);
+  const [createAgentRoleLocked, setCreateAgentRoleLocked] = useState(false);
+  const createAgentOnCreatedRef = useRef<((paneId: string) => void) | null>(null);
   useEffect(() => {
     const requestCreateAgent = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
@@ -346,6 +348,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         role_template: String(detail.roleTemplate || '').trim() || 'assistant',
       });
       setCreateAgentProjectLocked(false);
+      setCreateAgentRoleLocked(detail.roleTemplateLocked === true);
+      createAgentOnCreatedRef.current = typeof detail.onCreated === 'function' ? detail.onCreated : null;
       setCreateAgentOpen(true);
     };
     window.addEventListener('cicy:request-create-agent', requestCreateAgent as EventListener);
@@ -546,6 +550,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         setCreateAgentOpen(false);
         setCreateAgentInitialValues(undefined);
         setCreateAgentProjectLocked(false);
+        setCreateAgentRoleLocked(false);
+        createAgentOnCreatedRef.current?.(String(id).includes(':') ? String(id) : `${id}:main.0`);
+        createAgentOnCreatedRef.current = null;
       }
     } catch {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastCreateWorkerFailed') }));
@@ -2584,12 +2591,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <CreateAgentDialog
         open={createAgentOpen}
         submitting={createAgentSubmitting}
-        onClose={() => { if (!createAgentSubmitting) { setCreateAgentOpen(false); setCreateAgentInitialValues(undefined); setCreateAgentProjectLocked(false); } }}
+        onClose={() => { if (!createAgentSubmitting) { setCreateAgentOpen(false); setCreateAgentInitialValues(undefined); setCreateAgentProjectLocked(false); setCreateAgentRoleLocked(false); createAgentOnCreatedRef.current = null; } }}
         onSubmit={submitCreateAgent}
         title={t('drawerCreateTitle')}
         submitLabel={t('drawerCreateSubmit')}
         initialValues={createAgentInitialValues}
         projectTemplateLocked={createAgentProjectLocked}
+        roleTemplateLocked={createAgentRoleLocked}
       />
       <WeChatBindModal />
       <SettingsModal
@@ -2614,6 +2622,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           agentId={nativeFilesAgentId}
           workspaceFolder={nativeFilesWorkspace}
           pageClientId={pageClientId}
+          agents={agents.map((agent) => {
+            const paneId = String(agent?.pane_id || agent?.paneId || agent?.id || '').replace(/:main\.0$/, '');
+            return {
+              paneId: `${paneId}:main.0`,
+              title: String(agent?.title || agent?.name || paneId),
+              roleTemplate: String(agent?.role_template || paneDetails[paneId]?.role_template || ''),
+            };
+          }).filter((agent) => agent.paneId !== ':main.0')}
           pendingCount={knowledgePendingCount}
         />
       </Suspense>

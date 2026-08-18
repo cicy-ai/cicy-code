@@ -3,7 +3,7 @@
 
 import { lazy, Suspense, useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, Check, Eye, EyeOff, Loader2, MessageCircle, Minus, Settings, X } from 'lucide-react';
+import { BookOpen, Check, Eye, EyeOff, Loader2, MessageCircle, Minus, Plus, Settings, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import FilesView from '../files/FilesView';
 import DispatcherChat from '../chat/DispatcherChat';
@@ -18,6 +18,7 @@ interface KnowledgePanelProps {
   agentId: string;
   workspaceFolder: string;
   pageClientId?: string;
+  agents?: Array<{ paneId: string; title: string; roleTemplate: string }>;
   pendingCount?: number;
 }
 
@@ -27,7 +28,7 @@ interface KnowledgePanelProps {
 //   right  knowledge graph
 // FilesView already owns the explorer/editor split, so this reuses the real
 // editor instead of creating a second file-selection or save path.
-export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder, pageClientId, pendingCount = 0 }: KnowledgePanelProps) {
+export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder, pageClientId, agents = [], pendingCount = 0 }: KnowledgePanelProps) {
   const { t } = useTranslation('workspace');
   const [openRequest, setOpenRequest] = useState<{ path: string; root: string; nonce: number } | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
@@ -36,6 +37,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
   const [configError, setConfigError] = useState('');
   const [configSaved, setConfigSaved] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatPane, setChatPane] = useState('w-1001:main.0');
   const [chatFrame, setChatFrame] = useState(() => {
     const fallback = { right: 16, bottom: 16, width: 440, height: 640 };
     try {
@@ -70,6 +72,9 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
   useEffect(() => {
     if (!open) return;
     setOpenRequest({ path: 'README.md', root: 'knowledge', nonce: Date.now() });
+    apiService.getKnowledgeSpecialist()
+      .then(({ data }) => setChatPane(String(data?.pane || data?.default || 'w-1001:main.0')))
+      .catch(() => setChatPane('w-1001:main.0'));
   }, [open]);
 
   useEffect(() => {
@@ -177,6 +182,31 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
     document.addEventListener('pointerup', onUp);
   };
 
+  const knowledgeAgents = agents.filter((item) => item.roleTemplate === 'knowledge-specialist');
+  const selectedKnowledgeAgent = knowledgeAgents.find((item) => item.paneId === chatPane);
+  const switchKnowledgeAgent = async (paneId: string) => {
+    const previous = chatPane;
+    setChatPane(paneId);
+    try {
+      const { data } = await apiService.setKnowledgeSpecialist(paneId);
+      setChatPane(String(data?.pane || paneId));
+    } catch (error: any) {
+      setChatPane(previous);
+      setConfigError(error?.response?.data?.error || error?.message || '切换知识专员失败');
+    }
+  };
+
+  const createKnowledgeAgent = () => {
+    window.dispatchEvent(new CustomEvent('cicy:request-create-agent', {
+      detail: {
+        title: '知识专员',
+        roleTemplate: 'knowledge-specialist',
+        roleTemplateLocked: true,
+        onCreated: (paneId: string) => { void switchKnowledgeAgent(paneId); },
+      },
+    }));
+  };
+
   if (!open) return null;
 
   return createPortal(
@@ -232,15 +262,22 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
           <header data-id="knowledge-agent-chat-drag-handle" onPointerDown={(event) => startChatFramePointer('move', event)} className="flex h-11 shrink-0 cursor-move select-none items-center gap-2 border-b border-white/[0.07] px-3">
             <MessageCircle className="h-4 w-4 text-sky-400" />
             <div className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-xs font-semibold text-zinc-100">
-              <span className="truncate">知识专员 · w-1001 · 待治理</span>
+              <select data-id="knowledge-agent-chat-select" value={chatPane} onChange={(event) => { void switchKnowledgeAgent(event.target.value); }} onPointerDown={(event) => event.stopPropagation()} className="min-w-0 max-w-[190px] cursor-pointer truncate rounded-md border border-white/[0.08] bg-white/[0.04] px-1.5 py-1 text-xs text-zinc-100 outline-none hover:bg-white/[0.08]">
+                {!selectedKnowledgeAgent ? <option value={chatPane}>{chatPane.replace(/:main\.0$/, '')}</option> : null}
+                {knowledgeAgents.map((item) => <option key={item.paneId} value={item.paneId}>{item.title} · {item.paneId.replace(/:main\.0$/, '')}</option>)}
+              </select>
+              <span className="shrink-0 text-zinc-400">待治理</span>
               <span data-id="knowledge-agent-chat-pending-count" className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-[0_0_10px_rgba(239,68,68,0.55)]">{pendingCount}</span>
             </div>
+            <button type="button" data-id="knowledge-agent-chat-create" onClick={createKnowledgeAgent} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sky-400 hover:bg-sky-500/15 hover:text-sky-200" title="创建知识专员" aria-label="创建知识专员">
+              <Plus className="h-4 w-4" />
+            </button>
             <button type="button" data-id="knowledge-agent-chat-minimize" onClick={() => setChatOpen(false)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200" title="最小化" aria-label="最小化知识专员聊天">
               <Minus className="h-4 w-4" />
             </button>
           </header>
           <div className="min-h-0 flex-1 bg-black">
-            <DispatcherChat paneId="w-1001:main.0" active agentType="cicy" title="知识专员" />
+            <DispatcherChat key={chatPane} paneId={chatPane} active agentType="cicy" title={selectedKnowledgeAgent?.title || '知识专员'} />
           </div>
           <div data-id="knowledge-agent-chat-resize-handle" onPointerDown={(event) => startChatFramePointer('resize', event)} className="absolute bottom-0 right-0 z-20 h-4 w-4 cursor-se-resize border-b-2 border-r-2 border-sky-400/60" />
         </section>

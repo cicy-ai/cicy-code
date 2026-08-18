@@ -45,6 +45,7 @@ interface Props {
   masterAgentType?: string;
   initialValues?: Partial<CreateAgentValues>;
   projectTemplateLocked?: boolean;
+  roleTemplateLocked?: boolean;
 }
 
 const DEFAULT_VALUES: CreateAgentValues = {
@@ -72,6 +73,7 @@ export default function CreateAgentDialog({
   agentTypeGridClassName = 'grid grid-cols-1 gap-2 sm:grid-cols-2',
   initialValues,
   projectTemplateLocked = false,
+  roleTemplateLocked = false,
 }: Props) {
   const { t, i18n } = useTranslation('createAgent');
   const { t: ts } = useTranslation('settings');
@@ -236,6 +238,7 @@ export default function CreateAgentDialog({
                 value={values.role_template}
                 onChange={(v) => set({ role_template: v })}
                 options={roleTemplates.map((slug) => ({ value: slug, label: slug }))}
+                disabled={roleTemplateLocked}
               />
             </div>
             <div data-id="create-agent-dialog-lang-field">
