@@ -469,6 +469,9 @@ const api = {
   listKnowledge: (params?: { status?: string; tag?: string; q?: string; domain?: string; view?: string }) =>
     http.get('/api/knowledge', { params: params || {} }),
   getKnowledge: (id: string) => http.get(`/api/knowledge/${encodeURIComponent(id)}`),
+  getKnowledgeConfig: () => http.get('/api/knowledge/config'),
+  saveKnowledgeConfig: (body: { pane: string; origin: string; token?: string; clear_token?: boolean }) =>
+    http.post('/api/knowledge/config', body),
   addTodo: (paneId: string, title: string, creatorId?: string) => {
     const pid = shortPaneRouteId(paneId);
     if (!pid) return Promise.reject(new Error('paneId required for addTodo'));

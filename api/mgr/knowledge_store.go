@@ -97,6 +97,7 @@ func knowledgeDocsDir() string    { return filepath.Join(knowledgeRootDir(), "do
 // knowledgeEnsureRoot creates the store skeleton so writes succeed and the fs
 // root shows up in the FileExplorer even before the first entry.
 func knowledgeEnsureRoot() error {
+	loadKnowledgeGitTokenEnv()
 	for _, d := range []string{knowledgeRootDir(), knowledgeInboxDir(), knowledgeArchiveDir(), knowledgeDraftsDir(), knowledgeDocsDir()} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err

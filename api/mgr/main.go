@@ -390,6 +390,7 @@ Options:
 	http.HandleFunc("/api/agent/messages", authM(handleAgentMessages))             // cross-agent message link view (JOIN history_turns)
 	http.HandleFunc("/api/knowledge", authM(handleKnowledge))                      // team knowledge Layer 2 store: GET list/recall, POST add
 	http.HandleFunc("/api/knowledge/specialist", authM(handleKnowledgeSpecialist)) // GET/POST which pane governs (config-file backed)
+	http.HandleFunc("/api/knowledge/config", authM(handleKnowledgeConfig))         // GET/POST notification pane + private Git remote/token
 	http.HandleFunc("/api/knowledge/", authM(handleKnowledgeByID))                 // GET one / PATCH promote|reject|supersede
 	http.HandleFunc("/api/github/accounts", authM(handleGithubAccounts))
 	http.HandleFunc("/api/github/accounts/test", authM(handleGithubAccountTest))
