@@ -2225,8 +2225,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   setProjectsOpen(false);
                   onSelectAgent(targetPaneId.replace(/:.*$/, ''));
                 }}
-                onCreateAgent={() => {
-                  setCreateAgentInitialValues(undefined);
+                onCreateAgent={(projectTemplate) => {
+                  setCreateAgentInitialValues({ project_template: projectTemplate });
                   setCreateAgentOpen(true);
                 }}
                 onOpenGuidance={openAgentGuidanceDetail}

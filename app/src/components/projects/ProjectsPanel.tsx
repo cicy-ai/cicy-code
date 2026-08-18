@@ -545,7 +545,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   shellPanel?: ReactNode;
   dockOpen?: boolean;
   onOpenAgent: (paneId: string) => void;
-  onCreateAgent?: () => void;
+  onCreateAgent?: (projectTemplate: string) => void;
   onOpenGuidance?: (paneId: string) => void;
   onOpenHistory?: (paneId: string) => void;
 }) {
@@ -1742,7 +1742,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             <button
               type="button"
               data-id="project-fab-create-agent"
-              onClick={() => { setFabOpen(false); onCreateAgent(); }}
+              onClick={() => { setFabOpen(false); onCreateAgent(selectedProject.project_template || (selectedProject.builtin ? 'default' : '')); }}
               className="flex h-9 items-center gap-2 rounded-full border border-white/[0.10] bg-[#202126] px-3 text-[12px] text-zinc-100 shadow-xl hover:bg-[#292a30]"
             >
               <UserPlus data-id="project-fab-create-agent-icon" className="h-4 w-4" />

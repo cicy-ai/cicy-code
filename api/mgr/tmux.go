@@ -945,6 +945,9 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
 		paneID, opts.title, workspace, opts.initScript, proxyConfigJSON, opts.role, opts.defaultModel, opts.agentType, opts.allowAllActions, opts.replyInChinese, opts.useCustomGateway, opts.useProxy, opts.projectTemplate, opts.roleTemplate,
 	)
+	if err := assignPaneToProjectTemplate(paneID, opts.projectTemplate); err != nil {
+		log.Printf("[create] assign %s to project %q failed: %v", paneID, opts.projectTemplate, err)
+	}
 	if strings.TrimSpace(opts.masterPaneID) != "" {
 		if _, err := bindAgentCore(opts.masterPaneID, opts.session, opts.inheritGuidance, opts.masterAgentType); err != nil {
 			log.Printf("[create] auto-bind sub=%s under master=%s failed: %v",

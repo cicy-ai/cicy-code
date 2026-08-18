@@ -43,6 +43,26 @@ func groupProjectDefinitionPath(groupID int64, isDefault bool) string {
 	return projectTemplatePath(slug)
 }
 
+func assignPaneToProjectTemplate(paneID, projectTemplate string) error {
+	slug := projectSlugOrDefault(projectTemplate)
+	var groupID int64
+	if slug == defaultProjectSlug {
+		if err := store.QueryRow("SELECT id FROM agent_groups WHERE COALESCE(is_default,0)=1 LIMIT 1").Scan(&groupID); err != nil {
+			return err
+		}
+	} else {
+		var id int64
+		if _, err := fmt.Sscanf(slug, "project-%d", &id); err != nil || id <= 0 || slug != fmt.Sprintf("project-%d", id) {
+			return nil
+		}
+		if err := store.QueryRow("SELECT id FROM agent_groups WHERE id=?", id).Scan(&groupID); err != nil {
+			return err
+		}
+	}
+	_, err := store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), groupID, paneID, "agent_ttyd", paneID)
+	return err
+}
+
 func writeGroupProjectDefinition(groupID int64, name string, isDefault bool, content string) (string, error) {
 	slug, _, err := ensureGroupProjectDefinition(groupID, name, isDefault)
 	if err != nil {
