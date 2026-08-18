@@ -17,6 +17,8 @@ const api = vi.hoisted(() => ({
   updateGroupPaneLayout: vi.fn(),
   getAgentCurrentReply: vi.fn(),
   uploadAssetFile: vi.fn(),
+  getMemoryTemplate: vi.fn(),
+  saveMemoryTemplate: vi.fn(),
 }));
 const agentSend = vi.hoisted(() => ({ sendToAgent: vi.fn() }));
 
@@ -44,10 +46,33 @@ beforeEach(() => {
   api.createGroup.mockResolvedValue({ data: { id: 3 } });
   api.getAgentCurrentReply.mockResolvedValue({ data: { question: '', items: [], status: 'completed' } });
   api.uploadAssetFile.mockResolvedValue({ data: { file: { file_ref: '/home/cicy/cicy-ai/assets/queued.png' } } });
+  api.getMemoryTemplate.mockResolvedValue({ data: { content: '# Global', path: '/home/cicy/cicy-ai/memory/global.md' } });
+  api.saveMemoryTemplate.mockResolvedValue({ data: { saved: true } });
   vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:queued-image'), revokeObjectURL: vi.fn() });
 });
 
 describe('<ProjectsPanel /> floating action button', () => {
+  it('edits global.md and the project definition with the shared file editor', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], project_file: '/home/cicy/cicy-ai/memory/projects/default.md', project_rules: '# Project' }] } });
+    render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
+    const open = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-definition-edit-1"]');
+      if (!node) throw new Error('definition button did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(open);
+
+    expect(await screen.findByText('global.md')).toBeInTheDocument();
+    expect(screen.getByText('default.md')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="markdown-file-editor"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-definition-tips"]')).toHaveTextContent('global.md → Project 定义 → Agent 角色');
+    fireEvent.click(document.querySelector('[data-id="project-definition-file-global"]') as HTMLElement);
+    expect(await screen.findByText('/home/cicy/cicy-ai/memory/global.md')).toBeInTheDocument();
+    fireEvent.click(document.querySelector('[data-id="project-definition-save"]') as HTMLElement);
+    await waitFor(() => expect(api.saveMemoryTemplate).toHaveBeenCalledWith('global', '', '# Global'));
+    expect(api.updateGroup).toHaveBeenCalledWith(1, { project_rules: '# Project' });
+  });
+
   it('hides while the bottom dock is open and returns collapsed after it closes', async () => {
     const { rerender } = render(<ProjectsPanel agents={[]} dockOpen={false} onOpenAgent={vi.fn()} />);
     await screen.findByText('projectDefault');

@@ -18,6 +18,7 @@ import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
 import { toolHeadline } from '../chat/history/lib/toolFormat';
 import { isTechnicalTransportFailureText } from '../chat/history/lib/normalizeItem';
 import TerminalView from '../terminal/TerminalView';
+import MarkdownFileEditor from '../files/MarkdownFileEditor';
 
 const AgentDocRoleEditor = lazy(() => import('../layout/AgentDocRoleEditor'));
 
@@ -566,6 +567,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [createError, setCreateError] = useState('');
   const [definitionProject, setDefinitionProject] = useState<AgentProject | null>(null);
   const [definitionRules, setDefinitionRules] = useState('');
+  const [definitionGlobalRules, setDefinitionGlobalRules] = useState('');
+  const [definitionGlobalPath, setDefinitionGlobalPath] = useState('~/cicy-ai/memory/global.md');
+  const [definitionFile, setDefinitionFile] = useState<'global' | 'project'>('project');
+  const [definitionLoading, setDefinitionLoading] = useState(false);
   const [definitionSaving, setDefinitionSaving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [projectMenuId, setProjectMenuId] = useState<string>('');
@@ -955,15 +960,26 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setProjectMenuId('');
     setDefinitionProject(project);
     setDefinitionRules(String(project.project_rules || ''));
+    setDefinitionFile('project');
+    setDefinitionLoading(true);
+    void apiService.getMemoryTemplate('global').then((response: any) => {
+      setDefinitionGlobalRules(String(response?.data?.content || ''));
+      setDefinitionGlobalPath(String(response?.data?.path || '~/cicy-ai/memory/global.md'));
+    }).catch((cause: any) => {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.message || '加载 global.md 失败' }));
+    }).finally(() => setDefinitionLoading(false));
   };
 
   const saveProjectDefinition = async () => {
     if (!definitionProject) return;
     setDefinitionSaving(true);
     try {
+      await apiService.saveMemoryTemplate('global', '', definitionGlobalRules);
       await apiService.updateGroup(definitionProject.api_id, { project_rules: definitionRules });
       await load(false);
       setDefinitionProject(null);
+    } catch (cause: any) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.message || '保存角色定义失败' }));
     } finally {
       setDefinitionSaving(false);
     }
@@ -1916,14 +1932,33 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         </div>
       </AppModal>
 
-      <AppModal open={Boolean(definitionProject)} title={t('projectDefinitionTitle', { name: definitionProject?.name || '' })} onClose={() => { if (!definitionSaving) setDefinitionProject(null); }} maxWidth="720px">
-        <div data-id="project-definition-modal" className="space-y-4">
-          <p data-id="project-definition-hint" className="text-[12px] leading-5 text-zinc-500">{t('projectDefinitionHint')}</p>
-          {definitionProject?.project_file ? <div data-id="project-definition-file" className="rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 font-mono text-[11px] text-zinc-400">{definitionProject.project_file}</div> : null}
-          <textarea data-id="project-definition-input" value={definitionRules} onChange={(event) => setDefinitionRules(event.target.value)} rows={18} spellCheck={false} className="w-full resize-y rounded-xl border border-white/[0.09] bg-black/20 px-3 py-3 font-mono text-[13px] leading-5 text-zinc-100 outline-none focus:border-zinc-500" />
-          <div data-id="project-definition-actions" className="flex justify-end gap-2 border-t border-white/[0.07] pt-4">
+      <AppModal open={Boolean(definitionProject)} title={t('projectDefinitionTitle', { name: definitionProject?.name || '' })} onClose={() => { if (!definitionSaving) setDefinitionProject(null); }} maxWidth="960px">
+        <div data-id="project-definition-modal" className="flex h-[min(680px,calc(82vh-88px))] min-h-[480px] flex-col gap-3">
+          <p data-id="project-definition-hint" className="shrink-0 text-[12px] leading-5 text-zinc-500">Global 与 Project 文件会共同组成项目内 Agent 的共享角色设定。</p>
+          <div data-id="project-definition-file-workbench" className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-white/[0.09] bg-black/20">
+            <aside data-id="project-definition-file-list" className="w-48 shrink-0 border-r border-white/[0.08] bg-[#121317] py-2">
+              <button type="button" data-id="project-definition-file-global" onClick={() => setDefinitionFile('global')} className={cn('flex h-9 w-full items-center gap-2 px-3 text-left font-mono text-[12px]', definitionFile === 'global' ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300')}>
+                <FileText className="h-3.5 w-3.5" /> global.md
+              </button>
+              <button type="button" data-id="project-definition-file-project" onClick={() => setDefinitionFile('project')} className={cn('flex h-9 w-full items-center gap-2 px-3 text-left font-mono text-[12px]', definitionFile === 'project' ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300')}>
+                <FileText className="h-3.5 w-3.5" /> {String(definitionProject?.project_file || 'project.md').split('/').pop()}
+              </button>
+            </aside>
+            <div data-id="project-definition-editor" className="min-w-0 flex-1">
+              <MarkdownFileEditor
+                value={definitionFile === 'global' ? definitionGlobalRules : definitionRules}
+                path={definitionFile === 'global' ? definitionGlobalPath : String(definitionProject?.project_file || '')}
+                loading={definitionFile === 'global' && definitionLoading}
+                onChange={definitionFile === 'global' ? setDefinitionGlobalRules : setDefinitionRules}
+              />
+            </div>
+          </div>
+          <div data-id="project-definition-tips" className="shrink-0 rounded-lg border border-amber-400/15 bg-amber-400/[0.05] px-3 py-2 text-[11px] leading-5 text-zinc-400">
+            <span className="font-medium text-zinc-300">Tips：</span>Agent 角色人设按 <code className="text-amber-300/80">global.md → Project 定义 → Agent 角色</code> 的顺序组合。global.md 提供全局共通原则，Project 定义补充当前项目的目标、约束和上下文，Agent 角色再补充个体职责。更具体的后续定义用于细化前面的通用规则。
+          </div>
+          <div data-id="project-definition-actions" className="flex shrink-0 justify-end gap-2 border-t border-white/[0.07] pt-3">
             <button type="button" data-id="project-definition-cancel" onClick={() => setDefinitionProject(null)} disabled={definitionSaving} className="h-9 rounded-lg px-3.5 text-[12px] text-zinc-400 hover:bg-white/[0.05]">{t('cancel', { ns: 'common' })}</button>
-            <button type="button" data-id="project-definition-save" onClick={() => { void saveProjectDefinition(); }} disabled={definitionSaving} className="h-9 rounded-lg bg-zinc-200 px-4 text-[12px] font-medium text-zinc-900 hover:bg-white disabled:opacity-50">{definitionSaving ? t('projectSaving') : t('projectSave')}</button>
+            <button type="button" data-id="project-definition-save" onClick={() => { void saveProjectDefinition(); }} disabled={definitionSaving || definitionLoading} className="h-9 rounded-lg bg-zinc-200 px-4 text-[12px] font-medium text-zinc-900 hover:bg-white disabled:opacity-50">{definitionSaving ? t('projectSaving') : t('projectSave')}</button>
           </div>
         </div>
       </AppModal>
