@@ -50,7 +50,7 @@ import CurrentHistoryView from './chat/CurrentHistoryView';
 import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
 import type { AgentCanvasItem } from './layout/AgentStack';
-import AgentStack, { CardMoreMenu } from './layout/AgentStack';
+import AgentStack, { AgentCardMoreMenu } from './layout/AgentStack';
 import { ShellPanel } from './terminal/ShellPanel';
 import WeChatBindModal from './im/WeChatBindModal';
 import SettingsModal, { type SettingsSection } from './settings/SettingsModal';
@@ -2168,17 +2168,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 onActiveAgentChange={handleProjectActiveAgentChange}
                 onActiveProjectChange={handleActiveProjectChange}
                 topRightControls={!cliContentOpen ? (
-                  <CardMoreMenu
+                  <AgentCardMoreMenu
                     paneId={activeCliPaneId}
-                    items={[
-                      ...(todoSkillInstalled ? [{ id: 'agent-stack-card-todo', label: t('tabTodo'), icon: <ListTodo className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); openPaneTodo(activeCliPaneId); }, badge: todoCount }] : []),
-                      { id: 'agent-stack-card-files', label: t('tabFiles'), icon: <Folder className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); openPaneFiles(activeCliPaneId); } },
-                      { id: 'agent-stack-card-session', label: t('tabSession'), icon: <LineChart className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); handleStackOpenSession(activeCliPaneId); } },
-                      { id: 'agent-stack-card-memory', label: t('tabMemory'), icon: <Brain className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); openPaneMemory(activeCliPaneId); } },
-                      ...(globalVar?.audit_enabled === true ? [{ id: 'agent-stack-card-audit', label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }), icon: <ShieldCheck className="h-4 w-4" />, onClick: (event: React.MouseEvent) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'audit'); }, badge: auditAlertCount }] : []),
-                      { id: 'agent-stack-card-account-matrix', label: t('accountMatrixTitle', { defaultValue: '账号矩阵' }), icon: <Grid3X3 className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'github'); } },
-                      { id: 'agent-stack-card-settings', label: t('tabSettings'), icon: <Settings className="h-4 w-4" />, onClick: (event) => { event.stopPropagation(); openPaneSettings(activeCliPaneId); }, active: cliContentOpen && cliContentTab === 'settings' },
-                    ]}
+                    onTodo={todoSkillInstalled ? (event) => { event.stopPropagation(); openPaneTodo(activeCliPaneId); } : undefined}
+                    onFiles={(event) => { event.stopPropagation(); openPaneFiles(activeCliPaneId); }}
+                    onSession={(event) => { event.stopPropagation(); handleStackOpenSession(activeCliPaneId); }}
+                    onMemory={(event) => { event.stopPropagation(); openPaneMemory(activeCliPaneId); }}
+                    onAudit={globalVar?.audit_enabled === true ? (event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'audit'); } : undefined}
+                    onAccountMatrix={(event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'github'); }}
+                    onSettings={(event) => { event.stopPropagation(); openPaneSettings(activeCliPaneId); }}
+                    todoCount={todoCount}
+                    auditCount={auditAlertCount}
+                    settingsActive={cliContentOpen && cliContentTab === 'settings'}
                   />
                 ) : null}
                 footerControls={stackHeaderControls(activeCliPaneId, false)}

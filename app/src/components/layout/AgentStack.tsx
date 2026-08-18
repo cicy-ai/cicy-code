@@ -236,6 +236,36 @@ export function CardMoreMenu({ paneId, items }: { paneId: string; items: CardMen
   )
 }
 
+export function AgentCardMoreMenu({ paneId, onTodo, onFiles, onSession, onMemory, onAudit, onAccountMatrix, onSettings, todoCount = 0, auditCount = 0, settingsActive = false }: {
+  paneId: string;
+  onTodo?: CardMenuItem['onClick'];
+  onFiles: CardMenuItem['onClick'];
+  onSession: CardMenuItem['onClick'];
+  onMemory?: CardMenuItem['onClick'];
+  onAudit?: CardMenuItem['onClick'];
+  onAccountMatrix?: CardMenuItem['onClick'];
+  onSettings: CardMenuItem['onClick'];
+  todoCount?: number;
+  auditCount?: number;
+  settingsActive?: boolean;
+}) {
+  const { t } = useTranslation('workspace');
+  return (
+    <CardMoreMenu
+      paneId={paneId}
+      items={[
+        ...(onTodo ? [{ id: 'agent-stack-card-todo', label: t('tabTodo'), icon: <ListTodo className="h-4 w-4" />, onClick: onTodo, badge: todoCount }] : []),
+        { id: 'agent-stack-card-files', label: t('tabFiles'), icon: <Folder className="h-4 w-4" />, onClick: onFiles },
+        { id: 'agent-stack-card-session', label: t('tabSession'), icon: <LineChart className="h-4 w-4" />, onClick: onSession },
+        ...(onMemory ? [{ id: 'agent-stack-card-memory', label: t('tabMemory'), icon: <Brain className="h-4 w-4" />, onClick: onMemory }] : []),
+        ...(onAudit ? [{ id: 'agent-stack-card-audit', label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }), icon: <ShieldCheck className="h-4 w-4" />, onClick: onAudit, badge: auditCount }] : []),
+        ...(onAccountMatrix ? [{ id: 'agent-stack-card-account-matrix', label: t('accountMatrixTitle', { defaultValue: '账号矩阵' }), icon: <Grid3X3 className="h-4 w-4" />, onClick: onAccountMatrix }] : []),
+        { id: 'agent-stack-card-settings', label: t('tabSettings'), icon: <Settings className="h-4 w-4" />, onClick: onSettings, active: settingsActive },
+      ]}
+    />
+  );
+}
+
 // TermPromptArea — the composing bar the old gotty page had (its #cp-prompt,
 // opened by the #cp-kbd keyboard button). TerminalView dropped the iframe and
 // lost it; this is the React replacement, docked above the card's bottom
@@ -1236,55 +1266,18 @@ function AgentStackCard({
             // The eight icon buttons that used to sit here inline now live in a
             // single ⋯ menu. Every data-id is preserved, so anything that
             // addressed a button by id still finds it.
-            <CardMoreMenu
+            <AgentCardMoreMenu
               paneId={item.paneId}
-              items={[
-                ...(onOpenPaneTodo ? [{
-                  id: 'agent-stack-card-todo',
-                  label: t('tabTodo', { ns: 'workspace' }),
-                  icon: <ListTodo className="h-4 w-4" />,
-                  onClick: handleOpenTodo,
-                  badge: todoCount,
-                }] : []),
-                {
-                  id: 'agent-stack-card-files',
-                  label: t('tabFiles', { ns: 'workspace' }),
-                  icon: <Folder className="h-4 w-4" />,
-                  onClick: handleOpenFiles,
-                },
-                {
-                  id: 'agent-stack-card-session',
-                  label: t('tabSession', { ns: 'workspace' }),
-                  icon: <LineChart className="h-4 w-4" />,
-                  onClick: handleOpenSession,
-                },
-                ...(onOpenPaneMemory ? [{
-                  id: 'agent-stack-card-memory',
-                  label: t('tabMemory', { ns: 'workspace' }),
-                  icon: <Brain className="h-4 w-4" />,
-                  onClick: handleOpenMemory,
-                }] : []),
-                ...(onOpenPaneContent ? [{
-                  id: 'agent-stack-card-audit',
-                  label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }),
-                  icon: <ShieldCheck className="h-4 w-4" />,
-                  onClick: handleOpenAudit,
-                  badge: auditAlertCount,
-                }] : []),
-                ...(onOpenPaneContent ? [{
-                  id: 'agent-stack-card-account-matrix',
-                  label: t('accountMatrixTitle', { ns: 'workspace', defaultValue: '账号矩阵' }),
-                  icon: <Grid3X3 className="h-4 w-4" />,
-                  onClick: handleOpenAccountMatrix,
-                }] : []),
-                {
-                  id: 'agent-stack-card-settings',
-                  label: t('tabSettings', { ns: 'workspace' }),
-                  icon: <Settings className="h-4 w-4" />,
-                  onClick: handleOpenSettings,
-                  active: settingsShortcutActive,
-                },
-              ]}
+              onTodo={onOpenPaneTodo ? handleOpenTodo : undefined}
+              onFiles={handleOpenFiles}
+              onSession={handleOpenSession}
+              onMemory={onOpenPaneMemory ? handleOpenMemory : undefined}
+              onAudit={onOpenPaneContent ? handleOpenAudit : undefined}
+              onAccountMatrix={onOpenPaneContent ? handleOpenAccountMatrix : undefined}
+              onSettings={handleOpenSettings}
+              todoCount={todoCount}
+              auditCount={auditAlertCount}
+              settingsActive={settingsShortcutActive}
             />
           ) : null}
         </div>
