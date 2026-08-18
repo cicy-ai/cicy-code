@@ -573,6 +573,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [addError, setAddError] = useState('');
   const [selectedToAdd, setSelectedToAdd] = useState<Set<string>>(new Set());
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
+  const agentMembershipKey = agents.map((agent) => agent.paneId).sort().join('|');
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
   const [agentAttachments, setAgentAttachments] = useState<Record<string, ProjectAttachment[]>>({});
   const [agentReplies, setAgentReplies] = useState<Record<string, any>>({});
@@ -663,7 +664,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     }
   }, [t]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); }, [load, agentMembershipKey]);
 
   useEffect(() => {
     if (!projectMenuId) return;
