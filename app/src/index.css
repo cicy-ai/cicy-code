@@ -336,6 +336,20 @@ html[data-theme="light"] .inspector-history-hit {
   color: #713f12;
   box-shadow: inset 0 0 0 1px #facc15;
 }
+html[data-theme="light"] .markdown-body {
+  color: #27272a;
+}
+html[data-theme="light"] .markdown-body thead {
+  background: #f4f4f5 !important;
+}
+html[data-theme="light"] .markdown-body tr:nth-child(even) {
+  background: #fafafa !important;
+}
+html[data-theme="light"] .markdown-body code:not(.hljs) {
+  background: #f4f4f5 !important;
+  border-color: #d4d4d8 !important;
+  color: #9a3412 !important;
+}
 html[data-theme="light"] .markdown-body .hljs {
   background: #f6f8fa !important;
   color: #24292f !important;
