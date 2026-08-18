@@ -516,6 +516,38 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(await screen.findByText(/第一条/)).toBeInTheDocument();
   });
 
+  it('restores a queued prompt after the project panel reloads', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+    const thinkingAgent = { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'thinking' };
+    const liveThinking = { 'w-101:main.0': { status: 'thinking', updated_at: '1' } };
+    const first = render(<ProjectsPanel agents={[thinkingAgent]} statuses={liveThinking} onOpenAgent={vi.fn()} />);
+
+    const input = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
+      if (!node) throw new Error('project agent prompt did not render');
+      return node as HTMLInputElement;
+    });
+    fireEvent.change(input, { target: { value: '刷新后继续发送' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).toHaveTextContent('刷新后继续发送'));
+    await waitFor(() => expect(localStorage.getItem('cicy_project_agent_queue:v1')).toContain('刷新后继续发送'));
+    expect(agentSend.sendToAgent).not.toHaveBeenCalled();
+
+    first.rerender(<ProjectsPanel key="after-reload" agents={[thinkingAgent]} statuses={liveThinking} onOpenAgent={vi.fn()} />);
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).toHaveTextContent('刷新后继续发送'));
+    expect(agentSend.sendToAgent).not.toHaveBeenCalled();
+
+    first.rerender(<ProjectsPanel key="after-reload" agents={[thinkingAgent]} statuses={{ 'w-101:main.0': { status: 'completed', updated_at: '2' } }} onOpenAgent={vi.fn()} />);
+    await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledWith(
+      'w-101:main.0',
+      '刷新后继续发送',
+      { submit: true, agentType: 'codex', fromComposer: true },
+    ));
+  });
+
   it('keeps a queued image visible when another text message is queued', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },

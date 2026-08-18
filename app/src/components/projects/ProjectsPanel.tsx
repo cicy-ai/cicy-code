@@ -86,6 +86,13 @@ const readProjectAgentQueue = (): Record<string, QueuedAgentMessage[]> => {
     return value && typeof value === 'object' ? value : {};
   } catch { return {}; }
 };
+const persistProjectAgentQueue = (queue: Record<string, QueuedAgentMessage[]>) => {
+  const persisted = Object.fromEntries(Object.entries(queue).map(([paneId, messages]) => [paneId, messages.map((message) => ({
+    ...message,
+    attachments: message.attachments.map(({ previewURL: _previewURL, ...attachment }) => attachment),
+  }))]));
+  try { localStorage.setItem(PROJECT_AGENT_QUEUE_KEY, JSON.stringify(persisted)); } catch {}
+};
 const previewableMarkdown = (value: unknown) => String(value || '').replace(/\(file:\/\/(\/?[^)]+)\)/g, (_match, path: string) => `(/${path.replace(/^\/+/, '')})`);
 const questionWithoutUploadedAttachments = (value: unknown) => String(value || '')
   .replace(/!?\[[^\]]*\]\((?:file:\/\/)?\/?[^)\n]*\/cicy-ai\/assets\/[^)\n]+\)/gi, '')
@@ -585,7 +592,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
   const [agentAttachments, setAgentAttachments] = useState<Record<string, ProjectAttachment[]>>({});
   const [agentReplies, setAgentReplies] = useState<Record<string, any>>({});
-  const [queuedAgentMessages, setQueuedAgentMessages] = useState<Record<string, QueuedAgentMessage[]>>(readProjectAgentQueue);
+  const [queuedAgentMessages, setQueuedAgentMessagesState] = useState<Record<string, QueuedAgentMessage[]>>(readProjectAgentQueue);
   const [sendingAgentIds, setSendingAgentIds] = useState<Set<string>>(new Set());
   const [cancelingAgentIds, setCancelingAgentIds] = useState<Set<string>>(new Set());
   const [canceledAgentIds, setCanceledAgentIds] = useState<Set<string>>(new Set());
@@ -612,13 +619,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const promptHistoryDraftRef = useRef<Record<string, string>>({});
   const cancelReleaseTimersRef = useRef<Record<string, number>>({});
 
-  useEffect(() => {
-    const persisted = Object.fromEntries(Object.entries(queuedAgentMessages).map(([paneId, messages]) => [paneId, messages.map((message) => ({
-      ...message,
-      attachments: message.attachments.map(({ previewURL: _previewURL, ...attachment }) => attachment),
-    }))]));
-    try { localStorage.setItem(PROJECT_AGENT_QUEUE_KEY, JSON.stringify(persisted)); } catch {}
-  }, [queuedAgentMessages]);
+  const setQueuedAgentMessages = useCallback((update: (current: Record<string, QueuedAgentMessage[]>) => Record<string, QueuedAgentMessage[]>) => {
+    setQueuedAgentMessagesState((current) => {
+      const next = update(current);
+      persistProjectAgentQueue(next);
+      return next;
+    });
+  }, []);
   const agentDragRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
   const agentResizeRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originWidth: number; originHeight: number } | null>(null);
   const panDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
@@ -817,7 +824,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setLayoutReadyProjectId(cached ? String(selectedProject.id) : '');
     setSelectedAgentIds(new Set());
     setAgentMessages({});
-    setQueuedAgentMessages({});
     setSendingAgentIds(new Set());
     setTerminalAgentIds(new Set());
     optimisticQuestionsRef.current = {};
