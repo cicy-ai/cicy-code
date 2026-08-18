@@ -451,10 +451,6 @@ html[data-theme="light"] [data-id="settings-theme-selector"] button[aria-pressed
 }
 html[data-theme="light"] [data-id="settings-public-url-input"] { background-color: #ffffff !important; }
 
-html[data-theme="light"] [data-id^="team-panel-worker-"][data-active="true"] {
-  background-color: #dbeafe !important;
-}
-
 html[data-theme="light"] [data-id^="project-agent-card-"][aria-pressed] {
   background-color: #ffffff !important;
   border-color: #e4e4e7 !important;
@@ -512,9 +508,12 @@ html[data-theme="light"] [data-id="terminal-view-retrying-dot"] {
 [data-id="project-agent-card-live-body"]:hover::-webkit-scrollbar-thumb {
   background-color: rgba(113, 113, 122, 0.55);
 }
-html[data-theme="light"] [data-id^="team-panel-worker-w-"]:not([data-id*="wrap"]):not([data-id*="forks"]):not([data-id*="menu"]) {
+html[data-theme="light"] [data-id^="team-panel-worker-w-"][data-active="false"]:not([data-id*="wrap"]):not([data-id*="forks"]):not([data-id*="menu"]) {
   background-color: #ffffff !important;
   border-color: #e4e4e7 !important;
+}
+html[data-theme="light"] [data-id^="team-panel-worker-w-"][data-active="true"]:not([data-id*="wrap"]):not([data-id*="forks"]):not([data-id*="menu"]) {
+  background-color: #dbeafe !important;
 }
 html[data-theme="light"] [data-id^="agent-role-market-"][class*="rounded-xl"] {
   background-color: #ffffff !important;
