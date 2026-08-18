@@ -1204,7 +1204,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setCancelingAgentIds((current) => new Set(current).add(id));
     try {
       if (agent.agentType === 'cicy') await apiService.cancelCicyReply(agent.paneId);
-      else await apiService.sendKeys(agent.paneId, 'Escape');
+      else await apiService.sendKeys(agent.paneId, 'C-c');
       delete optimisticQuestionsRef.current[id];
       setSendingAgentIds((current) => {
         const next = new Set(current);

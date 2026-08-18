@@ -452,12 +452,12 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
 
   // 取消生成,按 agent 形态分流:
   // - cicy 是 headless(无 tmux pane)→ /api/cicy/cancel,服务端取消正在跑的网关请求。
-  // - 终端类 agent(claude/codex)→ 往 pane 送 Escape。
+  // - 终端类 agent(claude/codex)→ 往 pane 送 Ctrl+C，真正中断当前 turn。
   const cancel = useCallback(async () => {
     if (!busy) return;
     try {
       if (agentType === 'cicy') await apiService.cancelCicyReply(paneId);
-      else await apiService.sendKeys(paneId, 'Escape');
+      else await apiService.sendKeys(paneId, 'C-c');
       setBusy(false); // reflect the stop at once; if the turn is still tearing down
                       // the history poll re-sets busy=true until it truly ends.
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('composerCanceled') }));
