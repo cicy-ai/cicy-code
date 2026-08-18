@@ -43,6 +43,17 @@ func TestKnowledgeConfigPersistsSecretAndRemoteWithoutLeakingToken(t *testing.T)
 	if gitConfigInfo.Mode().Perm() != 0o600 {
 		t.Fatalf(".git/config must be private: mode=%v", gitConfigInfo.Mode().Perm())
 	}
+	for key, want := range map[string]string{
+		"branch.main.remote": "origin",
+		"branch.main.merge":  "refs/heads/main",
+		"user.name":          "cicy-knowledge-sync-gh",
+		"user.email":         "cicybot@qq.com",
+	} {
+		out, err := exec.Command("git", "-C", knowledgeRootDir(), "config", "--local", "--get", key).Output()
+		if err != nil || strings.TrimSpace(string(out)) != want {
+			t.Fatalf("git config %s = %q, want %q (err=%v)", key, strings.TrimSpace(string(out)), want, err)
+		}
+	}
 	if strings.Contains(strings.TrimSpace(anyString(body["token"])), "secret") {
 		t.Fatalf("response leaked token: %v", body)
 	}

@@ -173,6 +173,16 @@ func setKnowledgeRemoteOrigin(origin, token string) error {
 	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("set knowledge origin: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+	for _, item := range [][2]string{
+		{"branch.main.remote", "origin"},
+		{"branch.main.merge", "refs/heads/main"},
+		{"user.name", "cicy-knowledge-sync-gh"},
+		{"user.email", "cicybot@qq.com"},
+	} {
+		if out, err := exec.Command("git", "-C", knowledgeRootDir(), "config", "--local", item[0], item[1]).CombinedOutput(); err != nil {
+			return fmt.Errorf("set knowledge git config %s: %w: %s", item[0], err, strings.TrimSpace(string(out)))
+		}
+	}
 	return os.Chmod(filepath.Join(knowledgeRootDir(), ".git", "config"), 0o600)
 }
 
