@@ -476,7 +476,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             title={agent.title || agent.paneId}
             dataId={`project-agent-card-reply-avatar-${shortPaneId(agent.paneId)}`}
             variant="select"
-            className="mt-0.5 rounded-full"
+            className="sticky top-1 z-[1] mt-0.5 rounded-full shadow-sm"
           />
         ) : null}
         <div className="min-w-0 flex-1 space-y-3.5">
