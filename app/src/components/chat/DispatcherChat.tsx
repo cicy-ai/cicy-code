@@ -157,6 +157,13 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
   const [dragOver, setDragOver] = useState(false);
   const composingRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const scrollHistoryToBottom = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      const root = inputRef.current?.closest<HTMLElement>('[data-id="dispatcher-chat"]');
+      const history = root?.querySelector<HTMLElement>('[data-id="current-history-scroll"]');
+      if (history) history.scrollTop = history.scrollHeight;
+    });
+  }, []);
   // 输入框展开态(issue #29):一键放大到约半屏,展开后顶部手柄可拖拽调高。
   // expandedH=0 表示未手动调过,用默认 45vh;拖拽后记住本次会话的高度。
   const [inputExpanded, setInputExpanded] = useState(false);
@@ -274,10 +281,11 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
       if (!insert) return;
       setText((prev) => (prev ? `${prev} ${insert}` : insert));
       inputRef.current?.focus();
+      scrollHistoryToBottom();
     };
     window.addEventListener('cicy:fill-composer', onFill as EventListener);
     return () => window.removeEventListener('cicy:fill-composer', onFill as EventListener);
-  }, [paneId]);
+  }, [paneId, scrollHistoryToBottom]);
 
   // 切换 PM 时清空忙态 + 附件,避免把上一个会话的状态带过来。
   useEffect(() => {
@@ -375,6 +383,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     const done = override ? [] : attachmentsRef.current.filter((a) => a.status === 'done');
     // 无内容(既无文本也无已传附件)、发送中、或还有附件在上传 → 不发。
     if ((!value && done.length === 0) || sending || uploading) return;
+    scrollHistoryToBottom();
     if (recordHistory) appendPromptHistory(paneId, value);
     promptHistoryIndexRef.current = null;
     promptHistoryDraftRef.current = '';
@@ -413,6 +422,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     setAttachments((prev) => { prev.forEach((a) => a.previewURL && URL.revokeObjectURL(a.previewURL)); return []; });
     // Paint the q bubble + reserve the a slot THIS frame — BEFORE the POST round-trips.
     window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId, text: body } }));
+    scrollHistoryToBottom();
     try {
       await sendToAgent(paneId, body, { submit: true, agentType, fromComposer: true });
       window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId } }));
@@ -425,7 +435,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [paneId, text, sending, uploading, busy]);
+  }, [paneId, text, sending, uploading, busy, scrollHistoryToBottom]);
 
   // 空闲放行:busy→idle 且队列非空时,自动发出队首批次 —— 队首是斜杠命令就单独发
   // (独占一轮);否则把队首连续的普通消息合并成一条。剩余项留队列,等下一次空闲。
@@ -606,7 +616,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
             rows={inputExpanded ? undefined : Math.min(8, Math.max(1, text.split('\n').length))}
             style={inputExpanded ? { height: `${expandedHeight()}px` } : undefined}
             placeholder={busy ? t('composerBusyPlaceholder') : idlePlaceholder}
-            onChange={(e) => { promptHistoryIndexRef.current = null; setText(e.target.value); setSlashSel(0); }}
+            onChange={(e) => { promptHistoryIndexRef.current = null; setText(e.target.value); setSlashSel(0); scrollHistoryToBottom(); }}
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={() => { composingRef.current = false; }}
             onPaste={(e) => {

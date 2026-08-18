@@ -218,6 +218,10 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
         submit: true,
         agentType: selectedKnowledgeAgent?.agentType,
       });
+      window.requestAnimationFrame(() => {
+        const history = document.querySelector<HTMLElement>('[data-id="knowledge-agent-chat-float"] [data-id="current-history-scroll"]');
+        if (history) history.scrollTop = history.scrollHeight;
+      });
     } catch (error: any) {
       setConfigError(error?.response?.data?.error || error?.message || '发送治理任务失败');
     } finally {
