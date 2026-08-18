@@ -725,6 +725,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               <button
                 type="button"
                 data-id="team-panel-worker-menu-unbind"
+                style={{ display: 'none' }}
                 onMouseEnter={showMenuTip('unbind')}
                 onMouseLeave={hideMenuTip}
                 onClick={() => {
@@ -1085,7 +1086,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         />
         </div>
         {onOpenRoster ? (
-          <TipBelow label={i18n.t('rosterTitle', { ns: 'workspace', defaultValue: '团队花名册' })}>
+          <TipBelow className="hidden" label={i18n.t('rosterTitle', { ns: 'workspace', defaultValue: '团队花名册' })}>
             <button
               data-id="team-panel-open-roster"
               onClick={() => onOpenRoster()}
