@@ -2174,7 +2174,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     onFiles={(event) => { event.stopPropagation(); openPaneFiles(activeCliPaneId); }}
                     onSession={(event) => { event.stopPropagation(); handleStackOpenSession(activeCliPaneId); }}
                     onMemory={(event) => { event.stopPropagation(); openPaneMemory(activeCliPaneId); }}
-                    onAudit={globalVar?.audit_enabled === true ? (event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'audit'); } : undefined}
+                    onAudit={(event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'audit'); }}
                     onAccountMatrix={(event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'github'); }}
                     onSettings={(event) => { event.stopPropagation(); openPaneSettings(activeCliPaneId); }}
                     todoCount={todoCount}
