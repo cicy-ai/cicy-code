@@ -203,12 +203,3 @@ jobs:
             --file=npm/install.sh \
             --content-type=text/x-shellscript
           echo "Uploaded npm/install.sh -> https://r2.deepfetch.de5.net/code"
-
-      - name: Upload App SPA to per-release R2 dir (for --cdn)
-        # Publish app/dist to /app/v<version>/ so `cicy-code --cdn` serves this exact
-        # release's bundles from R2 (build.sh bakes /app/v<version>).
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.R2_API_TOKEN }}
-        run: |
-          bash npm/upload-cdn.sh "${{ steps.meta.outputs.version }}" app/dist
