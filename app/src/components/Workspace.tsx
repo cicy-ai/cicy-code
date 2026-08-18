@@ -973,14 +973,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
 
   const canvasPaneIds = useMemo(() => {
     const next = [paneId];
-    boundAgents.forEach((binding: any) => {
-      const boundPaneId = String(binding?.name || binding?.pane_id || '').replace(/:.*$/, '');
-      if (boundPaneId && !next.includes(boundPaneId)) {
-        next.push(boundPaneId);
+    agents.forEach((agent: any) => {
+      const agentPaneId = String(agent?.pane_id || agent?.id || agent?.name || '').replace(/:.*$/, '');
+      if (agentPaneId && !next.includes(agentPaneId)) {
+        next.push(agentPaneId);
       }
     });
     return next;
-  }, [boundAgents, paneId]);
+  }, [agents, paneId]);
   useEffect(() => {
     const prev = prevCanvasPaneIdsRef.current;
     prevCanvasPaneIdsRef.current = canvasPaneIds;
