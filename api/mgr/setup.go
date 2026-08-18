@@ -570,7 +570,6 @@ func officialRoleRoster() []builtinWorker {
 		{Port: 102, AgentType: "codex", Title: "全栈工程师", TitleEn: "Full-stack Engineer", BindToPrimary: true},
 		{Port: 103, AgentType: "opencode", Title: "软件工程师", TitleEn: "Software Engineer"},
 		{Port: 104, AgentType: "cicy", Title: "审计策略专员", TitleEn: "Audit Policy Specialist", RoleTemplate: "audit-policy-specialist"},
-		{Port: 105, AgentType: "cicy", Title: "口播智能体", TitleEn: "Spoken Content Agent", RoleTemplate: "koubo"},
 	}
 	return roster
 }
