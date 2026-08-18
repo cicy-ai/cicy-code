@@ -438,7 +438,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         data-id="project-agent-card-question-fixed"
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
-        className="max-h-[45%] shrink-0 space-y-2 overflow-y-auto overscroll-contain pr-[18px] pb-3 [scrollbar-width:thin]"
+        className="max-h-[45%] shrink-0 space-y-2 overflow-y-auto overscroll-contain border-b border-zinc-200/80 pr-[18px] pb-5 dark:border-white/[0.07] [scrollbar-width:thin]"
       >
         <div data-id="project-agent-card-history-link-row" className="flex justify-end">
           <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史<ArrowRight className="h-3 w-3" /></button>
@@ -467,7 +467,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => { event.stopPropagation(); if (event.deltaY < 0) loadingDetachedRef.current = true; }}
         onScroll={() => { updateScrollToBottomButton(); updateLoadingVisibility(); }}
-        className="min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
+        className="min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] pt-5 text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
       >
         <div data-id="project-agent-card-current-turn" className="flex min-w-0 items-start gap-2.5">
         {(replyItems.length || latest?.latest_response || latest?.latest_tool?.name || working) ? (
@@ -538,7 +538,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </button>
       ) : null}
       {rawQuestion && (working || completed) ? (
-        <div data-id="project-agent-card-output-loading" className="flex h-6 shrink-0 translate-y-1 items-center gap-1.5 pr-[18px] font-mono text-[11px] text-zinc-500" aria-label={working ? 'Loading' : 'Worked'}>
+        <div data-id="project-agent-card-output-loading" className="mt-3 flex h-9 shrink-0 items-center gap-1.5 border-t border-zinc-200/80 pr-[18px] pt-2 font-mono text-[11px] text-zinc-500 dark:border-white/[0.07]" aria-label={working ? 'Loading' : 'Worked'}>
           {working ? <span data-id="project-agent-card-loading-dot" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" /> : <Check className="h-3.5 w-3.5 text-emerald-500" />}
           <span className="font-medium text-zinc-400">{working ? 'Working' : 'Worked'}</span>
           {startedAt ? <span className="tabular-nums text-zinc-500">{working ? `· ${fmtElapsed(elapsedMs)}` : `for ${fmtElapsed(elapsedMs)}`}</span> : null}
