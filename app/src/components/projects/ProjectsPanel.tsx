@@ -602,6 +602,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const visibilityCheckedKeyRef = useRef('');
   const promptHistoryIndexRef = useRef<Record<string, number | null>>({});
   const promptHistoryDraftRef = useRef<Record<string, string>>({});
+  const cancelReleaseTimersRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     const persisted = Object.fromEntries(Object.entries(queuedAgentMessages).map(([paneId, messages]) => [paneId, messages.map((message) => ({
@@ -614,6 +615,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const agentResizeRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; originWidth: number; originHeight: number } | null>(null);
   const panDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const optimisticQuestionsRef = useRef<Record<string, string>>({});
+
+  useEffect(() => () => {
+    Object.values(cancelReleaseTimersRef.current).forEach((timer) => window.clearTimeout(timer));
+  }, []);
 
   useEffect(() => {
     if (dockOpen) setFabOpen(false);
@@ -1078,7 +1083,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
   const agentIsThinking = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
-    if (canceledAgentIds.has(id)) return false;
+    // Keep new prompts queued briefly while Ctrl+C settles and the CLI restores
+    // its input prompt. Sending immediately can type the text before the shell is
+    // ready and have the accompanying Enter swallowed by the cancel transition.
+    if (canceledAgentIds.has(id)) return true;
     const summary = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id] || {};
     // poll/status is the freshest source. Do not OR it with stale agent/reply
     // snapshots: an old "thinking" there would keep queued prompts stuck forever
@@ -1213,6 +1221,15 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         },
       }));
       setCanceledAgentIds((current) => new Set(current).add(id));
+      window.clearTimeout(cancelReleaseTimersRef.current[id]);
+      cancelReleaseTimersRef.current[id] = window.setTimeout(() => {
+        setCanceledAgentIds((current) => {
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
+        delete cancelReleaseTimersRef.current[id];
+      }, 1200);
     } catch (cause: any) {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.message || t('projectCancelFailed', { defaultValue: '取消失败' }) }));
     } finally {
