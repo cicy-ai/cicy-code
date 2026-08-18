@@ -1,6 +1,8 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
+import { useEffect, useState } from 'react';
+import apiService from '../../../services/api';
 import { useCurrentHistory } from './useCurrentHistory';
 import { HistoryList } from './HistoryList';
 import type { CurrentHistoryViewProps } from '../CurrentHistoryView';
@@ -14,9 +16,19 @@ export default function CodingAgentHistoryView({
   fullWidth = false,
   leftAlignQuestions = false,
 }: CurrentHistoryViewProps) {
-  // Coding agents (claude/codex/…) ignore WS deltas and rely on polling, and
-  // start with a blank empty-history state (no opening greeting).
+  // Coding agents (claude/codex/…) ignore WS deltas and rely on polling.
   const state = useCurrentHistory({ paneId, open, promptsOnly, hideTools, agentType, consumeWsDeltas: false });
+  const [greeting, setGreeting] = useState('');
+  useEffect(() => {
+    setGreeting('');
+    const id = String(paneId || '').trim();
+    if (!id) return;
+    let alive = true;
+    apiService.getAgentGreeting(id)
+      .then((res: any) => { if (alive) setGreeting(String(res?.data?.greeting || '').trim()); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [paneId, agentType]);
   return (
     <HistoryList
       {...state}
@@ -26,7 +38,7 @@ export default function CodingAgentHistoryView({
       hideTools={hideTools}
       fullWidth={fullWidth}
       leftAlignQuestions={leftAlignQuestions}
-      greeting=""
+      greeting={greeting}
     />
   );
 }

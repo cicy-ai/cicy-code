@@ -278,7 +278,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
             </button>
           </header>
           <div className="min-h-0 flex-1 bg-black">
-            <DispatcherChat key={chatPane} paneId={chatPane} active agentType="cicy" title={selectedKnowledgeAgent?.title || '知识专员'} />
+            <DispatcherChat key={chatPane} paneId={chatPane} active agentType="cicy" title={selectedKnowledgeAgent?.title || '知识专员'} thinkingLockedOn />
           </div>
           <div data-id="knowledge-agent-chat-resize-handle" onPointerDown={(event) => startChatFramePointer('resize', event)} className="absolute bottom-0 right-0 z-20 h-4 w-4 cursor-se-resize border-b-2 border-r-2 border-sky-400/60" />
         </section>

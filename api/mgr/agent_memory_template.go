@@ -522,11 +522,6 @@ func agentOpeningGreeting(shortID string) string {
 		"SELECT COALESCE(role_template,''), COALESCE(title,''), COALESCE(agent_type,''), COALESCE(workspace,''), COALESCE(config,'') FROM agent_config WHERE pane_id=?",
 		shortID+":main.0",
 	).Scan(&roleTemplate, &title, &agentType, &workspace, &config)
-	// Only cicy (lite) agents have an opening greeting; coding agents
-	// (claude/codex/…) get none so the chat view stays blank for them.
-	if normalizeAgentType(agentType) != "cicy" {
-		return ""
-	}
 	lang := agentLangFromConfig(config)
 	if slug := sanitizeTemplateSlug(roleTemplate); slug != "" {
 		if g := roleMetaGreeting(slug, lang); g != "" {

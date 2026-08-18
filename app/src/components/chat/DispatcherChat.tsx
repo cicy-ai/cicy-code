@@ -132,7 +132,7 @@ const readDispatcherQueue = (paneId: string): { id: number; text: string }[] => 
   } catch { return []; }
 };
 
-export default function DispatcherChat({ paneId, active, agentType = 'cicy', title = '' }: { paneId: string; active: boolean; agentType?: string; title?: string }) {
+export default function DispatcherChat({ paneId, active, agentType = 'cicy', title = '', thinkingLockedOn = false }: { paneId: string; active: boolean; agentType?: string; title?: string; thinkingLockedOn?: boolean }) {
   const { t } = useTranslation('chat');
   // placeholder 跟当前 agent 的 title 走(产品经理→「问问你的产品经理」),不再写死「项目经理」。
   // title 为空时回退到通用文案。
@@ -192,7 +192,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
   // agent_config.config {"thinking":"enabled|disabled"},优先于全局 gateway_thinking。
   // 网关 agentInspectorApplyThinking 实时读取,免重启。仅对 cicy(lite)agent 显示。
   const showThinking = isCicyLiteAgent(agentType);
-  const [thinkingOn, setThinkingOn] = useState(false);
+  const [thinkingOn, setThinkingOn] = useState(thinkingLockedOn);
   const [thinkingSaving, setThinkingSaving] = useState(false);
   const configRef = useRef<Record<string, any>>({});
 
@@ -204,12 +204,23 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
       let cfg: Record<string, any> = {};
       try { cfg = data?.config ? JSON.parse(data.config) : {}; } catch { cfg = {}; }
       configRef.current = cfg && typeof cfg === 'object' ? cfg : {};
-      setThinkingOn(String(configRef.current.thinking || '').toLowerCase() === 'enabled');
+      if (thinkingLockedOn) {
+        setThinkingOn(true);
+        if (String(configRef.current.thinking || '').toLowerCase() !== 'enabled') {
+          const merged = { ...configRef.current, thinking: 'enabled' };
+          apiService.updatePane(paneId, { config: JSON.stringify(merged) })
+            .then(() => { configRef.current = merged; })
+            .catch(() => window.dispatchEvent(new CustomEvent('show-toast', { detail: t('composerThinkingSaveFailed') })));
+        }
+      } else {
+        setThinkingOn(String(configRef.current.thinking || '').toLowerCase() === 'enabled');
+      }
     }).catch(() => {});
     return () => { alive = false; };
-  }, [paneId, showThinking]);
+  }, [paneId, showThinking, thinkingLockedOn, t]);
 
   const toggleThinking = useCallback(async () => {
+    if (thinkingLockedOn) return;
     const next = thinkingOn ? 'disabled' : 'enabled';
     setThinkingSaving(true);
     const merged = { ...configRef.current, thinking: next };
@@ -222,7 +233,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     } finally {
       setThinkingSaving(false);
     }
-  }, [paneId, thinkingOn]);
+  }, [paneId, thinkingLockedOn, thinkingOn]);
 
   // 附件上传上限:运行时读通用配置 globalVar.max_attachment_mb(设置面板可改),
   // 缺省回落到编译期默认 MAX_ATTACHMENT_MB(100)。
@@ -681,9 +692,9 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
                   type="button"
                   data-id="dispatcher-chat-thinking-toggle"
                   onClick={toggleThinking}
-                  disabled={thinkingSaving}
+                  disabled={thinkingSaving || thinkingLockedOn}
                   aria-pressed={thinkingOn}
-                  title={thinkingOn ? t('composerThinkingOn') : t('composerThinkingOff')}
+                  title={thinkingLockedOn ? '知识专员固定开启思考模式' : thinkingOn ? t('composerThinkingOn') : t('composerThinkingOff')}
                   className={`inline-flex h-7 shrink-0 items-center gap-1 rounded-full border px-2.5 text-[12px] font-medium transition-colors disabled:opacity-50 ${
                     thinkingOn
                       ? 'border-blue-500/40 bg-blue-500/15 text-blue-300 hover:bg-blue-500/25'
