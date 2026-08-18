@@ -5,9 +5,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trans } from 'react-i18next';
 import i18n from '../../i18n';
-import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, ArrowUpCircle, UserPlus, GitBranch, ChevronRight, ChevronDown, ClipboardList, MessageCircle, Zap } from 'lucide-react';
+import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, ArrowUpCircle, Search, GitBranch, ChevronRight, ChevronDown, ClipboardList, MessageCircle, Zap } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
-import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
 import { normalizeAgentType } from '../../lib/agentType';
@@ -18,7 +17,6 @@ import { useApp } from '../../contexts/AppContext';
 import { ModelTag } from '../../lib/modelTag';
 import AgentAvatar from '../AgentAvatar';
 import TipBelow from '../ui/TipBelow';
-import Select from '../ui/Select';
 import CreateAgentDialog, { CreateAgentValues } from '../CreateAgentDialog';
 import ForkConfirmModal from './ForkConfirmModal';
 
@@ -240,6 +238,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     }
   };
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const [draggingWid, setDraggingWid] = useState<string | null>(null);
   // Drop intent while dragging a node onto card `wid`: upper half = 'before'
   // (same level, insert before), lower half = 'child' (become wid's sub).
@@ -255,21 +254,33 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     return () => document.removeEventListener('pointerdown', closeMenu);
   }, []);
   const boundIds = new Set(bindings.map(b => shortId(b.name)));
-  // 客服主管(is_kefu)只能绑客服 agent;非客服 master 只能绑非客服 agent。
-  const masterIsKefu = !!panes.find(a => shortId(a.pane_id) === paneId)?.is_kefu;
-  const available = panes.filter(a => {
-    const sid = shortId(a.pane_id);
-    if (sid === paneId || boundIds.has(sid)) return false;
-    return !!a.is_kefu === masterIsKefu;
-  });
-
-  const bind = async (agentPaneId: string) => {
-    try {
-      await apiService.bindAgent({ pane_id: paneId, agent_name: shortId(agentPaneId) });
-      onRefreshPoll();
-    } catch {}
-  };
-
+  const displayBindings = useMemo(() => {
+    const existing = new Map(bindings.map(b => [shortId(b.name), b] as const));
+    return panes
+      .filter(agent => shortId(agent.pane_id) !== paneId)
+      .map((agent, index): Binding => existing.get(shortId(agent.pane_id)) || {
+        id: -(index + 1),
+        pane_id: paneId,
+        name: shortId(agent.pane_id),
+        title: agent.title,
+        status: '',
+        agent_type: agent.agent_type,
+        machine_id: agent.machine_id,
+        machine_label: agent.machine_label,
+        source_kind: agent.source_kind,
+        source_ref: agent.source_ref,
+      });
+  }, [bindings, paneId, panes]);
+  const filteredBindings = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return displayBindings;
+    return displayBindings.filter(binding => {
+      const wid = shortId(binding.name);
+      return wid.toLowerCase().includes(query)
+        || String(binding.title || '').toLowerCase().includes(query)
+        || String(binding.agent_type || '').toLowerCase().includes(query);
+    });
+  }, [displayBindings, searchQuery]);
   const unbind = async (binding: Binding) => {
     const removedPaneId = shortId(binding.name);
     const nextSelectedPaneId = (
@@ -358,7 +369,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     });
     if (!ok) return;
     try {
-      await apiService.unbindAgent(binding.id);
+      if (boundIds.has(wid)) await apiService.unbindAgent(binding.id);
       await apiService.deletePane(wid);
       onOpenInCurrentPane?.(paneId);
       await onRefreshPanes();
@@ -367,25 +378,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
       showToast(i18n.t('toastDeleteFailed', { ns: 'teamPanel', title }));
     }
   }, [confirm, onOpenInCurrentPane, onRefreshPanes, onRefreshPoll, paneId, showToast]);
-  const deleteUnboundPane = useCallback(async (agent: Agent) => {
-    const wid = shortId(agent.pane_id);
-    const title = agent.title || wid;
-    const ok = await confirm({
-      body: <Trans i18nKey="confirmDelete" ns="teamPanel" values={{ title }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await apiService.deletePane(wid);
-      await onRefreshPanes();
-      onRefreshPoll();
-    } catch {
-      showToast(i18n.t('toastDeleteFailed', { ns: 'teamPanel', title }));
-    }
-  }, [confirm, onRefreshPanes, onRefreshPoll, showToast]);
   const orderedBindings = useMemo(() => {
-    if (!dragOrder || dragOrder.length === 0) return bindings;
-    const byWid = new Map(bindings.map(b => [shortId(b.name), b] as const));
+    if (!dragOrder || dragOrder.length === 0) return filteredBindings;
+    const byWid = new Map(filteredBindings.map(b => [shortId(b.name), b] as const));
     const result: Binding[] = [];
     const seen = new Set<string>();
     for (const wid of dragOrder) {
@@ -395,12 +390,12 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         seen.add(wid);
       }
     }
-    for (const b of bindings) {
+    for (const b of filteredBindings) {
       const wid = shortId(b.name);
       if (!seen.has(wid)) result.push(b);
     }
     return result;
-  }, [bindings, dragOrder]);
+  }, [dragOrder, filteredBindings]);
 
   const groupedBindings = useMemo(() => {
     const groups = new Map<string, { machineId?: number; machineLabel?: string; items: Binding[] }>();
@@ -988,13 +983,13 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         setOpenMenuId(null);
       },
       forking: forkingId === wid,
-      onRemove: async () => {
+      onRemove: boundIds.has(wid) ? async () => {
         const ok = await confirm({
           body: <Trans i18nKey="confirmUnbind" ns="teamPanel" values={{ name: getName(b) }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
           danger: true,
         });
         if (ok) unbind(b);
-      },
+      } : undefined,
       onDelete: () => deletePane(b, getName(b)),
     });
   };
@@ -1060,31 +1055,15 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         document.body
       ) : null}
       {!hideMaster && <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 flex-shrink-0" data-id="team-panel-toolbar">
-        <div data-id="team-panel-bind-select" className="flex-1 min-w-0">
-        <Select
-          options={available.map(a => ({
-            value: a.pane_id,
-            label: a.title || shortId(a.pane_id),
-            sub: shortId(a.pane_id),
-            icon: <AgentAvatar agentType={a.agent_type} title={a.title || shortId(a.pane_id)} variant="select" />,
-            actions: [
-              {
-                id: 'delete',
-                label: i18n.t('delete', { ns: 'teamPanel' }),
-                icon: <Trash2 className="w-3.5 h-3.5" />,
-                danger: true,
-                onClick: () => deleteUnboundPane(a),
-              },
-            ] as SelectOptionAction[],
-          }))}
-          onChange={v => bind(v)}
-          onOpenChange={open => { if (open) void onRefreshPanes(); }}
-          placeholder={i18n.t('bindMemberPlaceholder', { ns: 'teamPanel' })}
-          searchable
-          className="flex-1"
-          triggerIcon={<UserPlus className="w-3.5 h-3.5" />}
-          dropdownMatchSelector='[data-id="left-panel-team-view"]'
-        />
+        <div data-id="team-panel-agent-search" className="relative flex-1 min-w-0">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+          <input
+            data-id="team-panel-agent-search-input"
+            value={searchQuery}
+            onChange={event => setSearchQuery(event.target.value)}
+            placeholder="Search agents"
+            className="h-[34px] w-full rounded-lg border border-[var(--vsc-border)] bg-white/[0.03] pl-9 pr-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/20"
+          />
         </div>
         {onOpenRoster ? (
           <TipBelow className="hidden" label={i18n.t('rosterTitle', { ns: 'workspace', defaultValue: '团队花名册' })}>
@@ -1154,7 +1133,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             },
           })}
         </div>}
-        {bindings.length > 0 ? (
+        {displayBindings.length > 0 ? (
           <div className="flex w-full min-w-0 flex-col" data-id="team-panel-groups">
             {groupedBindings.map(group => {
               const groupKey = group.machineId ? String(group.machineId) : 'local';
