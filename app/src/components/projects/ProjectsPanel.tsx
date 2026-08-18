@@ -1071,10 +1071,16 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   useEffect(() => {
     const routeToSelectedPrompt = (event: Event) => {
       const routed = event as CustomEvent<{ paneId?: string; text?: string }>;
-      const id = shortPaneId(routed.detail?.paneId || '');
       const text = String(routed.detail?.text || '').trim();
-      if (!id || !text || !selectedAgentIds.has(id)) return;
+      if (!text) return;
       routed.preventDefault();
+      const id = Array.from(selectedAgentIds)[0] || '';
+      if (!id) {
+        window.dispatchEvent(new CustomEvent('show-toast', {
+          detail: t('projectSelectAgentFirst', { defaultValue: '请先选择 Agent' }),
+        }));
+        return;
+      }
       setAgentMessages((current) => ({
         ...current,
         [id]: [current[id], text].filter(Boolean).join('\n'),
@@ -1085,7 +1091,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     };
     window.addEventListener('cicy:route-agent-prompt', routeToSelectedPrompt as EventListener);
     return () => window.removeEventListener('cicy:route-agent-prompt', routeToSelectedPrompt as EventListener);
-  }, [selectedAgentIds]);
+  }, [selectedAgentIds, t]);
 
   const addAgentFiles = (agent: ProjectAgent, files: FileList | File[]) => {
     const agentId = shortPaneId(agent.paneId);

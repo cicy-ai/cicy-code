@@ -418,6 +418,28 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(document.querySelector('[data-id="project-agent-prompt-input-w-102"]')).toHaveValue('请先检查这个任务'));
   });
 
+  it('blocks contextual sends and shows a toast when no project agent is selected', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+    await waitFor(() => {
+      if (!document.querySelector('[data-id="project-agent-card-w-101"]')) throw new Error('project agent card did not render');
+    });
+    const toast = vi.fn();
+    window.addEventListener('show-toast', toast);
+    const routed = new CustomEvent('cicy:route-agent-prompt', {
+      cancelable: true,
+      detail: { paneId: 'w-101', text: '不应直接发送' },
+    });
+    window.dispatchEvent(routed);
+    window.removeEventListener('show-toast', toast);
+
+    expect(routed.defaultPrevented).toBe(true);
+    expect(toast).toHaveBeenCalled();
+    expect(document.querySelector('[data-id="project-agent-prompt-input-w-101"]')).toHaveValue('');
+  });
+
   it('queues multiple prompts while thinking and sends them together when idle', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
