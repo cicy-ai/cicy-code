@@ -1361,14 +1361,14 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     const canvas = canvasRef.current;
     if (!canvas || !visibleAgents.length) return;
     const gap = 24;
-    const targetRowWidth = Math.max(1, canvas.clientWidth - 80);
+    const columnCount = Math.max(1, Math.ceil(Math.sqrt(visibleAgents.length)));
     let cursorX = 0;
     let cursorY = 0;
     let rowHeight = 0;
     const arrangedLayouts = { ...agentLayouts };
     const layouts = visibleAgents.map((agent, index) => {
       const current = layoutForAgent(agent, index);
-      if (cursorX > 0 && cursorX + current.width > targetRowWidth) {
+      if (index > 0 && index % columnCount === 0) {
         cursorX = 0;
         cursorY += rowHeight + gap;
         rowHeight = 0;
