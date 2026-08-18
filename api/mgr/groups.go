@@ -212,7 +212,12 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 				httpErr(w, 404, "Group not found")
 				return
 			}
-			if _, err := writeGroupProjectDefinition(gid, currentName, currentDefault == 1, projectRules); err != nil {
+			slug, err := writeGroupProjectDefinition(gid, currentName, currentDefault == 1, projectRules)
+			if err != nil {
+				httpErr(w, 500, err.Error())
+				return
+			}
+			if err := syncGroupAgentProjectMemory(gid, slug); err != nil {
 				httpErr(w, 500, err.Error())
 				return
 			}
@@ -337,7 +342,73 @@ func addWindowToGroup(w http.ResponseWriter, groupID, winID, winType, refID, res
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if winType == "agent_ttyd" {
+		var gid int64
+		var name string
+		var isDefault int
+		if err := store.QueryRow("SELECT id, name, COALESCE(is_default,0) FROM agent_groups WHERE id=?", groupID).Scan(&gid, &name, &isDefault); err != nil {
+			store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		slug, _, err := ensureGroupProjectDefinition(gid, name, isDefault == 1)
+		if err != nil {
+			store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := syncAgentProjectMemory(winID, slug); err != nil {
+			store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 	J(w, M{"success": true, "group_id": groupID, responseKey: winID})
+}
+
+func syncGroupAgentProjectMemory(groupID int64, projectTemplate string) error {
+	rows, err := store.Query(`SELECT win_id FROM group_windows WHERE group_id=? AND win_type='agent_ttyd'`, groupID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var paneIDs []string
+	for rows.Next() {
+		var paneID string
+		if err := rows.Scan(&paneID); err != nil {
+			return err
+		}
+		paneIDs = append(paneIDs, paneID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, paneID := range paneIDs {
+		if err := syncAgentProjectMemory(paneID, projectTemplate); err != nil {
+			return fmt.Errorf("sync project memory for %s: %w", shortPaneID(paneID), err)
+		}
+	}
+	return nil
+}
+
+func syncAgentProjectMemory(paneID, projectTemplate string) error {
+	res, err := store.Exec("UPDATE agent_config SET project_template=?, updated_at=datetime('now') WHERE pane_id=?", projectTemplate, paneID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil
+	}
+	var target reseedTarget
+	err = store.QueryRow(`SELECT pane_id, COALESCE(workspace,''), COALESCE(agent_type,''),
+		COALESCE(project_template,''), COALESCE(role_template,'') FROM agent_config WHERE pane_id=?`, paneID).
+		Scan(&target.paneID, &target.workspace, &target.agentType, &target.projectTemplate, &target.roleTemplate)
+	if err != nil {
+		return err
+	}
+	target.shortID = shortPaneID(target.paneID)
+	target.workspace = expandHome(strings.TrimSpace(target.workspace))
+	return reseedOne(target, false, "")
 }
 
 func handleGroupBatchLayout(w http.ResponseWriter, r *http.Request, groupID string) {
