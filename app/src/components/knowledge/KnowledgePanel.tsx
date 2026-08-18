@@ -10,6 +10,7 @@ import DispatcherChat from '../chat/DispatcherChat';
 import apiService from '../../services/api';
 
 const KnowledgeGraphView = lazy(() => import('./KnowledgeGraphView'));
+const KNOWLEDGE_CHAT_FRAME_KEY = 'knowledge-agent-chat-frame';
 
 interface KnowledgePanelProps {
   open: boolean;
@@ -35,7 +36,21 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
   const [configError, setConfigError] = useState('');
   const [configSaved, setConfigSaved] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatFrame, setChatFrame] = useState({ right: 16, bottom: 16, width: 320, height: 640 });
+  const [chatFrame, setChatFrame] = useState(() => {
+    const fallback = { right: 16, bottom: 16, width: 440, height: 640 };
+    try {
+      const saved = JSON.parse(localStorage.getItem(KNOWLEDGE_CHAT_FRAME_KEY) || 'null');
+      if (!saved || typeof saved !== 'object') return fallback;
+      return {
+        right: Number.isFinite(saved.right) ? Math.max(0, saved.right) : fallback.right,
+        bottom: Number.isFinite(saved.bottom) ? Math.max(0, saved.bottom) : fallback.bottom,
+        width: Number.isFinite(saved.width) ? Math.max(280, saved.width) : fallback.width,
+        height: Number.isFinite(saved.height) ? Math.max(320, saved.height) : fallback.height,
+      };
+    } catch {
+      return fallback;
+    }
+  });
   const [origin, setOrigin] = useState('');
   const [token, setToken] = useState('');
   const [showToken, setShowToken] = useState(false);
@@ -56,6 +71,10 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
     if (!open) return;
     setOpenRequest({ path: 'README.md', root: 'knowledge', nonce: Date.now() });
   }, [open]);
+
+  useEffect(() => {
+    try { localStorage.setItem(KNOWLEDGE_CHAT_FRAME_KEY, JSON.stringify(chatFrame)); } catch { /* storage unavailable */ }
+  }, [chatFrame]);
 
   useEffect(() => {
     if (!open) return;
@@ -212,7 +231,10 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
         <section data-id="knowledge-agent-chat-float" style={chatFrame} className="absolute z-10 flex max-h-[calc(100%-1rem)] max-w-[calc(100%-1rem)] flex-col overflow-hidden rounded-xl border border-sky-400/25 bg-[#101012] shadow-[0_24px_70px_rgba(0,0,0,0.55)]">
           <header data-id="knowledge-agent-chat-drag-handle" onPointerDown={(event) => startChatFramePointer('move', event)} className="flex h-11 shrink-0 cursor-move select-none items-center gap-2 border-b border-white/[0.07] px-3">
             <MessageCircle className="h-4 w-4 text-sky-400" />
-            <div className="min-w-0 flex-1 truncate text-xs font-semibold text-zinc-100">知识专员 · w-1001 · 待治理 {pendingCount}</div>
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-xs font-semibold text-zinc-100">
+              <span className="truncate">知识专员 · w-1001 · 待治理</span>
+              <span data-id="knowledge-agent-chat-pending-count" className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-[0_0_10px_rgba(239,68,68,0.55)]">{pendingCount}</span>
+            </div>
             <button type="button" data-id="knowledge-agent-chat-minimize" onClick={() => setChatOpen(false)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200" title="最小化" aria-label="最小化知识专员聊天">
               <Minus className="h-4 w-4" />
             </button>
