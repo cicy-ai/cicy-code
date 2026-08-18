@@ -106,6 +106,23 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
     }
   };
 
+  const toggleTokenVisibility = async () => {
+    if (showToken) {
+      setShowToken(false);
+      return;
+    }
+    if (!token && tokenSet) {
+      try {
+        const { data } = await apiService.getKnowledgeConfig(true);
+        setToken(String(data?.token || ''));
+      } catch (error: any) {
+        setConfigError(error?.response?.data?.error || error?.message || '读取 Token 失败');
+        return;
+      }
+    }
+    setShowToken(true);
+  };
+
   if (!open) return null;
 
   return createPortal(
@@ -171,7 +188,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
                 <label className="block text-xs text-zinc-400">CICY_KNOWLEDGE_GH_TOKEN
                   <span className="relative mt-1.5 block">
                     <input data-id="knowledge-config-token" type={showToken ? 'text' : 'password'} value={token} onChange={(event) => setToken(event.target.value)} placeholder={tokenSet ? `已配置 ····${tokenTail}（留空不修改）` : 'GitHub fine-grained token'} autoComplete="new-password" className="h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 py-0 pl-3 pr-10 font-mono text-xs text-zinc-200 outline-none focus:border-sky-600" />
-                    <button type="button" data-id="knowledge-config-token-toggle" onClick={() => setShowToken((visible) => !visible)} className="absolute inset-y-0 right-0 inline-flex w-9 items-center justify-center text-zinc-500 hover:text-zinc-200" title={showToken ? '隐藏 Token' : '显示 Token'} aria-label={showToken ? '隐藏 Token' : '显示 Token'}>
+                    <button type="button" data-id="knowledge-config-token-toggle" onClick={() => { void toggleTokenVisibility(); }} className="absolute inset-y-0 right-0 inline-flex w-9 items-center justify-center text-zinc-500 hover:text-zinc-200" title={showToken ? '隐藏 Token' : '显示 Token'} aria-label={showToken ? '隐藏 Token' : '显示 Token'}>
                       {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </span>

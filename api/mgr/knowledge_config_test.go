@@ -49,6 +49,10 @@ func TestKnowledgeConfigPersistsSecretAndRemoteWithoutLeakingToken(t *testing.T)
 	if _, exists := get["token"]; exists {
 		t.Fatalf("GET response must not include token: %v", get)
 	}
+	code, revealed := knowledgeReq(t, handleKnowledgeConfig, "GET", "/api/knowledge/config?reveal_token=1", nil)
+	if code != 200 || revealed["token"] != "github_pat_secret-value" {
+		t.Fatalf("explicit token reveal code=%d body=%v", code, revealed)
+	}
 }
 
 func TestKnowledgeConfigRejectsCredentialBearingRemote(t *testing.T) {

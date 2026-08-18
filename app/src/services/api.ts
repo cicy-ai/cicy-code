@@ -469,7 +469,7 @@ const api = {
   listKnowledge: (params?: { status?: string; tag?: string; q?: string; domain?: string; view?: string }) =>
     http.get('/api/knowledge', { params: params || {} }),
   getKnowledge: (id: string) => http.get(`/api/knowledge/${encodeURIComponent(id)}`),
-  getKnowledgeConfig: () => http.get('/api/knowledge/config'),
+  getKnowledgeConfig: (revealToken = false) => http.get('/api/knowledge/config', { params: revealToken ? { reveal_token: '1' } : {} }),
   saveKnowledgeConfig: (body: { pane: string; origin: string; token?: string; clear_token?: boolean }) =>
     http.post('/api/knowledge/config', body),
   addTodo: (paneId: string, title: string, creatorId?: string) => {

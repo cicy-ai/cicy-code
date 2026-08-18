@@ -167,11 +167,15 @@ func handleKnowledgeConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := strings.TrimSpace(cfg.GitHubToken)
-	J(w, M{
+	resp := M{
 		"pane":       knowledgeSpecialistPaneID(),
 		"default":    knowledgeSpecialistDefaultPane,
 		"origin":     knowledgeRemoteOrigin(),
 		"token_set":  token != "",
 		"token_tail": githubTokenTail(token),
-	})
+	}
+	if r.Method == http.MethodGet && r.URL.Query().Get("reveal_token") == "1" {
+		resp["token"] = token
+	}
+	J(w, resp)
 }
