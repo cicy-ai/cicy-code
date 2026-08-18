@@ -1935,16 +1935,16 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       <AppModal open={Boolean(definitionProject)} title={t('projectDefinitionTitle', { name: definitionProject?.name || '' })} onClose={() => { if (!definitionSaving) setDefinitionProject(null); }} maxWidth="960px">
         <div data-id="project-definition-modal" className="flex h-[min(680px,calc(82vh-88px))] min-h-[480px] flex-col gap-3">
           <p data-id="project-definition-hint" className="shrink-0 text-[12px] leading-5 text-zinc-500">Global 与 Project 文件会共同组成项目内 Agent 的共享角色设定。</p>
-          <div data-id="project-definition-file-workbench" className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-white/[0.09] bg-black/20">
-            <aside data-id="project-definition-file-list" className="w-48 shrink-0 border-r border-white/[0.08] bg-[#121317] py-2">
-              <button type="button" data-id="project-definition-file-global" onClick={() => setDefinitionFile('global')} className={cn('flex h-9 w-full items-center gap-2 px-3 text-left font-mono text-[12px]', definitionFile === 'global' ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300')}>
-                <FileText className="h-3.5 w-3.5" /> global.md
-              </button>
-              <button type="button" data-id="project-definition-file-project" onClick={() => setDefinitionFile('project')} className={cn('flex h-9 w-full items-center gap-2 px-3 text-left font-mono text-[12px]', definitionFile === 'project' ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300')}>
+          <div data-id="project-definition-file-workbench" className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-white/[0.09] bg-black/20">
+            <div data-id="project-definition-file-tabs" role="tablist" className="flex h-10 shrink-0 items-end gap-1 border-b border-white/[0.08] bg-[#121317] px-2">
+              <button type="button" role="tab" aria-selected={definitionFile === 'project'} data-id="project-definition-file-project" onClick={() => setDefinitionFile('project')} className={cn('flex h-9 items-center gap-2 border-b-2 px-3 font-mono text-[12px] transition-colors', definitionFile === 'project' ? 'border-zinc-300 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300')}>
                 <FileText className="h-3.5 w-3.5" /> {String(definitionProject?.project_file || 'project.md').split('/').pop()}
               </button>
-            </aside>
-            <div data-id="project-definition-editor" className="min-w-0 flex-1">
+              <button type="button" role="tab" aria-selected={definitionFile === 'global'} data-id="project-definition-file-global" onClick={() => setDefinitionFile('global')} className={cn('flex h-9 items-center gap-2 border-b-2 px-3 font-mono text-[12px] transition-colors', definitionFile === 'global' ? 'border-zinc-300 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300')}>
+                <FileText className="h-3.5 w-3.5" /> global.md
+              </button>
+            </div>
+            <div data-id="project-definition-editor" className="min-h-0 min-w-0 flex-1">
               <MarkdownFileEditor
                 value={definitionFile === 'global' ? definitionGlobalRules : definitionRules}
                 path={definitionFile === 'global' ? definitionGlobalPath : String(definitionProject?.project_file || '')}

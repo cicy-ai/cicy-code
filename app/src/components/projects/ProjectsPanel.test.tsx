@@ -64,6 +64,8 @@ describe('<ProjectsPanel /> floating action button', () => {
 
     expect(await screen.findByText('global.md')).toBeInTheDocument();
     expect(screen.getByText('default.md')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-definition-file-project"]')).toHaveAttribute('aria-selected', 'true');
+    expect(document.querySelector('[data-id="project-definition-file-tabs"]')).toHaveAttribute('role', 'tablist');
     expect(document.querySelector('[data-id="markdown-file-editor"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="project-definition-tips"]')).toHaveTextContent('global.md → Project 定义 → Agent 角色');
     fireEvent.click(document.querySelector('[data-id="project-definition-file-global"]') as HTMLElement);
