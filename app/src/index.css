@@ -1162,3 +1162,88 @@ html[data-theme="light"] [data-id="current-history-tool-toggle-arg-preview"] {
 html[data-theme="light"] [data-id="current-history-tool-toggle-expand"] {
   color: #71717a !important;
 }
+
+/* Current chat Markdown: crisp tables on light surfaces. */
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown table {
+  overflow: hidden;
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown :is(th, td) {
+  border-color: #d4d4d8;
+  color: #3f3f46;
+}
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown th {
+  background: #e4e4e7;
+  color: #18181b;
+  font-weight: 650;
+}
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown tbody tr:nth-child(even) td {
+  background: #f4f4f5;
+}
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown tbody tr:hover td {
+  background: #eef4ff;
+}
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown hr {
+  border-top-color: #d4d4d8;
+}
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown a {
+  color: #2563eb;
+}
+
+/* Model picker: replace translucent dark-theme surfaces in light mode. */
+html[data-theme="light"] [data-id="model-picker-trigger"] {
+  border-color: #d4d4d8 !important;
+  background: #ffffff !important;
+  color: #27272a !important;
+  box-shadow: 0 1px 2px rgba(24, 24, 27, 0.06);
+}
+html[data-theme="light"] [data-id="model-picker-trigger"]:hover,
+html[data-theme="light"] [data-id="model-picker-trigger"][aria-expanded="true"] {
+  border-color: #a1a1aa !important;
+  background: #f4f4f5 !important;
+}
+html[data-theme="light"] :is([data-id="model-picker-provider"], [data-id="model-picker-sep"], [data-id="model-picker-chevron"]) {
+  color: #52525b !important;
+}
+html[data-theme="light"] [data-id="model-picker-model"] {
+  color: #27272a !important;
+}
+html[data-theme="light"] [data-id="model-picker-popover"] {
+  border-color: #d4d4d8 !important;
+  background: rgba(255, 255, 255, 0.98) !important;
+  color: #27272a !important;
+  box-shadow: 0 18px 45px -12px rgba(24, 24, 27, 0.24), inset 0 1px 0 #ffffff !important;
+}
+html[data-theme="light"] :is([data-id="model-picker-tabs"], [data-id="model-picker-search"], [data-id="model-picker-current-summary"]) {
+  border-color: #e4e4e7 !important;
+}
+html[data-theme="light"] [data-id="model-picker-search-input"] {
+  color: #27272a !important;
+}
+html[data-theme="light"] [data-id="model-picker-search-input"]::placeholder {
+  color: #71717a !important;
+}
+html[data-theme="light"] [data-id^="model-picker-family-header-"] {
+  color: #71717a !important;
+}
+html[data-theme="light"] [data-id^="model-picker-model-row-"] {
+  color: #3f3f46 !important;
+}
+html[data-theme="light"] [data-id^="model-picker-model-row-"]:hover {
+  background: #f4f4f5 !important;
+}
+html[data-theme="light"] [data-id^="model-picker-model-row-"][class*="bg-blue"] {
+  background: #dbeafe !important;
+  color: #1d4ed8 !important;
+}
+html[data-theme="light"] [data-id^="model-picker-routes-list-"] {
+  background: #f4f4f5 !important;
+}
+html[data-theme="light"] [data-id^="model-picker-route-item-"] {
+  color: #52525b !important;
+}
+html[data-theme="light"] [data-id^="model-picker-route-item-"]:hover {
+  background: #e4e4e7 !important;
+}
