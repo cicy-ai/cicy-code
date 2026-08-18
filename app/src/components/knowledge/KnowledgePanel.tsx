@@ -3,7 +3,7 @@
 
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, Check, Loader2, Settings, X } from 'lucide-react';
+import { BookOpen, Check, Eye, EyeOff, Loader2, Settings, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import FilesView from '../files/FilesView';
 import apiService from '../../services/api';
@@ -37,6 +37,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
   const [pane, setPane] = useState('w-1001:main.0');
   const [origin, setOrigin] = useState('');
   const [token, setToken] = useState('');
+  const [showToken, setShowToken] = useState(false);
   const [tokenSet, setTokenSet] = useState(false);
   const [tokenTail, setTokenTail] = useState('');
 
@@ -72,6 +73,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
     setConfigError('');
     setConfigSaved(false);
     setToken('');
+    setShowToken(false);
     try {
       const { data } = await apiService.getKnowledgeConfig();
       setPane(String(data?.pane || data?.default || 'w-1001:main.0'));
@@ -167,7 +169,12 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
                   <input data-id="knowledge-config-origin" value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="https://github.com/org/private-knowledge.git" className="mt-1.5 h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 font-mono text-xs text-zinc-200 outline-none focus:border-sky-600" />
                 </label>
                 <label className="block text-xs text-zinc-400">CICY_KNOWLEDGE_GH_TOKEN
-                  <input data-id="knowledge-config-token" type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder={tokenSet ? `已配置 ····${tokenTail}（留空不修改）` : 'GitHub fine-grained token'} autoComplete="new-password" className="mt-1.5 h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 font-mono text-xs text-zinc-200 outline-none focus:border-sky-600" />
+                  <span className="relative mt-1.5 block">
+                    <input data-id="knowledge-config-token" type={showToken ? 'text' : 'password'} value={token} onChange={(event) => setToken(event.target.value)} placeholder={tokenSet ? `已配置 ····${tokenTail}（留空不修改）` : 'GitHub fine-grained token'} autoComplete="new-password" className="h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 py-0 pl-3 pr-10 font-mono text-xs text-zinc-200 outline-none focus:border-sky-600" />
+                    <button type="button" data-id="knowledge-config-token-toggle" onClick={() => setShowToken((visible) => !visible)} className="absolute inset-y-0 right-0 inline-flex w-9 items-center justify-center text-zinc-500 hover:text-zinc-200" title={showToken ? '隐藏 Token' : '显示 Token'} aria-label={showToken ? '隐藏 Token' : '显示 Token'}>
+                      {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </span>
                 </label>
                 <div className="flex min-h-5 items-center text-xs">
                   {configError ? <span className="text-red-400">{configError}</span> : configSaved ? <span className="inline-flex items-center gap-1 text-emerald-400"><Check className="h-3.5 w-3.5" />已保存</span> : <span className="text-zinc-600">Token 仅保存在本机私密配置中，不写入 Git remote URL。</span>}
