@@ -584,14 +584,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         setAgents(Array.isArray(fresh) ? fresh : fresh?.panes || []);
         setCreateAgentOpen(false);
         setCreateAgentInitialValues(undefined);
-        onSelectAgent(String(id).split(':')[0]);
       }
     } catch {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastCreateWorkerFailed') }));
     } finally {
       setCreateAgentSubmitting(false);
     }
-  }, [onSelectAgent, t]);
+  }, [t]);
   const [boundAgents, setBoundAgents] = useState<any[]>([]);
   const [pollStatuses, setPollStatuses] = useState<Record<string, any>>({});
   const [paneDetails, setPaneDetails] = useState<Record<string, any>>({});
