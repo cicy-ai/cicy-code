@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { BookOpen, Check, Eye, EyeOff, Loader2, MessageCircle, Minus, Settings, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -35,6 +35,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
   const [configError, setConfigError] = useState('');
   const [configSaved, setConfigSaved] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatFrame, setChatFrame] = useState({ right: 16, bottom: 16, width: 320, height: 640 });
   const [origin, setOrigin] = useState('');
   const [token, setToken] = useState('');
   const [showToken, setShowToken] = useState(false);
@@ -121,6 +122,42 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
     setShowToken(true);
   };
 
+  const startChatFramePointer = (mode: 'move' | 'resize', event: ReactPointerEvent<HTMLElement>) => {
+    if (mode === 'move' && (event.target as HTMLElement).closest('button')) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const start = chatFrame;
+    const onMove = (moveEvent: PointerEvent) => {
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+      const maxWidth = Math.max(280, window.innerWidth - 80);
+      const maxHeight = Math.max(320, window.innerHeight - 80);
+      if (mode === 'move') {
+        setChatFrame({
+          ...start,
+          right: Math.max(0, Math.min(window.innerWidth - start.width - 56, start.right - dx)),
+          bottom: Math.max(0, Math.min(window.innerHeight - start.height, start.bottom - dy)),
+        });
+        return;
+      }
+      const width = Math.max(280, Math.min(maxWidth, start.width + dx));
+      const height = Math.max(320, Math.min(maxHeight, start.height + dy));
+      setChatFrame({
+        right: Math.max(0, start.right - (width - start.width)),
+        bottom: Math.max(0, start.bottom - (height - start.height)),
+        width,
+        height,
+      });
+    };
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  };
+
   if (!open) return null;
 
   return createPortal(
@@ -172,10 +209,10 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
         </div>
       </section>
       {chatOpen ? (
-        <section data-id="knowledge-agent-chat-float" className="absolute right-4 top-14 z-10 flex h-[min(640px,calc(100%-4.5rem))] w-[320px] flex-col overflow-hidden rounded-xl border border-sky-400/25 bg-[#101012] shadow-[0_24px_70px_rgba(0,0,0,0.55)]">
-          <header className="flex h-11 shrink-0 items-center gap-2 border-b border-white/[0.07] px-3">
+        <section data-id="knowledge-agent-chat-float" style={chatFrame} className="absolute z-10 flex max-h-[calc(100%-1rem)] max-w-[calc(100%-1rem)] flex-col overflow-hidden rounded-xl border border-sky-400/25 bg-[#101012] shadow-[0_24px_70px_rgba(0,0,0,0.55)]">
+          <header data-id="knowledge-agent-chat-drag-handle" onPointerDown={(event) => startChatFramePointer('move', event)} className="flex h-11 shrink-0 cursor-move select-none items-center gap-2 border-b border-white/[0.07] px-3">
             <MessageCircle className="h-4 w-4 text-sky-400" />
-            <div className="min-w-0 flex-1 truncate text-xs font-semibold text-zinc-100">知识专员 · w-1001</div>
+            <div className="min-w-0 flex-1 truncate text-xs font-semibold text-zinc-100">知识专员 · w-1001 · 待治理 {pendingCount}</div>
             <button type="button" data-id="knowledge-agent-chat-minimize" onClick={() => setChatOpen(false)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200" title="最小化" aria-label="最小化知识专员聊天">
               <Minus className="h-4 w-4" />
             </button>
@@ -183,6 +220,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
           <div className="min-h-0 flex-1 bg-black">
             <DispatcherChat paneId="w-1001:main.0" active agentType="cicy" title="知识专员" />
           </div>
+          <div data-id="knowledge-agent-chat-resize-handle" onPointerDown={(event) => startChatFramePointer('resize', event)} className="absolute bottom-0 right-0 z-20 h-4 w-4 cursor-se-resize border-b-2 border-r-2 border-sky-400/60" />
         </section>
       ) : null}
       {configOpen ? (
