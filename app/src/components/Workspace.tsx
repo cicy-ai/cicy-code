@@ -2632,6 +2632,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               paneId: `${paneId}:main.0`,
               title: String(agent?.title || agent?.name || paneId),
               roleTemplate: String(agent?.role_template || paneDetails[paneId]?.role_template || ''),
+              agentType: String(agent?.agent_type || paneDetails[paneId]?.agent_type || ''),
             };
           }).filter((agent) => agent.paneId !== ':main.0')}
           pendingCount={knowledgePendingCount}
