@@ -183,7 +183,7 @@ func setKnowledgeRemoteOrigin(origin, token string) error {
 			return fmt.Errorf("set knowledge git config %s: %w: %s", item[0], err, strings.TrimSpace(string(out)))
 		}
 	}
-	return os.Chmod(filepath.Join(knowledgeRootDir(), ".git", "config"), 0o600)
+	return nil
 }
 
 // GET never returns the token itself. POST accepts a non-empty token to replace

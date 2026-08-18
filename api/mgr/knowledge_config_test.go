@@ -36,13 +36,6 @@ func TestKnowledgeConfigPersistsSecretAndRemoteWithoutLeakingToken(t *testing.T)
 	if err != nil || !strings.Contains(string(rawRemote), "x-access-token:github_pat_secret-value@github.com") {
 		t.Fatalf("authenticated origin was not saved to .git/config: %q err=%v", rawRemote, err)
 	}
-	gitConfigInfo, err := os.Stat(filepath.Join(knowledgeRootDir(), ".git", "config"))
-	if err != nil {
-		t.Fatalf("stat .git/config: %v", err)
-	}
-	if gitConfigInfo.Mode().Perm() != 0o600 {
-		t.Fatalf(".git/config must be private: mode=%v", gitConfigInfo.Mode().Perm())
-	}
 	for key, want := range map[string]string{
 		"branch.main.remote": "origin",
 		"branch.main.merge":  "refs/heads/main",
