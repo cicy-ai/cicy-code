@@ -28,7 +28,7 @@ func TestAgentLanguageDefaultsToChinese(t *testing.T) {
 }
 
 func TestOfficialRosterDefaultsToChineseTitles(t *testing.T) {
-	want := map[int]string{1001: "知识专员", 101: "架构师", 102: "全栈工程师", 103: "软件工程师", 104: "审计策略专员"}
+	want := map[int]string{1001: "知识专员", 101: "架构师", 102: "全栈工程师", 104: "审计策略专员"}
 	for _, worker := range officialRoleRoster() {
 		if got := worker.Title; got != want[worker.Port] {
 			t.Errorf("w-%d title = %q, want %q", worker.Port, got, want[worker.Port])
