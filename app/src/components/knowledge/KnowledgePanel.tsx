@@ -61,7 +61,11 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
           <button
             type="button"
             data-id="knowledge-modal-close"
-            onClick={onClose}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose();
+            }}
             className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
             title={t('close', { ns: 'common', defaultValue: '关闭' })}
           >
