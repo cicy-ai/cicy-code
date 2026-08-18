@@ -580,6 +580,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [queuedAgentMessages, setQueuedAgentMessages] = useState<Record<string, QueuedAgentMessage[]>>(readProjectAgentQueue);
   const [sendingAgentIds, setSendingAgentIds] = useState<Set<string>>(new Set());
   const [cancelingAgentIds, setCancelingAgentIds] = useState<Set<string>>(new Set());
+  const [canceledAgentIds, setCanceledAgentIds] = useState<Set<string>>(new Set());
   const [terminalAgentIds, setTerminalAgentIds] = useState<Set<string>>(new Set());
   const [agentLayouts, setAgentLayouts] = useState<Record<string, ProjectAgentLayout>>({});
   const [layoutReadyProjectId, setLayoutReadyProjectId] = useState('');
@@ -1077,6 +1078,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
   const agentIsThinking = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
+    if (canceledAgentIds.has(id)) return false;
     const summary = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id] || {};
     // poll/status is the freshest source. Do not OR it with stale agent/reply
     // snapshots: an old "thinking" there would keep queued prompts stuck forever
@@ -1087,6 +1089,12 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
   const deliverAgentMessage = async (agent: ProjectAgent, message: string, displayQuestion: string, previousReply: any, sentAttachments: ProjectAttachment[] = [], restoreText = '') => {
     const id = shortPaneId(agent.paneId);
+    setCanceledAgentIds((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
     setSendingAgentIds((current) => new Set(current).add(id));
     optimisticQuestionsRef.current[id] = displayQuestion;
     setAgentReplies((current) => ({
@@ -1180,7 +1188,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       setQueuedAgentMessages((current) => ({ ...current, [id]: [] }));
       void deliverAgentMessage(agent, payload, displayQuestion, previousReply);
     }
-  }, [agents, agentReplies, queuedAgentMessages, sendingAgentIds, statuses]);
+  }, [agents, agentReplies, queuedAgentMessages, sendingAgentIds, canceledAgentIds, statuses]);
 
   const cancelAgentMessage = async (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
@@ -1204,6 +1212,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           updated_at: new Date().toISOString(),
         },
       }));
+      setCanceledAgentIds((current) => new Set(current).add(id));
     } catch (cause: any) {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.message || t('projectCancelFailed', { defaultValue: '取消失败' }) }));
     } finally {
@@ -1515,7 +1524,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               // reply is already `pending`, so it bridges that gap until the
               // current-reply poll replaces it with an authoritative terminal state.
               const observedReplyStatus = String(agentReplies[cardShortId]?.status || cardLatest?.status || agent.status || '').toLowerCase();
-              const cardBusy = sendingAgentIds.has(cardShortId) || Boolean(cardMetrics?.working) || /running|working|thinking|streaming|pending|tool_use|tool_call|in_progress/.test(observedReplyStatus);
+              const cardBusy = !canceledAgentIds.has(cardShortId) && (sendingAgentIds.has(cardShortId) || Boolean(cardMetrics?.working) || /running|working|thinking|streaming|pending|tool_use|tool_call|in_progress/.test(observedReplyStatus));
               return (
               <div
                 key={agent.paneId}
