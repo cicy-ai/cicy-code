@@ -602,6 +602,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [addSearch, setAddSearch] = useState('');
   const [addError, setAddError] = useState('');
   const [selectedToAdd, setSelectedToAdd] = useState<Set<string>>(new Set());
+  const addResultsRef = useRef<HTMLDivElement>(null);
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
   const agentMembershipKey = agents.map((agent) => agent.paneId).sort().join('|');
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
@@ -633,6 +634,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const promptHistoryIndexRef = useRef<Record<string, number | null>>({});
   const promptHistoryDraftRef = useRef<Record<string, string>>({});
   const cancelReleaseTimersRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    addResultsRef.current?.scrollTo({ top: 0 });
+  }, [addSearch]);
 
   const setQueuedAgentMessages = useCallback((update: (current: Record<string, QueuedAgentMessage[]>) => Record<string, QueuedAgentMessage[]>) => {
     setQueuedAgentMessagesState((current) => {
@@ -2009,7 +2014,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               autoFocus
             />
           </label>
-          <div data-id="project-add-agent-results" className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+          <div ref={addResultsRef} data-id="project-add-agent-results" className="min-h-0 flex-1 space-y-2 overflow-y-scroll pr-1 [scrollbar-gutter:stable]">
           {filteredAvailableAgents.length ? filteredAvailableAgents.map((agent) => {
             const checked = selectedToAdd.has(agent.paneId);
             return (
