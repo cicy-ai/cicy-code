@@ -338,6 +338,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [createAgentInitialValues, setCreateAgentInitialValues] = useState<Partial<CreateAgentValues> | undefined>();
   const [createAgentProjectLocked, setCreateAgentProjectLocked] = useState(false);
   const [createAgentRoleLocked, setCreateAgentRoleLocked] = useState(false);
+  const [createAgentTypeLocked, setCreateAgentTypeLocked] = useState(false);
   const createAgentOnCreatedRef = useRef<((paneId: string) => void) | null>(null);
   useEffect(() => {
     const requestCreateAgent = (event: Event) => {
@@ -349,6 +350,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       });
       setCreateAgentProjectLocked(false);
       setCreateAgentRoleLocked(detail.roleTemplateLocked === true);
+      setCreateAgentTypeLocked(detail.agentTypeLocked === true);
       createAgentOnCreatedRef.current = typeof detail.onCreated === 'function' ? detail.onCreated : null;
       setCreateAgentOpen(true);
     };
@@ -551,6 +553,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         setCreateAgentInitialValues(undefined);
         setCreateAgentProjectLocked(false);
         setCreateAgentRoleLocked(false);
+        setCreateAgentTypeLocked(false);
         createAgentOnCreatedRef.current?.(String(id).includes(':') ? String(id) : `${id}:main.0`);
         createAgentOnCreatedRef.current = null;
       }
@@ -2591,13 +2594,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <CreateAgentDialog
         open={createAgentOpen}
         submitting={createAgentSubmitting}
-        onClose={() => { if (!createAgentSubmitting) { setCreateAgentOpen(false); setCreateAgentInitialValues(undefined); setCreateAgentProjectLocked(false); setCreateAgentRoleLocked(false); createAgentOnCreatedRef.current = null; } }}
+        onClose={() => { if (!createAgentSubmitting) { setCreateAgentOpen(false); setCreateAgentInitialValues(undefined); setCreateAgentProjectLocked(false); setCreateAgentRoleLocked(false); setCreateAgentTypeLocked(false); createAgentOnCreatedRef.current = null; } }}
         onSubmit={submitCreateAgent}
         title={t('drawerCreateTitle')}
         submitLabel={t('drawerCreateSubmit')}
         initialValues={createAgentInitialValues}
         projectTemplateLocked={createAgentProjectLocked}
         roleTemplateLocked={createAgentRoleLocked}
+        agentTypeLocked={createAgentTypeLocked}
       />
       <WeChatBindModal />
       <SettingsModal

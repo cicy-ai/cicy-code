@@ -46,6 +46,7 @@ interface Props {
   initialValues?: Partial<CreateAgentValues>;
   projectTemplateLocked?: boolean;
   roleTemplateLocked?: boolean;
+  agentTypeLocked?: boolean;
 }
 
 const DEFAULT_VALUES: CreateAgentValues = {
@@ -74,6 +75,7 @@ export default function CreateAgentDialog({
   initialValues,
   projectTemplateLocked = false,
   roleTemplateLocked = false,
+  agentTypeLocked = false,
 }: Props) {
   const { t, i18n } = useTranslation('createAgent');
   const { t: ts } = useTranslation('settings');
@@ -136,6 +138,9 @@ export default function CreateAgentDialog({
 
   const canSubmit = values.title.trim().length > 0 && values.agent_type.trim().length > 0 && !submitting;
   const selectedAgent = mergedAgentTypeOptions.find((option) => option.value === values.agent_type) || null;
+  const visibleAgentTypeOptions = agentTypeLocked
+    ? mergedAgentTypeOptions.filter((option) => option.value === values.agent_type)
+    : mergedAgentTypeOptions;
   const supportsAPIStyle = values.agent_type === 'cicy' || values.agent_type.startsWith('custom:');
 
   const set = (patch: Partial<CreateAgentValues>) => {
@@ -203,8 +208,9 @@ export default function CreateAgentDialog({
             <label data-id="create-agent-dialog-agent-type-label" className="mb-1.5 block text-[13px] font-medium text-zinc-300">{t('agentTypeLabel')}</label>
             <AgentTypeSelector
               value={values.agent_type}
-              options={mergedAgentTypeOptions}
+              options={visibleAgentTypeOptions}
               onChange={(agentType) => {
+                if (agentTypeLocked) return;
                 const option = mergedAgentTypeOptions.find((item) => item.value === agentType);
                 handleAgentTypeSelect(agentType, (option?.label || agentType).replace(/^★\s*/, ''));
               }}
@@ -214,6 +220,7 @@ export default function CreateAgentDialog({
             />
             <div data-id="create-agent-dialog-agent-type-hint" className="mt-2 rounded-xl border border-cyan-400/15 bg-cyan-500/[0.06] px-3 py-2 text-[12px] text-cyan-100/90">
               {t('currentSelection')}<span data-id="create-agent-dialog-agent-type-hint-name" className="font-medium text-cyan-100">{selectedAgent?.label || t('noSelection')}</span>
+              {agentTypeLocked ? <span data-id="create-agent-dialog-agent-type-locked" className="ml-1 text-amber-300/75">（知识专员固定类型，不可更改）</span> : null}
               <span data-id="create-agent-dialog-agent-type-hint-desc" className="ml-1 text-cyan-100/65">{selectedAgent?.description || (agentTypeOptions.length ? t('selectAgentTypeHint') : t('noAgentTypesAvailable'))}</span>
             </div>
           </div>

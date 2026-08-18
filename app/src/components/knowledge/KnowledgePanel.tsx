@@ -202,6 +202,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
         title: '知识专员',
         roleTemplate: 'knowledge-specialist',
         roleTemplateLocked: true,
+        agentTypeLocked: true,
         onCreated: (paneId: string) => { void switchKnowledgeAgent(paneId); },
       },
     }));
