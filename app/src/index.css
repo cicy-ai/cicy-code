@@ -1210,6 +1210,12 @@ html[data-theme="light"] :is([data-id="model-picker-provider"], [data-id="model-
 html[data-theme="light"] [data-id="model-picker-model"] {
   color: #27272a !important;
 }
+html[data-theme="light"] :is([data-id="model-picker-trigger"], [data-id="model-picker-popover"]) [data-id="ModelTag"] {
+  background: transparent !important;
+  color: #3f3f46 !important;
+  box-shadow: none !important;
+  font-weight: 600;
+}
 html[data-theme="light"] [data-id="model-picker-popover"] {
   border-color: #d4d4d8 !important;
   background: rgba(255, 255, 255, 0.98) !important;
