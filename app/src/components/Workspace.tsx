@@ -301,6 +301,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   });
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const knowledgeReturnPanelRef = useRef<LeftPanelView>(null);
   const [projectsOpen, setProjectsOpen] = useState(() => /^#\/project\/[^/?#]+/.test(window.location.hash) || cache.get(projectsOpenKey(paneId), false) === true);
   const [activeProjectTitle, setActiveProjectTitle] = useState('');
   const [projectAgentSelected, setProjectAgentSelected] = useState(false);
@@ -932,6 +933,24 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setProjectsOpen(false);
     setLeftPanelView(prev => prev === p ? null : p);
   };
+
+  const openKnowledge = useCallback(() => {
+    knowledgeReturnPanelRef.current = leftPanelView;
+    setPortsOpen(false);
+    setProjectsOpen(false);
+    setKnowledgeOpen(true);
+  }, [leftPanelView]);
+
+  const closeKnowledge = useCallback(() => {
+    const returnPanel = knowledgeReturnPanelRef.current;
+    setKnowledgeOpen(false);
+    // Closing a portal can expose an underlying control during the same native
+    // pointer sequence. Restore the panel after that sequence has completed so
+    // the knowledge close button can never dismiss the left/team panel.
+    if (returnPanel) {
+      window.requestAnimationFrame(() => setLeftPanelView(returnPanel));
+    }
+  }, []);
 
   const canvasPaneIds = useMemo(() => {
     const next = [paneId];
@@ -2130,7 +2149,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 active={knowledgeOpen}
                 icon={<BookOpen className="w-5 h-5" />}
                 title={t('tabKnowledge', { defaultValue: '知识库' })}
-                onClick={() => { setPortsOpen(false); setProjectsOpen(false); setKnowledgeOpen(true); }}
+                onClick={openKnowledge}
                 badge={knowledgePendingCount > 0}
                 badgeTitle={t('knowledgePendingBadge', { defaultValue: '{{count}} 条知识待审核', count: knowledgePendingCount })}
               />
@@ -2582,7 +2601,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <Suspense fallback={null}>
         <KnowledgePanel
           open={knowledgeOpen}
-          onClose={() => setKnowledgeOpen(false)}
+          onClose={closeKnowledge}
           agentId={nativeFilesAgentId}
           workspaceFolder={nativeFilesWorkspace}
           pageClientId={pageClientId}
