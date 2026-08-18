@@ -347,6 +347,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(() => /^#\/project\/[^/?#]+/.test(window.location.hash) || cache.get(projectsOpenKey(paneId), false) === true);
   const [activeProjectTitle, setActiveProjectTitle] = useState('');
+  const [projectAgentSelected, setProjectAgentSelected] = useState(false);
   const [portsOpen, setPortsOpen] = useState(false);
   const [fixedDomain, setFixedDomain] = useState('');
   const [proxyAvailable, setProxyAvailable] = useState(false);
@@ -1608,10 +1609,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCanvasLocateRequest({ paneId: clean, nonce: Date.now(), zoomToActual: true });
   }, [paneId]);
   useEffect(() => {
-    document.title = projectsOpen && activeProjectTitle
+    document.title = projectsOpen && activeProjectTitle && !projectAgentSelected
       ? `${activeProjectTitle} | CiCy Code`
       : `${topBarTitle} (${topBarPaneId}) | CiCy Code`;
-  }, [activeProjectTitle, projectsOpen, topBarPaneId, topBarTitle]);
+  }, [activeProjectTitle, projectAgentSelected, projectsOpen, topBarPaneId, topBarTitle]);
   useEffect(() => {
     if (!token) return;
   }, [token]);
@@ -2069,10 +2070,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }).filter((agent) => agent.paneId), [agents, paneDetails, pollStatuses, token, currentLang]);
   const handleActiveProjectChange = useCallback((project: { name: string }) => {
     setActiveProjectTitle(project.name);
+    setProjectAgentSelected(false);
   }, []);
   const handleProjectActiveAgentChange = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
+    setProjectAgentSelected(true);
     setActiveTeamPaneId((current) => current[paneId] === clean ? current : { ...current, [paneId]: clean });
   }, [paneId]);
   const handleStackOpenSession = useCallback((targetPaneId: string) => {
