@@ -2058,6 +2058,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             onOpenPaneTodo={todoSkillInstalled ? openPaneTodo : undefined}
             onOpenPaneMemory={openPaneMemory}
             onOpenPaneContent={openPaneContent}
+            auditEnabled={globalVar?.audit_enabled === true}
             onActivePaneIdChange={handleStackActivePaneIdChange}
             onRenamePaneTitle={handleRenamePaneTitle}
             todoCount={todoCount}
@@ -2174,7 +2175,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     onFiles={(event) => { event.stopPropagation(); openPaneFiles(activeCliPaneId); }}
                     onSession={(event) => { event.stopPropagation(); handleStackOpenSession(activeCliPaneId); }}
                     onMemory={(event) => { event.stopPropagation(); openPaneMemory(activeCliPaneId); }}
-                    onAudit={(event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'audit'); }}
+                    onAudit={globalVar?.audit_enabled === true ? (event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'audit'); } : undefined}
                     onAccountMatrix={(event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'github'); }}
                     onSettings={(event) => { event.stopPropagation(); openPaneSettings(activeCliPaneId); }}
                     todoCount={todoCount}

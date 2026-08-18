@@ -560,6 +560,7 @@ function AgentStack({
   onOpenPaneMemory,
   onOpenPaneContent,
   onRenamePaneTitle,
+  auditEnabled = false,
   todoCount = 0,
   auditAlertCount = 0,
 }: {
@@ -578,6 +579,7 @@ function AgentStack({
   // header buttons that mirror cli-content-tabs (audit / account matrix).
   onOpenPaneContent?: (paneId: string, tab: string) => void
   onRenamePaneTitle?: (paneId: string, nextTitle: string) => Promise<void> | void
+  auditEnabled?: boolean
   // Pending-todo count for the active pane; shown as a badge on its todo button.
   todoCount?: number
   // Open (unhandled) audit-alert count; shown as a badge on the 审计日志 button.
@@ -783,6 +785,7 @@ function AgentStack({
             onOpenPaneMemory={onOpenPaneMemory}
             onOpenPaneContent={onOpenPaneContent}
             onRenamePaneTitle={onRenamePaneTitle}
+            auditEnabled={auditEnabled}
             todoCount={activePaneId === item.paneId ? todoCount : 0}
             auditAlertCount={auditAlertCount}
             onClick={() => onActivePaneIdChange(item.paneId)}
@@ -836,6 +839,7 @@ function AgentStackCard({
   onOpenPaneMemory,
   onOpenPaneContent,
   onRenamePaneTitle,
+  auditEnabled,
   todoCount = 0,
   auditAlertCount = 0,
   onClick,
@@ -862,6 +866,7 @@ function AgentStackCard({
   onOpenPaneMemory?: (paneId: string) => void;
   onOpenPaneContent?: (paneId: string, tab: string) => void;
   onRenamePaneTitle?: (paneId: string, nextTitle: string) => Promise<void> | void;
+  auditEnabled: boolean;
   todoCount?: number;
   auditAlertCount?: number;
   onClick: () => void;
@@ -1272,7 +1277,7 @@ function AgentStackCard({
               onFiles={handleOpenFiles}
               onSession={handleOpenSession}
               onMemory={onOpenPaneMemory ? handleOpenMemory : undefined}
-              onAudit={onOpenPaneContent ? handleOpenAudit : undefined}
+              onAudit={auditEnabled && onOpenPaneContent ? handleOpenAudit : undefined}
               onAccountMatrix={onOpenPaneContent ? handleOpenAccountMatrix : undefined}
               onSettings={handleOpenSettings}
               todoCount={todoCount}
