@@ -44,6 +44,7 @@ interface Props {
   // the master's agent_type). When unset, the toggle is hidden.
   masterAgentType?: string;
   initialValues?: Partial<CreateAgentValues>;
+  projectTemplateLocked?: boolean;
 }
 
 const DEFAULT_VALUES: CreateAgentValues = {
@@ -70,6 +71,7 @@ export default function CreateAgentDialog({
   dialogClassName = '',
   agentTypeGridClassName = 'grid grid-cols-1 gap-2 sm:grid-cols-2',
   initialValues,
+  projectTemplateLocked = false,
 }: Props) {
   const { t, i18n } = useTranslation('createAgent');
   const { t: ts } = useTranslation('settings');
@@ -223,6 +225,7 @@ export default function CreateAgentDialog({
                 value={values.project_template}
                 onChange={(v) => set({ project_template: v })}
                 options={projects.map((p) => ({ value: p.slug, label: p.name }))}
+                disabled={projectTemplateLocked}
               />
             </div>
             <div>
