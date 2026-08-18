@@ -207,6 +207,27 @@ html[data-theme="light"] [class*="text-yellow-2"],
 html[data-theme="light"] [class*="text-yellow-3"],
 html[data-theme="light"] [class*="text-yellow-4"] { color: #854d0e !important; }
 
+/* Team panel's agent picker must read as an actionable select in light mode,
+   not blend into the surrounding toolbar/card borders. */
+html[data-theme="light"] [data-id="team-panel-bind-select"] [data-id="select-trigger"] {
+  background: #eff6ff !important;
+  border-color: #93c5fd !important;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.08), inset 0 0 0 1px rgba(59, 130, 246, 0.08);
+}
+html[data-theme="light"] [data-id="team-panel-bind-select"] [data-id="select-trigger"]:hover,
+html[data-theme="light"] [data-id="team-panel-bind-select"] [data-id="select-trigger"][aria-expanded="true"] {
+  background: #dbeafe !important;
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+}
+html[data-theme="light"] [data-id="team-panel-bind-select"] [data-id="select-trigger-value"] {
+  color: #1e3a8a !important;
+  font-weight: 600;
+}
+html[data-theme="light"] [data-id="team-panel-bind-select"] [data-id="select-trigger-icon"] {
+  color: #2563eb !important;
+}
+
 /* Preserve semantic status surfaces without carrying dark-only 800-950
    backgrounds into the light palette. */
 html[data-theme="light"] [class*="bg-sky-800"],
