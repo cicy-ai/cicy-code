@@ -197,7 +197,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
                 </div>
                 <div className="flex items-center justify-between border-t border-white/[0.07] pt-3">
                   <button type="button" disabled={!tokenSet || configSaving} onClick={() => { void saveConfig(true); }} className="text-xs text-red-400 disabled:opacity-30">清除 Token</button>
-                  <button type="button" data-id="knowledge-config-save" disabled={configSaving || !pane.trim()} onClick={() => { void saveConfig(); }} className="inline-flex h-9 items-center gap-2 rounded-md bg-zinc-100 px-4 text-xs font-semibold text-zinc-900 disabled:opacity-50">{configSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}保存</button>
+                  <button type="button" data-id="knowledge-config-save" disabled={configSaving || !pane.trim() || !origin.trim() || (!token.trim() && !tokenSet)} onClick={() => { void saveConfig(); }} className="inline-flex h-9 items-center gap-2 rounded-md bg-zinc-100 px-4 text-xs font-semibold text-zinc-900 disabled:opacity-50">{configSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}保存</button>
                 </div>
               </div>
             )}

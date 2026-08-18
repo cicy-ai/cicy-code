@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const knowledgeGitTokenEnv = "CICY_KNOWLEDGE_GH_TOKEN"
@@ -86,7 +87,7 @@ func effectiveKnowledgeGitToken(cfg knowledgePrivateConfig) string {
 	return strings.TrimSpace(os.Getenv(knowledgeGitTokenEnv))
 }
 
-func knowledgeRemoteOrigin() string {
+func knowledgeRemoteOriginRaw() string {
 	out, err := exec.Command("git", "-C", knowledgeRootDir(), "remote", "get-url", "origin").Output()
 	if err != nil {
 		return ""
@@ -94,29 +95,85 @@ func knowledgeRemoteOrigin() string {
 	return strings.TrimSpace(string(out))
 }
 
+func knowledgeRemoteOrigin() string {
+	raw := knowledgeRemoteOriginRaw()
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	u.User = nil
+	return u.String()
+}
+
 func normalizeKnowledgeRemote(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", nil
+		return "", fmt.Errorf("origin is required")
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
-		return "", fmt.Errorf("origin must be an HTTPS repository URL without embedded credentials")
+	if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Hostname(), "github.com") || u.User != nil {
+		return "", fmt.Errorf("origin must be an HTTPS github.com repository URL without embedded credentials")
 	}
 	return u.String(), nil
 }
 
-func setKnowledgeRemoteOrigin(origin string) error {
+func authenticatedKnowledgeRemote(origin, token string) (string, error) {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return "", err
+	}
+	u.User = url.UserPassword("x-access-token", token)
+	return u.String(), nil
+}
+
+func validateKnowledgeGitHubAccess(origin, token string) error {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(strings.Trim(strings.TrimSuffix(u.Path, ".git"), "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("origin must identify a GitHub owner/repository")
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+url.PathEscape(parts[0])+"/"+url.PathEscape(parts[1]), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := (&http.Client{Timeout: 12 * time.Second}).Do(req)
+	if err != nil {
+		return fmt.Errorf("validate GitHub token: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GitHub rejected the token or repository access (HTTP %d)", resp.StatusCode)
+	}
+	return nil
+}
+
+var validateKnowledgeGitHubAccessFn = validateKnowledgeGitHubAccess
+
+func setKnowledgeRemoteOrigin(origin, token string) error {
+	remote := origin
+	var err error
+	if strings.TrimSpace(token) != "" {
+		remote, err = authenticatedKnowledgeRemote(origin, token)
+		if err != nil {
+			return err
+		}
+	}
 	knowledgeGitMu.Lock()
 	defer knowledgeGitMu.Unlock()
-	args := []string{"-C", knowledgeRootDir(), "remote", "add", "origin", origin}
-	if knowledgeRemoteOrigin() != "" {
-		args = []string{"-C", knowledgeRootDir(), "remote", "set-url", "origin", origin}
+	args := []string{"-C", knowledgeRootDir(), "remote", "add", "origin", remote}
+	if knowledgeRemoteOriginRaw() != "" {
+		args = []string{"-C", knowledgeRootDir(), "remote", "set-url", "origin", remote}
 	}
 	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("set knowledge origin: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	return nil
+	return os.Chmod(filepath.Join(knowledgeRootDir(), ".git", "config"), 0o600)
 }
 
 // GET never returns the token itself. POST accepts a non-empty token to replace
@@ -138,10 +195,6 @@ func handleKnowledgeConfig(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := setKnowledgeSpecialistPane(req.Pane); err != nil {
-			httpErr(w, http.StatusInternalServerError, err.Error())
-			return
-		}
 		cfg, err := readKnowledgePrivateConfig()
 		if err != nil {
 			httpErr(w, http.StatusInternalServerError, err.Error())
@@ -152,17 +205,32 @@ func handleKnowledgeConfig(w http.ResponseWriter, r *http.Request) {
 			_ = os.Unsetenv(knowledgeGitTokenEnv)
 		} else if token := strings.TrimSpace(req.Token); token != "" {
 			cfg.GitHubToken = token
-			_ = os.Setenv(knowledgeGitTokenEnv, token)
+		}
+		token := effectiveKnowledgeGitToken(cfg)
+		if !req.ClearToken {
+			if token == "" {
+				httpErr(w, http.StatusBadRequest, "CICY_KNOWLEDGE_GH_TOKEN is required")
+				return
+			}
+			if err := validateKnowledgeGitHubAccessFn(origin, token); err != nil {
+				httpErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if err := setKnowledgeSpecialistPane(req.Pane); err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 		if err := writeKnowledgePrivateConfig(cfg); err != nil {
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if origin != "" && origin != knowledgeRemoteOrigin() {
-			if err := setKnowledgeRemoteOrigin(origin); err != nil {
-				httpErr(w, http.StatusInternalServerError, err.Error())
-				return
-			}
+		if !req.ClearToken {
+			_ = os.Setenv(knowledgeGitTokenEnv, token)
+		}
+		if err := setKnowledgeRemoteOrigin(origin, token); err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 	} else if r.Method != http.MethodGet {
 		httpErr(w, http.StatusMethodNotAllowed, "GET or POST")

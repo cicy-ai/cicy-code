@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,6 +10,9 @@ import (
 
 func TestKnowledgeConfigPersistsSecretAndRemoteWithoutLeakingToken(t *testing.T) {
 	withTempCicyRoot(t)
+	previousValidator := validateKnowledgeGitHubAccessFn
+	validateKnowledgeGitHubAccessFn = func(_, _ string) error { return nil }
+	t.Cleanup(func() { validateKnowledgeGitHubAccessFn = previousValidator })
 	if err := knowledgeEnsureRoot(); err != nil {
 		t.Fatalf("ensure knowledge root: %v", err)
 	}
@@ -27,6 +31,17 @@ func TestKnowledgeConfigPersistsSecretAndRemoteWithoutLeakingToken(t *testing.T)
 	}
 	if body["token_set"] != true || body["token_tail"] != "alue" {
 		t.Fatalf("masked token metadata missing: %v", body)
+	}
+	rawRemote, err := exec.Command("git", "-C", knowledgeRootDir(), "remote", "get-url", "origin").Output()
+	if err != nil || !strings.Contains(string(rawRemote), "x-access-token:github_pat_secret-value@github.com") {
+		t.Fatalf("authenticated origin was not saved to .git/config: %q err=%v", rawRemote, err)
+	}
+	gitConfigInfo, err := os.Stat(filepath.Join(knowledgeRootDir(), ".git", "config"))
+	if err != nil {
+		t.Fatalf("stat .git/config: %v", err)
+	}
+	if gitConfigInfo.Mode().Perm() != 0o600 {
+		t.Fatalf(".git/config must be private: mode=%v", gitConfigInfo.Mode().Perm())
 	}
 	if strings.Contains(strings.TrimSpace(anyString(body["token"])), "secret") {
 		t.Fatalf("response leaked token: %v", body)
@@ -65,6 +80,21 @@ func TestKnowledgeConfigRejectsCredentialBearingRemote(t *testing.T) {
 	})
 	if code != 400 {
 		t.Fatalf("credential-bearing origin code=%d, want 400", code)
+	}
+}
+
+func TestKnowledgeConfigRequiresOriginAndToken(t *testing.T) {
+	withTempCicyRoot(t)
+	if err := knowledgeEnsureRoot(); err != nil {
+		t.Fatalf("ensure knowledge root: %v", err)
+	}
+	code, _ := knowledgeReq(t, handleKnowledgeConfig, "POST", "/api/knowledge/config", M{"pane": "w-1001", "token": "token"})
+	if code != 400 {
+		t.Fatalf("missing origin code=%d, want 400", code)
+	}
+	code, _ = knowledgeReq(t, handleKnowledgeConfig, "POST", "/api/knowledge/config", M{"pane": "w-1001", "origin": "https://github.com/org/repo.git"})
+	if code != 400 {
+		t.Fatalf("missing token code=%d, want 400", code)
 	}
 }
 
