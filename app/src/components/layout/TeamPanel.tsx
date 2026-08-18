@@ -634,6 +634,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     <div
       key={wid}
       data-id={`team-panel-worker-${wid}`}
+      data-active={active ? 'true' : 'false'}
       onClick={onClick}
       draggable={draggable}
       onDragStart={draggable ? (e) => {
