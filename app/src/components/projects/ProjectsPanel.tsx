@@ -15,6 +15,7 @@ import { appendPromptHistory, canNavigatePromptHistory, readPromptHistory } from
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
 import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
+import { UserTurnAvatar } from '../chat/history/shared/CollapsibleQ';
 import { toolHeadline } from '../chat/history/lib/toolFormat';
 import { isTechnicalTransportFailureText } from '../chat/history/lib/normalizeItem';
 import TerminalView from '../terminal/TerminalView';
@@ -443,7 +444,9 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史<ArrowRight className="h-3 w-3" /></button>
         </div>
         {visibleQuestion || visibleQuestionAttachments.length ? (
-          <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown mr-auto w-fit max-w-[92%] rounded-xl rounded-bl-sm border border-[var(--chat-question-border)] bg-[var(--chat-question-bg)] px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-contain">
+          <div data-id="project-agent-card-question-row" className="flex min-w-0 items-start gap-2.5">
+            <UserTurnAvatar />
+            <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown min-w-0 w-fit max-w-[92%] rounded-xl rounded-bl-sm border border-[var(--chat-question-border)] bg-[var(--chat-question-bg)] px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-contain">
             {visibleQuestion ? <MarkdownBlock text={previewableMarkdown(visibleQuestion)} /> : null}
             {visibleQuestionAttachments.length ? (
               <div data-id="project-agent-card-question-attachments" className="mt-2 flex max-w-full flex-wrap gap-2">
@@ -454,6 +457,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
                 ))}
               </div>
             ) : null}
+            </div>
           </div>
         ) : null}
       </div>
