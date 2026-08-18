@@ -338,12 +338,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     >
       <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-4 pt-5">
       <div data-id="project-agent-card-header" className="flex items-start gap-3">
-        <AgentAvatar
-          agentType={agent.agentType}
-          title={agent.title || agent.paneId}
-          dataId={`project-agent-card-avatar-${shortPaneId(agent.paneId)}`}
-          variant="stack"
-        />
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 data-id="project-agent-card-title" className="truncate text-[18px] font-semibold tracking-[-0.01em] text-zinc-100">{agent.title || agent.paneId}</h3>
@@ -471,7 +465,17 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         onScroll={() => { updateScrollToBottomButton(); updateLoadingVisibility(); }}
         className="min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
       >
-        <div data-id="project-agent-card-current-turn" className="space-y-3.5">
+        <div data-id="project-agent-card-current-turn" className="flex min-w-0 items-start gap-2.5">
+        {(replyItems.length || latest?.latest_response || latest?.latest_tool?.name || working) ? (
+          <AgentAvatar
+            agentType={agent.agentType}
+            title={agent.title || agent.paneId}
+            dataId={`project-agent-card-reply-avatar-${shortPaneId(agent.paneId)}`}
+            variant="select"
+            className="mt-0.5 rounded-full"
+          />
+        ) : null}
+        <div className="min-w-0 flex-1 space-y-3.5">
         {replyItems.length ? replyItems.map((item: any, index: number) => {
           const type = String(item?.type || '');
           if (type === 'thinking' && item?.thinking) return (
@@ -521,6 +525,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             ))}
           </div>
         ) : null}
+        </div>
         </div>
       </div>
       {showScrollToBottom ? (
