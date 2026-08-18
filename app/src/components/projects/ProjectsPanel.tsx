@@ -1189,11 +1189,23 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     try {
       if (agent.agentType === 'cicy') await apiService.cancelCicyReply(agent.paneId);
       else await apiService.sendKeys(agent.paneId, 'Escape');
+      delete optimisticQuestionsRef.current[id];
       setSendingAgentIds((current) => {
         const next = new Set(current);
         next.delete(id);
         return next;
       });
+      setAgentReplies((current) => ({
+        ...current,
+        [id]: {
+          ...(current[id] || {}),
+          status: 'canceled',
+          complete: true,
+          updated_at: new Date().toISOString(),
+        },
+      }));
+    } catch (cause: any) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.message || t('projectCancelFailed', { defaultValue: '取消失败' }) }));
     } finally {
       setCancelingAgentIds((current) => {
         const next = new Set(current);
