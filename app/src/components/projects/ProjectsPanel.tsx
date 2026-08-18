@@ -1242,6 +1242,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     for (const agent of agents) {
       const id = shortPaneId(agent.paneId);
       const queued = queuedAgentMessages[id] || [];
+      const liveStatus = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id];
+      // Never release a queue during the reload gap before the first live
+      // status arrives. Treating that unknown state as idle clears and sends a
+      // restored queue as soon as the panel mounts.
+      if (!liveStatus) continue;
       if (!queued.length || agentIsThinking(agent)) continue;
       const payload = queued.map((item) => item.payload).join('\n\n');
       const displayQuestion = payload;
