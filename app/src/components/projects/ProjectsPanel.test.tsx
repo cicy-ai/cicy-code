@@ -367,6 +367,50 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(input).toHaveFocus());
   });
 
+  it('keeps project-card selection synchronized with the shared active agent', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0'], pane_count: 2 }] },
+    });
+    const onActiveAgentChange = vi.fn();
+    const { rerender } = render(
+      <ProjectsPanel
+        agents={[
+          { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' },
+          { paneId: 'w-102:main.0', title: '测试', agentType: 'codex' },
+        ]}
+        activeAgentId="w-101"
+        onActiveAgentChange={onActiveAgentChange}
+        onOpenAgent={vi.fn()}
+      />,
+    );
+    const first = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('first project agent card did not render');
+      return node as HTMLElement;
+    });
+    const second = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-102"]');
+      if (!node) throw new Error('second project agent card did not render');
+      return node as HTMLElement;
+    });
+    expect(first.className).toContain('border-blue-500');
+    fireEvent.click(second);
+    expect(onActiveAgentChange).toHaveBeenCalledWith('w-102');
+
+    rerender(
+      <ProjectsPanel
+        agents={[
+          { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' },
+          { paneId: 'w-102:main.0', title: '测试', agentType: 'codex' },
+        ]}
+        activeAgentId="w-102"
+        onActiveAgentChange={onActiveAgentChange}
+        onOpenAgent={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-w-102"]')?.className).toContain('border-blue-500'));
+  });
+
   it('queues multiple prompts while thinking and sends them together when idle', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },

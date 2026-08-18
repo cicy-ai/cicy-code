@@ -2070,6 +2070,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleActiveProjectChange = useCallback((project: { name: string }) => {
     setActiveProjectTitle(project.name);
   }, []);
+  const handleProjectActiveAgentChange = useCallback((targetPaneId: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    setActiveTeamPaneId((current) => current[paneId] === clean ? current : { ...current, [paneId]: clean });
+  }, [paneId]);
   const handleStackOpenSession = useCallback((targetPaneId: string) => {
     openPaneRequestView(targetPaneId, lastSessionSubTab);
   }, [openPaneRequestView, lastSessionSubTab]);
@@ -2208,6 +2213,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <ProjectsPanel
                 agents={projectAgents}
                 statuses={pollStatuses}
+                activeAgentId={activeCliPaneId}
+                onActiveAgentChange={handleProjectActiveAgentChange}
                 onActiveProjectChange={handleActiveProjectChange}
                 topRightControls={!cliContentOpen ? (
                   <CardMoreMenu

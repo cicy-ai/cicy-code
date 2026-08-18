@@ -537,13 +537,15 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   );
 }
 
-export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, dockOpen = false, onOpenAgent, onCreateAgent = () => {}, onOpenGuidance: _onOpenGuidance = () => {}, onOpenHistory = () => {}, onActiveProjectChange = () => {} }: {
+export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, dockOpen = false, activeAgentId = '', onActiveAgentChange = () => {}, onOpenAgent, onCreateAgent = () => {}, onOpenGuidance: _onOpenGuidance = () => {}, onOpenHistory = () => {}, onActiveProjectChange = () => {} }: {
   agents: ProjectAgent[];
   statuses?: Record<string, any>;
   topRightControls?: ReactNode;
   footerControls?: ReactNode;
   shellPanel?: ReactNode;
   dockOpen?: boolean;
+  activeAgentId?: string;
+  onActiveAgentChange?: (paneId: string) => void;
   onOpenAgent: (paneId: string) => void;
   onCreateAgent?: (projectTemplate: string) => void;
   onOpenGuidance?: (paneId: string) => void;
@@ -1056,8 +1058,15 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
   const toggleAgentSelection = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
-    setSelectedAgentIds((current) => current.has(id) ? current : new Set([id]));
+    setSelectedAgentIds(new Set([id]));
+    onActiveAgentChange(id);
   };
+
+  useEffect(() => {
+    const id = shortPaneId(activeAgentId);
+    if (!id || !visibleAgents.some((agent) => shortPaneId(agent.paneId) === id)) return;
+    setSelectedAgentIds((current) => current.size === 1 && current.has(id) ? current : new Set([id]));
+  }, [activeAgentId, visibleAgentKey]);
 
   const addAgentFiles = (agent: ProjectAgent, files: FileList | File[]) => {
     const agentId = shortPaneId(agent.paneId);
