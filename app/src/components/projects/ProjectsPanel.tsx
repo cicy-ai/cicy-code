@@ -338,6 +338,12 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     >
       <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-4 pt-5">
       <div data-id="project-agent-card-header" className="flex items-start gap-3">
+        <AgentAvatar
+          agentType={agent.agentType}
+          title={agent.title || agent.paneId}
+          dataId={`project-agent-card-avatar-${shortPaneId(agent.paneId)}`}
+          variant="stack"
+        />
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 data-id="project-agent-card-title" className="truncate text-[18px] font-semibold tracking-[-0.01em] text-zinc-100">{agent.title || agent.paneId}</h3>
