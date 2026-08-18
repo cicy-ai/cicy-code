@@ -457,7 +457,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     if (!busy) return;
     try {
       if (agentType === 'cicy') await apiService.cancelCicyReply(paneId);
-      else await apiService.sendKeys(paneId, 'C-c');
+      else await apiService.sendKeys(paneId, 'Escape');
       setBusy(false); // reflect the stop at once; if the turn is still tearing down
                       // the history poll re-sets busy=true until it truly ends.
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('composerCanceled') }));

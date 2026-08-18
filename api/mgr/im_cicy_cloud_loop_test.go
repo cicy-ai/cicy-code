@@ -680,7 +680,7 @@ func TestCiCyCloudRPCCancelInterruptsExactTerminalAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.TrimSpace(string(command)), "send-keys -t w-102:main.0 C-c"; got != want {
+	if got, want := strings.TrimSpace(string(command)), "send-keys -t w-102:main.0 Escape"; got != want {
 		t.Fatalf("tmux command = %q, want %q", got, want)
 	}
 }

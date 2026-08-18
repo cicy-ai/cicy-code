@@ -2167,7 +2167,7 @@ func handleCicyCancel(w http.ResponseWriter, r *http.Request) {
 
 // cancelAgentTurnData interrupts the exact agent addressed by the caller. A
 // headless cicy agent is canceled in process; terminal-backed agents receive
-// Ctrl+C in their own tmux pane. The result deliberately does not claim that a
+// Escape in their own tmux pane. The result deliberately does not claim that a
 // terminal turn has settled: the authoritative reply snapshot remains the
 // source of truth for the UI's working state.
 func cancelAgentTurnData(paneID string) (M, error) {
@@ -2181,10 +2181,10 @@ func cancelAgentTurnData(paneID string) (M, error) {
 		return nil, fmt.Errorf("agent %s not found", shortID)
 	}
 	if agentType != "cicy" {
-		if _, err := runTmux("send-keys", "-t", fullPaneID, "C-c"); err != nil {
+		if _, err := runTmux("send-keys", "-t", fullPaneID, "Escape"); err != nil {
 			return nil, fmt.Errorf("interrupt agent %s: %w", shortID, err)
 		}
-		return M{"canceled": true, "paneId": shortID, "agentType": agentType, "mode": "tmux_ctrl_c"}, nil
+		return M{"canceled": true, "paneId": shortID, "agentType": agentType, "mode": "tmux_escape"}, nil
 	}
 
 	canceled := cancelCicyPane(shortID)
