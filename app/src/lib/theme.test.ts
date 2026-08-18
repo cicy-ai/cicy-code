@@ -9,11 +9,11 @@ describe('global theme', () => {
     document.documentElement.className = '';
   });
 
-  it('defaults to dark and applies the document contract', () => {
-    expect(getCicyTheme()).toBe('dark');
-    applyCicyTheme('dark');
-    expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
-    expect(document.documentElement).toHaveClass('dark');
+  it('defaults to light and applies the document contract', () => {
+    expect(getCicyTheme()).toBe('light');
+    applyCicyTheme('light');
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+    expect(document.documentElement).not.toHaveClass('dark');
   });
 
   it('persists light and notifies mounted surfaces immediately', () => {
@@ -25,6 +25,11 @@ describe('global theme', () => {
     expect(document.documentElement).not.toHaveClass('dark');
     expect(listener).toHaveBeenCalledOnce();
     window.removeEventListener('cicy-theme-change', listener);
+  });
+
+  it('keeps an explicitly saved dark preference', () => {
+    localStorage.setItem('cicy_theme', 'dark');
+    expect(getCicyTheme()).toBe('dark');
   });
 
   it('keeps the project shell, canvas and footer in the light theme contract', () => {
