@@ -144,7 +144,6 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
             title="知识库配置"
           >
             <Settings className="h-4 w-4" />
-            {pendingCount > 0 ? <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-red-500" /> : null}
           </button>
         </header>
         <div data-id="knowledge-modal-body" className="flex min-h-0 flex-1">
