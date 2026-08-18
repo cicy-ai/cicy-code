@@ -555,20 +555,17 @@ type builtinWorker struct {
 // Two flavors:
 //   - cicy lite agents: non-coding roles, each with a role template
 //     (~/cicy-ai/memory/agents/<slug>.md) that shapes its AGENTS.md charter.
-//   - CLI coding agents: claude/codex/opencode, gateway-routed
+//   - CLI coding agents: claude/codex, gateway-routed
 //     (use_custom_gateway via createBuiltinWorker); no role template.
 func officialRoleRoster() []builtinWorker {
-	// Minimal cicy roster: only two cicy specialists are preinstalled —
-	//   - 知识专员 doubles as the master (team knowledge base + curation of
-	//     agents' native Layer-1 auto-memory writes into the canon _inbox),
-	//   - 审计策略专员 = the user's audit advisor.
-	// The coding agents (claude/codex/opencode) are kept and bind under the
+	// Minimal cicy roster: 知识专员 doubles as the master (team knowledge base +
+	// curation of agents' native Layer-1 auto-memory writes into the canon _inbox).
+	// The coding agents (claude/codex) are kept and bind under the
 	// master. All other cicy roles (项目经理/HR/产品经理/…) are NOT preinstalled.
 	roster := []builtinWorker{
 		{Port: 1001, AgentType: "cicy", Title: "知识专员", TitleEn: "Knowledge Specialist", RoleTemplate: "knowledge-specialist", Master: true},
 		{Port: 101, AgentType: "claude", Title: "架构师", TitleEn: "Architect", BindToPrimary: true},
 		{Port: 102, AgentType: "codex", Title: "全栈工程师", TitleEn: "Full-stack Engineer", BindToPrimary: true},
-		{Port: 104, AgentType: "cicy", Title: "审计策略专员", TitleEn: "Audit Policy Specialist", RoleTemplate: "audit-policy-specialist"},
 	}
 	return roster
 }
