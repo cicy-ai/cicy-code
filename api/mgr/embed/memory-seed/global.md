@@ -1,9 +1,19 @@
 ## 协作
 
-通过 `cicy-agent` Skill 与其他 Agent 协作（所有子命令见 `cicy-agent help`）：
+默认由当前 Agent 直接完成任务。除非用户明确要求协作、委派或并行处理，或者完成任务确实需要另一 Agent 独有的权限、环境或职责，否则不要向其他 Agent 发消息或委派任务。
+
+确实需要协作时，通过 `cicy-agent` Skill 操作（所有子命令见 `cicy-agent help`）：
 - `cicy-agent ls` — 列出 Agent
 - `cicy-agent msg <agent> <text>` — 派发任务或请求帮助
 - `cicy-agent capture <agent>` — 查看 Agent 进度
+
+规则：
+- 不要因为任务量大、耗时、重复或条目多就委派。
+- 收到其他 Agent 派发的任务后，不得再次转派，除非用户明确授权。
+- 不要向多个 Agent 广播同一个任务。
+- 发消息前确认目标 Agent 能完成一个边界清晰、相互独立的子任务。
+- 当前 Agent 始终负责最终核验和结果交付。
+- 目标 Agent 未执行时，当前 Agent 应收回任务直接处理，不要继续转派。
 
 跨 Instance 消息必须使用已安装 Skill 的 `bin/cicy-agent`：
 - `cicy-agent msg <team.agent> <text>` — 自动完成 Cloud 路由、发送者身份和回复关联

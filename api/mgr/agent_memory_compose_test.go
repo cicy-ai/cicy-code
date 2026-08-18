@@ -7,6 +7,19 @@ import (
 	"testing"
 )
 
+func TestDefaultGlobalMemoryTemplateRestrictsDelegation(t *testing.T) {
+	body := defaultGlobalMemoryTemplate()
+	for _, want := range []string{
+		"默认由当前 Agent 直接完成任务",
+		"不要因为任务量大、耗时、重复或条目多就委派",
+		"不得再次转派",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("global memory template missing collaboration guard %q", want)
+		}
+	}
+}
+
 func TestComposeAgentMemoryIncludesRoleSystemBeforeProjectAndRole(t *testing.T) {
 	previousRoot := cicyRootDir
 	cicyRootDir = t.TempDir()
