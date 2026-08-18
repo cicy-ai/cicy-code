@@ -1944,6 +1944,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 <FileText className="h-3.5 w-3.5" /> global.md
               </button>
             </div>
+            <div data-id={`project-definition-tab-help-${definitionFile}`} className="shrink-0 border-b border-white/[0.07] bg-white/[0.025] px-3 py-2 text-[11px] leading-5 text-zinc-500">
+              {definitionFile === 'project' ? (
+                <><span className="font-medium text-zinc-300">Project 定义：</span>只对当前项目内的 Agent 生效。用来编写项目目标、业务背景、技术约束、协作方式和验收标准；不要重复 global.md 里的全局通用规则。</>
+              ) : (
+                <><span className="font-medium text-zinc-300">global.md：</span>对所有项目和 Agent 生效。用来编写稳定的全局原则、沟通风格、安全要求和通用工作流；不要放入某个项目才需要的细节。</>
+              )}
+            </div>
             <div data-id="project-definition-editor" className="min-h-0 min-w-0 flex-1">
               <MarkdownFileEditor
                 value={definitionFile === 'global' ? definitionGlobalRules : definitionRules}

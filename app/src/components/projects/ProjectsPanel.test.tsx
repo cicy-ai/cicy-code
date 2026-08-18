@@ -66,10 +66,12 @@ describe('<ProjectsPanel /> floating action button', () => {
     expect(screen.getByText('default.md')).toBeInTheDocument();
     expect(document.querySelector('[data-id="project-definition-file-project"]')).toHaveAttribute('aria-selected', 'true');
     expect(document.querySelector('[data-id="project-definition-file-tabs"]')).toHaveAttribute('role', 'tablist');
+    expect(document.querySelector('[data-id="project-definition-tab-help-project"]')).toHaveTextContent('只对当前项目内的 Agent 生效');
     expect(document.querySelector('[data-id="markdown-file-editor"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="project-definition-tips"]')).toHaveTextContent('global.md → Project 定义 → Agent 角色');
     fireEvent.click(document.querySelector('[data-id="project-definition-file-global"]') as HTMLElement);
     expect(await screen.findByText('/home/cicy/cicy-ai/memory/global.md')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-definition-tab-help-global"]')).toHaveTextContent('对所有项目和 Agent 生效');
     fireEvent.click(document.querySelector('[data-id="project-definition-save"]') as HTMLElement);
     await waitFor(() => expect(api.saveMemoryTemplate).toHaveBeenCalledWith('global', '', '# Global'));
     expect(api.updateGroup).toHaveBeenCalledWith(1, { project_rules: '# Project' });
