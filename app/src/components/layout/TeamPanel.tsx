@@ -256,20 +256,22 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   const boundIds = new Set(bindings.map(b => shortId(b.name)));
   const displayBindings = useMemo(() => {
     const existing = new Map(bindings.map(b => [shortId(b.name), b] as const));
-    return panes
-      .filter(agent => shortId(agent.pane_id) !== paneId)
-      .map((agent, index): Binding => existing.get(shortId(agent.pane_id)) || {
-        id: -(index + 1),
-        pane_id: paneId,
+    return panes.map((agent, index): Binding => {
+      const bound = existing.get(shortId(agent.pane_id));
+      return {
+        ...(bound || {}),
+        id: bound?.id ?? -(index + 1),
+        pane_id: bound?.pane_id || paneId,
         name: shortId(agent.pane_id),
-        title: agent.title,
-        status: '',
-        agent_type: agent.agent_type,
-        machine_id: agent.machine_id,
-        machine_label: agent.machine_label,
-        source_kind: agent.source_kind,
-        source_ref: agent.source_ref,
-      });
+        title: bound?.title || agent.title,
+        status: bound?.status || '',
+        agent_type: bound?.agent_type || agent.agent_type,
+        machine_id: bound?.machine_id || agent.machine_id,
+        machine_label: bound?.machine_label || agent.machine_label,
+        source_kind: '',
+        source_ref: '',
+      };
+    });
   }, [bindings, paneId, panes]);
   const filteredBindings = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -555,30 +557,16 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     [panes]
   );
 
-  // Current pane + every bound worker, deduped + sorted so the poll effect's
+  // Every visible agent, deduped + sorted so the poll effect's
   // key is stable across reorders.
   const liveWids = useMemo(() => {
-    const ids = [paneId, ...bindings.map(b => shortId(b.name))].filter(Boolean);
+    const ids = panes.map(agent => shortId(agent.pane_id)).filter(Boolean);
     return Array.from(new Set(ids)).sort();
-  }, [paneId, bindings]);
+  }, [panes]);
   // Dual-channel metrics: WS poll_data push (via `statuses`) is primary; the hook
   // only batch-polls as fallback when the WS is down/stale.
   const { chatWsConnected } = useApp();
   const liveMetrics = useTeamLiveMetrics(liveWids, statuses, chatWsConnected);
-
-  const currentAgent = useMemo(() => {
-    const agent = panes.find(a => shortId(a.pane_id) === paneId);
-    const status = getStatus(paneId);
-    // 状态文字由指标行的彩点承担,副标题只留 id(+机器),model 由渲染层并入同一行。
-    const subtitleParts: string[] = [paneId];
-    if (agent?.machine_label) subtitleParts.push(agent.machine_label);
-    return {
-      title: agent?.title || status.title || paneId,
-      agentType: normalizeAgentType(agent?.agent_type),
-      status,
-      subtitle: subtitleParts.join(' · '),
-    };
-  }, [paneId, panes, statuses]);
 
   const renderAgentCard = ({
     wid,
@@ -1062,8 +1050,19 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             value={searchQuery}
             onChange={event => setSearchQuery(event.target.value)}
             placeholder="Search agents"
-            className="h-[34px] w-full rounded-lg border border-[var(--vsc-border)] bg-white/[0.03] pl-9 pr-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/20"
+            className="h-[34px] w-full rounded-lg border border-[var(--vsc-border)] bg-white/[0.03] pl-9 pr-9 text-sm text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/20"
           />
+          {searchQuery ? (
+            <button
+              type="button"
+              data-id="team-panel-agent-search-clear"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-zinc-500 hover:bg-black/10 hover:text-zinc-300"
+              aria-label="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
         </div>
         {onOpenRoster ? (
           <TipBelow className="hidden" label={i18n.t('rosterTitle', { ns: 'workspace', defaultValue: '团队花名册' })}>
@@ -1103,36 +1102,6 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 
 
       <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto hide-scrollbar select-none" data-id="team-panel-worker-list">
-        {!hideMaster && <div className="p-1.5 border-b border-[var(--vsc-border)]" data-id="team-panel-current-agent">
-          {renderAgentCard({
-            wid: paneId,
-            title: currentAgent.title,
-            agentType: currentAgent.agentType,
-            gateway: gatewayById.get(paneId),
-            status: currentAgent.status,
-            subtitle: currentAgent.subtitle,
-            active: (activePaneId || paneId) === paneId,
-            onClick: () => {
-              if (onLocatePane) {
-                onLocatePane(paneId);
-                return;
-              }
-              if (onOpenInCurrentPane) {
-                onOpenInCurrentPane(paneId);
-                return;
-              }
-              window.location.hash = `#/agent/${paneId}`;
-            },
-            onRestart: () => restartPane(paneId, currentAgent.title),
-            onOpenSettings: () => onOpenSettingsPane?.(paneId),
-            canRestart: true,
-            onFork: () => {
-              onOpenInCurrentPane?.(paneId);
-              setForkPreviewSrc(paneId);
-              setOpenMenuId(null);
-            },
-          })}
-        </div>}
         {displayBindings.length > 0 ? (
           <div className="flex w-full min-w-0 flex-col" data-id="team-panel-groups">
             {groupedBindings.map(group => {
