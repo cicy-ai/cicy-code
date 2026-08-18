@@ -67,3 +67,16 @@ func TestKnowledgeConfigRejectsCredentialBearingRemote(t *testing.T) {
 		t.Fatalf("credential-bearing origin code=%d, want 400", code)
 	}
 }
+
+func TestKnowledgeConfigFallsBackToEnvironmentToken(t *testing.T) {
+	withTempCicyRoot(t)
+	t.Setenv(knowledgeGitTokenEnv, "github_pat_from-environment")
+	code, body := knowledgeReq(t, handleKnowledgeConfig, "GET", "/api/knowledge/config", nil)
+	if code != 200 || body["token_set"] != true || body["token_tail"] != "ment" {
+		t.Fatalf("environment token metadata code=%d body=%v", code, body)
+	}
+	code, revealed := knowledgeReq(t, handleKnowledgeConfig, "GET", "/api/knowledge/config?reveal_token=1", nil)
+	if code != 200 || revealed["token"] != "github_pat_from-environment" {
+		t.Fatalf("environment token reveal code=%d body=%v", code, revealed)
+	}
+}

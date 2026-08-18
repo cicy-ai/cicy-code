@@ -79,6 +79,13 @@ func loadKnowledgeGitTokenEnv() {
 	}
 }
 
+func effectiveKnowledgeGitToken(cfg knowledgePrivateConfig) string {
+	if token := strings.TrimSpace(cfg.GitHubToken); token != "" {
+		return token
+	}
+	return strings.TrimSpace(os.Getenv(knowledgeGitTokenEnv))
+}
+
 func knowledgeRemoteOrigin() string {
 	out, err := exec.Command("git", "-C", knowledgeRootDir(), "remote", "get-url", "origin").Output()
 	if err != nil {
@@ -166,7 +173,7 @@ func handleKnowledgeConfig(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	token := strings.TrimSpace(cfg.GitHubToken)
+	token := effectiveKnowledgeGitToken(cfg)
 	resp := M{
 		"pane":       knowledgeSpecialistPaneID(),
 		"default":    knowledgeSpecialistDefaultPane,
