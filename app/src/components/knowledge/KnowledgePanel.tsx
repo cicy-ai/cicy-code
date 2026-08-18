@@ -3,9 +3,10 @@
 
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, Check, Eye, EyeOff, Loader2, Settings, X } from 'lucide-react';
+import { BookOpen, Check, Eye, EyeOff, Loader2, MessageCircle, Minus, Settings, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import FilesView from '../files/FilesView';
+import DispatcherChat from '../chat/DispatcherChat';
 import apiService from '../../services/api';
 
 const KnowledgeGraphView = lazy(() => import('./KnowledgeGraphView'));
@@ -16,7 +17,6 @@ interface KnowledgePanelProps {
   agentId: string;
   workspaceFolder: string;
   pageClientId?: string;
-  agents?: Array<{ paneId: string; title: string }>;
   pendingCount?: number;
 }
 
@@ -26,7 +26,7 @@ interface KnowledgePanelProps {
 //   right  knowledge graph
 // FilesView already owns the explorer/editor split, so this reuses the real
 // editor instead of creating a second file-selection or save path.
-export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder, pageClientId, agents = [], pendingCount = 0 }: KnowledgePanelProps) {
+export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder, pageClientId, pendingCount = 0 }: KnowledgePanelProps) {
   const { t } = useTranslation('workspace');
   const [openRequest, setOpenRequest] = useState<{ path: string; root: string; nonce: number } | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
@@ -34,7 +34,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
   const [configSaving, setConfigSaving] = useState(false);
   const [configError, setConfigError] = useState('');
   const [configSaved, setConfigSaved] = useState(false);
-  const [pane, setPane] = useState('w-1001:main.0');
+  const [chatOpen, setChatOpen] = useState(false);
   const [origin, setOrigin] = useState('');
   const [token, setToken] = useState('');
   const [showToken, setShowToken] = useState(false);
@@ -76,7 +76,6 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
     setShowToken(false);
     try {
       const { data } = await apiService.getKnowledgeConfig();
-      setPane(String(data?.pane || data?.default || 'w-1001:main.0'));
       setOrigin(String(data?.origin || ''));
       setTokenSet(!!data?.token_set);
       setTokenTail(String(data?.token_tail || ''));
@@ -92,8 +91,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
     setConfigError('');
     setConfigSaved(false);
     try {
-      const { data } = await apiService.saveKnowledgeConfig({ pane, origin, token, clear_token: clearToken });
-      setPane(String(data?.pane || pane));
+      const { data } = await apiService.saveKnowledgeConfig({ origin, token, clear_token: clearToken });
       setOrigin(String(data?.origin || origin));
       setTokenSet(!!data?.token_set);
       setTokenTail(String(data?.token_tail || ''));
@@ -133,9 +131,17 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
           <h2 data-id="knowledge-modal-title" className="min-w-0 flex-1 truncate text-[13px] font-semibold text-zinc-100">
             {t('tabKnowledge', { defaultValue: '知识库' })}
           </h2>
-          <div data-id="knowledge-governance-status" className="text-[11px] text-zinc-500">
-            待治理 <span className={pendingCount > 0 ? 'font-semibold text-amber-400' : 'text-zinc-400'}>{pendingCount}</span>
-          </div>
+          <button
+            type="button"
+            data-id="knowledge-agent-chat-open"
+            onClick={() => setChatOpen(true)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-sky-500/15 px-2.5 text-[11px] font-medium text-sky-300 ring-1 ring-inset ring-sky-400/30 transition-colors hover:bg-sky-500/25 hover:text-sky-100"
+            title="打开知识专员聊天"
+          >
+            <MessageCircle className="h-3.5 w-3.5" />
+            <span>待治理</span>
+            <span className="font-semibold text-amber-400">{pendingCount}</span>
+          </button>
           <button
             type="button"
             data-id="knowledge-config-open"
@@ -165,6 +171,20 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
           </aside>
         </div>
       </section>
+      {chatOpen ? (
+        <section data-id="knowledge-agent-chat-float" className="absolute right-4 top-14 z-10 flex h-[min(640px,calc(100%-4.5rem))] w-[320px] flex-col overflow-hidden rounded-xl border border-sky-400/25 bg-[#101012] shadow-[0_24px_70px_rgba(0,0,0,0.55)]">
+          <header className="flex h-11 shrink-0 items-center gap-2 border-b border-white/[0.07] px-3">
+            <MessageCircle className="h-4 w-4 text-sky-400" />
+            <div className="min-w-0 flex-1 truncate text-xs font-semibold text-zinc-100">知识专员 · w-1001</div>
+            <button type="button" data-id="knowledge-agent-chat-minimize" onClick={() => setChatOpen(false)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200" title="最小化" aria-label="最小化知识专员聊天">
+              <Minus className="h-4 w-4" />
+            </button>
+          </header>
+          <div className="min-h-0 flex-1 bg-black">
+            <DispatcherChat paneId="w-1001:main.0" active agentType="cicy" title="知识专员" />
+          </div>
+        </section>
+      ) : null}
       {configOpen ? (
         <div data-id="knowledge-config-overlay" className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfigOpen(false); }}>
           <section data-id="knowledge-config-modal" className="w-full max-w-lg rounded-xl border border-white/[0.09] bg-[#141416] shadow-2xl">
@@ -175,12 +195,6 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
             </header>
             {configLoading ? <div className="flex h-56 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-zinc-500" /></div> : (
               <div className="space-y-4 p-4">
-                <label className="block text-xs text-zinc-400">接收待治理通知的 Agent
-                  <select data-id="knowledge-config-agent" value={pane} onChange={(event) => setPane(event.target.value)} className="mt-1.5 h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-200 outline-none focus:border-sky-600">
-                    {!agents.some((agent) => agent.paneId === pane) ? <option value={pane}>{pane}</option> : null}
-                    {agents.map((agent) => <option key={agent.paneId} value={agent.paneId}>{agent.title || agent.paneId} · {agent.paneId.replace(/:main\.0$/, '')}</option>)}
-                  </select>
-                </label>
                 <label className="block text-xs text-zinc-400">私有知识库仓库 origin
                   <input data-id="knowledge-config-origin" value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="https://github.com/org/private-knowledge.git" className="mt-1.5 h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 font-mono text-xs text-zinc-200 outline-none focus:border-sky-600" />
                 </label>
@@ -197,7 +211,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
                 </div>
                 <div className="flex items-center justify-between border-t border-white/[0.07] pt-3">
                   <button type="button" disabled={!tokenSet || configSaving} onClick={() => { void saveConfig(true); }} className="text-xs text-red-400 disabled:opacity-30">清除 Token</button>
-                  <button type="button" data-id="knowledge-config-save" disabled={configSaving || !pane.trim() || !origin.trim() || (!token.trim() && !tokenSet)} onClick={() => { void saveConfig(); }} className="inline-flex h-9 items-center gap-2 rounded-md bg-zinc-100 px-4 text-xs font-semibold text-zinc-900 disabled:opacity-50">{configSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}保存</button>
+                  <button type="button" data-id="knowledge-config-save" disabled={configSaving || !origin.trim() || (!token.trim() && !tokenSet)} onClick={() => { void saveConfig(); }} className="inline-flex h-9 items-center gap-2 rounded-md bg-zinc-100 px-4 text-xs font-semibold text-zinc-900 disabled:opacity-50">{configSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}保存</button>
                 </div>
               </div>
             )}

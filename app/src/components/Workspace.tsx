@@ -2614,10 +2614,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           agentId={nativeFilesAgentId}
           workspaceFolder={nativeFilesWorkspace}
           pageClientId={pageClientId}
-          agents={agents.map((agent) => ({
-            paneId: String(agent?.pane_id || agent?.paneId || agent?.id || '').replace(/:main\.0$/, '') + ':main.0',
-            title: String(agent?.title || agent?.name || ''),
-          })).filter((agent) => agent.paneId !== ':main.0')}
           pendingCount={knowledgePendingCount}
         />
       </Suspense>

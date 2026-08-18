@@ -227,9 +227,11 @@ func handleKnowledgeConfig(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if err := setKnowledgeSpecialistPane(req.Pane); err != nil {
-			httpErr(w, http.StatusInternalServerError, err.Error())
-			return
+		if strings.TrimSpace(req.Pane) != "" {
+			if err := setKnowledgeSpecialistPane(req.Pane); err != nil {
+				httpErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 		if err := writeKnowledgePrivateConfig(cfg); err != nil {
 			httpErr(w, http.StatusInternalServerError, err.Error())

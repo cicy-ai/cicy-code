@@ -74,6 +74,30 @@ func TestKnowledgeConfigPersistsSecretAndRemoteWithoutLeakingToken(t *testing.T)
 	}
 }
 
+func TestKnowledgeConfigWithoutPanePreservesNotificationAgent(t *testing.T) {
+	withTempCicyRoot(t)
+	previousValidator := validateKnowledgeGitHubAccessFn
+	validateKnowledgeGitHubAccessFn = func(_, _ string) error { return nil }
+	t.Cleanup(func() { validateKnowledgeGitHubAccessFn = previousValidator })
+	if err := knowledgeEnsureRoot(); err != nil {
+		t.Fatalf("ensure knowledge root: %v", err)
+	}
+	if err := setKnowledgeSpecialistPane("w-2048"); err != nil {
+		t.Fatalf("set notification agent: %v", err)
+	}
+
+	code, body := knowledgeReq(t, handleKnowledgeConfig, "POST", "/api/knowledge/config", M{
+		"origin": "https://github.com/cicy-ai/private-knowledge.git",
+		"token":  "github_pat_secret-value",
+	})
+	if code != 200 {
+		t.Fatalf("POST config code=%d body=%v", code, body)
+	}
+	if got := body["pane"]; got != "w-2048:main.0" {
+		t.Fatalf("notification agent = %v, want w-2048:main.0", got)
+	}
+}
+
 func TestKnowledgeConfigRejectsCredentialBearingRemote(t *testing.T) {
 	withTempCicyRoot(t)
 	if err := knowledgeEnsureRoot(); err != nil {
