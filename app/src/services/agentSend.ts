@@ -52,8 +52,16 @@ async function resolveAgentType(paneId: string): Promise<string> {
 export async function sendToAgent(
   paneId: string,
   text: string,
-  opts: { submit?: boolean; agentType?: string } = {},
+  opts: { submit?: boolean; agentType?: string; fromComposer?: boolean } = {},
 ): Promise<void> {
+  if (!opts.fromComposer) {
+    const routeEvent = new CustomEvent('cicy:route-agent-prompt', {
+      cancelable: true,
+      detail: { paneId: shortId(paneId), text },
+    });
+    window.dispatchEvent(routeEvent);
+    if (routeEvent.defaultPrevented) return;
+  }
   const submit = opts.submit ?? false;
   const type = opts.agentType ?? (await resolveAgentType(paneId));
   if (isCicyLiteAgent(type)) {

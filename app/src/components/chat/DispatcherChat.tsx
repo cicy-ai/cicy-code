@@ -12,6 +12,7 @@ import { useApp } from '../../contexts/AppContext';
 import LineStrip from '../line/LineStrip';
 import { chatAttachmentMarkdown } from '../../lib/attachmentMarkdown';
 import { appendPromptHistory, canNavigatePromptHistory, readPromptHistory } from '../../lib/promptHistory';
+import { sendToAgent } from '../../services/agentSend';
 
 /*
  * DispatcherChat — dispatcher(PM) agent 的专属卡片主体(data-id="dispatcher-chat")。
@@ -402,7 +403,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     // Paint the q bubble + reserve the a slot THIS frame — BEFORE the POST round-trips.
     window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId, text: body } }));
     try {
-      await apiService.sendCommand(paneId, body, true);
+      await sendToAgent(paneId, body, { submit: true, agentType, fromComposer: true });
       window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId } }));
     } catch {
       setText(value);

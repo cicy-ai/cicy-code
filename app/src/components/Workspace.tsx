@@ -59,7 +59,6 @@ import TipBelow from './ui/TipBelow';
 import config, { defaultWorkerWorkspace, syncHostHomeFromPath, urls } from '../config';
 import apiService from '../services/api';
 import { loadHandled } from './audit/auditHandled';
-import { sendCommandToTmux } from '../services/mockApi';
 import { sendToAgent } from '../services/agentSend';
 import { chatWs } from '../services/chatWs';
 import { ApiSwitchDialog } from './layout/ApiSwitchDialog';
@@ -140,49 +139,6 @@ function flagEmoji(code: string): string {
   return country.toUpperCase().replace(/./g, (ch) =>
     String.fromCodePoint(0x1F1A5 + ch.charCodeAt(0)),
   );
-}
-
-function focusTmuxPaneFrame(paneId: string) {
-  const id = String(paneId || '').trim();
-  if (!id || typeof document === 'undefined') return;
-  const shortId = id.split(':')[0];
-  const titles = [`stack-${shortId}`, `canvas-${shortId}`, `terminal-${shortId}`];
-  const candidates: HTMLIFrameElement[] = [];
-  for (const title of titles) {
-    document.querySelectorAll<HTMLIFrameElement>(`iframe[title="${title}"]`).forEach((el) => candidates.push(el));
-  }
-  if (candidates.length === 0) return;
-  const target = candidates.find((el) => el.getClientRects().length > 0) || candidates[0];
-  const active = document.activeElement as HTMLElement | null;
-  if (active) {
-    const tag = active.tagName;
-    if (active.isContentEditable || tag === 'TEXTAREA' || tag === 'INPUT') {
-      try { active.blur(); } catch {}
-    }
-  }
-  const focusXterm = (): boolean => {
-    try {
-      target.focus();
-      target.contentWindow?.focus?.();
-      const doc = target.contentDocument;
-      const ta = doc?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
-      if (ta) {
-        ta.focus();
-        return doc?.activeElement === ta;
-      }
-    } catch {}
-    return false;
-  };
-  window.requestAnimationFrame(() => {
-    if (focusXterm()) return;
-    let tries = 0;
-    const retry = () => {
-      tries += 1;
-      if (focusXterm() || tries >= 5) return;
-      window.setTimeout(retry, 60);
-    };
-    window.setTimeout(retry, 60);
-  });
 }
 
 function clampCliDrawerWidth(value: number): number {
@@ -1297,20 +1253,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         const tmuxTarget = runtimeActivePaneId || masterPaneId;
         const normalizedFilePath = `/${filePath.replace(/^\/+/, '')}`;
         const promptText = `file://${normalizedFilePath.replace(/^\/+/, '')}`;
-        // cicy-lite agents have no terminal — typing into tmux is a no-op. Fill
-        // their chat composer (DispatcherChat) instead so the path lands in the
-        // input box; terminal agents keep the type-into-tmux path.
         const targetType = String(paneDetailsRef.current[tmuxTarget.split(':')[0]]?.agent_type || '');
-        if (isCicyLiteAgent(targetType)) {
-          window.dispatchEvent(new CustomEvent('cicy:fill-composer', { detail: { paneId: tmuxTarget, text: promptText } }));
-        } else {
-          window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
-          sendCommandToTmux(promptText, tmuxTarget, false).then(() => {
-            focusTmuxPaneFrame(tmuxTarget);
-          }).catch(() => {
-            window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastSendFilePathFailed') }));
-          });
-        }
+        sendToAgent(tmuxTarget, promptText, { submit: false, agentType: targetType }).catch(() => {
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastSendFilePathFailed') }));
+        });
       }
     } else if (msg?.type === 'poll_data' && msg.data) {
       const data = msg.data;
@@ -1456,7 +1402,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const promptText = `My browser page clientId: ${currentClientId}.`;
     try {
       window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
-      await sendCommandToTmux(promptText, tmuxTarget, true);
+      await sendToAgent(tmuxTarget, promptText, { submit: true });
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastClientIdSent') }));
     } catch {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastClientIdFailed') }));
@@ -2366,7 +2312,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   if (blob.size < 100) return;
                   const fd = new FormData(); fd.append('file', blob, 'voice.webm'); fd.append('engine', 'google');
                   setVoiceLoading(true);
-                  try { const { data } = await apiService.stt(fd); if (data.text) { window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneId, q: data.text } })); sendCommandToTmux(data.text, paneId); } } catch {} finally { setVoiceLoading(false); }
+                  try { const { data } = await apiService.stt(fd); if (data.text) { void sendToAgent(activeCliPaneId || paneId, data.text, { submit: true }); } } catch {} finally { setVoiceLoading(false); }
                 };
                 rec.stop();
               }

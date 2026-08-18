@@ -10,6 +10,7 @@ import {
   Send, Users, RefreshCw, FlaskConical, UserPlus, LayoutGrid, List as ListIcon, Check,
 } from 'lucide-react';
 import apiService from '../services/api';
+import { sendToAgent } from '../services/agentSend';
 
 // The "发给 agent" prompts (promptTodo / promptDoing) live in the todoPanel
 // locale files so the text the UI sends
@@ -189,7 +190,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
     try {
       // Move ownership to the worker, then dispatch the task to its pane.
       await (apiService as any).updateTodo(paneId, todo.id, { assignee: workerPane });
-      await (apiService as any).sendCommand(workerPane, prompt, true);
+      await sendToAgent(workerPane, prompt, { submit: true });
       await refresh();
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'assign failed');
@@ -261,7 +262,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
     const list = chosen.map((t, i) => `${i + 1}. [${t.id}] ${t.title}`).join('\n');
     const prompt = tr('promptBatch', { count: chosen.length, list });
     try {
-      await (apiService as any).sendCommand(paneId, prompt, true);
+      await sendToAgent(paneId, prompt, { submit: true });
       clearSelection();
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'batch send failed');
@@ -277,7 +278,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
       ? tr('promptDoing', { id: todo.id, title: todo.title })
       : tr('promptTodo', { id: todo.id, title: todo.title });
     try {
-      await (apiService as any).sendCommand(paneId, prompt, true);
+      await sendToAgent(paneId, prompt, { submit: true });
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'send failed');
     } finally {

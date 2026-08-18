@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import apiService from "../../services/api";
+import { sendToAgent } from "../../services/agentSend";
 import GithubAccountsPanel from "./GithubAccountsPanel";
 import GoogleAccountsPanel, { GoogleIcon, openChromeProfile } from "./GoogleAccountsPanel";
 import ChatGPTAccountsPanel, { ChatGPTIcon } from "./ChatGPTAccountsPanel";
@@ -96,10 +97,10 @@ export default function AccountMatrixPanel({
   const send = async (name: string) => {
     setSending(name);
     try {
-      await apiService.sendCommand(
+      await sendToAgent(
         paneId,
         t("cloudflareAccountAgentPrompt", { name }),
-        true,
+        { submit: true },
       );
       window.dispatchEvent(
         new CustomEvent("show-toast", {

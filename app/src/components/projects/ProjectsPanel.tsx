@@ -1068,6 +1068,25 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setSelectedAgentIds((current) => current.size === 1 && current.has(id) ? current : new Set([id]));
   }, [activeAgentId, visibleAgentKey]);
 
+  useEffect(() => {
+    const routeToSelectedPrompt = (event: Event) => {
+      const routed = event as CustomEvent<{ paneId?: string; text?: string }>;
+      const id = shortPaneId(routed.detail?.paneId || '');
+      const text = String(routed.detail?.text || '').trim();
+      if (!id || !text || !selectedAgentIds.has(id)) return;
+      routed.preventDefault();
+      setAgentMessages((current) => ({
+        ...current,
+        [id]: [current[id], text].filter(Boolean).join('\n'),
+      }));
+      window.requestAnimationFrame(() => {
+        document.querySelector<HTMLTextAreaElement>(`[data-id="project-agent-prompt-input-${id}"]`)?.focus({ preventScroll: true });
+      });
+    };
+    window.addEventListener('cicy:route-agent-prompt', routeToSelectedPrompt as EventListener);
+    return () => window.removeEventListener('cicy:route-agent-prompt', routeToSelectedPrompt as EventListener);
+  }, [selectedAgentIds]);
+
   const addAgentFiles = (agent: ProjectAgent, files: FileList | File[]) => {
     const agentId = shortPaneId(agent.paneId);
     Array.from(files).forEach((file) => {
@@ -1123,7 +1142,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       [id]: { question: displayQuestion, items: [], answer: '', thinking: '', status: 'pending', started_at: new Date().toISOString() },
     }));
     try {
-      await sendToAgent(agent.paneId, message, { submit: true, agentType: agent.agentType });
+      await sendToAgent(agent.paneId, message, { submit: true, agentType: agent.agentType, fromComposer: true });
       sentAttachments.forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
     } catch (cause: any) {
       delete optimisticQuestionsRef.current[id];

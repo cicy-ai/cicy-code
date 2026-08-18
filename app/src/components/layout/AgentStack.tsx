@@ -17,6 +17,7 @@ import { isCicyLiteAgent } from '../../lib/agentType'
 import { replAttachmentMarkdown } from '../../lib/attachmentMarkdown'
 import { openOrActivateElectronProfileTab, openOrActivateElectronWindow } from '../../lib/speedup/rpc'
 import apiService from '../../services/api'
+import { sendToAgent } from '../../services/agentSend'
 
 const HELP_TOPICS = [
   { title: '如何使用 Claude Code 官方登录', href: 'https://docs.cicy-ai.com/faq/claude-official-login' },
@@ -108,7 +109,7 @@ function AttachSendButton({ paneId }: { paneId: string }) {
         if (!abs) continue
         parts.push(replAttachmentMarkdown(file.name, abs))
       }
-      if (parts.length) await apiService.sendCommand(paneId, parts.join('\n\n'), true)
+      if (parts.length) await sendToAgent(paneId, parts.join('\n\n'), { submit: true, fromComposer: true })
     } catch {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: '附件上传失败' }))
     } finally {
@@ -315,7 +316,7 @@ function TermPromptArea({ paneId }: { paneId: string }) {
     setSending(true)
     setDraft('')
     try {
-      await apiService.sendCommand(paneId, text, true)
+      await sendToAgent(paneId, text, { submit: true, fromComposer: true })
     } catch {
       // Network failure: put the prompt back instead of eating it.
       setDraft(text)

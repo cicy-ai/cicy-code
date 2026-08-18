@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { cn, copyToClipboard } from '../../lib/utils';
 import apiService from '../../services/api';
+import { sendToAgent as dispatchToAgent } from '../../services/agentSend';
 import { useDialogs } from '../ui/Modal';
 import { ProxyManagerDialog } from './ProxyManagerDialog';
 import { ProxySshManagerDialog } from './ProxySshManagerDialog';
@@ -1140,7 +1141,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
     if (!trimmed || !paneId) return;
     onClose();
     const toast = (msg: string) => window.dispatchEvent(new CustomEvent('show-toast', { detail: msg }));
-    apiService.sendCommand(paneId, trimmed, true)
+    dispatchToAgent(paneId, trimmed, { submit: true })
       .then(() => toast(i18n.t('marketplaceSentToast', { ns: 'workspace', pane: paneId })))
       .catch(() => toast(i18n.t('marketplaceSentToastFailed', { ns: 'workspace', pane: paneId })));
   }, [paneId, onClose]);
@@ -1329,7 +1330,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
                     <button
                       data-id="skill-detail-google-connect"
                       onClick={() => {
-                        apiService.sendCommand(paneId, GOOGLE_AUTH_PROMPT, true).catch(() => {});
+                        dispatchToAgent(paneId, GOOGLE_AUTH_PROMPT, { submit: true }).catch(() => {});
                         onClose();
                       }}
                       className="text-[12px] px-3 py-1.5 rounded bg-blue-500/20 text-blue-200 hover:bg-blue-500/30 transition-colors inline-flex items-center gap-1"

@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import apiService from "../../services/api";
+import { sendToAgent } from "../../services/agentSend";
 import { AppModal, useDialogs } from "../ui/Modal";
 import { openChromeProfile } from "./GoogleAccountsPanel";
 import AccountTOTPModal, { type TOTPValue } from "./AccountTOTPModal";
@@ -180,7 +181,7 @@ export default function GithubAccountsPanel({
         "请使用 github skill 管理 GitHub，指定账号为「{{name}}」。先执行 github whoami --account {{name}} 确认身份，然后等待我的下一步指令。不要读取、输出或泄露 Token。",
     });
     try {
-      await apiService.sendCommand(paneId, prompt, true);
+      await sendToAgent(paneId, prompt, { submit: true });
       window.dispatchEvent(
         new CustomEvent("show-toast", {
           detail: t("githubAccountSentToAgent", {

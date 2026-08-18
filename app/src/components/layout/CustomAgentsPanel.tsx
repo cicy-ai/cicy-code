@@ -9,6 +9,7 @@ import { useDialogs } from '../ui/Modal';
 import { useDevRegister } from '../../lib/devStore';
 import { openOrActivateElectronProfileTab } from '../../lib/speedup/rpc';
 import apiService from '../../services/api';
+import { sendToAgent } from '../../services/agentSend';
 
 interface CustomAgent {
   slug: string;
@@ -142,7 +143,7 @@ export default function CustomAgentsPanel({ paneId, marketOnly = false }: Props)
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('noActiveAgent') }));
       return;
     }
-    apiService.sendCommand(target, prompt, true)
+    sendToAgent(target, prompt, { submit: true })
       .then(() => window.dispatchEvent(new CustomEvent('show-toast', { detail: t('sentToAgent') })))
       .catch(() => window.dispatchEvent(new CustomEvent('show-toast', { detail: t('sentToAgentFailed') })));
   };

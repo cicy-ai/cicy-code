@@ -409,6 +409,13 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       />,
     );
     await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-w-102"]')?.className).toContain('border-blue-500'));
+    const routed = new CustomEvent('cicy:route-agent-prompt', {
+      cancelable: true,
+      detail: { paneId: 'w-102', text: '请先检查这个任务' },
+    });
+    window.dispatchEvent(routed);
+    expect(routed.defaultPrevented).toBe(true);
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-prompt-input-w-102"]')).toHaveValue('请先检查这个任务'));
   });
 
   it('queues multiple prompts while thinking and sends them together when idle', async () => {
@@ -452,7 +459,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledWith(
       'w-101:main.0',
       '第一条\n\n第二条',
-      { submit: true, agentType: 'codex' },
+      { submit: true, agentType: 'codex', fromComposer: true },
     ));
     expect(document.querySelectorAll('[data-id="project-agent-message-queue-item"]')).toHaveLength(0);
     expect(await screen.findByText(/第一条/)).toBeInTheDocument();

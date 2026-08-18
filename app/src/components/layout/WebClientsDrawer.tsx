@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { X, RefreshCw, Loader2, Monitor, Globe, Cpu, Copy, Check, Zap, MessageSquare, Wifi, WifiOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
+import { sendToAgent } from '../../services/agentSend';
 import { cn } from '../../lib/utils';
 
 interface WsClient {
@@ -138,7 +139,7 @@ function ClientCard({
     setSendOk(false);
     try {
       const text = t('webClientsTestPrompt', { clientId: client.client_id });
-      await apiService.sendCommand(paneId, text, true);
+      await sendToAgent(paneId, text, { submit: true });
       setSendOk(true);
       // Brief flash then close the drawer
       setTimeout(onSent, 600);
