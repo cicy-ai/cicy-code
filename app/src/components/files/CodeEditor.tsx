@@ -161,6 +161,8 @@ interface CodeEditorProps {
    *  state but drop their `data-id="code-editor"` so DOM queries like
    *  [data-id=code-editor] match exactly one element. */
   active?: boolean;
+  /** Open Markdown files in rendered preview mode instead of source mode. */
+  markdownPreviewByDefault?: boolean;
   className?: string;
 }
 
@@ -261,6 +263,7 @@ export default function CodeEditor({
   onShowDiff,
   pageClientId,
   active = true,
+  markdownPreviewByDefault = false,
   className,
 }: CodeEditorProps) {
   // Inactive editors stay mounted (so buffer state survives tab switches)
@@ -269,11 +272,12 @@ export default function CodeEditor({
   const rootDataId = active ? 'code-editor' : 'code-editor-inactive';
 
   const isMarkdown = isMarkdownPath(path);
-  // Default to source when opening a markdown file; user toggles to preview via right-click.
-  const [previewMd, setPreviewMd] = useState<boolean>(false);
+  // Files normally open as source; read-oriented surfaces (e.g. Knowledge)
+  // can opt into rendered Markdown by default.
+  const [previewMd, setPreviewMd] = useState<boolean>(markdownPreviewByDefault);
   useEffect(() => {
-    setPreviewMd(false);
-  }, [path]);
+    setPreviewMd(markdownPreviewByDefault);
+  }, [markdownPreviewByDefault, path]);
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   // Soft-wrap toggle. Default OFF (long lines scroll horizontally); the editor

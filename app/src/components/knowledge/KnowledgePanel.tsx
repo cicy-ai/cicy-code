@@ -3,7 +3,7 @@
 
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, X } from 'lucide-react';
+import { BookOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import FilesView from '../files/FilesView';
 
@@ -39,6 +39,11 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
 
   useEffect(() => {
     if (!open) return;
+    setOpenRequest({ path: 'README.md', root: 'knowledge', nonce: Date.now() });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.stopPropagation();
@@ -51,26 +56,13 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
   if (!open) return null;
 
   return createPortal(
-    <div data-id="knowledge-modal-overlay" className="fixed inset-0 z-[1000] bg-[#0b0b0d]">
+    <div data-id="knowledge-modal-overlay" className="fixed inset-y-0 right-0 left-14 z-[1000] bg-[#0b0b0d]">
       <section data-id="knowledge-modal" className="absolute inset-0 flex min-h-0 flex-col overflow-hidden bg-[#0b0b0d]">
         <header data-id="knowledge-modal-header" className="flex h-12 shrink-0 items-center gap-2 border-b border-white/[0.07] px-4">
           <BookOpen className="h-4 w-4 text-zinc-400" />
           <h2 data-id="knowledge-modal-title" className="min-w-0 flex-1 truncate text-[13px] font-semibold text-zinc-100">
             {t('tabKnowledge', { defaultValue: '知识库' })}
           </h2>
-          <button
-            type="button"
-            data-id="knowledge-modal-close"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              onClose();
-            }}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
-            title={t('close', { ns: 'common', defaultValue: '关闭' })}
-          >
-            <X className="h-4 w-4" />
-          </button>
         </header>
         <div data-id="knowledge-modal-body" className="flex min-h-0 flex-1">
           <div data-id="knowledge-modal-files-content" className="min-w-0 flex-[3] border-r border-white/[0.07]">
@@ -79,6 +71,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
               workspaceFolder={workspaceFolder}
               pageClientId={pageClientId}
               scopeRoot="knowledge"
+              markdownPreviewByDefault
               className="h-full w-full"
               openRequest={openRequest}
             />

@@ -931,6 +931,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const toggleLeft = (p: 'team' | 'skills' | 'customAgents' | 'todo') => {
     setPortsOpen(false);
     setProjectsOpen(false);
+    setKnowledgeOpen(false);
     setLeftPanelView(prev => prev === p ? null : p);
   };
 
@@ -951,6 +952,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       window.requestAnimationFrame(() => setLeftPanelView(returnPanel));
     }
   }, []);
+
+  const toggleKnowledge = useCallback(() => {
+    if (knowledgeOpen) {
+      closeKnowledge();
+      return;
+    }
+    openKnowledge();
+  }, [closeKnowledge, knowledgeOpen, openKnowledge]);
 
   const canvasPaneIds = useMemo(() => {
     const next = [paneId];
@@ -2149,7 +2158,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 active={knowledgeOpen}
                 icon={<BookOpen className="w-5 h-5" />}
                 title={t('tabKnowledge', { defaultValue: '知识库' })}
-                onClick={openKnowledge}
+                onClick={toggleKnowledge}
                 badge={knowledgePendingCount > 0}
                 badgeTitle={t('knowledgePendingBadge', { defaultValue: '{{count}} 条知识待审核', count: knowledgePendingCount })}
               />
