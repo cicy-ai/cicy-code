@@ -70,9 +70,23 @@ func TestDefaultGroupIsPersistedAndCanManageAgents(t *testing.T) {
 
 	other := decodeGroupResponse(t, callGroupsHandler(t, "POST", "/api/groups", `{"name":"Other"}`))
 	otherID := int(other["id"].(float64))
-	conflict := callGroupsHandler(t, "POST", fmt.Sprintf("/api/groups/%d/panes/w-123:main.0", otherID), "")
-	if conflict.Code != 409 {
-		t.Fatalf("duplicate project membership status = %d body=%s", conflict.Code, conflict.Body.String())
+	decodeGroupResponse(t, callGroupsHandler(t, "POST", fmt.Sprintf("/api/groups/%d/panes/w-123:main.0", otherID), ""))
+	moved := decodeGroupResponse(t, callGroupsHandler(t, "GET", fmt.Sprintf("/api/groups/%d", otherID), ""))
+	if panes := moved["panes"].([]interface{}); len(panes) != 1 || panes[0].(map[string]interface{})["pane_id"] != "w-123:main.0" {
+		t.Fatalf("moved project panes = %#v", moved["panes"])
+	}
+	previous := decodeGroupResponse(t, callGroupsHandler(t, "GET", fmt.Sprintf("/api/groups/%d", groupID), ""))
+	if panes := previous["panes"].([]interface{}); len(panes) != 2 {
+		t.Fatalf("previous project retained moved Agent: %#v", previous["panes"])
+	}
+	decodeGroupResponse(t, callGroupsHandler(t, "POST", fmt.Sprintf("/api/groups/%d/panes/w-123:main.0?mode=add", groupID), ""))
+	added := decodeGroupResponse(t, callGroupsHandler(t, "GET", fmt.Sprintf("/api/groups/%d", groupID), ""))
+	if panes := added["panes"].([]interface{}); len(panes) != 3 {
+		t.Fatalf("add mode did not retain both project memberships: %#v", added["panes"])
+	}
+	stillInOther := decodeGroupResponse(t, callGroupsHandler(t, "GET", fmt.Sprintf("/api/groups/%d", otherID), ""))
+	if panes := stillInOther["panes"].([]interface{}); len(panes) != 1 {
+		t.Fatalf("add mode removed the original membership: %#v", stillInOther["panes"])
 	}
 
 	denied := callGroupsHandler(t, "DELETE", fmt.Sprintf("/api/groups/%d", groupID), "")

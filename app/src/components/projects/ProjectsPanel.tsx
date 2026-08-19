@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowRight, Atom, BookOpen, Check, FileText, FolderKanban, History, LayoutGrid, Loader2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, Atom, BookOpen, Check, FileText, FolderKanban, History, LayoutGrid, Loader2, Minus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -84,7 +84,18 @@ interface QueuedAgentMessage {
 const DEFAULT_PROJECT_ID = 'default';
 const PROJECT_VIEW_CACHE_PREFIX = 'cicy_project_view:';
 const PROJECT_AGENT_QUEUE_KEY = 'cicy_project_agent_queue:v1';
+const PROJECT_LIST_COLLAPSED_KEY = 'cicy_projects_list_collapsed';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
+const projectAgentIdentity = (agent: ProjectAgent) => agent.remote
+  ? `remote:${String(agent.instanceId || agent.instanceTeam || '')}:${String(agent.remoteAgentId || shortPaneId(agent.paneId))}`
+  : `local:${shortPaneId(agent.paneId)}`;
+const projectAgentCompleteness = (agent: ProjectAgent) => [
+  agent.title,
+  agent.agentType,
+  agent.defaultModel,
+  agent.workspace,
+  agent.ttydSrc,
+].filter(Boolean).length + (agent.status && agent.status !== 'offline' ? 2 : 0);
 const cloudInstanceOnline = (instance: any) => {
   const seen = Date.parse(String(instance?.lastSeenAt || '').replace(' ', 'T') + 'Z');
   return instance?.status === 'online' && Number.isFinite(seen) && Date.now() - seen < 90_000;
@@ -280,7 +291,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, terminalOpen, working, teamId, selected, removable, footer, width, height, onSelect, onRemove, onOpenHistory, onToggleTerminal, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, terminalOpen, working, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onMoveProject, onAddProject, onOpenHistory, onToggleTerminal, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
@@ -292,10 +303,13 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   selected: boolean;
   removable: boolean;
   footer?: ReactNode;
+  projectOptions?: Array<{ id: number | string; name: string; checked: boolean }>;
   width: number;
   height: number;
   onSelect: () => void;
   onRemove: () => void;
+  onMoveProject: (projectId: number | string) => void;
+  onAddProject: (projectId: number | string) => void;
   onOpenHistory: () => void;
   onToggleTerminal: () => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -304,6 +318,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
 }) {
   const { t } = useTranslation('workspace');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [projectSubmenu, setProjectSubmenu] = useState<'move' | 'add' | null>(null);
   const [activeBodyTab, setActiveBodyTab] = useState<'history' | 'terminal' | 'role'>('history');
   const [identityCopied, setIdentityCopied] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -341,6 +356,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const rawQuestion = String(optimisticQuestion || freshestQuestion);
   const visibleQuestion = questionWithoutUploadedAttachments(rawQuestion);
   const visibleQuestionAttachments = uploadedAttachmentsFromQuestion(rawQuestion);
+  const hasConversationContent = Boolean(rawQuestion || replyItems.length || latest?.latest_response || latest?.latest_tool?.name || working);
   const replyStatus = String(reply?.status || latest?.status || status).toLowerCase();
   const completed = /completed|complete|done/.test(replyStatus);
   const serverStartedAt = Date.parse(String(reply?.started_at || latest?.started_at || '')) || 0;
@@ -418,7 +434,10 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
 
   const toggleMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    setMenuOpen((value) => !value);
+    setMenuOpen((value) => {
+      if (value) setProjectSubmenu(null);
+      return !value;
+    });
   };
 
   const selectBodyTab = (tab: 'history' | 'terminal' | 'role') => {
@@ -459,13 +478,31 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             <MoreHorizontal className="h-4 w-4" />
           </button>
           {menuOpen ? (
-            <div data-id="project-agent-card-menu" className="absolute right-0 top-9 z-20 min-w-[150px] overflow-hidden rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
+            <div data-id="project-agent-card-menu" className="absolute right-0 top-9 z-20 min-w-[190px] overflow-visible rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
+              <button type="button" data-id="project-agent-card-move-to" onMouseEnter={() => setProjectSubmenu((current) => current === null ? null : 'move')} onClick={(event) => { event.stopPropagation(); setProjectSubmenu('move'); }} className={cn('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]', projectSubmenu === 'move' && 'bg-white/[0.06] text-zinc-100')}>
+                <ArrowRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                <span className="min-w-0 flex-1">移动到</span>
+                <span className="text-zinc-600">›</span>
+              </button>
+              {projectOptions.some((project) => !project.checked) ? <button type="button" data-id="project-agent-card-add-to" onMouseEnter={() => setProjectSubmenu((current) => current === null ? null : 'add')} onClick={(event) => { event.stopPropagation(); setProjectSubmenu('add'); }} className={cn('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]', projectSubmenu === 'add' && 'bg-white/[0.06] text-zinc-100')}>
+                <Plus className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                <span className="min-w-0 flex-1">添加到</span>
+                <span className="text-zinc-600">›</span>
+              </button> : null}
+              {projectSubmenu ? <div data-id={`project-agent-card-${projectSubmenu}-submenu`} className="absolute right-[calc(100%+4px)] top-0 min-w-[190px] overflow-hidden rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
+                <div data-id="project-agent-card-submenu-label" className="px-3 pb-1 pt-1.5 text-[10px] font-semibold tracking-wide text-zinc-600">{projectSubmenu === 'move' ? '移动到' : '添加到'}</div>
+                {(projectSubmenu === 'move' ? projectOptions : projectOptions.filter((project) => !project.checked)).map((project) => (
+                  <button key={`${projectSubmenu}-${String(project.id)}`} type="button" data-id={`project-agent-card-${projectSubmenu}-project-${project.id}`} onClick={(event) => { event.stopPropagation(); setMenuOpen(false); setProjectSubmenu(null); if (projectSubmenu === 'move') onMoveProject(project.id); else onAddProject(project.id); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]">
+                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                  </button>
+                ))}
+              </div> : null}
               {removable ? (
                 <button
                   type="button"
                   data-id="project-agent-card-remove"
                   onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onRemove(); }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-red-300 hover:bg-red-500/10"
+                  className="mt-1 flex w-full items-center gap-2 border-t border-white/[0.07] rounded-lg px-3 py-2 text-left text-[12px] text-red-300 hover:bg-red-500/10"
                 >
                   <X className="h-3.5 w-3.5" />{t('projectRemoveAgent')}
                 </button>
@@ -476,7 +513,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </div>
       </div>
 
-      <div data-id="project-agent-card-metrics" className="mt-2.5 flex h-8 min-w-0 items-center gap-2 border-b border-white/[0.08] pb-2.5 font-mono text-[13px] text-zinc-500">
+      <div data-id="project-agent-card-metrics" className={cn('mt-2.5 flex h-8 min-w-0 items-center gap-2 pb-2.5 font-mono text-[13px] text-zinc-500', hasConversationContent && 'border-b border-white/[0.08]')}>
         <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
         <button
           type="button"
@@ -500,7 +537,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         ) : null}
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
-      <div data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`} role="tablist" className="flex h-9 shrink-0 items-end gap-5 border-b border-white/[0.08]">
+      {selected ? <div data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`} role="tablist" className="flex h-9 shrink-0 items-end gap-5 border-b border-white/[0.08]">
         {([
           ['history', '会话'],
           ...(String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
@@ -522,12 +559,12 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             </button>
           );
         })}
-      </div>
-      {activeBodyTab === 'terminal' && terminalOpen && agent.ttydSrc ? (
+      </div> : null}
+      {selected && activeBodyTab === 'terminal' && terminalOpen && agent.ttydSrc ? (
         <div data-id={`project-agent-card-terminal-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mx-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-lg bg-black">
           <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" />
         </div>
-      ) : activeBodyTab === 'role' ? (
+      ) : selected && activeBodyTab === 'role' ? (
         <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()} onTouchStart={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()} className="-mx-5 flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0b0b0d] overscroll-contain">
           <Suspense fallback={<div data-id="project-agent-card-role-loading" className="flex h-full items-center justify-center text-[11px] text-zinc-600">Loading…</div>}>
             {agent.remote ? <RemoteAgentRoleEditor agent={agent} /> : <AgentDocRoleEditor paneId={agent.paneId} className="min-h-0 flex-1" />}
@@ -535,18 +572,21 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </div>
       ) : (
       <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 flex min-h-0 flex-1 flex-col">
-      <div
+      {visibleQuestion || visibleQuestionAttachments.length ? <div
         data-id="project-agent-card-question-fixed"
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
-        className="max-h-[45%] shrink-0 space-y-2 overflow-y-auto overscroll-contain border-b border-zinc-200/80 pr-[18px] pb-5 dark:border-white/[0.07] [scrollbar-width:thin]"
+        className={cn(
+          'max-h-[45%] shrink-0 space-y-2 overflow-y-auto overscroll-contain pr-[18px] [scrollbar-width:thin]',
+          (visibleQuestion || visibleQuestionAttachments.length) && 'border-b border-zinc-200/80 pb-5 dark:border-white/[0.07]',
+        )}
       >
-        <div data-id="project-agent-card-history-link-row" className="flex justify-end">
+        {selected ? <div data-id="project-agent-card-history-link-row" className="flex justify-end">
           <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史<ArrowRight className="h-3 w-3" /></button>
-        </div>
+        </div> : null}
         {visibleQuestion || visibleQuestionAttachments.length ? (
           <div data-id="project-agent-card-question-row" className="flex min-w-0 items-start gap-2.5">
-            <UserTurnAvatar />
+            <UserTurnAvatar className="!mt-0" />
             <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown min-w-0 w-fit max-w-[92%] rounded-xl rounded-bl-sm border border-[var(--chat-question-border)] bg-[var(--chat-question-bg)] px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-contain">
             {visibleQuestion ? <MarkdownBlock text={previewableMarkdown(visibleQuestion)} /> : null}
             {visibleQuestionAttachments.length ? (
@@ -561,7 +601,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             </div>
           </div>
         ) : null}
-      </div>
+      </div> : null}
       <div
         ref={bodyScrollRef}
         data-id="project-agent-card-live-body"
@@ -577,7 +617,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             title={agent.title || agent.paneId}
             dataId={`project-agent-card-reply-avatar-${shortPaneId(agent.paneId)}`}
             variant="select"
-            className="sticky top-1 z-[1] mt-0.5 rounded-full shadow-sm"
+            className="sticky top-1 z-[1] rounded-full shadow-sm"
           />
         ) : null}
         <div className="min-w-0 flex-1 space-y-3.5">
@@ -624,7 +664,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           </div>
         ) : null}
         {working ? (
-          <div ref={loadingRef} data-id="project-agent-card-stream-loading" className="flex h-5 items-center gap-1 pt-1" aria-label="Loading reply">
+          <div ref={loadingRef} data-id="project-agent-card-stream-loading" className="flex h-7 items-center gap-1" aria-label="Loading reply">
             {[0, 1, 2].map((index) => (
               <span key={index} data-id="project-agent-card-stream-loading-dot" className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />
             ))}
@@ -648,7 +688,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       </div>
       )}
       </div>
-      {activeBodyTab === 'history' ? footer : null}
+      {(selected || working) && activeBodyTab === 'history' ? footer : null}
       <div
         data-id={`project-agent-card-resize-${shortPaneId(agent.paneId)}`}
         onPointerDown={onResizePointerDown}
@@ -698,6 +738,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [creating, setCreating] = useState(false);
   const [projectMenuId, setProjectMenuId] = useState<string>('');
   const [projectMenuAnchor, setProjectMenuAnchor] = useState<string>('');
+  const [projectListCollapsed, setProjectListCollapsed] = useState(() => localStorage.getItem(PROJECT_LIST_COLLAPSED_KEY) === '1');
+  const setProjectListVisibility = (collapsed: boolean) => {
+    setProjectListCollapsed(collapsed);
+    localStorage.setItem(PROJECT_LIST_COLLAPSED_KEY, collapsed ? '1' : '0');
+  };
   const [addOpen, setAddOpen] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
   const [addSearch, setAddSearch] = useState('');
@@ -895,7 +940,15 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       }];
     });
   }, [cloudDirectoryAgents, cloudInstances, teamId]);
-  const allAgents = useMemo(() => [...agents, ...cloudProjectAgents], [agents, cloudProjectAgents]);
+  const allAgents = useMemo(() => {
+    const unique = new Map<string, ProjectAgent>();
+    for (const agent of [...agents, ...cloudProjectAgents]) {
+      const key = projectAgentIdentity(agent);
+      const existing = unique.get(key);
+      if (!existing || projectAgentCompleteness(agent) > projectAgentCompleteness(existing)) unique.set(key, agent);
+    }
+    return [...unique.values()];
+  }, [agents, cloudProjectAgents]);
   const memberIds = useMemo(() => new Set(selectedProject.pane_ids.map(shortPaneId)), [selectedProject.pane_ids]);
   const visibleAgents = allAgents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
   const assignedAgentIds = useMemo(() => new Set(groups.flatMap((group) => group.pane_ids.map(shortPaneId))), [groups]);
@@ -926,6 +979,33 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   });
   const paneMembershipKey = selectedProject.pane_ids.map(shortPaneId).sort().join('|');
   const visibleAgentKey = visibleAgents.map((agent) => shortPaneId(agent.paneId)).sort().join('|');
+  useEffect(() => {
+    const receiveCloudReply = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail || {};
+      if (String(detail.kind || '') !== 'agent_reply') return;
+      const remoteAgentId = String(detail.senderAgentId || '').trim();
+      if (!remoteAgentId) return;
+      const agent = visibleAgents.find((item) => item.remote && item.remoteAgentId === remoteAgentId
+        && (!detail.senderInstanceId || item.instanceId === String(detail.senderInstanceId)));
+      if (!agent) return;
+      const id = shortPaneId(agent.paneId);
+      const answer = String(detail.text || '');
+      setAgentReplies((current) => ({
+        ...current,
+        [id]: {
+          ...(current[id] || {}),
+          question: optimisticQuestionsRef.current[id] || current[id]?.question || '',
+          answer,
+          status: 'completed',
+          completed_at: new Date(Number(detail.receivedAtMs) || Date.now()).toISOString(),
+        },
+      }));
+      delete optimisticQuestionsRef.current[id];
+    };
+    window.addEventListener('cicy:cloud-reply', receiveCloudReply);
+    return () => window.removeEventListener('cicy:cloud-reply', receiveCloudReply);
+  }, [visibleAgentKey]);
+
   useEffect(() => {
     let cancelled = false;
     const ids = visibleAgents.map((agent) => shortPaneId(agent.paneId));
@@ -962,7 +1042,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       });
     };
     void pollReplies();
-    const timer = window.setInterval(() => { void pollReplies(); }, visibleAgents.some((agent) => agent.remote) ? 2000 : 500);
+    // Local Agents retain the fast compatibility poll. Cross-Instance replies
+    // arrive over the Cloud subscription; this slow poll is only recovery for
+    // a temporarily disconnected browser/backend WebSocket.
+    const timer = window.setInterval(() => { void pollReplies(); }, visibleAgents.some((agent) => agent.remote) ? 15_000 : 500);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [visibleAgentKey]);
 
@@ -1269,6 +1352,31 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       return next;
     });
     await load(false);
+  };
+
+  const changeAgentProject = async (agent: ProjectAgent, projectId: number | string, mode: 'move' | 'add') => {
+    const project = projects.find((item) => String(item.id) === String(projectId));
+    if (!project?.api_id) return;
+    const id = shortPaneId(agent.paneId);
+    try {
+      await apiService.addGroupPane(project.api_id, agent.paneId, mode);
+      setGroups((current) => current.map((group) => {
+        if (String(group.id) === String(project.id)) {
+          if (group.pane_ids.some((paneId) => shortPaneId(paneId) === id)) return group;
+          return { ...group, pane_ids: [...group.pane_ids, agent.paneId], pane_count: group.pane_count + 1 };
+        }
+        if (mode === 'move' && String(group.id) !== String(project.id)) {
+          if (!group.pane_ids.some((paneId) => shortPaneId(paneId) === id)) return group;
+          return { ...group, pane_ids: group.pane_ids.filter((paneId) => shortPaneId(paneId) !== id), pane_count: Math.max(0, group.pane_count - 1) };
+        }
+        return group;
+      }));
+      window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: mode === 'add' ? `已添加到「${project.name}」` : `已移动到「${project.name}」`,
+      }));
+    } catch (cause: any) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.response?.data?.error || cause?.message || t('projectSaving') }));
+    }
   };
 
   const toggleAgentSelection = (agent: ProjectAgent) => {
@@ -1711,9 +1819,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
   return (
     <section data-id="projects-panel" className="flex h-full min-w-0 flex-1 bg-[#090a0d] text-zinc-300">
-      <aside data-id="projects-list" className="flex w-[280px] shrink-0 flex-col border-r border-white/[0.07] bg-[#0d0e12] max-[700px]:w-[180px]">
+      <aside data-id="projects-list" className={cn('shrink-0 flex-col border-r border-white/[0.07] bg-[#0d0e12]', projectListCollapsed ? 'hidden' : 'flex w-[280px] max-[700px]:w-[180px]')}>
         <header data-id="projects-list-header" className="flex h-12 shrink-0 items-center border-b border-white/[0.07] px-4">
           <h2 data-id="projects-list-title" className="flex-1 text-[15px] font-semibold text-zinc-100">{t('projectsTitle')}</h2>
+          <button type="button" data-id="projects-list-collapse" onClick={() => setProjectListVisibility(true)} className="mr-1 grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-white/[0.06] hover:text-white" title={t('collapse', { ns: 'common', defaultValue: '折叠' })} aria-label={t('collapse', { ns: 'common', defaultValue: '折叠' })}><PanelLeftClose className="h-4 w-4" /></button>
           <button
             type="button"
             data-id="projects-create"
@@ -1746,7 +1855,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 {project.pinned ? <Pin data-id="project-list-item-pinned" className="h-3 w-3 shrink-0 text-amber-400" /> : null}
                 <span data-id="project-list-item-name" className="min-w-0 flex-1 truncate text-[13px] font-medium">{project.name}</span>
                 <div data-id="project-list-item-actions" className="relative w-7 shrink-0">
-                  <button type="button" data-id="project-more" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setProjectMenuId(String(project.id)); setProjectMenuAnchor(String(project.id)); }} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 opacity-0 transition-opacity hover:bg-white/[0.08] hover:text-zinc-200 group-hover:opacity-100 group-focus-within:opacity-100" title={t('projectMore')}><MoreHorizontal className="h-4 w-4" /></button>
+                  <span data-id="project-list-item-agent-count" className="grid h-7 w-7 place-items-center text-[11px] font-medium tabular-nums text-zinc-600 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">{project.pane_count}</span>
+                  <button type="button" data-id="project-more" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setProjectMenuId(String(project.id)); setProjectMenuAnchor(String(project.id)); }} className="absolute inset-0 grid h-7 w-7 place-items-center rounded-lg text-zinc-500 opacity-0 transition-opacity hover:bg-white/[0.08] hover:text-zinc-200 group-hover:opacity-100 group-focus-within:opacity-100" title={t('projectMore')}><MoreHorizontal className="h-4 w-4" /></button>
                   {projectMenuId === String(project.id) && projectMenuAnchor === String(project.id) ? (
                     <div data-id="project-more-menu" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} className="absolute right-0 top-8 z-50 min-w-[150px] rounded-xl border border-white/10 bg-[#18191e] p-1 shadow-2xl">
                       <button type="button" data-id="project-pin" onClick={() => { setProjectMenuId(''); void toggleProjectPinned(project); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/[0.06]">{project.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}{project.pinned ? t('projectUnpin') : t('projectPin')}</button>
@@ -1763,6 +1873,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
       <main data-id="projects-agent-canvas" className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.07)_1px,transparent_0)] bg-[size:32px_32px]">
         <header data-id="projects-agent-header" className="z-[200] flex h-12 shrink-0 items-center border-b border-white/[0.06] bg-[#090a0d]/90 px-5 backdrop-blur">
+          {projectListCollapsed ? <button type="button" data-id="projects-list-expand" onClick={() => setProjectListVisibility(false)} className="mr-3 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100" title={t('expand', { ns: 'common', defaultValue: '展开' })} aria-label={t('expand', { ns: 'common', defaultValue: '展开' })}><PanelLeftOpen className="h-4 w-4" /></button> : null}
           <div data-id="projects-agent-heading" className="min-w-0 flex-1">
             <h2 data-id="projects-agent-title" className="truncate text-[15px] font-semibold text-zinc-100">{selectedProject.name}</h2>
             <p data-id="projects-agent-count" className="text-[11px] text-zinc-600">{t('projectAgentCount', { count: visibleAgents.length })}</p>
@@ -1829,6 +1940,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
                 removable={Boolean(selectedProject.api_id)}
+                projectOptions={projects.filter((project) => String(project.id) !== String(selectedProject.id)).map((project) => ({
+                  id: project.id,
+                  name: project.name,
+                  checked: project.pane_ids.some((paneId) => shortPaneId(paneId) === cardShortId),
+                }))}
                 width={layout.width}
                 height={layout.height}
                 onSelect={() => toggleAgentSelection(agent)}
@@ -2001,6 +2117,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                   </footer>
                 )}
                 onRemove={() => { void removeAgent(agent); }}
+                onMoveProject={(projectId) => { void changeAgentProject(agent, projectId, 'move'); }}
+                onAddProject={(projectId) => { void changeAgentProject(agent, projectId, 'add'); }}
                     onOpenHistory={() => onOpenHistory(agent.paneId)}
                 onToggleTerminal={() => setTerminalAgentIds((current) => {
                   const next = new Set(current);
@@ -2035,11 +2153,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           </div>
         ) : null}
         </div>
-        {!dockOpen ? <div data-id="project-fab-wrap" className="absolute right-5 z-[60] flex flex-col items-end gap-2" style={{ bottom: 64 }}>
+        {!dockOpen ? <div data-id="project-fab-wrap" className="fixed bottom-16 right-5 z-[80] flex flex-col items-end gap-2">
           <div
             data-id="project-fab-menu"
             className={cn(
-              'flex origin-bottom-right flex-col items-end gap-2 transition-all duration-200',
+              'flex min-w-[184px] origin-bottom-right flex-col rounded-xl border border-white/[0.10] bg-[#202126] p-1 shadow-2xl transition-all duration-200',
               fabOpen ? 'pointer-events-auto translate-y-0 scale-100 opacity-100' : 'pointer-events-none translate-y-2 scale-95 opacity-0',
             )}
           >
@@ -2047,7 +2165,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               type="button"
               data-id="project-fab-create-agent"
               onClick={() => { setFabOpen(false); onCreateAgent(selectedProject.project_template || (selectedProject.builtin ? 'default' : '')); }}
-              className="flex h-9 items-center gap-2 rounded-full border border-white/[0.10] bg-[#202126] px-3 text-[12px] text-zinc-100 shadow-xl hover:bg-[#292a30]"
+              className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[12px] text-zinc-100 transition-colors hover:bg-white/[0.07]"
             >
               <UserPlus data-id="project-fab-create-agent-icon" className="h-4 w-4" />
               <span data-id="project-fab-create-agent-label">{t('projectCreateAgent')}</span>
@@ -2057,7 +2175,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               data-id="project-fab-add-existing"
               onClick={() => { setFabOpen(false); openAddAgents(selectedProject); }}
               disabled={!selectedProject.api_id || availableAgents.length === 0}
-              className="flex h-9 items-center gap-2 rounded-full border border-white/[0.10] bg-[#202126] px-3 text-[12px] text-zinc-100 shadow-xl hover:bg-[#292a30] disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[12px] text-zinc-100 transition-colors hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Users data-id="project-fab-add-existing-icon" className="h-4 w-4" />
               <span data-id="project-fab-add-existing-label">{t('projectAddExistingAgent')}</span>

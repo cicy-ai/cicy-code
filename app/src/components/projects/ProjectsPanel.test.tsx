@@ -54,6 +54,7 @@ beforeEach(() => {
   api.getCiCyCloudInstances.mockResolvedValue({ data: { instances: [] } });
   api.getCiCyCloudAgents.mockResolvedValue({ data: { agents: [] } });
   api.addGroupPane.mockResolvedValue({ data: { success: true } });
+  api.removeGroupPane.mockResolvedValue({ data: { success: true } });
   api.updateGroupPaneLayout.mockResolvedValue({ data: { success: true } });
   api.uploadAssetFile.mockResolvedValue({ data: { file: { file_ref: '/home/cicy/cicy-ai/assets/queued.png' } } });
   api.getMemoryTemplate.mockResolvedValue({ data: { content: '# Global', path: '/home/cicy/cicy-ai/memory/global.md' } });
@@ -140,11 +141,38 @@ describe('<ProjectsPanel /> floating action button', () => {
 
     rerender(<ProjectsPanel agents={[]} dockOpen={false} onOpenAgent={vi.fn()} />);
     expect(document.querySelector('[data-id="project-fab-wrap"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-fab-wrap"]')).toHaveClass('fixed', 'bottom-16', 'right-5');
     expect(document.querySelector('[data-id="project-fab-menu"]')).toHaveClass('pointer-events-none');
+  });
+
+  it('collapses the project list and remembers the preference', async () => {
+    const { unmount } = render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
+    fireEvent.click(await waitFor(() => document.querySelector('[data-id="projects-list-collapse"]') as HTMLElement));
+    expect(document.querySelector('[data-id="projects-list"]')).toHaveClass('hidden');
+    expect(localStorage.getItem('cicy_projects_list_collapsed')).toBe('1');
+    unmount();
+
+    render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
+    const expand = await waitFor(() => document.querySelector('[data-id="projects-list-expand"]') as HTMLElement);
+    fireEvent.click(expand);
+    expect(document.querySelector('[data-id="projects-list"]')).not.toHaveClass('hidden');
+    expect(localStorage.getItem('cicy_projects_list_collapsed')).toBe('0');
   });
 });
 
 describe('<ProjectsPanel /> project view cache', () => {
+  it('renders duplicate roster records for one pane only once', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-1010:main.0'], pane_count: 1 }] } });
+    render(<ProjectsPanel agents={[
+      { paneId: 'w-1010:main.0', title: 'cicy-code', agentType: 'codex' },
+      { paneId: 'w-1010:main.0', title: 'cicy-code', agentType: 'codex', defaultModel: 'gpt-5.6-sol' },
+      { paneId: 'w-1010:main.0', title: 'cicy-code', agentType: 'codex', status: 'working' },
+    ]} onOpenAgent={vi.fn()} />);
+
+    await waitFor(() => expect(document.querySelectorAll('[data-id="project-canvas-node-w-1010"]')).toHaveLength(1));
+    expect(document.querySelectorAll('[data-id="project-agent-card-w-1010"]')).toHaveLength(1);
+  });
+
   it('restores zoom and card layout before the background layout request resolves', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
@@ -165,6 +193,11 @@ describe('<ProjectsPanel /> project view cache', () => {
     });
     expect(node.style.left).toBe('120px');
     expect(node.style.top).toBe('80px');
+    expect(document.querySelector('[data-id="project-list-item-default"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
+    expect(document.querySelector('[data-id="project-agent-card-metrics"]')).not.toHaveClass('border-b');
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-w-101"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-history-w-101"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-w-101"]')).toHaveStyle({ width: '420px', height: '360px' });
     expect(document.querySelector('[data-id="project-canvas-zoom-value"]')).toHaveTextContent('125%');
   });
@@ -274,9 +307,16 @@ describe('<ProjectsPanel /> project creation', () => {
 describe('<ProjectsPanel /> agent prompt footer', () => {
   it('switches card body tabs and opens the full history in the right panel', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    api.getAgentCurrentReply.mockResolvedValue({ data: { question: '已有问题', items: [], status: 'completed' } });
     const onOpenHistory = vi.fn();
     render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} onOpenHistory={onOpenHistory} />);
 
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(card);
     const historyTab = await screen.findByRole('tab', { name: '会话' });
     expect(historyTab).toHaveAttribute('aria-selected', 'true');
     expect(document.querySelector('[data-id="project-agent-card-history-sentinel"]')).not.toBeInTheDocument();
@@ -292,7 +332,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     render(<ProjectsPanel agents={[
       { paneId: 'w-101:main.0', title: 'Codex', agentType: 'codex', ttydSrc: '/ttyd/w-101/?token=test' },
       { paneId: 'w-102:main.0', title: 'CiCy', agentType: 'cicy', ttydSrc: '/ttyd/w-102/?token=test' },
-    ]} onOpenAgent={vi.fn()} />);
+    ]} activeAgentId="w-101" onOpenAgent={vi.fn()} />);
 
     const toggle = await screen.findByRole('tab', { name: 'Terminal' });
     expect(document.querySelector('[data-id="project-agent-card-tab-terminal-w-102"]')).not.toBeInTheDocument();
@@ -309,7 +349,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
   it('shows the agent role editor without a redundant toolbar and isolates its scrolling', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
-    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} activeAgentId="w-101" onOpenAgent={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('tab', { name: '角色' }));
     const roleBody = document.querySelector('[data-id="project-agent-card-role-body-w-101"]') as HTMLElement;
@@ -317,9 +357,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-role-toolbar"]')).not.toBeInTheDocument();
     const zoom = document.querySelector('[data-id="project-canvas-zoom-value"]');
-    expect(zoom).toHaveTextContent('100%');
+    const zoomBeforeWheel = zoom?.textContent;
     fireEvent.wheel(roleBody, { deltaY: 100 });
-    expect(zoom).toHaveTextContent('100%');
+    expect(zoom).toHaveTextContent(String(zoomBeforeWheel));
   });
 
   it('loads and saves a remote Agent persona through Cloud RPC', async () => {
@@ -338,7 +378,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
         : { filename: 'AGENTS.md', guidance: '# Remote role', systemPrompt: 'Remote system', meta: 'name: remote' },
     }) } } }));
 
-    render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
+    render(<ProjectsPanel agents={[]} activeAgentId="mac_local.w-200" onOpenAgent={vi.fn()} />);
 
     const roleTab = await screen.findByRole('tab', { name: '角色' });
     expect(roleTab).toBeEnabled();
@@ -444,7 +484,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-tool-result-markdown"]')).not.toBeInTheDocument();
   });
 
-  it('always shows the footer and ignores IME confirmation Enter', async () => {
+  it('shows card controls only when active and ignores IME confirmation Enter', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
     });
@@ -456,7 +496,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       if (!node) throw new Error('agent card did not render');
       return node as HTMLElement;
     });
-    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-tabs-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).not.toBeInTheDocument();
     const canvasNode = card.closest('[data-id="project-canvas-node-w-101"]') as HTMLElement;
     fireEvent.pointerDown(canvasNode, { button: 0, pointerId: 1, clientX: 120, clientY: 120 });
     fireEvent.pointerUp(canvasNode, { pointerId: 1, clientX: 120, clientY: 120 });
@@ -468,6 +510,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       return node as HTMLTextAreaElement;
     });
     expect(input.tagName).toBe('TEXTAREA');
+    expect(document.querySelector('[data-id="project-agent-card-tabs-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-history-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).not.toBeInTheDocument();
     fireEvent.click(card);
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
 
@@ -488,8 +533,61 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     // arrives, otherwise the loading indicator disappears and reappears during
     // the handoff to server-side working status.
     expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).toHaveClass('h-7');
+    expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).not.toHaveClass('mt-0.5');
     expect(document.querySelectorAll('[data-id="project-agent-card-stream-loading-dot"]')).toHaveLength(3);
     await waitFor(() => expect(input).toHaveFocus());
+  });
+
+  it('keeps the loading stop control visible on an inactive card', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} statuses={{ 'w-101:main.0': { status: 'working' } }} onOpenAgent={vi.fn()} />);
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument());
+    expect(document.querySelector('[data-id="project-agent-prompt-cancel-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-inactive-loading-w-101"]')).not.toBeInTheDocument();
+  });
+
+  it('offers separate move-to and add-to actions from the card More menu', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [
+      { ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 },
+      defaultGroups[1],
+    ] } });
+    const toast = vi.fn();
+    window.addEventListener('show-toast', toast);
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+
+    const menu = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-menu-w-101"]');
+      if (!node) throw new Error('agent card menu did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(menu);
+    expect(document.querySelector('[data-id="project-agent-card-move-to"]')).toHaveTextContent('移动到');
+    expect(document.querySelector('[data-id="project-agent-card-add-to"]')).toHaveTextContent('添加到');
+    expect(document.querySelector('[data-id="project-agent-card-move-submenu"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-add-submenu"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-add-project-2"]')).not.toBeInTheDocument();
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-add-to"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-agent-card-add-submenu"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-submenu-label"]')).toHaveTextContent('添加到');
+    fireEvent.mouseEnter(document.querySelector('[data-id="project-agent-card-move-to"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-agent-card-move-submenu"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-submenu-label"]')).toHaveTextContent('移动到');
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-move-to"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-agent-card-move-submenu"]')).toBeInTheDocument();
+    fireEvent.mouseEnter(document.querySelector('[data-id="project-agent-card-add-to"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-agent-card-add-submenu"]')).toBeInTheDocument();
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-add-project-2"]') as HTMLElement);
+    expect(api.removeGroupPane).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.addGroupPane).toHaveBeenCalledWith(2, 'w-101:main.0', 'add'));
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+    expect((toast.mock.calls[0][0] as CustomEvent).detail).toBe('已添加到「Existing」');
+    expect(document.querySelector('[data-id="project-list-item-default"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
+    expect(document.querySelector('[data-id="project-list-item-2"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
+    window.removeEventListener('show-toast', toast);
   });
 
   it('keeps project-card selection synchronized with the shared active agent', async () => {
@@ -562,7 +660,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
     expect(routed.defaultPrevented).toBe(true);
     expect(toast).toHaveBeenCalled();
-    expect(document.querySelector('[data-id="project-agent-prompt-input-w-101"]')).toHaveValue('');
+    expect(document.querySelector('[data-id="project-agent-prompt-input-w-101"]')).not.toBeInTheDocument();
   });
 
   it('queues multiple prompts while thinking and sends them together when idle', async () => {

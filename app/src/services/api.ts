@@ -314,7 +314,7 @@ const api = {
   createGroup: (data: { name: string; description?: string }) => http.post('/api/groups', data),
   updateGroup: (id: number | string, data: { name?: string; description?: string; is_pinned?: boolean; project_rules?: string }) => http.patch(`/api/groups/${encodeURIComponent(String(id))}`, data),
   deleteGroup: (id: number | string) => http.delete(`/api/groups/${encodeURIComponent(String(id))}`),
-  addGroupPane: (id: number | string, paneId: string) => http.post(`/api/groups/${encodeURIComponent(String(id))}/panes/${encodeURIComponent(paneId)}`),
+  addGroupPane: (id: number | string, paneId: string, mode: 'move' | 'add' = 'move') => http.post(`/api/groups/${encodeURIComponent(String(id))}/panes/${encodeURIComponent(paneId)}`, undefined, { params: { mode } }),
   removeGroupPane: (id: number | string, paneId: string) => http.delete(`/api/groups/${encodeURIComponent(String(id))}/panes/${encodeURIComponent(paneId)}`),
   updateGroupPaneLayout: (id: number | string, paneId: string, data: { pos_x: number; pos_y: number; width?: number; height?: number; z_index?: number }) => http.patch(`/api/groups/${encodeURIComponent(String(id))}/panes/${encodeURIComponent(paneId)}/layout`, data),
   getSystemResources: (cfg?: any) => http.get('/api/system/resources', cfg),

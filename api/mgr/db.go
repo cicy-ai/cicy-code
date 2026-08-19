@@ -306,23 +306,10 @@ func (d *DB) Migrate() {
 			}
 		}
 	}
-	// An Agent belongs to at most one Project. Older builds allowed duplicate
-	// memberships, so collapse them deterministically before adding the unique
-	// index: keep the default-project membership first, otherwise the oldest.
-	if _, err := d.Exec(`DELETE FROM group_windows WHERE id IN (
-		SELECT id FROM (
-			SELECT gw.id, ROW_NUMBER() OVER (
-				PARTITION BY gw.win_id
-				ORDER BY COALESCE(ag.is_default, 0) DESC, gw.id
-			) AS project_rank
-			FROM group_windows gw
-			JOIN agent_groups ag ON ag.id=gw.group_id
-		) ranked WHERE project_rank > 1
-	)`); err != nil {
-		log.Printf("[db] deduplicate project agents: %v", err)
-	}
-	if _, err := d.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_group_windows_one_project_per_agent ON group_windows(win_id)"); err != nil {
-		log.Printf("[db] enforce one project per agent: %v", err)
+	// Project cards support both moving (one canonical membership) and adding
+	// (secondary memberships). Older builds enforced one Project per Agent.
+	if _, err := d.Exec("DROP INDEX IF EXISTS idx_group_windows_one_project_per_agent"); err != nil {
+		log.Printf("[db] allow multi-project agents: %v", err)
 	}
 
 	d.ensureColumn("agent_config", "machine_id", "INTEGER")
