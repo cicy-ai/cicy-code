@@ -30,6 +30,7 @@ const agentSend = vi.hoisted(() => ({ sendToAgent: vi.fn() }));
 vi.mock('../../services/api', () => ({ default: api }));
 vi.mock('../../services/agentSend', () => agentSend);
 vi.mock('../AgentAvatar', () => ({ default: () => <span data-testid="agent-avatar" /> }));
+vi.mock('../chat/CurrentHistoryView', () => ({ default: ({ paneId }: { paneId: string }) => <div data-id={`mock-current-history-${paneId}`} /> }));
 vi.mock('../terminal/TerminalView', () => ({ default: ({ ttydSrc }: { ttydSrc: string }) => <div data-id="mock-project-terminal">{ttydSrc}</div> }));
 
 import ProjectsPanel from './ProjectsPanel';

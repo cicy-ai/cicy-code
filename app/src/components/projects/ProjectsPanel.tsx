@@ -20,6 +20,7 @@ import { toolHeadline } from '../chat/history/lib/toolFormat';
 import { isTechnicalTransportFailureText } from '../chat/history/lib/normalizeItem';
 import TerminalView from '../terminal/TerminalView';
 import MarkdownFileEditor from '../files/MarkdownFileEditor';
+import CurrentHistoryView from '../chat/CurrentHistoryView';
 
 const AgentDocRoleEditor = lazy(() => import('../layout/AgentDocRoleEditor'));
 
@@ -477,6 +478,23 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           <Suspense fallback={<div data-id="project-agent-card-role-loading" className="flex h-full items-center justify-center text-[11px] text-zinc-600">Loading…</div>}>
             <AgentDocRoleEditor paneId={agent.paneId} className="min-h-0 flex-1" />
           </Suspense>
+        </div>
+      ) : selected && activeBodyTab === 'history' && !agent.remote ? (
+        <div
+          data-id={`project-agent-card-full-history-${shortPaneId(agent.paneId)}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onWheel={(event) => event.stopPropagation()}
+          onTouchStart={(event) => event.stopPropagation()}
+          onTouchMove={(event) => event.stopPropagation()}
+          className="-mx-5 min-h-0 flex-1 overflow-hidden bg-[#0b0b0d]"
+        >
+          <CurrentHistoryView
+            paneId={shortPaneId(agent.paneId)}
+            open
+            agentType={agent.agentType}
+            fullWidth
+            leftAlignQuestions
+          />
         </div>
       ) : (
       <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 flex min-h-0 flex-1 flex-col">
@@ -1373,6 +1391,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       ...current,
       [id]: { question: displayQuestion, items: [], answer: '', thinking: '', status: 'pending', started_at: new Date().toISOString() },
     }));
+    // The embedded conversation view owns the authoritative committed + live
+    // transcript. Nudge it with the same optimistic prompt used by the regular
+    // chat surface so the card updates immediately without inventing a second
+    // history state machine.
+    window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId: id, text: displayQuestion } }));
     try {
       if (agent.remote) {
         if (!agent.instanceOnline) throw new Error(`${agent.instanceTeam || 'Instance'} is offline`);
@@ -1383,6 +1406,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       }
       sentAttachments.forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
     } catch (cause: any) {
+      window.dispatchEvent(new CustomEvent('cicy:current-history-cancel-optimistic', { detail: { paneId: id } }));
       delete optimisticQuestionsRef.current[id];
       setAgentMessages((current) => ({ ...current, [id]: [restoreText, current[id]].filter(Boolean).join('\n') }));
       setAgentAttachments((current) => ({ ...current, [id]: [...sentAttachments, ...(current[id] || [])] }));
