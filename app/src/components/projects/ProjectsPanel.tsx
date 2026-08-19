@@ -2002,7 +2002,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           </div>
         ) : null}
         </div>
-        {!dockOpen ? <div data-id="project-fab-wrap" className="absolute right-5 z-[60] flex flex-col items-end gap-2" style={{ bottom: 64 }}>
+        {!dockOpen ? <div data-id="project-fab-wrap" className="fixed bottom-16 right-5 z-[80] flex flex-col items-end gap-2">
           <div
             data-id="project-fab-menu"
             className={cn(
