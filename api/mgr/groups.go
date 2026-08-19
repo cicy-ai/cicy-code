@@ -331,34 +331,47 @@ func addWindowToGroup(w http.ResponseWriter, groupID, winID, winType, refID, res
 			J(w, M{"success": true, "already_added": true, "group_id": groupID, responseKey: winID})
 			return
 		}
-		httpErr(w, http.StatusConflict, "Agent already belongs to another project")
-		return
 	}
 	if err != sql.ErrNoRows {
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	moved := err == nil
+	if moved {
+		if _, err = store.Exec("UPDATE group_windows SET group_id=? WHERE group_id=? AND win_id=?", groupID, existingGroupID, winID); err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else if _, err = store.Exec("INSERT INTO group_windows (group_id, win_id, win_type, ref_id) VALUES (?,?,?,?)", groupID, winID, winType, refID); err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if _, err := store.Exec("INSERT INTO group_windows (group_id, win_id, win_type, ref_id) VALUES (?,?,?,?)", groupID, winID, winType, refID); err != nil {
-		httpErr(w, http.StatusInternalServerError, err.Error())
-		return
+	rollback := func() {
+		if moved {
+			_, _ = store.Exec("UPDATE group_windows SET group_id=? WHERE group_id=? AND win_id=?", existingGroupID, groupID, winID)
+		} else {
+			_, _ = store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)
+		}
 	}
 	if winType == "agent_ttyd" {
 		var gid int64
 		var name string
 		var isDefault int
 		if err := store.QueryRow("SELECT id, name, COALESCE(is_default,0) FROM agent_groups WHERE id=?", groupID).Scan(&gid, &name, &isDefault); err != nil {
-			store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)
+			rollback()
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		slug, _, err := ensureGroupProjectDefinition(gid, name, isDefault == 1)
 		if err != nil {
-			store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)
+			rollback()
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if err := syncAgentProjectMemory(winID, slug); err != nil {
-			store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)
+			rollback()
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}

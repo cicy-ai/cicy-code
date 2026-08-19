@@ -1263,17 +1263,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       if (checked) {
         await apiService.removeGroupPane(project.api_id, agent.paneId);
       } else {
-        // Project membership is exclusive. Selecting another Project is a
-        // move, not an additional membership. Roll the original membership
-        // back if the target add fails so an Agent is never orphaned.
-        if (!selectedProject.api_id) return;
-        await apiService.removeGroupPane(selectedProject.api_id, agent.paneId);
-        try {
-          await apiService.addGroupPane(project.api_id, agent.paneId);
-        } catch (cause) {
-          await apiService.addGroupPane(selectedProject.api_id, agent.paneId).catch(() => undefined);
-          throw cause;
-        }
+        // POST is an atomic move when the Agent already belongs elsewhere.
+        await apiService.addGroupPane(project.api_id, agent.paneId);
       }
       setGroups((current) => current.map((group) => {
         if (String(group.id) === String(project.id)) {

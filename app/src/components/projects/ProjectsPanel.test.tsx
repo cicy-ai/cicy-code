@@ -499,7 +499,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-project-default"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-projects-label"]')).toHaveTextContent('其他 Projects');
     fireEvent.click(document.querySelector('[data-id="project-agent-card-project-2"]') as HTMLElement);
-    await waitFor(() => expect(api.removeGroupPane).toHaveBeenCalledWith(1, 'w-101:main.0'));
+    expect(api.removeGroupPane).not.toHaveBeenCalled();
     await waitFor(() => expect(api.addGroupPane).toHaveBeenCalledWith(2, 'w-101:main.0'));
     expect(document.querySelector('[data-id="project-list-item-default"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('0');
     expect(document.querySelector('[data-id="project-list-item-2"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
