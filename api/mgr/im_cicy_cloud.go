@@ -891,6 +891,8 @@ func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, sende
 		switch strings.TrimSpace(req.Op) {
 		case "reply":
 			result, rpcErr = agentReplyTextData(target, req.Full)
+		case "agent_status":
+			result, rpcErr = cicyCloudAgentStatus(target)
 		case "current_reply":
 			current, currentErr := aiGatewayReadCurrentSnapshotCached(target)
 			if currentErr != nil && !os.IsNotExist(currentErr) {
@@ -909,14 +911,24 @@ func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, sende
 				thinking = aiGatewayReplyItemsText(displayItems, "thinking", aiGatewayCommittedAssistantThinking(current))
 			}
 			ctxUsedPct, ctxWindowSize := agentInspectorReadContextWindow(target)
-			result = M{
-				"pane_id": target, "status": status,
+			result, rpcErr = cicyCloudAgentStatus(target)
+			if rpcErr != nil {
+				break
+			}
+			replyModel := aiGatewayFirstNonEmpty(aiGatewayReplyPrimaryModel(reply), strings.TrimSpace(current.Model))
+			for key, value := range M{
+				"status": status,
 				"complete": status == "" || status == "idle" || status == "done" || isAIGatewayReplyTerminal(status),
 				"question": aiGatewayCurrentQuestion(current), "answer": answer, "thinking": thinking, "items": displayItems,
 				"started_at": aiGatewayFirstNonEmpty(strings.TrimSpace(reply.StartedAt), strings.TrimSpace(current.StartedAt), strings.TrimSpace(current.Timestamp)),
-				"updated_at": strings.TrimSpace(reply.UpdatedAt), "model": aiGatewayFirstNonEmpty(aiGatewayReplyPrimaryModel(reply), strings.TrimSpace(current.Model)),
+				"updated_at": strings.TrimSpace(reply.UpdatedAt),
 				"input_tokens": reply.InputTokens, "output_tokens": reply.OutputTokens, "total_tokens": reply.TotalTokens,
 				"cost_credit": reply.CostCredit, "context_used_pct": ctxUsedPct, "context_window_size": ctxWindowSize,
+			} {
+				result[key] = value
+			}
+			if replyModel != "" {
+				result["model"] = replyModel
 			}
 		case "history":
 			if req.Index < 0 {
@@ -1180,7 +1192,10 @@ func cicyCloudFiniteNumber(value interface{}) (float64, bool) {
 }
 
 func cicyCloudAgentRuntimeState(agentID, defaultModel string, metrics M) M {
-	state := M{"agentId": agentID, "status": "idle", "model": defaultModel, "online": true}
+	state := M{"agentId": agentID, "status": "", "model": interface{}(nil), "online": false}
+	if strings.TrimSpace(defaultModel) != "" {
+		state["model"] = strings.TrimSpace(defaultModel)
+	}
 	if metrics == nil {
 		return state
 	}
@@ -1223,12 +1238,102 @@ func cicyCloudAgentRuntimeState(agentID, defaultModel string, metrics M) M {
 	return state
 }
 
+func cicyCloudAgentForeground(command string) bool {
+	command = strings.ToLower(strings.TrimSpace(command))
+	if command == "" {
+		return false
+	}
+	switch command {
+	case "bash", "zsh", "sh", "fish", "dash", "ksh", "tcsh":
+		return false
+	default:
+		return true
+	}
+}
+
+func cicyCloudAgentIdle(online bool, metrics M) interface{} {
+	if !online || metrics == nil {
+		return nil
+	}
+	status := strings.ToLower(strings.TrimSpace(aiGatewayString(metrics["status"])))
+	switch status {
+	case "thinking", "working", "running", "streaming", "pending", "tool_use", "tool_call", "in_progress":
+		return false
+	case "idle", "done", "completed", "complete", "cancelled", "canceled", "error", "failed":
+		return true
+	}
+	if complete, ok := metrics["complete"].(bool); ok {
+		return complete
+	}
+	return nil
+}
+
+// cicyCloudAgentRosterState is the authoritative Cloud roster contract used by
+// both agent_status and current_reply. Nullable runtime fields are always
+// present, and numeric zero is deliberately preserved.
+func cicyCloudAgentRosterState(paneID, title, agentType, defaultModel, workspace string, useCustomGateway bool, metrics M) M {
+	agentID := shortPaneID(paneID)
+	online := false
+	if normalizeAgentType(agentType) == "cicy" {
+		online = cicySessionRegistered(agentID)
+	} else {
+		online = cicyCloudAgentForeground(paneCurrentCommand(normPaneID(paneID)))
+	}
+	provider, usageModel, usageCost := agentUsageRuntimeSummary(agentID)
+	var model interface{}
+	if value := strings.TrimSpace(aiGatewayString(metrics["model"])); value != "" {
+		model = value
+	} else if usageModel != nil {
+		model = *usageModel
+	} else if value := strings.TrimSpace(defaultModel); value != "" {
+		model = value
+	}
+	var providerValue interface{}
+	if provider != nil {
+		providerValue = *provider
+	}
+	var cost interface{}
+	if usageCost != nil {
+		cost = *usageCost
+	}
+	var contextUsage interface{}
+	if value, ok := cicyCloudFiniteNumber(metrics["context_used_pct"]); ok {
+		contextUsage = fmt.Sprintf("%g%%", max(0, min(100, value)))
+	}
+	return M{
+		"id": agentID, "title": title, "agent_type": normalizeAgentType(agentType), "online": online,
+		"model": model, "provider": providerValue, "local_gateway": useCustomGateway,
+		"context_usage": contextUsage, "cost": cost, "idle": cicyCloudAgentIdle(online, metrics),
+		"pane_id": normPaneID(paneID), "workspace": workspace,
+		// Compatibility aliases for existing Hub/UI consumers.
+		"agentId": agentID, "agentType": normalizeAgentType(agentType), "localGateway": useCustomGateway,
+		"useCustomGateway": useCustomGateway, "contextUsage": contextUsage, "paneId": normPaneID(paneID),
+	}
+}
+
+func cicyCloudAgentStatus(paneID string) (M, error) {
+	if store == nil {
+		return nil, fmt.Errorf("agent store unavailable")
+	}
+	var fullPaneID, title, agentType, defaultModel, workspace string
+	var useCustomGateway bool
+	err := store.QueryRow(`SELECT pane_id,COALESCE(title,''),COALESCE(agent_type,''),
+		COALESCE(default_model,''),COALESCE(workspace,''),COALESCE(use_custom_gateway,0)
+		FROM agent_config WHERE pane_id=? AND active=1`, normPaneID(paneID)).
+		Scan(&fullPaneID, &title, &agentType, &defaultModel, &workspace, &useCustomGateway)
+	if err != nil {
+		return nil, err
+	}
+	return cicyCloudAgentRosterState(fullPaneID, title, agentType, defaultModel, workspace,
+		useCustomGateway, agentInspectorLiteMetrics(shortPaneID(fullPaneID))), nil
+}
+
 func collectCiCyCloudAgents() ([]M, []M, error) {
 	if store == nil {
 		return nil, nil, fmt.Errorf("agent store unavailable")
 	}
 	rows, err := store.Query(`SELECT pane_id,COALESCE(title,''),COALESCE(agent_type,''),COALESCE(role,''),
-		COALESCE(default_model,''),COALESCE(use_custom_gateway,0)
+		COALESCE(default_model,''),COALESCE(workspace,''),COALESCE(use_custom_gateway,0)
 		FROM agent_config WHERE active=1 ORDER BY created_at,pane_id`)
 	if err != nil {
 		return nil, nil, err
@@ -1236,9 +1341,9 @@ func collectCiCyCloudAgents() ([]M, []M, error) {
 	defer rows.Close()
 	directory, states := []M{}, []M{}
 	for rows.Next() {
-		var paneID, title, agentType, role, defaultModel string
+		var paneID, title, agentType, role, defaultModel, workspace string
 		var useCustomGateway bool
-		if err := rows.Scan(&paneID, &title, &agentType, &role, &defaultModel, &useCustomGateway); err != nil {
+		if err := rows.Scan(&paneID, &title, &agentType, &role, &defaultModel, &workspace, &useCustomGateway); err != nil {
 			return nil, nil, err
 		}
 		if isBuiltinAgent(paneID) {
@@ -1247,7 +1352,8 @@ func collectCiCyCloudAgents() ([]M, []M, error) {
 		agentID := shortPaneID(paneID)
 		directory = append(directory, M{"agentId": agentID, "title": title,
 			"agentType": agentType, "role": role, "useCustomGateway": useCustomGateway})
-		states = append(states, cicyCloudAgentRuntimeState(agentID, defaultModel, agentInspectorLiteMetrics(agentID)))
+		states = append(states, cicyCloudAgentRosterState(paneID, title, agentType, defaultModel, workspace,
+			useCustomGateway, agentInspectorLiteMetrics(agentID)))
 	}
 	return directory, states, rows.Err()
 }

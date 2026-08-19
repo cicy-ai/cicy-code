@@ -361,6 +361,34 @@ func TestCiCyCloudAgentRuntimeStateFitsMaximumHubSnapshot(t *testing.T) {
 	}
 }
 
+func TestCiCyCloudAgentForegroundRejectsShells(t *testing.T) {
+	for _, command := range []string{"", "bash", "zsh", "sh", "fish", "dash", "ksh", "tcsh", " BASH "} {
+		if cicyCloudAgentForeground(command) {
+			t.Fatalf("%q classified as an Agent foreground process", command)
+		}
+	}
+	for _, command := range []string{"codex", "claude", "node", "cicy-code"} {
+		if !cicyCloudAgentForeground(command) {
+			t.Fatalf("%q classified as a shell prompt", command)
+		}
+	}
+}
+
+func TestCiCyCloudAgentIdleIsNullableAndStatusAware(t *testing.T) {
+	if got := cicyCloudAgentIdle(false, M{"status": "thinking"}); got != nil {
+		t.Fatalf("offline idle = %#v, want nil", got)
+	}
+	if got := cicyCloudAgentIdle(true, nil); got != nil {
+		t.Fatalf("unknown idle = %#v, want nil", got)
+	}
+	if got := cicyCloudAgentIdle(true, M{"status": "thinking"}); got != false {
+		t.Fatalf("thinking idle = %#v, want false", got)
+	}
+	if got := cicyCloudAgentIdle(true, M{"status": "completed"}); got != true {
+		t.Fatalf("completed idle = %#v, want true", got)
+	}
+}
+
 func TestCiCyCloudWebSocketDialLogDoesNotLeakCredentials(t *testing.T) {
 	t.Setenv("CICY_CLOUD_DISABLE_WS", "0")
 	const token = "token-must-never-appear"

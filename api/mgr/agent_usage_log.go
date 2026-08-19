@@ -6,6 +6,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -140,6 +141,51 @@ func agentUsageLogRead(agentID string, limit int) []agentUsageLogRecord {
 		out = append(out, ordered[i])
 	}
 	return out
+}
+
+// agentUsageRuntimeSummary scans the append-only usage log without retaining
+// it in memory. Pointers distinguish an explicitly recorded numeric zero from
+// a missing field; Cloud roster consumers must preserve that distinction.
+func agentUsageRuntimeSummary(agentID string) (provider, model *string, cost *float64) {
+	path := agentUsageLogPath(strings.TrimSpace(agentID))
+	usageLogMu.Lock()
+	defer usageLogMu.Unlock()
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, nil
+	}
+	defer f.Close()
+	var total float64
+	hasCost := false
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		raw := strings.TrimSpace(sc.Text())
+		if raw == "" {
+			continue
+		}
+		var values map[string]interface{}
+		if json.Unmarshal([]byte(raw), &values) != nil {
+			continue
+		}
+		if value, ok := values["cost_credit"].(float64); ok && !math.IsNaN(value) && !math.IsInf(value, 0) {
+			total += value
+			hasCost = true
+		}
+		if value := strings.TrimSpace(aiGatewayString(values["provider"])); value != "" {
+			copy := value
+			provider = &copy
+		}
+		if value := strings.TrimSpace(aiGatewayString(values["model"])); value != "" {
+			copy := value
+			model = &copy
+		}
+	}
+	if hasCost {
+		total = math.Round(total*1e4) / 1e4
+		cost = &total
+	}
+	return provider, model, cost
 }
 
 // handleAgentUsageLogByPane serves GET /api/agents/usage-log/<paneID>?limit=N.
