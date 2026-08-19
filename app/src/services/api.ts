@@ -299,10 +299,11 @@ const api = {
     http.post('/api/ports', { port, name, visibility }),
   deletePublishedPort: (port: number) => http.delete('/api/ports', { params: { port } }),
   getCiCyCloudAgents: () => http.get('/api/im/cicy-cloud/agents'),
-  sendCiCyCloudMessage: (targetInstanceId: string, targetAgentId: string, senderAgentId: string, text: string) => http.post('/api/im/cicy-cloud/send', {
+  sendCiCyCloudMessage: (targetInstanceId: string, targetAgentId: string, senderAgentId: string, text: string, kind = 'user_message') => http.post('/api/im/cicy-cloud/send', {
     target_instance_id: targetInstanceId, target_agent_id: targetAgentId,
-    sender_agent_id: senderAgentId, text,
+    sender_agent_id: senderAgentId, text, kind,
   }),
+  getCiCyCloudMessageStatus: (messageId: string) => http.get('/api/im/cicy-cloud/status', { params: { id: messageId } }),
 
   getTokens: () => http.get('/api/auth/tokens'),
   createToken: (data: any) => http.post('/api/auth/tokens', data),

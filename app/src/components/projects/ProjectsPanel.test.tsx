@@ -16,6 +16,11 @@ const api = vi.hoisted(() => ({
   removeGroupPane: vi.fn(),
   updateGroupPaneLayout: vi.fn(),
   getAgentCurrentReply: vi.fn(),
+  getIMAccounts: vi.fn(),
+  getCiCyCloudInstances: vi.fn(),
+  getCiCyCloudAgents: vi.fn(),
+  sendCiCyCloudMessage: vi.fn(),
+  getCiCyCloudMessageStatus: vi.fn(),
   uploadAssetFile: vi.fn(),
   getMemoryTemplate: vi.fn(),
   saveMemoryTemplate: vi.fn(),
@@ -45,6 +50,11 @@ beforeEach(() => {
   api.getGroup.mockResolvedValue({ data: { panes: [] } });
   api.createGroup.mockResolvedValue({ data: { id: 3 } });
   api.getAgentCurrentReply.mockResolvedValue({ data: { question: '', items: [], status: 'completed' } });
+  api.getIMAccounts.mockResolvedValue({ data: { accounts: [{ platform: 'cicy_cloud', config: { team_id: 'local_team' } }] } });
+  api.getCiCyCloudInstances.mockResolvedValue({ data: { instances: [] } });
+  api.getCiCyCloudAgents.mockResolvedValue({ data: { agents: [] } });
+  api.addGroupPane.mockResolvedValue({ data: { success: true } });
+  api.updateGroupPaneLayout.mockResolvedValue({ data: { success: true } });
   api.uploadAssetFile.mockResolvedValue({ data: { file: { file_ref: '/home/cicy/cicy-ai/assets/queued.png' } } });
   api.getMemoryTemplate.mockResolvedValue({ data: { content: '# Global', path: '/home/cicy/cicy-ai/memory/global.md' } });
   api.saveMemoryTemplate.mockResolvedValue({ data: { saved: true } });
@@ -52,6 +62,22 @@ beforeEach(() => {
 });
 
 describe('<ProjectsPanel /> floating action button', () => {
+  it('lists searchable Cloud Agents by Instance and persists a qualified project member id', async () => {
+    const lastSeenAt = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+    api.getCiCyCloudInstances.mockResolvedValue({ data: { instances: [{ instanceId: 'code-remote', teamId: 'mac_local', status: 'online', lastSeenAt }] } });
+    api.getCiCyCloudAgents.mockResolvedValue({ data: { agents: [{ instanceId: 'code-remote', teamId: 'mac_local', agentId: 'w-200', title: 'Remote Builder', agentType: 'codex' }] } });
+    render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
+
+    fireEvent.click(await waitFor(() => document.querySelector('[data-id="project-add-agent"]') as HTMLElement));
+    fireEvent.click(document.querySelector('[data-id="project-fab-add-existing"]') as HTMLElement);
+    fireEvent.click(await waitFor(() => document.querySelector('[data-id="project-add-agent-instance-code-remote"]') as HTMLElement));
+    fireEvent.change(document.querySelector('[data-id="project-add-agent-search"]') as HTMLInputElement, { target: { value: 'Builder' } });
+    fireEvent.click(await waitFor(() => document.querySelector('[data-id="project-add-agent-mac_local.w-200"]') as HTMLElement));
+    fireEvent.click(document.querySelector('[data-id="project-add-agent-confirm"]') as HTMLElement);
+
+    await waitFor(() => expect(api.addGroupPane).toHaveBeenCalledWith(1, 'mac_local.w-200'));
+  });
+
   it('edits global.md and the project definition with the shared file editor', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], project_file: '/home/cicy/cicy-ai/memory/projects/default.md', project_rules: '# Project' }] } });
     render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);

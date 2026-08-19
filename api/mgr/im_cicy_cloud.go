@@ -891,6 +891,33 @@ func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, sende
 		switch strings.TrimSpace(req.Op) {
 		case "reply":
 			result, rpcErr = agentReplyTextData(target, req.Full)
+		case "current_reply":
+			current, currentErr := aiGatewayReadCurrentSnapshotCached(target)
+			if currentErr != nil && !os.IsNotExist(currentErr) {
+				rpcErr = currentErr
+				break
+			}
+			reply := agentInspectorLoadReply(target)
+			status := strings.ToLower(strings.TrimSpace(reply.Status))
+			displayItems := aiGatewayFilterTechnicalTransportFailures(reply.Items)
+			answer := strings.TrimSpace(reply.Answer)
+			if answer == "" {
+				answer = aiGatewayReplyItemsText(displayItems, "text", aiGatewayCommittedAssistantTexts(current))
+			}
+			thinking := strings.TrimSpace(reply.Thinking)
+			if thinking == "" {
+				thinking = aiGatewayReplyItemsText(displayItems, "thinking", aiGatewayCommittedAssistantThinking(current))
+			}
+			ctxUsedPct, ctxWindowSize := agentInspectorReadContextWindow(target)
+			result = M{
+				"pane_id": target, "status": status,
+				"complete": status == "" || status == "idle" || status == "done" || isAIGatewayReplyTerminal(status),
+				"question": aiGatewayCurrentQuestion(current), "answer": answer, "thinking": thinking, "items": displayItems,
+				"started_at": aiGatewayFirstNonEmpty(strings.TrimSpace(reply.StartedAt), strings.TrimSpace(current.StartedAt), strings.TrimSpace(current.Timestamp)),
+				"updated_at": strings.TrimSpace(reply.UpdatedAt), "model": aiGatewayFirstNonEmpty(aiGatewayReplyPrimaryModel(reply), strings.TrimSpace(current.Model)),
+				"input_tokens": reply.InputTokens, "output_tokens": reply.OutputTokens, "total_tokens": reply.TotalTokens,
+				"cost_credit": reply.CostCredit, "context_used_pct": ctxUsedPct, "context_window_size": ctxWindowSize,
+			}
 		case "history":
 			if req.Index < 0 {
 				rpcErr = fmt.Errorf("index must be >= 0")

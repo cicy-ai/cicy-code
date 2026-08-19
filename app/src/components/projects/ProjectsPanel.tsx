@@ -32,6 +32,11 @@ export interface ProjectAgent {
   machineLabel?: string;
   ttydSrc?: string;
   isApiOnly?: boolean;
+  remote?: boolean;
+  instanceId?: string;
+  instanceTeam?: string;
+  remoteAgentId?: string;
+  instanceOnline?: boolean;
 }
 
 interface AgentProject {
@@ -79,6 +84,29 @@ const DEFAULT_PROJECT_ID = 'default';
 const PROJECT_VIEW_CACHE_PREFIX = 'cicy_project_view:';
 const PROJECT_AGENT_QUEUE_KEY = 'cicy_project_agent_queue:v1';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
+const cloudInstanceOnline = (instance: any) => {
+  const seen = Date.parse(String(instance?.lastSeenAt || '').replace(' ', 'T') + 'Z');
+  return instance?.status === 'online' && Number.isFinite(seen) && Date.now() - seen < 90_000;
+};
+
+const cloudRPC = async (agent: ProjectAgent, op: string) => {
+  if (!agent.instanceId || !agent.remoteAgentId) throw new Error('Cloud Agent address is incomplete');
+  const sent = await apiService.sendCiCyCloudMessage(agent.instanceId, agent.remoteAgentId, '', JSON.stringify({ op }), 'rpc_request');
+  const messageId = String(sent?.data?.message?.id || '');
+  if (!messageId) throw new Error('Cloud RPC was not accepted');
+  const deadline = Date.now() + 12_000;
+  while (Date.now() < deadline) {
+    const response = await apiService.getCiCyCloudMessageStatus(messageId);
+    const replyText = String(response?.data?.reply?.text || '');
+    if (replyText) {
+      const envelope = JSON.parse(replyText);
+      if (!envelope?.ok) throw new Error(envelope?.error || 'Cloud RPC failed');
+      return envelope.data || {};
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+  }
+  throw new Error('Cloud RPC timed out');
+};
 
 const readProjectAgentQueue = (): Record<string, QueuedAgentMessage[]> => {
   try {
@@ -212,10 +240,10 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const loadingRef = useRef<HTMLDivElement>(null);
   const loadingVisibleRef = useRef(false);
   const loadingDetachedRef = useRef(false);
-  const status = String(agent.status || 'idle').toLowerCase();
+  const status = String(agent.remote && agent.instanceOnline === false ? 'offline' : agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
-  const identity = teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId);
+  const identity = agent.remote ? agent.paneId : (teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId));
   const replyItems = Array.isArray(reply?.items) ? reply.items : [];
   const toolGroupsByLastIndex = new Map<number, number>();
   let currentToolGroup: number[] = [];
@@ -342,6 +370,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 data-id="project-agent-card-title" className="truncate text-[18px] font-semibold tracking-[-0.01em] text-zinc-100">{agent.title || agent.paneId}</h3>
             {agent.agentType ? <span data-id="project-agent-card-agent-type" className="shrink-0 font-mono text-[12px] text-zinc-500">{agent.agentType}</span> : null}
+            {agent.remote ? <span data-id="project-agent-card-instance" className="shrink-0 rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-zinc-500">{agent.instanceTeam}</span> : null}
             {metrics?.model ? <ModelTag model={metrics.model} className="shrink-0" /> : null}
           </div>
         </div>
@@ -404,7 +433,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           ...(String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
           ['role', '角色'],
         ] as Array<['history' | 'terminal' | 'role', string]>).map(([tab, label]) => {
-          const unavailable = tab === 'terminal' && (!agent.ttydSrc || agent.isApiOnly);
+          const unavailable = (tab === 'terminal' && (!agent.ttydSrc || agent.isApiOnly)) || (tab === 'role' && agent.remote);
           return (
             <button
               key={tab}
@@ -585,6 +614,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [addOpen, setAddOpen] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
   const [addSearch, setAddSearch] = useState('');
+  const [addInstanceId, setAddInstanceId] = useState('local');
+  const [cloudInstances, setCloudInstances] = useState<any[]>([]);
+  const [cloudDirectoryAgents, setCloudDirectoryAgents] = useState<any[]>([]);
   const [addError, setAddError] = useState('');
   const [selectedToAdd, setSelectedToAdd] = useState<Set<string>>(new Set());
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
@@ -712,6 +744,26 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadCloudDirectory = async () => {
+      try {
+        const [instancesResponse, agentsResponse] = await Promise.all([
+          apiService.getCiCyCloudInstances(),
+          apiService.getCiCyCloudAgents(),
+        ]);
+        if (cancelled) return;
+        setCloudInstances(Array.isArray(instancesResponse?.data?.instances) ? instancesResponse.data.instances : []);
+        setCloudDirectoryAgents(Array.isArray(agentsResponse?.data?.agents) ? agentsResponse.data.agents : []);
+      } catch {
+        if (!cancelled) { setCloudInstances([]); setCloudDirectoryAgents([]); }
+      }
+    };
+    void loadCloudDirectory();
+    const timer = window.setInterval(() => { void loadCloudDirectory(); }, 5000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+
   const projects = groups;
 
   const selectedProject = projects.find((project) => String(project.id) === String(selectedId)) || projects[0] || {
@@ -726,12 +778,38 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   useEffect(() => {
     onActiveProjectChange({ id: selectedProject.id, name: selectedProject.name });
   }, [onActiveProjectChange, selectedProject.id, selectedProject.name]);
+  const cloudProjectAgents = useMemo<ProjectAgent[]>(() => {
+    const instanceById = new Map(cloudInstances.map((instance) => [String(instance.instanceId), instance]));
+    return cloudDirectoryAgents.flatMap((cloudAgent) => {
+      const instance = instanceById.get(String(cloudAgent.instanceId));
+      const instanceTeam = String(instance?.teamId || cloudAgent.teamId || '');
+      const remoteAgentId = String(cloudAgent.agentId || '');
+      if (!instance || !instanceTeam || !remoteAgentId || instanceTeam === teamId) return [];
+      const online = cloudInstanceOnline(instance);
+      return [{
+        paneId: `${instanceTeam}.${remoteAgentId}`,
+        title: String(cloudAgent.title || remoteAgentId),
+        agentType: String(cloudAgent.agentType || ''),
+        status: online ? String(cloudAgent.status || 'idle') : 'offline',
+        defaultModel: String(cloudAgent.defaultModel || ''),
+        machineLabel: instanceTeam,
+        isApiOnly: true,
+        remote: true,
+        instanceId: String(instance.instanceId),
+        instanceTeam,
+        remoteAgentId,
+        instanceOnline: online,
+      }];
+    });
+  }, [cloudDirectoryAgents, cloudInstances, teamId]);
+  const allAgents = useMemo(() => [...agents, ...cloudProjectAgents], [agents, cloudProjectAgents]);
   const memberIds = useMemo(() => new Set(selectedProject.pane_ids.map(shortPaneId)), [selectedProject.pane_ids]);
-  const visibleAgents = agents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
+  const visibleAgents = allAgents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
   const assignedAgentIds = useMemo(() => new Set(groups.flatMap((group) => group.pane_ids.map(shortPaneId))), [groups]);
-  const availableAgents = agents.filter((agent) => !assignedAgentIds.has(shortPaneId(agent.paneId)));
+  const availableAgents = allAgents.filter((agent) => !assignedAgentIds.has(shortPaneId(agent.paneId)));
+  const availableAgentsForInstance = availableAgents.filter((agent) => addInstanceId === 'local' ? !agent.remote : agent.instanceId === addInstanceId);
   const normalizedAddSearch = addSearch.trim().toLowerCase();
-  const filteredAvailableAgents = availableAgents.filter((agent) => !normalizedAddSearch || [
+  const filteredAvailableAgents = availableAgentsForInstance.filter((agent) => !normalizedAddSearch || [
     agent.title,
     agent.paneId,
     agent.agentType,
@@ -748,8 +826,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     const pollReplies = async () => {
       if (polling || cancelled) return;
       polling = true;
-      const rows = await Promise.all(ids.map(async (id) => {
+      const rows = await Promise.all(visibleAgents.map(async (agent) => {
+        const id = shortPaneId(agent.paneId);
         try {
+          if (agent.remote) return [id, await cloudRPC(agent, 'current_reply')] as const;
           const response = await apiService.getAgentCurrentReply(id);
           return [id, response?.data || {}] as const;
         } catch {
@@ -774,7 +854,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       });
     };
     void pollReplies();
-    const timer = window.setInterval(() => { void pollReplies(); }, 500);
+    const timer = window.setInterval(() => { void pollReplies(); }, visibleAgents.some((agent) => agent.remote) ? 2000 : 500);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [visibleAgentKey]);
 
@@ -905,6 +985,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setSelectedId(project.id);
     setSelectedToAdd(new Set());
     setAddSearch('');
+    setAddInstanceId('local');
     setAddError('');
     setAddOpen(true);
   };
@@ -1081,7 +1162,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const toggleAgentSelection = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
     setSelectedAgentIds(new Set([id]));
-    onActiveAgentChange(id);
+    if (!agent.remote) onActiveAgentChange(id);
   };
 
   useEffect(() => {
@@ -1170,7 +1251,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       [id]: { question: displayQuestion, items: [], answer: '', thinking: '', status: 'pending', started_at: new Date().toISOString() },
     }));
     try {
-      await sendToAgent(agent.paneId, message, { submit: true, agentType: agent.agentType, fromComposer: true });
+      if (agent.remote) {
+        if (!agent.instanceOnline) throw new Error(`${agent.instanceTeam || 'Instance'} is offline`);
+        if (!agent.instanceId || !agent.remoteAgentId) throw new Error('Cloud Agent address is incomplete');
+        await apiService.sendCiCyCloudMessage(agent.instanceId, agent.remoteAgentId, '', message);
+      } else {
+        await sendToAgent(agent.paneId, message, { submit: true, agentType: agent.agentType, fromComposer: true });
+      }
       sentAttachments.forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
     } catch (cause: any) {
       delete optimisticQuestionsRef.current[id];
@@ -1245,7 +1332,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   };
 
   useEffect(() => {
-    for (const agent of agents) {
+    for (const agent of allAgents) {
       const id = shortPaneId(agent.paneId);
       const queued = queuedAgentMessages[id] || [];
       const liveStatus = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id];
@@ -1261,14 +1348,15 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       setQueuedAgentMessages((current) => ({ ...current, [id]: [] }));
       void deliverAgentMessage(agent, payload, displayQuestion, previousReply);
     }
-  }, [agents, agentReplies, queuedAgentMessages, sendingAgentIds, canceledAgentIds, statuses]);
+  }, [allAgents, agentReplies, queuedAgentMessages, sendingAgentIds, canceledAgentIds, statuses]);
 
   const cancelAgentMessage = async (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
     if (cancelingAgentIds.has(id)) return;
     setCancelingAgentIds((current) => new Set(current).add(id));
     try {
-      if (agent.agentType === 'cicy') await apiService.cancelCicyReply(agent.paneId);
+      if (agent.remote) await cloudRPC(agent, 'cancel');
+      else if (agent.agentType === 'cicy') await apiService.cancelCicyReply(agent.paneId);
       else await apiService.sendKeys(agent.paneId, 'C-c');
       delete optimisticQuestionsRef.current[id];
       setSendingAgentIds((current) => {
@@ -1597,7 +1685,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           >
             {visibleAgents.map((agent, index) => {
               const layout = layoutForAgent(agent, index);
-              const cardMetrics = liveMetrics[shortPaneId(agent.paneId)];
+              const cardMetrics = liveMetrics[shortPaneId(agent.paneId)] || (agentReplies[shortPaneId(agent.paneId)] ? metricsFromCurrentReply(agentReplies[shortPaneId(agent.paneId)]) : undefined);
               const cardShortId = shortPaneId(agent.paneId);
               const cardLatest = statuses[agent.paneId] || statuses[`${cardShortId}:main.0`] || statuses[cardShortId] || {};
               // Keep the loading sentinel continuous across the send handoff:
@@ -1983,6 +2071,34 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
       <AppModal open={addOpen} title={t('projectAddAgentTitle', { name: selectedProject.name })} onClose={() => setAddOpen(false)} maxWidth="620px">
         <div data-id="project-add-agent-modal" className="space-y-2">
+          <div data-id="project-add-agent-instance-tabs" className="mb-3 flex gap-1 overflow-x-auto border-b border-white/[0.08] pb-2">
+            <button
+              type="button"
+              data-id="project-add-agent-instance-local"
+              onClick={() => setAddInstanceId('local')}
+              className={cn('flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-[11px]', addInstanceId === 'local' ? 'bg-white/[0.10] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.05]')}
+            >
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              <span>{t('projectLocalInstance', { defaultValue: '本地' })}</span>
+            </button>
+            {cloudInstances.filter((instance) => String(instance.teamId || '') !== teamId).map((instance) => {
+              const online = cloudInstanceOnline(instance);
+              const instanceId = String(instance.instanceId || '');
+              return (
+                <button
+                  key={instanceId}
+                  type="button"
+                  data-id={`project-add-agent-instance-${instanceId}`}
+                  onClick={() => setAddInstanceId(instanceId)}
+                  className={cn('flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-[11px]', addInstanceId === instanceId ? 'bg-white/[0.10] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.05]')}
+                >
+                  <span className={cn('h-2 w-2 rounded-full', online ? 'bg-emerald-500' : 'bg-zinc-600')} />
+                  <span>{String(instance.teamId || instanceId)}</span>
+                  <span className="text-[9px] text-zinc-600">{online ? t('online', { defaultValue: '在线' }) : t('offline', { defaultValue: '离线' })}</span>
+                </button>
+              );
+            })}
+          </div>
           <label data-id="project-add-agent-search-wrap" className="mb-3 flex h-9 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 focus-within:border-sky-500/40">
             <Search className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
             <input
@@ -2011,6 +2127,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               >
                 <AgentAvatar agentType={agent.agentType} title={agent.title || agent.paneId} dataId="project-add-agent-avatar" variant="stack" />
                 <span className="min-w-0 flex-1"><span className="block truncate text-[13px] text-zinc-200">{agent.title}</span><span className="block font-mono text-[10px] text-zinc-600">{shortPaneId(agent.paneId)}</span></span>
+                {agent.remote ? <span className={cn('text-[10px]', agent.instanceOnline ? 'text-emerald-500' : 'text-zinc-600')}>{agent.instanceOnline ? t('online', { defaultValue: '在线' }) : t('offline', { defaultValue: '离线' })}</span> : null}
                 <span className={cn('grid h-5 w-5 place-items-center rounded border', checked ? 'border-blue-400 bg-blue-500 text-white' : 'border-white/15')}><Check className={cn('h-3 w-3', checked ? 'opacity-100' : 'opacity-0')} /></span>
               </button>
             );
