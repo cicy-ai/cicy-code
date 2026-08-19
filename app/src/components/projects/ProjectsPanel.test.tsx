@@ -30,7 +30,6 @@ const agentSend = vi.hoisted(() => ({ sendToAgent: vi.fn() }));
 vi.mock('../../services/api', () => ({ default: api }));
 vi.mock('../../services/agentSend', () => agentSend);
 vi.mock('../AgentAvatar', () => ({ default: () => <span data-testid="agent-avatar" /> }));
-vi.mock('../chat/CurrentHistoryView', () => ({ default: ({ paneId }: { paneId: string }) => <div data-id={`mock-current-history-${paneId}`} /> }));
 vi.mock('../terminal/TerminalView', () => ({ default: ({ ttydSrc }: { ttydSrc: string }) => <div data-id="mock-project-terminal">{ttydSrc}</div> }));
 
 import ProjectsPanel from './ProjectsPanel';
@@ -484,7 +483,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-inactive-loading-w-101"]')).not.toBeInTheDocument();
   });
 
-  it('adds an agent to another project from the card More menu', async () => {
+  it('offers separate move-to and add-to actions from the card More menu', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [
       { ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 },
       defaultGroups[1],
@@ -497,12 +496,13 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       return node as HTMLElement;
     });
     fireEvent.click(menu);
-    expect(document.querySelector('[data-id="project-agent-card-project-default"]')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-projects-label"]')).toHaveTextContent('其他 Projects');
-    fireEvent.click(document.querySelector('[data-id="project-agent-card-project-2"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-agent-card-move-project-default"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-projects-label"]')).toHaveTextContent('移动到');
+    expect(document.querySelector('[data-id="project-agent-card-add-projects-label"]')).toHaveTextContent('添加到');
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-add-project-2"]') as HTMLElement);
     expect(api.removeGroupPane).not.toHaveBeenCalled();
-    await waitFor(() => expect(api.addGroupPane).toHaveBeenCalledWith(2, 'w-101:main.0'));
-    expect(document.querySelector('[data-id="project-list-item-default"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('0');
+    await waitFor(() => expect(api.addGroupPane).toHaveBeenCalledWith(2, 'w-101:main.0', 'add'));
+    expect(document.querySelector('[data-id="project-list-item-default"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
     expect(document.querySelector('[data-id="project-list-item-2"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
   });
 

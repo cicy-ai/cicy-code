@@ -79,6 +79,15 @@ func TestDefaultGroupIsPersistedAndCanManageAgents(t *testing.T) {
 	if panes := previous["panes"].([]interface{}); len(panes) != 2 {
 		t.Fatalf("previous project retained moved Agent: %#v", previous["panes"])
 	}
+	decodeGroupResponse(t, callGroupsHandler(t, "POST", fmt.Sprintf("/api/groups/%d/panes/w-123:main.0?mode=add", groupID), ""))
+	added := decodeGroupResponse(t, callGroupsHandler(t, "GET", fmt.Sprintf("/api/groups/%d", groupID), ""))
+	if panes := added["panes"].([]interface{}); len(panes) != 3 {
+		t.Fatalf("add mode did not retain both project memberships: %#v", added["panes"])
+	}
+	stillInOther := decodeGroupResponse(t, callGroupsHandler(t, "GET", fmt.Sprintf("/api/groups/%d", otherID), ""))
+	if panes := stillInOther["panes"].([]interface{}); len(panes) != 1 {
+		t.Fatalf("add mode removed the original membership: %#v", stillInOther["panes"])
+	}
 
 	denied := callGroupsHandler(t, "DELETE", fmt.Sprintf("/api/groups/%d", groupID), "")
 	if denied.Code != 400 {

@@ -264,7 +264,7 @@ func handleGroupWindows(w http.ResponseWriter, r *http.Request, groupID, sub str
 		if refID == "" {
 			refID = winID
 		}
-		addWindowToGroup(w, groupID, winID, winType, refID, "win_id")
+		addWindowToGroup(w, groupID, winID, winType, refID, "win_id", r.URL.Query().Get("mode") == "add")
 	case "DELETE":
 		winID := strings.TrimPrefix(sub, "/")
 		store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)
@@ -295,7 +295,7 @@ func handleGroupPanesCompat(w http.ResponseWriter, r *http.Request, groupID, sub
 	paneID := strings.TrimSuffix(sub, "/layout")
 	switch r.Method {
 	case "POST":
-		addWindowToGroup(w, groupID, paneID, "agent_ttyd", paneID, "pane_id")
+		addWindowToGroup(w, groupID, paneID, "agent_ttyd", paneID, "pane_id", r.URL.Query().Get("mode") == "add")
 	case "DELETE":
 		store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, paneID)
 		J(w, M{"success": true, "group_id": groupID, "pane_id": paneID})
@@ -318,44 +318,64 @@ func handleGroupPanesCompat(w http.ResponseWriter, r *http.Request, groupID, sub
 	}
 }
 
-func addWindowToGroup(w http.ResponseWriter, groupID, winID, winType, refID, responseKey string) {
+func addWindowToGroup(w http.ResponseWriter, groupID, winID, winType, refID, responseKey string, preserveExisting bool) {
 	winID = strings.TrimSpace(winID)
 	if winID == "" {
 		httpErr(w, http.StatusBadRequest, "Agent id is required")
 		return
 	}
-	var existingGroupID int64
-	err := store.QueryRow("SELECT group_id FROM group_windows WHERE win_id=? LIMIT 1", winID).Scan(&existingGroupID)
-	if err == nil {
-		if groupID == fmt.Sprint(existingGroupID) {
-			J(w, M{"success": true, "already_added": true, "group_id": groupID, responseKey: winID})
+	rows, err := store.Query("SELECT group_id FROM group_windows WHERE win_id=? ORDER BY id", winID)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var existingGroupIDs []int64
+	targetExists := false
+	for rows.Next() {
+		var id int64
+		if scanErr := rows.Scan(&id); scanErr != nil {
+			rows.Close()
+			httpErr(w, http.StatusInternalServerError, scanErr.Error())
 			return
 		}
-	}
-	if err != sql.ErrNoRows {
-		if err != nil {
-			httpErr(w, http.StatusInternalServerError, err.Error())
-			return
+		existingGroupIDs = append(existingGroupIDs, id)
+		if groupID == fmt.Sprint(id) {
+			targetExists = true
 		}
 	}
-	moved := err == nil
+	rows.Close()
+	if targetExists && (preserveExisting || len(existingGroupIDs) == 1) {
+		J(w, M{"success": true, "already_added": true, "group_id": groupID, responseKey: winID})
+		return
+	}
+	moved := len(existingGroupIDs) > 0 && !preserveExisting
 	if moved {
-		if _, err = store.Exec("UPDATE group_windows SET group_id=? WHERE group_id=? AND win_id=?", groupID, existingGroupID, winID); err != nil {
+		if _, err = store.Exec("DELETE FROM group_windows WHERE win_id=? AND group_id<>?", winID, groupID); err != nil {
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	} else if _, err = store.Exec("INSERT INTO group_windows (group_id, win_id, win_type, ref_id) VALUES (?,?,?,?)", groupID, winID, winType, refID); err != nil {
+		if _, err = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), groupID, winID, winType, refID); err != nil {
+			for _, id := range existingGroupIDs {
+				_, _ = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), id, winID, winType, refID)
+			}
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else if _, err = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), groupID, winID, winType, refID); err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	rollback := func() {
 		if moved {
-			_, _ = store.Exec("UPDATE group_windows SET group_id=? WHERE group_id=? AND win_id=?", existingGroupID, groupID, winID)
+			_, _ = store.Exec("DELETE FROM group_windows WHERE win_id=?", winID)
+			for _, id := range existingGroupIDs {
+				_, _ = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), id, winID, winType, refID)
+			}
 		} else {
 			_, _ = store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)
 		}
 	}
-	if winType == "agent_ttyd" {
+	if winType == "agent_ttyd" && !preserveExisting {
 		var gid int64
 		var name string
 		var isDefault int

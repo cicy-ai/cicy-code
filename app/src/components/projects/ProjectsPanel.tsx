@@ -20,7 +20,6 @@ import { toolHeadline } from '../chat/history/lib/toolFormat';
 import { isTechnicalTransportFailureText } from '../chat/history/lib/normalizeItem';
 import TerminalView from '../terminal/TerminalView';
 import MarkdownFileEditor from '../files/MarkdownFileEditor';
-import CurrentHistoryView from '../chat/CurrentHistoryView';
 
 const AgentDocRoleEditor = lazy(() => import('../layout/AgentDocRoleEditor'));
 
@@ -209,7 +208,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, terminalOpen, working, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onToggleProject, onOpenHistory, onToggleTerminal, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, terminalOpen, working, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onMoveProject, onAddProject, onOpenHistory, onToggleTerminal, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
@@ -226,7 +225,8 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   height: number;
   onSelect: () => void;
   onRemove: () => void;
-  onToggleProject: (projectId: number | string, checked: boolean) => void;
+  onMoveProject: (projectId: number | string) => void;
+  onAddProject: (projectId: number | string) => void;
   onOpenHistory: () => void;
   onToggleTerminal: () => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -393,19 +393,28 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           </button>
           {menuOpen ? (
             <div data-id="project-agent-card-menu" className="absolute right-0 top-9 z-20 min-w-[190px] overflow-hidden rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
-              <div data-id="project-agent-card-projects-label" className="px-3 pb-1 pt-1.5 text-[10px] font-semibold tracking-wide text-zinc-600">{t('projectOtherProjects', { defaultValue: '其他 Projects' })}</div>
+              <div data-id="project-agent-card-projects-label" className="px-3 pb-1 pt-1.5 text-[10px] font-semibold tracking-wide text-zinc-600">移动到</div>
               {projectOptions.map((project) => (
                 <button
-                  key={String(project.id)}
+                  key={`move-${String(project.id)}`}
                   type="button"
-                  data-id={`project-agent-card-project-${project.id}`}
-                  onClick={(event) => { event.stopPropagation(); onToggleProject(project.id, project.checked); }}
+                  data-id={`project-agent-card-move-project-${project.id}`}
+                  onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onMoveProject(project.id); }}
                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]"
                 >
-                  <span className={cn('grid h-4 w-4 shrink-0 place-items-center rounded border', project.checked ? 'border-blue-400 bg-blue-500 text-white' : 'border-white/15 text-transparent')}><Check className="h-3 w-3" /></span>
+                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
                   <span className="min-w-0 flex-1 truncate">{project.name}</span>
                 </button>
               ))}
+              {projectOptions.some((project) => !project.checked) ? <>
+                <div data-id="project-agent-card-add-projects-label" className="mt-1 border-t border-white/[0.07] px-3 pb-1 pt-2 text-[10px] font-semibold tracking-wide text-zinc-600">添加到</div>
+                {projectOptions.filter((project) => !project.checked).map((project) => (
+                  <button key={`add-${String(project.id)}`} type="button" data-id={`project-agent-card-add-project-${project.id}`} onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onAddProject(project.id); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]">
+                    <Plus className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                  </button>
+                ))}
+              </> : null}
               {removable ? (
                 <button
                   type="button"
@@ -478,23 +487,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           <Suspense fallback={<div data-id="project-agent-card-role-loading" className="flex h-full items-center justify-center text-[11px] text-zinc-600">Loading…</div>}>
             <AgentDocRoleEditor paneId={agent.paneId} className="min-h-0 flex-1" />
           </Suspense>
-        </div>
-      ) : selected && activeBodyTab === 'history' && !agent.remote ? (
-        <div
-          data-id={`project-agent-card-full-history-${shortPaneId(agent.paneId)}`}
-          onPointerDown={(event) => event.stopPropagation()}
-          onWheel={(event) => event.stopPropagation()}
-          onTouchStart={(event) => event.stopPropagation()}
-          onTouchMove={(event) => event.stopPropagation()}
-          className="-mx-5 min-h-0 flex-1 overflow-hidden bg-[#0b0b0d]"
-        >
-          <CurrentHistoryView
-            paneId={shortPaneId(agent.paneId)}
-            open
-            agentType={agent.agentType}
-            fullWidth
-            leftAlignQuestions
-          />
         </div>
       ) : (
       <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 flex min-h-0 flex-1 flex-col">
@@ -1269,28 +1261,19 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     await load(false);
   };
 
-  const toggleAgentProject = async (agent: ProjectAgent, projectId: number | string, checked: boolean) => {
+  const changeAgentProject = async (agent: ProjectAgent, projectId: number | string, mode: 'move' | 'add') => {
     const project = projects.find((item) => String(item.id) === String(projectId));
     if (!project?.api_id) return;
-    if (checked && String(project.id) === String(selectedProject.id)) {
-      await removeAgent(agent);
-      return;
-    }
     const id = shortPaneId(agent.paneId);
     try {
-      if (checked) {
-        await apiService.removeGroupPane(project.api_id, agent.paneId);
-      } else {
-        // POST is an atomic move when the Agent already belongs elsewhere.
-        await apiService.addGroupPane(project.api_id, agent.paneId);
-      }
+      await apiService.addGroupPane(project.api_id, agent.paneId, mode);
       setGroups((current) => current.map((group) => {
         if (String(group.id) === String(project.id)) {
-          if (checked) return { ...group, pane_ids: group.pane_ids.filter((paneId) => shortPaneId(paneId) !== id), pane_count: Math.max(0, group.pane_count - 1) };
           if (group.pane_ids.some((paneId) => shortPaneId(paneId) === id)) return group;
           return { ...group, pane_ids: [...group.pane_ids, agent.paneId], pane_count: group.pane_count + 1 };
         }
-        if (!checked && String(group.id) === String(selectedProject.id)) {
+        if (mode === 'move' && String(group.id) !== String(project.id)) {
+          if (!group.pane_ids.some((paneId) => shortPaneId(paneId) === id)) return group;
           return { ...group, pane_ids: group.pane_ids.filter((paneId) => shortPaneId(paneId) !== id), pane_count: Math.max(0, group.pane_count - 1) };
         }
         return group;
@@ -1391,11 +1374,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       ...current,
       [id]: { question: displayQuestion, items: [], answer: '', thinking: '', status: 'pending', started_at: new Date().toISOString() },
     }));
-    // The embedded conversation view owns the authoritative committed + live
-    // transcript. Nudge it with the same optimistic prompt used by the regular
-    // chat surface so the card updates immediately without inventing a second
-    // history state machine.
-    window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId: id, text: displayQuestion } }));
     try {
       if (agent.remote) {
         if (!agent.instanceOnline) throw new Error(`${agent.instanceTeam || 'Instance'} is offline`);
@@ -1406,7 +1384,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       }
       sentAttachments.forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
     } catch (cause: any) {
-      window.dispatchEvent(new CustomEvent('cicy:current-history-cancel-optimistic', { detail: { paneId: id } }));
       delete optimisticQuestionsRef.current[id];
       setAgentMessages((current) => ({ ...current, [id]: [restoreText, current[id]].filter(Boolean).join('\n') }));
       setAgentAttachments((current) => ({ ...current, [id]: [...sentAttachments, ...(current[id] || [])] }));
@@ -2044,7 +2021,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                   </footer>
                 )}
                 onRemove={() => { void removeAgent(agent); }}
-                onToggleProject={(projectId, checked) => { void toggleAgentProject(agent, projectId, checked); }}
+                onMoveProject={(projectId) => { void changeAgentProject(agent, projectId, 'move'); }}
+                onAddProject={(projectId) => { void changeAgentProject(agent, projectId, 'add'); }}
                     onOpenHistory={() => onOpenHistory(agent.paneId)}
                 onToggleTerminal={() => setTerminalAgentIds((current) => {
                   const next = new Set(current);
