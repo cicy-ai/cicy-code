@@ -468,7 +468,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       {selected ? <div data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`} role="tablist" className="flex h-9 shrink-0 items-end gap-5 border-b border-white/[0.08]">
         {([
           ['history', '会话'],
-          ...(String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
+          ...(agent.remote || String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
           ['role', '角色'],
         ] as Array<['history' | 'terminal' | 'role', string]>).map(([tab, label]) => {
           const unavailable = tab === 'terminal' && (!agent.ttydSrc || agent.isApiOnly);

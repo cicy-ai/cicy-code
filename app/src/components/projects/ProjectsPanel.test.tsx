@@ -352,6 +352,18 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
   });
 
+  it('hides the Terminal tab for remote Agents', async () => {
+    const lastSeenAt = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['mac_local.w-200'], pane_count: 1 }] } });
+    api.getCiCyCloudInstances.mockResolvedValue({ data: { instances: [{ instanceId: 'code-remote', teamId: 'mac_local', status: 'online', lastSeenAt }] } });
+    api.getCiCyCloudAgents.mockResolvedValue({ data: { agents: [{ instanceId: 'code-remote', teamId: 'mac_local', agentId: 'w-200', title: 'Remote Codex', agentType: 'codex' }] } });
+
+    render(<ProjectsPanel agents={[]} activeAgentId="mac_local.w-200" onOpenAgent={vi.fn()} />);
+
+    expect(await screen.findByRole('tab', { name: '角色' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Terminal' })).not.toBeInTheDocument();
+  });
+
   it('shows the agent role editor without a redundant toolbar and isolates its scrolling', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
     render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} activeAgentId="w-101" onOpenAgent={vi.fn()} />);
