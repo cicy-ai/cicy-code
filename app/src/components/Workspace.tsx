@@ -1202,6 +1202,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     } else if (msg?.type === 'thinking_chunk' && msg.data) {
       // thinking 阶段同样直推 —— 这是最长的阶段,只靠轮询最迟钝。
       window.dispatchEvent(new CustomEvent('cicy:agent-stream-delta', { detail: { ...msg.data, kind: 'thinking' } }));
+    } else if (msg?.type === 'cicy_cloud_reply' && msg.data) {
+      // Bridge the backend's Cloud subscription into the browser event bus so
+      // Projects can render cross-Instance replies without waiting for a poll.
+      window.dispatchEvent(new CustomEvent('cicy:cloud-reply', { detail: msg.data }));
     } else if (msg?.type === 'status_change' && msg.data) {
       window.dispatchEvent(new CustomEvent('agent-status-change', { detail: msg.data }));
       const nextStatus = String(msg.data?.status || '').toLowerCase();

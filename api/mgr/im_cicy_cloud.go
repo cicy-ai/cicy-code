@@ -847,6 +847,20 @@ func (t *cicyCloudTransport) recordCloudReply(reply cicyCloudStreamMessage) {
 	state.ReceivedMS = time.Now().UnixMilli()
 	t.sentMessages[replyTo] = state
 	t.pruneCloudMessagesLocked()
+
+	// The Cloud stream is already a live subscription. Forward terminal
+	// replies to connected UIs immediately instead of making every Projects
+	// card discover the same reply through message-status/current_reply polls.
+	// broadcastAll is intentionally used because Projects can show Agents from
+	// several master buckets at once; replyTo lets each client correlate safely.
+	hub.broadcastAll(ChatEvent{Type: "cicy_cloud_reply", Data: M{
+		"id": reply.ID, "kind": reply.Kind, "replyTo": replyTo,
+		"senderInstanceId": reply.SenderInstanceID,
+		"senderAgentId": reply.SenderAgentID,
+		"targetAgentId": reply.TargetAgentID,
+		"text": reply.Text, "enqueuedAtMs": reply.EnqueuedAtMS,
+		"receivedAtMs": state.ReceivedMS,
+	}})
 }
 
 func (t *cicyCloudTransport) cloudMessageState(id string) (cicyCloudLocalMessageState, bool) {

@@ -855,6 +855,33 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const paneMembershipKey = selectedProject.pane_ids.map(shortPaneId).sort().join('|');
   const visibleAgentKey = visibleAgents.map((agent) => shortPaneId(agent.paneId)).sort().join('|');
   useEffect(() => {
+    const receiveCloudReply = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail || {};
+      if (String(detail.kind || '') !== 'agent_reply') return;
+      const remoteAgentId = String(detail.senderAgentId || '').trim();
+      if (!remoteAgentId) return;
+      const agent = visibleAgents.find((item) => item.remote && item.remoteAgentId === remoteAgentId
+        && (!detail.senderInstanceId || item.instanceId === String(detail.senderInstanceId)));
+      if (!agent) return;
+      const id = shortPaneId(agent.paneId);
+      const answer = String(detail.text || '');
+      setAgentReplies((current) => ({
+        ...current,
+        [id]: {
+          ...(current[id] || {}),
+          question: optimisticQuestionsRef.current[id] || current[id]?.question || '',
+          answer,
+          status: 'completed',
+          completed_at: new Date(Number(detail.receivedAtMs) || Date.now()).toISOString(),
+        },
+      }));
+      delete optimisticQuestionsRef.current[id];
+    };
+    window.addEventListener('cicy:cloud-reply', receiveCloudReply);
+    return () => window.removeEventListener('cicy:cloud-reply', receiveCloudReply);
+  }, [visibleAgentKey]);
+
+  useEffect(() => {
     let cancelled = false;
     const ids = visibleAgents.map((agent) => shortPaneId(agent.paneId));
     if (!ids.length) { setAgentReplies({}); return () => { cancelled = true; }; }
@@ -890,7 +917,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       });
     };
     void pollReplies();
-    const timer = window.setInterval(() => { void pollReplies(); }, visibleAgents.some((agent) => agent.remote) ? 2000 : 500);
+    // Local Agents retain the fast compatibility poll. Cross-Instance replies
+    // arrive over the Cloud subscription; this slow poll is only recovery for
+    // a temporarily disconnected browser/backend WebSocket.
+    const timer = window.setInterval(() => { void pollReplies(); }, visibleAgents.some((agent) => agent.remote) ? 15_000 : 500);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [visibleAgentKey]);
 
