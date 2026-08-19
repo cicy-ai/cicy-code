@@ -207,7 +207,7 @@ export function CardMoreMenu({ paneId, items }: { paneId: string; items: CardMen
           data-id={`agent-stack-card-more-menu-${paneId}`}
           role="menu"
           onClick={(event) => event.stopPropagation()}
-          className="absolute right-0 top-full z-30 mt-1 min-w-[168px] overflow-hidden rounded-lg border border-white/[0.08] bg-[#141417] py-1 shadow-[0_8px_28px_rgba(0,0,0,0.6)]"
+          className="absolute right-0 top-full z-[210] mt-1 min-w-[168px] overflow-hidden rounded-lg border border-white/[0.08] bg-[#141417] py-1 shadow-[0_8px_28px_rgba(0,0,0,0.6)]"
         >
           {items.map((it) => (
             <button

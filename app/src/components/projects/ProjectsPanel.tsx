@@ -1762,7 +1762,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       </aside>
 
       <main data-id="projects-agent-canvas" className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.07)_1px,transparent_0)] bg-[size:32px_32px]">
-        <header data-id="projects-agent-header" className="z-10 flex h-12 shrink-0 items-center border-b border-white/[0.06] bg-[#090a0d]/90 px-5 backdrop-blur">
+        <header data-id="projects-agent-header" className="z-[200] flex h-12 shrink-0 items-center border-b border-white/[0.06] bg-[#090a0d]/90 px-5 backdrop-blur">
           <div data-id="projects-agent-heading" className="min-w-0 flex-1">
             <h2 data-id="projects-agent-title" className="truncate text-[15px] font-semibold text-zinc-100">{selectedProject.name}</h2>
             <p data-id="projects-agent-count" className="text-[11px] text-zinc-600">{t('projectAgentCount', { count: visibleAgents.length })}</p>
