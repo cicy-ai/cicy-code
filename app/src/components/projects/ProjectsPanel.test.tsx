@@ -498,6 +498,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     fireEvent.click(menu);
     expect(document.querySelector('[data-id="project-agent-card-move-to"]')).toHaveTextContent('移动到');
     expect(document.querySelector('[data-id="project-agent-card-add-to"]')).toHaveTextContent('添加到');
+    expect(document.querySelector('[data-id="project-agent-card-move-submenu"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-add-submenu"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-add-project-2"]')).not.toBeInTheDocument();
     fireEvent.click(document.querySelector('[data-id="project-agent-card-add-to"]') as HTMLElement);
     expect(document.querySelector('[data-id="project-agent-card-add-submenu"]')).toBeInTheDocument();
