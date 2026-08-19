@@ -471,8 +471,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     });
     render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} statuses={{ 'w-101:main.0': { status: 'working' } }} onOpenAgent={vi.fn()} />);
 
-    await waitFor(() => expect(document.querySelector('[data-id="project-agent-inactive-cancel-w-101"]')).toBeInTheDocument());
-    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).not.toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument());
+    expect(document.querySelector('[data-id="project-agent-prompt-cancel-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-inactive-loading-w-101"]')).not.toBeInTheDocument();
   });
 
   it('keeps project-card selection synchronized with the shared active agent', async () => {

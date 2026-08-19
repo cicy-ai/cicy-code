@@ -208,7 +208,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, terminalOpen, working, teamId, selected, removable, footer, inactiveLoadingControl, width, height, onSelect, onRemove, onOpenHistory, onToggleTerminal, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, terminalOpen, working, teamId, selected, removable, footer, width, height, onSelect, onRemove, onOpenHistory, onToggleTerminal, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
@@ -220,7 +220,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   selected: boolean;
   removable: boolean;
   footer?: ReactNode;
-  inactiveLoadingControl?: ReactNode;
   width: number;
   height: number;
   onSelect: () => void;
@@ -578,8 +577,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       </div>
       )}
       </div>
-      {selected && activeBodyTab === 'history' ? footer : null}
-      {!selected && working && inactiveLoadingControl ? <div data-id={`project-agent-card-inactive-loading-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} className="absolute bottom-4 right-5 z-10">{inactiveLoadingControl}</div> : null}
+      {(selected || working) && activeBodyTab === 'history' ? footer : null}
       <div
         data-id={`project-agent-card-resize-${shortPaneId(agent.paneId)}`}
         onPointerDown={onResizePointerDown}
@@ -1968,18 +1966,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     </div>
                     </div>
                   </footer>
-                )}
-                inactiveLoadingControl={(
-                  <button
-                    type="button"
-                    data-id={`project-agent-inactive-cancel-${cardShortId}`}
-                    onClick={() => { void cancelAgentMessage(agent); }}
-                    disabled={cancelingAgentIds.has(cardShortId)}
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-amber-400/20 bg-amber-400/10 text-amber-300 shadow-lg transition hover:bg-amber-400/15 disabled:opacity-50"
-                    title={t('composerStop', { ns: 'chat', defaultValue: '停止' })}
-                  >
-                    {cancelingAgentIds.has(cardShortId) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <span className="relative grid h-4 w-4 place-items-center"><Loader2 className="absolute h-4 w-4 animate-spin text-amber-300" /><Square className="h-2 w-2 fill-current" /></span>}
-                  </button>
                 )}
                 onRemove={() => { void removeAgent(agent); }}
                     onOpenHistory={() => onOpenHistory(agent.paneId)}
