@@ -491,7 +491,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </div> : null}
         {visibleQuestion || visibleQuestionAttachments.length ? (
           <div data-id="project-agent-card-question-row" className="flex min-w-0 items-start gap-2.5">
-            <UserTurnAvatar />
+            <UserTurnAvatar className="!mt-0" />
             <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown min-w-0 w-fit max-w-[92%] rounded-xl rounded-bl-sm border border-[var(--chat-question-border)] bg-[var(--chat-question-bg)] px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-contain">
             {visibleQuestion ? <MarkdownBlock text={previewableMarkdown(visibleQuestion)} /> : null}
             {visibleQuestionAttachments.length ? (
@@ -522,7 +522,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             title={agent.title || agent.paneId}
             dataId={`project-agent-card-reply-avatar-${shortPaneId(agent.paneId)}`}
             variant="select"
-            className="sticky top-1 z-[1] mt-0.5 rounded-full shadow-sm"
+            className="sticky top-1 z-[1] rounded-full shadow-sm"
           />
         ) : null}
         <div className="min-w-0 flex-1 space-y-3.5">
@@ -569,7 +569,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           </div>
         ) : null}
         {working ? (
-          <div ref={loadingRef} data-id="project-agent-card-stream-loading" className="mt-0.5 flex h-7 items-center gap-1" aria-label="Loading reply">
+          <div ref={loadingRef} data-id="project-agent-card-stream-loading" className="flex h-7 items-center gap-1" aria-label="Loading reply">
             {[0, 1, 2].map((index) => (
               <span key={index} data-id="project-agent-card-stream-loading-dot" className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />
             ))}

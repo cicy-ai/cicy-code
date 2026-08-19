@@ -465,7 +465,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     // arrives, otherwise the loading indicator disappears and reappears during
     // the handoff to server-side working status.
     expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).toHaveClass('h-7', 'mt-0.5');
+    expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).toHaveClass('h-7');
+    expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).not.toHaveClass('mt-0.5');
     expect(document.querySelectorAll('[data-id="project-agent-card-stream-loading-dot"]')).toHaveLength(3);
     await waitFor(() => expect(input).toHaveFocus());
   });

@@ -4,15 +4,16 @@
 import { useCallback, useContext, useState } from 'react';
 import { User, Copy, Check, ChevronUp } from 'lucide-react';
 import { QAlignContext } from '../contexts';
+import { cn } from '../../../../lib/utils';
 import { splitLeadingHarnessBlocks, parseEnvironmentContext } from '../lib/normalizeItem';
 import { MarkdownBlock } from './Markdown';
 import { SystemNoticeCard, EnvironmentContextCard } from './notices';
 
 // 用户轮的左侧头像(居左布局时用):一个用户 icon 的圆形头像,与 assistant 头像同尺寸/
 // 顶对齐,使问答两列头像对齐成一条线。
-export function UserTurnAvatar() {
+export function UserTurnAvatar({ className }: { className?: string } = {}) {
   return (
-    <div data-id="current-history-user-avatar" className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-sky-300">
+    <div data-id="current-history-user-avatar" className={cn('mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-sky-300', className)}>
       <User className="h-4 w-4" />
     </div>
   );
