@@ -196,8 +196,8 @@ describe('<ProjectsPanel /> project view cache', () => {
     expect(document.querySelector('[data-id="project-list-item-default"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
     expect(document.querySelector('[data-id="project-agent-card-metrics"]')).not.toHaveClass('border-b');
     fireEvent.click(document.querySelector('[data-id="project-agent-card-w-101"]') as HTMLElement);
-    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).toBeInTheDocument());
-    expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).not.toHaveClass('border-b');
+    expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-history-w-101"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-w-101"]')).toHaveStyle({ width: '420px', height: '360px' });
     expect(document.querySelector('[data-id="project-canvas-zoom-value"]')).toHaveTextContent('125%');
   });
@@ -307,9 +307,16 @@ describe('<ProjectsPanel /> project creation', () => {
 describe('<ProjectsPanel /> agent prompt footer', () => {
   it('switches card body tabs and opens the full history in the right panel', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    api.getAgentCurrentReply.mockResolvedValue({ data: { question: '已有问题', items: [], status: 'completed' } });
     const onOpenHistory = vi.fn();
     render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} onOpenHistory={onOpenHistory} />);
 
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(card);
     const historyTab = await screen.findByRole('tab', { name: '会话' });
     expect(historyTab).toHaveAttribute('aria-selected', 'true');
     expect(document.querySelector('[data-id="project-agent-card-history-sentinel"]')).not.toBeInTheDocument();
@@ -459,8 +466,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     });
     expect(input.tagName).toBe('TEXTAREA');
     expect(document.querySelector('[data-id="project-agent-card-tabs-w-101"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-history-w-101"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-history-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).not.toBeInTheDocument();
     fireEvent.click(card);
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
 
