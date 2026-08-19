@@ -181,6 +181,7 @@ describe('<ProjectsPanel /> project view cache', () => {
     expect(node.style.left).toBe('120px');
     expect(node.style.top).toBe('80px');
     expect(document.querySelector('[data-id="project-list-item-default"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
+    expect(document.querySelector('[data-id="project-agent-card-metrics"]')).not.toHaveClass('border-b');
     expect(document.querySelector('[data-id="project-agent-card-w-101"]')).toHaveStyle({ width: '420px', height: '360px' });
     expect(document.querySelector('[data-id="project-canvas-zoom-value"]')).toHaveTextContent('125%');
   });

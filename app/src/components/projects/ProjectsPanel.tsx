@@ -269,6 +269,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   const rawQuestion = String(optimisticQuestion || freshestQuestion);
   const visibleQuestion = questionWithoutUploadedAttachments(rawQuestion);
   const visibleQuestionAttachments = uploadedAttachmentsFromQuestion(rawQuestion);
+  const hasConversationContent = Boolean(rawQuestion || replyItems.length || latest?.latest_response || latest?.latest_tool?.name || working);
   const replyStatus = String(reply?.status || latest?.status || status).toLowerCase();
   const completed = /completed|complete|done/.test(replyStatus);
   const serverStartedAt = Date.parse(String(reply?.started_at || latest?.started_at || '')) || 0;
@@ -405,7 +406,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </div>
       </div>
 
-      <div data-id="project-agent-card-metrics" className="mt-2.5 flex h-8 min-w-0 items-center gap-2 border-b border-white/[0.08] pb-2.5 font-mono text-[13px] text-zinc-500">
+      <div data-id="project-agent-card-metrics" className={cn('mt-2.5 flex h-8 min-w-0 items-center gap-2 pb-2.5 font-mono text-[13px] text-zinc-500', hasConversationContent && 'border-b border-white/[0.08]')}>
         <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
         <button
           type="button"
