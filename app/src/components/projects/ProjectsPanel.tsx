@@ -1278,6 +1278,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         }
         return group;
       }));
+      window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: mode === 'add' ? `已添加到「${project.name}」` : `已移动到「${project.name}」`,
+      }));
     } catch (cause: any) {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.response?.data?.error || cause?.message || t('projectSaving') }));
     }

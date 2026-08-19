@@ -488,6 +488,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       { ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 },
       defaultGroups[1],
     ] } });
+    const toast = vi.fn();
+    window.addEventListener('show-toast', toast);
     render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
 
     const menu = await waitFor(() => {
@@ -514,8 +516,11 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     fireEvent.click(document.querySelector('[data-id="project-agent-card-add-project-2"]') as HTMLElement);
     expect(api.removeGroupPane).not.toHaveBeenCalled();
     await waitFor(() => expect(api.addGroupPane).toHaveBeenCalledWith(2, 'w-101:main.0', 'add'));
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+    expect((toast.mock.calls[0][0] as CustomEvent).detail).toBe('已添加到「Existing」');
     expect(document.querySelector('[data-id="project-list-item-default"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
     expect(document.querySelector('[data-id="project-list-item-2"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
+    window.removeEventListener('show-toast', toast);
   });
 
   it('keeps project-card selection synchronized with the shared active agent', async () => {
