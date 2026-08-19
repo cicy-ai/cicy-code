@@ -1,7 +1,7 @@
 {
   "name": "cicy-code-ide-v1",
   "private": true,
-  "version": "2.3.554",
+  "version": "2.3.555",
   "type": "module",
   "scripts": {
     "dev": "vite --port=8022 --host=0.0.0.0",
