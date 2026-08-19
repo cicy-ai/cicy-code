@@ -464,7 +464,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </div>
       ) : (
       <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 flex min-h-0 flex-1 flex-col">
-      <div
+      {selected || visibleQuestion || visibleQuestionAttachments.length ? <div
         data-id="project-agent-card-question-fixed"
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
@@ -490,7 +490,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             </div>
           </div>
         ) : null}
-      </div>
+      </div> : null}
       <div
         ref={bodyScrollRef}
         data-id="project-agent-card-live-body"

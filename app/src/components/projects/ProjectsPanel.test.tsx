@@ -428,6 +428,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     });
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-tabs-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).not.toBeInTheDocument();
     const canvasNode = card.closest('[data-id="project-canvas-node-w-101"]') as HTMLElement;
     fireEvent.pointerDown(canvasNode, { button: 0, pointerId: 1, clientX: 120, clientY: 120 });
     fireEvent.pointerUp(canvasNode, { pointerId: 1, clientX: 120, clientY: 120 });
@@ -441,6 +442,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(input.tagName).toBe('TEXTAREA');
     expect(document.querySelector('[data-id="project-agent-card-tabs-w-101"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-history-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).toBeInTheDocument();
     fireEvent.click(card);
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
 
