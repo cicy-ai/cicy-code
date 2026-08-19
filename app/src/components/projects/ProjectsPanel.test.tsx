@@ -142,6 +142,20 @@ describe('<ProjectsPanel /> floating action button', () => {
     expect(document.querySelector('[data-id="project-fab-wrap"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="project-fab-menu"]')).toHaveClass('pointer-events-none');
   });
+
+  it('collapses the project list and remembers the preference', async () => {
+    const { unmount } = render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
+    fireEvent.click(await waitFor(() => document.querySelector('[data-id="projects-list-collapse"]') as HTMLElement));
+    expect(document.querySelector('[data-id="projects-list"]')).toHaveClass('hidden');
+    expect(localStorage.getItem('cicy_projects_list_collapsed')).toBe('1');
+    unmount();
+
+    render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
+    const expand = await waitFor(() => document.querySelector('[data-id="projects-list-expand"]') as HTMLElement);
+    fireEvent.click(expand);
+    expect(document.querySelector('[data-id="projects-list"]')).not.toHaveClass('hidden');
+    expect(localStorage.getItem('cicy_projects_list_collapsed')).toBe('0');
+  });
 });
 
 describe('<ProjectsPanel /> project view cache', () => {

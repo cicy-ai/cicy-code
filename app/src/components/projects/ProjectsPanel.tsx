@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowRight, Atom, BookOpen, Check, FileText, FolderKanban, History, LayoutGrid, Loader2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, Atom, BookOpen, Check, FileText, FolderKanban, History, LayoutGrid, Loader2, Minus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -84,6 +84,7 @@ interface QueuedAgentMessage {
 const DEFAULT_PROJECT_ID = 'default';
 const PROJECT_VIEW_CACHE_PREFIX = 'cicy_project_view:';
 const PROJECT_AGENT_QUEUE_KEY = 'cicy_project_agent_queue:v1';
+const PROJECT_LIST_COLLAPSED_KEY = 'cicy_projects_list_collapsed';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
 const cloudInstanceOnline = (instance: any) => {
   const seen = Date.parse(String(instance?.lastSeenAt || '').replace(' ', 'T') + 'Z');
@@ -626,6 +627,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [creating, setCreating] = useState(false);
   const [projectMenuId, setProjectMenuId] = useState<string>('');
   const [projectMenuAnchor, setProjectMenuAnchor] = useState<string>('');
+  const [projectListCollapsed, setProjectListCollapsed] = useState(() => localStorage.getItem(PROJECT_LIST_COLLAPSED_KEY) === '1');
+  const setProjectListVisibility = (collapsed: boolean) => {
+    setProjectListCollapsed(collapsed);
+    localStorage.setItem(PROJECT_LIST_COLLAPSED_KEY, collapsed ? '1' : '0');
+  };
   const [addOpen, setAddOpen] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
   const [addSearch, setAddSearch] = useState('');
@@ -1669,9 +1675,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
   return (
     <section data-id="projects-panel" className="flex h-full min-w-0 flex-1 bg-[#090a0d] text-zinc-300">
-      <aside data-id="projects-list" className="flex w-[280px] shrink-0 flex-col border-r border-white/[0.07] bg-[#0d0e12] max-[700px]:w-[180px]">
+      <aside data-id="projects-list" className={cn('shrink-0 flex-col border-r border-white/[0.07] bg-[#0d0e12]', projectListCollapsed ? 'hidden' : 'flex w-[280px] max-[700px]:w-[180px]')}>
         <header data-id="projects-list-header" className="flex h-12 shrink-0 items-center border-b border-white/[0.07] px-4">
           <h2 data-id="projects-list-title" className="flex-1 text-[15px] font-semibold text-zinc-100">{t('projectsTitle')}</h2>
+          <button type="button" data-id="projects-list-collapse" onClick={() => setProjectListVisibility(true)} className="mr-1 grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-white/[0.06] hover:text-white" title={t('collapse', { ns: 'common', defaultValue: '折叠' })} aria-label={t('collapse', { ns: 'common', defaultValue: '折叠' })}><PanelLeftClose className="h-4 w-4" /></button>
           <button
             type="button"
             data-id="projects-create"
@@ -1722,6 +1729,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
       <main data-id="projects-agent-canvas" className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.07)_1px,transparent_0)] bg-[size:32px_32px]">
         <header data-id="projects-agent-header" className="z-10 flex h-12 shrink-0 items-center border-b border-white/[0.06] bg-[#090a0d]/90 px-5 backdrop-blur">
+          {projectListCollapsed ? <button type="button" data-id="projects-list-expand" onClick={() => setProjectListVisibility(false)} className="mr-3 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100" title={t('expand', { ns: 'common', defaultValue: '展开' })} aria-label={t('expand', { ns: 'common', defaultValue: '展开' })}><PanelLeftOpen className="h-4 w-4" /></button> : null}
           <div data-id="projects-agent-heading" className="min-w-0 flex-1">
             <h2 data-id="projects-agent-title" className="truncate text-[15px] font-semibold text-zinc-100">{selectedProject.name}</h2>
             <p data-id="projects-agent-count" className="text-[11px] text-zinc-600">{t('projectAgentCount', { count: visibleAgents.length })}</p>
