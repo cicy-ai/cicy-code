@@ -414,7 +414,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-tool-result-markdown"]')).not.toBeInTheDocument();
   });
 
-  it('always shows the footer and ignores IME confirmation Enter', async () => {
+  it('shows card controls only when active and ignores IME confirmation Enter', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
     });
@@ -426,7 +426,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       if (!node) throw new Error('agent card did not render');
       return node as HTMLElement;
     });
-    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-tabs-w-101"]')).not.toBeInTheDocument();
     const canvasNode = card.closest('[data-id="project-canvas-node-w-101"]') as HTMLElement;
     fireEvent.pointerDown(canvasNode, { button: 0, pointerId: 1, clientX: 120, clientY: 120 });
     fireEvent.pointerUp(canvasNode, { pointerId: 1, clientX: 120, clientY: 120 });
@@ -438,6 +439,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       return node as HTMLTextAreaElement;
     });
     expect(input.tagName).toBe('TEXTAREA');
+    expect(document.querySelector('[data-id="project-agent-card-tabs-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-history-w-101"]')).toBeInTheDocument();
     fireEvent.click(card);
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
 

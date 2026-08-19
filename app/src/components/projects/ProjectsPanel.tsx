@@ -429,7 +429,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         ) : null}
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
-      <div data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`} role="tablist" className="flex h-9 shrink-0 items-end gap-5 border-b border-white/[0.08]">
+      {selected ? <div data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`} role="tablist" className="flex h-9 shrink-0 items-end gap-5 border-b border-white/[0.08]">
         {([
           ['history', '会话'],
           ...(String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
@@ -451,12 +451,12 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             </button>
           );
         })}
-      </div>
-      {activeBodyTab === 'terminal' && terminalOpen && agent.ttydSrc ? (
+      </div> : null}
+      {selected && activeBodyTab === 'terminal' && terminalOpen && agent.ttydSrc ? (
         <div data-id={`project-agent-card-terminal-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mx-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-lg bg-black">
           <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" />
         </div>
-      ) : activeBodyTab === 'role' ? (
+      ) : selected && activeBodyTab === 'role' ? (
         <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()} onTouchStart={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()} className="-mx-5 flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0b0b0d] overscroll-contain">
           <Suspense fallback={<div data-id="project-agent-card-role-loading" className="flex h-full items-center justify-center text-[11px] text-zinc-600">Loading…</div>}>
             <AgentDocRoleEditor paneId={agent.paneId} className="min-h-0 flex-1" />
@@ -470,9 +470,9 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         onWheel={(event) => event.stopPropagation()}
         className="max-h-[45%] shrink-0 space-y-2 overflow-y-auto overscroll-contain border-b border-zinc-200/80 pr-[18px] pb-5 dark:border-white/[0.07] [scrollbar-width:thin]"
       >
-        <div data-id="project-agent-card-history-link-row" className="flex justify-end">
+        {selected ? <div data-id="project-agent-card-history-link-row" className="flex justify-end">
           <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史<ArrowRight className="h-3 w-3" /></button>
-        </div>
+        </div> : null}
         {visibleQuestion || visibleQuestionAttachments.length ? (
           <div data-id="project-agent-card-question-row" className="flex min-w-0 items-start gap-2.5">
             <UserTurnAvatar />
@@ -577,7 +577,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       </div>
       )}
       </div>
-      {activeBodyTab === 'history' ? footer : null}
+      {selected && activeBodyTab === 'history' ? footer : null}
       <div
         data-id={`project-agent-card-resize-${shortPaneId(agent.paneId)}`}
         onPointerDown={onResizePointerDown}
