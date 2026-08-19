@@ -322,6 +322,51 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(zoom).toHaveTextContent('100%');
   });
 
+  it('loads and saves a remote Agent persona through Cloud RPC', async () => {
+    const lastSeenAt = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['mac_local.w-200'], pane_count: 1 }] } });
+    api.getCiCyCloudInstances.mockResolvedValue({ data: { instances: [{ instanceId: 'code-remote', teamId: 'mac_local', status: 'online', lastSeenAt }] } });
+    api.getCiCyCloudAgents.mockResolvedValue({ data: { agents: [{ instanceId: 'code-remote', teamId: 'mac_local', agentId: 'w-200', title: 'Remote Agent', agentType: 'cicy' }] } });
+    api.sendCiCyCloudMessage.mockImplementation((_instanceId: string, _agentId: string, _senderId: string, text: string) => {
+      const { op } = JSON.parse(text);
+      return Promise.resolve({ data: { message: { id: `rpc-${op}` } } });
+    });
+    api.getCiCyCloudMessageStatus.mockImplementation((messageId: string) => Promise.resolve({ data: { reply: { text: JSON.stringify({
+      ok: true,
+      data: messageId === 'rpc-persona_save'
+        ? { filename: 'AGENTS.md', guidance: '# Updated role', systemPrompt: 'Remote system', meta: 'name: remote' }
+        : { filename: 'AGENTS.md', guidance: '# Remote role', systemPrompt: 'Remote system', meta: 'name: remote' },
+    }) } } }));
+
+    render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
+
+    const roleTab = await screen.findByRole('tab', { name: '角色' });
+    expect(roleTab).toBeEnabled();
+    fireEvent.click(roleTab);
+    const editor = await screen.findByLabelText('AGENTS.md');
+    expect(editor).toHaveValue('# Remote role');
+    expect(api.sendCiCyCloudMessage).toHaveBeenCalledWith('code-remote', 'w-200', '', JSON.stringify({ op: 'persona' }), 'rpc_request');
+
+    fireEvent.change(editor, { target: { value: '# Updated role' } });
+    fireEvent.click(document.querySelector('[data-id="remote-agent-role-save"]') as HTMLElement);
+    await waitFor(() => expect(api.sendCiCyCloudMessage).toHaveBeenCalledWith('code-remote', 'w-200', '', JSON.stringify({ op: 'persona_save', guidance: '# Updated role' }), 'rpc_request'));
+    await waitFor(() => expect(document.querySelector('[data-id="remote-agent-role-save"]')).toHaveTextContent('已保存'));
+
+    fireEvent.click(document.querySelector('[data-id="remote-agent-role-tab-systemPrompt"]') as HTMLElement);
+    const systemEditor = screen.getByLabelText('system.md');
+    expect(systemEditor).toHaveValue('Remote system');
+    fireEvent.change(systemEditor, { target: { value: 'Updated system' } });
+    fireEvent.click(document.querySelector('[data-id="remote-agent-role-save"]') as HTMLElement);
+    await waitFor(() => expect(api.sendCiCyCloudMessage).toHaveBeenCalledWith('code-remote', 'w-200', '', JSON.stringify({ op: 'persona_save', systemPrompt: 'Updated system' }), 'rpc_request'));
+
+    fireEvent.click(document.querySelector('[data-id="remote-agent-role-tab-meta"]') as HTMLElement);
+    const metaEditor = screen.getByLabelText('meta.yaml');
+    expect(metaEditor).toHaveValue('name: remote');
+    fireEvent.change(metaEditor, { target: { value: 'name: updated' } });
+    fireEvent.click(document.querySelector('[data-id="remote-agent-role-save"]') as HTMLElement);
+    await waitFor(() => expect(api.sendCiCyCloudMessage).toHaveBeenCalledWith('code-remote', 'w-200', '', JSON.stringify({ op: 'persona_save', meta: 'name: updated' }), 'rpc_request'));
+  });
+
   it('shows the realtime latest question instead of a stale reply snapshot', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
