@@ -465,7 +465,12 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         ) : null}
         {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
       </div>
-      {selected ? <div data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`} role="tablist" className="flex h-9 shrink-0 items-end gap-5 border-b border-white/[0.08]">
+      <div
+        data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`}
+        role="tablist"
+        aria-hidden={!selected}
+        className={cn('flex h-9 shrink-0 items-end gap-5 border-b border-white/[0.08]', !selected && 'invisible pointer-events-none')}
+      >
         {([
           ['history', '会话'],
           ...(agent.remote || String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
@@ -487,7 +492,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             </button>
           );
         })}
-      </div> : null}
+      </div>
       {selected && activeBodyTab === 'terminal' && terminalOpen && agent.ttydSrc ? (
         <div data-id={`project-agent-card-terminal-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mx-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-lg bg-black">
           <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" />
@@ -623,7 +628,15 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       </div>
       )}
       </div>
-      {(selected || working) && activeBodyTab === 'history' ? footer : null}
+      {!selected || activeBodyTab === 'history' ? (
+        <div
+          data-id={`project-agent-card-footer-slot-${shortPaneId(agent.paneId)}`}
+          aria-hidden={!(selected || working) || activeBodyTab !== 'history'}
+          className={cn('shrink-0', (!(selected || working) || activeBodyTab !== 'history') && 'invisible pointer-events-none')}
+        >
+          {footer}
+        </div>
+      ) : null}
       <div
         data-id={`project-agent-card-resize-${shortPaneId(agent.paneId)}`}
         onPointerDown={onResizePointerDown}

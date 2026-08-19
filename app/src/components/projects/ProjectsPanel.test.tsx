@@ -514,8 +514,15 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       if (!node) throw new Error('agent card did not render');
       return node as HTMLElement;
     });
-    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-tabs-w-101"]')).not.toBeInTheDocument();
+    const inactiveTabs = document.querySelector('[data-id="project-agent-card-tabs-w-101"]');
+    const inactiveFooterSlot = document.querySelector('[data-id="project-agent-card-footer-slot-w-101"]');
+    expect(inactiveTabs).toBeInTheDocument();
+    expect(inactiveTabs).toHaveClass('invisible', 'pointer-events-none');
+    expect(inactiveTabs).toHaveAttribute('aria-hidden', 'true');
+    expect(inactiveFooterSlot).toBeInTheDocument();
+    expect(inactiveFooterSlot).toHaveClass('invisible', 'pointer-events-none');
+    expect(inactiveFooterSlot).toHaveAttribute('aria-hidden', 'true');
+    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).not.toBeInTheDocument();
     const canvasNode = card.closest('[data-id="project-canvas-node-w-101"]') as HTMLElement;
     fireEvent.pointerDown(canvasNode, { button: 0, pointerId: 1, clientX: 120, clientY: 120 });
@@ -528,7 +535,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       return node as HTMLTextAreaElement;
     });
     expect(input.tagName).toBe('TEXTAREA');
-    expect(document.querySelector('[data-id="project-agent-card-tabs-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-tabs-w-101"]')).not.toHaveClass('invisible');
+    expect(document.querySelector('[data-id="project-agent-card-footer-slot-w-101"]')).not.toHaveClass('invisible');
     expect(document.querySelector('[data-id="project-agent-card-history-w-101"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).not.toBeInTheDocument();
     fireEvent.click(card);
@@ -678,7 +686,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
     expect(routed.defaultPrevented).toBe(true);
     expect(toast).toHaveBeenCalled();
-    expect(document.querySelector('[data-id="project-agent-prompt-input-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-prompt-input-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-footer-slot-w-101"]')).toHaveClass('invisible', 'pointer-events-none');
   });
 
   it('queues multiple prompts while thinking and sends them together when idle', async () => {
