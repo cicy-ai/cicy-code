@@ -161,6 +161,18 @@ describe('<ProjectsPanel /> floating action button', () => {
 });
 
 describe('<ProjectsPanel /> project view cache', () => {
+  it('renders duplicate roster records for one pane only once', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-1010:main.0'], pane_count: 1 }] } });
+    render(<ProjectsPanel agents={[
+      { paneId: 'w-1010:main.0', title: 'cicy-code', agentType: 'codex' },
+      { paneId: 'w-1010:main.0', title: 'cicy-code', agentType: 'codex', defaultModel: 'gpt-5.6-sol' },
+      { paneId: 'w-1010:main.0', title: 'cicy-code', agentType: 'codex', status: 'working' },
+    ]} onOpenAgent={vi.fn()} />);
+
+    await waitFor(() => expect(document.querySelectorAll('[data-id="project-canvas-node-w-1010"]')).toHaveLength(1));
+    expect(document.querySelectorAll('[data-id="project-agent-card-w-1010"]')).toHaveLength(1);
+  });
+
   it('restores zoom and card layout before the background layout request resolves', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },

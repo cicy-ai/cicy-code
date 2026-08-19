@@ -86,6 +86,16 @@ const PROJECT_VIEW_CACHE_PREFIX = 'cicy_project_view:';
 const PROJECT_AGENT_QUEUE_KEY = 'cicy_project_agent_queue:v1';
 const PROJECT_LIST_COLLAPSED_KEY = 'cicy_projects_list_collapsed';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
+const projectAgentIdentity = (agent: ProjectAgent) => agent.remote
+  ? `remote:${String(agent.instanceId || agent.instanceTeam || '')}:${String(agent.remoteAgentId || shortPaneId(agent.paneId))}`
+  : `local:${shortPaneId(agent.paneId)}`;
+const projectAgentCompleteness = (agent: ProjectAgent) => [
+  agent.title,
+  agent.agentType,
+  agent.defaultModel,
+  agent.workspace,
+  agent.ttydSrc,
+].filter(Boolean).length + (agent.status && agent.status !== 'offline' ? 2 : 0);
 const cloudInstanceOnline = (instance: any) => {
   const seen = Date.parse(String(instance?.lastSeenAt || '').replace(' ', 'T') + 'Z');
   return instance?.status === 'online' && Number.isFinite(seen) && Date.now() - seen < 90_000;
@@ -858,7 +868,15 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       }];
     });
   }, [cloudDirectoryAgents, cloudInstances, teamId]);
-  const allAgents = useMemo(() => [...agents, ...cloudProjectAgents], [agents, cloudProjectAgents]);
+  const allAgents = useMemo(() => {
+    const unique = new Map<string, ProjectAgent>();
+    for (const agent of [...agents, ...cloudProjectAgents]) {
+      const key = projectAgentIdentity(agent);
+      const existing = unique.get(key);
+      if (!existing || projectAgentCompleteness(agent) > projectAgentCompleteness(existing)) unique.set(key, agent);
+    }
+    return [...unique.values()];
+  }, [agents, cloudProjectAgents]);
   const memberIds = useMemo(() => new Set(selectedProject.pane_ids.map(shortPaneId)), [selectedProject.pane_ids]);
   const visibleAgents = allAgents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
   const assignedAgentIds = useMemo(() => new Set(groups.flatMap((group) => group.pane_ids.map(shortPaneId))), [groups]);
