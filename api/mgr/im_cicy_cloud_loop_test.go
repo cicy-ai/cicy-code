@@ -181,7 +181,7 @@ func TestCiCyCloudWebSocketCarriesMessageAndAck(t *testing.T) {
 		t.Fatalf("unexpected state frame: %#v", stateFrame)
 	}
 	encodedState, _ := json.Marshal(stateFrame)
-	for _, required := range []string{`"agentId":"w-local"`, `"status":"idle"`, `"model":"gpt-local"`, `"online":true`} {
+	for _, required := range []string{`"id":"w-local"`, `"agent_type":"codex"`, `"model":"gpt-local"`, `"online":false`, `"idle":null`} {
 		if !bytes.Contains(encodedState, []byte(required)) {
 			t.Fatalf("state frame missing %s: %s", required, encodedState)
 		}

@@ -25,25 +25,25 @@ import (
 const usageLogFileName = "usage.jsonl"
 
 type agentUsageLogRecord struct {
-	TS                       string `json:"ts"`                          // completion time, RFC3339Nano
-	ConversationID           string `json:"conversation_id,omitempty"`
-	TurnID                   string `json:"turn_id,omitempty"`
-	RequestID                string `json:"request_id,omitempty"`
-	Provider                 string `json:"provider,omitempty"`
-	Model                    string `json:"model,omitempty"`
-	Status                   string `json:"status,omitempty"`            // "completed" | "failed"
-	StatusCode               int    `json:"status_code,omitempty"`
-	ReplyStartMS             int    `json:"reply_start_ms"`              // 发起 → reply 开始（首字节/TTFT）
-	LatencyMS                int    `json:"latency_ms"`                  // 发起 → reply 结束（总耗时）
-	InputTokens              int    `json:"input_tokens"`
-	OutputTokens             int    `json:"output_tokens"`
-	CacheReadInputTokens     int    `json:"cache_read_input_tokens"`     // 输入缓存（命中）
-	CacheCreationInputTokens int    `json:"cache_creation_input_tokens"` // 输出缓存（写入）
-	TotalTokens              int    `json:"total_tokens"`
+	TS                       string  `json:"ts"` // completion time, RFC3339Nano
+	ConversationID           string  `json:"conversation_id,omitempty"`
+	TurnID                   string  `json:"turn_id,omitempty"`
+	RequestID                string  `json:"request_id,omitempty"`
+	Provider                 string  `json:"provider,omitempty"`
+	Model                    string  `json:"model,omitempty"`
+	Status                   string  `json:"status,omitempty"` // "completed" | "failed"
+	StatusCode               int     `json:"status_code,omitempty"`
+	ReplyStartMS             int     `json:"reply_start_ms"` // 发起 → reply 开始（首字节/TTFT）
+	LatencyMS                int     `json:"latency_ms"`     // 发起 → reply 结束（总耗时）
+	InputTokens              int     `json:"input_tokens"`
+	OutputTokens             int     `json:"output_tokens"`
+	CacheReadInputTokens     int     `json:"cache_read_input_tokens"`     // 输入缓存（命中）
+	CacheCreationInputTokens int     `json:"cache_creation_input_tokens"` // 输出缓存（写入）
+	TotalTokens              int     `json:"total_tokens"`
 	CostCredit               float64 `json:"cost_credit,omitempty"`
 	// AuxKind tags non-mainline spend that still bills to this pane (currently
 	// "sidechain" — Task subagents etc.). Empty for mainline conversation turns.
-	AuxKind                  string `json:"aux_kind,omitempty"`
+	AuxKind string `json:"aux_kind,omitempty"`
 }
 
 var usageLogMu sync.Mutex

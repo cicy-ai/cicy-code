@@ -918,15 +918,15 @@ func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, sende
 				break
 			}
 			replyModel := aiGatewayFirstNonEmpty(aiGatewayReplyPrimaryModel(reply), strings.TrimSpace(current.Model))
-			for key, value := range M{
-				"status": status,
+			for key, value := range (M{
+				"status":   status,
 				"complete": status == "" || status == "idle" || status == "done" || isAIGatewayReplyTerminal(status),
 				"question": aiGatewayCurrentQuestion(current), "answer": answer, "thinking": thinking, "items": displayItems,
-				"started_at": aiGatewayFirstNonEmpty(strings.TrimSpace(reply.StartedAt), strings.TrimSpace(current.StartedAt), strings.TrimSpace(current.Timestamp)),
-				"updated_at": strings.TrimSpace(reply.UpdatedAt),
+				"started_at":   aiGatewayFirstNonEmpty(strings.TrimSpace(reply.StartedAt), strings.TrimSpace(current.StartedAt), strings.TrimSpace(current.Timestamp)),
+				"updated_at":   strings.TrimSpace(reply.UpdatedAt),
 				"input_tokens": reply.InputTokens, "output_tokens": reply.OutputTokens, "total_tokens": reply.TotalTokens,
 				"cost_credit": reply.CostCredit, "context_used_pct": ctxUsedPct, "context_window_size": ctxWindowSize,
-			} {
+			}) {
 				result[key] = value
 			}
 			if replyModel != "" {

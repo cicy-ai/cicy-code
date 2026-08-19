@@ -329,7 +329,14 @@ build_one() {
   if [ -n "${CICY_TTYD_CDN_PREFIX:-}" ]; then
     ldflags="$ldflags -X ttyd-go/server.BuiltTTYDCDNPrefix=${CICY_TTYD_CDN_PREFIX}"
   fi
-  cd $API_DIR && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -buildvcs=false -ldflags="$ldflags" -o "$out" ./mgr/ && cd "$ROOT_DIR"
+  (
+    cd "$API_DIR"
+    CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -buildvcs=false -ldflags="$ldflags" -o "$out" ./mgr/
+  )
+  if [ ! -s "$out" ]; then
+    echo "❌ Missing build output: $out" >&2
+    return 1
+  fi
   echo "✅ $out (${os}/${arch})"
 }
 

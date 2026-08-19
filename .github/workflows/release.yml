@@ -131,6 +131,16 @@ jobs:
           TAG="${{ steps.meta.outputs.tag }}"
           VERSION="${{ steps.meta.outputs.version }}"
           BASE="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          for f in \
+            dist/cicy-code-darwin-amd64 \
+            dist/cicy-code-darwin-arm64 \
+            dist/cicy-code-linux-amd64 \
+            dist/cicy-code-linux-arm64; do
+            if [ ! -s "$f" ]; then
+              echo "Missing release artifact: $f" >&2
+              exit 1
+            fi
+          done
           cat > dist/manifest.json <<EOF
           {
             "version": "${VERSION}",
