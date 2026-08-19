@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowRight, Atom, BookOpen, Check, FileText, FolderKanban, History, LayoutGrid, Loader2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Server, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, Atom, BookOpen, Check, FileText, FolderKanban, History, LayoutGrid, Loader2, Minus, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -846,6 +846,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     })),
   ];
   const selectedAddInstance = addInstanceOptions.find((instance) => instance.id === addInstanceId) || addInstanceOptions[0];
+  const selectedToAddHasOfflineAgent = [...selectedToAdd].some((paneId) => {
+    const agent = allAgents.find((item) => item.paneId === paneId);
+    return Boolean(agent?.remote && !agent.instanceOnline);
+  });
   const paneMembershipKey = selectedProject.pane_ids.map(shortPaneId).sort().join('|');
   const visibleAgentKey = visibleAgents.map((agent) => shortPaneId(agent.paneId)).sort().join('|');
   useEffect(() => {
@@ -1133,6 +1137,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
   const addSelectedAgents = async () => {
     if (!selectedProject.api_id || selectedToAdd.size === 0) return;
+    if (selectedToAddHasOfflineAgent) {
+      setAddError(t('projectOfflineAgentCannotAdd', { defaultValue: '离线 Instance 的 Agent 无法添加，请取消选择后重试。' }));
+      return;
+    }
     setBusy(true);
     try {
       const paneIds = [...selectedToAdd];
@@ -2112,8 +2120,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                   onClick={() => { setAddInstanceId(instance.id); setAddSearch(''); }}
                   className={cn('group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors', addInstanceId === instance.id ? 'bg-blue-500/12 text-zinc-100 ring-1 ring-blue-500/25' : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300')}
                 >
-                  <span className={cn('grid h-7 w-7 shrink-0 place-items-center rounded-md', addInstanceId === instance.id ? 'bg-blue-500/15 text-blue-400' : 'bg-white/[0.04] text-zinc-600')}><Server className="h-3.5 w-3.5" /></span>
-                  <span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-medium">{instance.label}</span><span className="mt-0.5 flex items-center gap-1.5 text-[9px] text-zinc-600"><span className={cn('h-1.5 w-1.5 rounded-full', instance.online ? 'bg-emerald-500' : 'bg-zinc-600')} />{instance.online ? t('online', { defaultValue: '在线' }) : t('offline', { defaultValue: '离线' })}</span></span>
+                  <span className={cn('h-2 w-2 shrink-0 rounded-full', instance.online ? 'bg-emerald-500' : 'bg-zinc-600')} />
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{instance.label}</span>
                   <span className="rounded-md bg-white/[0.05] px-1.5 py-0.5 text-[9px] tabular-nums text-zinc-500">{instance.count}</span>
                 </button>
               ))}
@@ -2132,21 +2140,23 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             <div ref={addResultsRef} data-id="project-add-agent-results" className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1 [scrollbar-gutter:stable]">
           {filteredAvailableAgents.length ? filteredAvailableAgents.map((agent) => {
             const checked = selectedToAdd.has(agent.paneId);
+            const disabled = Boolean(agent.remote && !agent.instanceOnline);
             return (
               <button
                 key={agent.paneId}
                 type="button"
                 data-id={`project-add-agent-${shortPaneId(agent.paneId)}`}
-                onClick={() => setSelectedToAdd((current) => {
+                disabled={disabled}
+                onClick={() => !disabled && setSelectedToAdd((current) => {
                   const next = new Set(current);
                   if (next.has(agent.paneId)) next.delete(agent.paneId); else next.add(agent.paneId);
                   return next;
                 })}
-                className={cn('group flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors', checked ? 'border-blue-500/45 bg-blue-500/10 ring-1 ring-blue-500/10' : 'border-white/[0.06] bg-white/[0.015] hover:border-white/[0.11] hover:bg-white/[0.04]')}
+                className={cn('group flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45', checked ? 'border-blue-500/45 bg-blue-500/10 ring-1 ring-blue-500/10' : 'border-white/[0.06] bg-white/[0.015] hover:border-white/[0.11] hover:bg-white/[0.04]')}
               >
                 <AgentAvatar agentType={agent.agentType} title={agent.title || agent.paneId} dataId="project-add-agent-avatar" variant="stack" />
                 <span className="min-w-0 flex-1"><span className="block truncate text-[13px] text-zinc-200">{agent.title}</span><span className="block font-mono text-[10px] text-zinc-600">{shortPaneId(agent.paneId)}</span></span>
-                {agent.remote ? <span className={cn('text-[10px]', agent.instanceOnline ? 'text-emerald-500' : 'text-zinc-600')}>{agent.instanceOnline ? t('online', { defaultValue: '在线' }) : t('offline', { defaultValue: '离线' })}</span> : null}
+                {agent.remote ? <span className={cn('h-2 w-2 shrink-0 rounded-full', agent.instanceOnline ? 'bg-emerald-500' : 'bg-zinc-600')} /> : null}
                 <span className={cn('grid h-5 w-5 place-items-center rounded border', checked ? 'border-blue-400 bg-blue-500 text-white' : 'border-white/15')}><Check className={cn('h-3 w-3', checked ? 'opacity-100' : 'opacity-0')} /></span>
               </button>
             );
@@ -2155,7 +2165,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             {addError ? <p data-id="project-add-agent-error" className="mt-2 shrink-0 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{addError}</p> : null}
             <div data-id="project-add-agent-actions" className="mt-3 flex shrink-0 justify-end gap-2 border-t border-white/[0.07] pt-3">
             <button type="button" data-id="project-add-agent-cancel" onClick={() => setAddOpen(false)} className="h-8 rounded-lg px-3 text-[12px] text-zinc-400 hover:bg-white/[0.05]">{t('cancel', { ns: 'common' })}</button>
-            <button type="button" data-id="project-add-agent-confirm" onClick={() => { void addSelectedAgents(); }} disabled={selectedToAdd.size === 0 || busy} className="h-8 rounded-lg bg-blue-500 px-3 text-[12px] font-medium text-white hover:bg-blue-400 disabled:opacity-40">{busy ? t('projectSaving') : t('projectAddSelected', { count: selectedToAdd.size })}</button>
+            <button type="button" data-id="project-add-agent-confirm" onClick={() => { void addSelectedAgents(); }} disabled={selectedToAdd.size === 0 || selectedToAddHasOfflineAgent || busy} className="h-8 rounded-lg bg-blue-500 px-3 text-[12px] font-medium text-white hover:bg-blue-400 disabled:opacity-40">{busy ? t('projectSaving') : t('projectAddSelected', { count: selectedToAdd.size })}</button>
             </div>
           </div>
         </div>

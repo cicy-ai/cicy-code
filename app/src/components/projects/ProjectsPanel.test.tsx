@@ -78,6 +78,24 @@ describe('<ProjectsPanel /> floating action button', () => {
     await waitFor(() => expect(api.addGroupPane).toHaveBeenCalledWith(1, 'mac_local.w-200'));
   });
 
+  it('shows dot-only Instance status and prevents adding Agents from an offline Instance', async () => {
+    api.getCiCyCloudInstances.mockResolvedValue({ data: { instances: [{ instanceId: 'code-offline', teamId: 'old_mac', status: 'offline', lastSeenAt: '2026-01-01 00:00:00' }] } });
+    api.getCiCyCloudAgents.mockResolvedValue({ data: { agents: [{ instanceId: 'code-offline', teamId: 'old_mac', agentId: 'w-201', title: 'Offline Builder', agentType: 'codex' }] } });
+    render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
+
+    fireEvent.click(await waitFor(() => document.querySelector('[data-id="project-add-agent"]') as HTMLElement));
+    fireEvent.click(document.querySelector('[data-id="project-fab-add-existing"]') as HTMLElement);
+    const instance = await waitFor(() => document.querySelector('[data-id="project-add-agent-instance-code-offline"]') as HTMLElement);
+    expect(instance).not.toHaveTextContent('在线');
+    expect(instance).not.toHaveTextContent('离线');
+    fireEvent.click(instance);
+    const agent = await waitFor(() => document.querySelector('[data-id="project-add-agent-old_mac.w-201"]') as HTMLButtonElement);
+    expect(agent).toBeDisabled();
+    fireEvent.click(agent);
+    expect(document.querySelector('[data-id="project-add-agent-confirm"]')).toBeDisabled();
+    expect(api.addGroupPane).not.toHaveBeenCalled();
+  });
+
   it('edits global.md and the project definition with the shared file editor', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], project_file: '/home/cicy/cicy-ai/memory/projects/default.md', project_rules: '# Project' }] } });
     render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
