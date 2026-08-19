@@ -39,6 +39,11 @@ html[data-theme="light"] {
   --vsc-text-secondary: #52525b;
   --vsc-text-muted: #71717a;
   --vsc-text-disabled: #a1a1aa;
+  --vsc-block-bg: #ffffff;
+  --vsc-block-bg-subtle: #fafafa;
+  --vsc-block-bg-hover: #f4f4f5;
+  --vsc-block-bg-active: #e4e4e7;
+  --vsc-block-border: #e4e4e7;
   --chat-question-bg: #f5f5f5;
   --chat-question-border: #e5e5e5;
 }
@@ -255,38 +260,41 @@ html[data-theme="light"] [class~="border-white/[0.05]"],
 html[data-theme="light"] [class~="border-white/[0.07]"],
 html[data-theme="light"] [class~="border-white/[0.09]"],
 html[data-theme="light"] [class~="border-white/[0.1]"],
+html[data-theme="light"] [class~="border-white/5"],
+html[data-theme="light"] [class~="border-white/10"] { border-color: var(--vsc-block-border) !important; }
 html[data-theme="light"] [class~="border-white/[0.12]"],
 html[data-theme="light"] [class~="border-white/[0.14]"],
 html[data-theme="light"] [class~="border-white/[0.16]"],
 html[data-theme="light"] [class~="border-white/[0.18]"],
-html[data-theme="light"] [class~="border-white/5"],
-html[data-theme="light"] [class~="border-white/10"],
 html[data-theme="light"] [class~="border-white/15"],
 html[data-theme="light"] [class~="border-white/20"],
 html[data-theme="light"] [class~="border-white/25"] { border-color: #d4d4d8 !important; }
 html[data-theme="light"] [class*="divide-white"] > :not(:last-child) { border-color: #e4e4e7 !important; }
-html[data-theme="light"] [class~="bg-white/[0.02]"],
-html[data-theme="light"] [class~="bg-white/[0.03]"],
-html[data-theme="light"] [class~="bg-white/[0.04]"],
-html[data-theme="light"] [class~="bg-white/[0.05]"],
-html[data-theme="light"] [class~="bg-white/[0.06]"],
-html[data-theme="light"] [class~="bg-white/[0.08]"],
-html[data-theme="light"] [class~="bg-white/[0.10]"] { background-color: #e4e4e7 !important; }
+
+/* Dark surfaces use white alpha as elevation. Recreate that hierarchy with
+   light-theme surface tokens instead of mapping every alpha to a gray slab. */
 html[data-theme="light"] [class~="bg-white/[0.01]"],
 html[data-theme="light"] [class~="bg-white/[0.015]"],
+html[data-theme="light"] [class~="bg-white/[0.02]"],
 html[data-theme="light"] [class~="bg-white/[0.025]"],
+html[data-theme="light"] [class~="bg-white/[0.03]"],
 html[data-theme="light"] [class~="bg-white/[0.035]"],
+html[data-theme="light"] [class~="bg-white/[0.04]"],
 html[data-theme="light"] [class~="bg-white/[0.045]"],
-html[data-theme="light"] [class~="bg-white/5"] { background-color: #f4f4f5 !important; }
+html[data-theme="light"] [class~="bg-white/[0.05]"] { background-color: var(--vsc-block-bg) !important; }
+html[data-theme="light"] [class~="bg-white/[0.06]"],
 html[data-theme="light"] [class~="bg-white/[0.07]"],
+html[data-theme="light"] [class~="bg-white/[0.08]"],
 html[data-theme="light"] [class~="bg-white/[0.09]"],
 html[data-theme="light"] [class~="bg-white/[0.1]"],
-html[data-theme="light"] [class~="bg-white/10"] { background-color: #e4e4e7 !important; }
+html[data-theme="light"] [class~="bg-white/[0.10]"],
+html[data-theme="light"] [class~="bg-white/5"],
+html[data-theme="light"] [class~="bg-white/10"] { background-color: var(--vsc-block-bg-hover) !important; }
 html[data-theme="light"] [class~="bg-white/[0.12]"],
 html[data-theme="light"] [class~="bg-white/[0.14]"],
 html[data-theme="light"] [class~="bg-white/[0.16]"],
 html[data-theme="light"] [class~="bg-white/[0.18]"],
-html[data-theme="light"] [class~="bg-white/20"] { background-color: #d4d4d8 !important; }
+html[data-theme="light"] [class~="bg-white/20"] { background-color: var(--vsc-block-bg-active) !important; }
 html[data-theme="light"] [class~="bg-white/[0.25]"],
 html[data-theme="light"] [class~="bg-white/40"] { background-color: #a1a1aa !important; }
 
@@ -298,7 +306,7 @@ html[data-theme="light"] [class~="hover:bg-white/[0.07]"]:hover,
 html[data-theme="light"] [class~="hover:bg-white/[0.08]"]:hover,
 html[data-theme="light"] [class~="hover:bg-white/[0.09]"]:hover,
 html[data-theme="light"] [class~="hover:bg-white/[0.10]"]:hover,
-html[data-theme="light"] [class~="hover:bg-white/10"]:hover { background-color: #e4e4e7 !important; }
+html[data-theme="light"] [class~="hover:bg-white/10"]:hover { background-color: var(--vsc-block-bg-hover) !important; }
 html[data-theme="light"] [class~="hover:text-white"]:hover { color: #18181b !important; }
 html[data-theme="light"] [class~="hover:bg-[#292a30]"]:hover { background-color: #e4e4e7 !important; }
 html[data-theme="light"] [class~="bg-[#1d2636]"] { background-color: #eef2ff !important; }
