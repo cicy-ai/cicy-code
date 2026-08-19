@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Cloud,
   Eye,
@@ -6,6 +7,7 @@ import {
   ExternalLink,
   Github,
   Loader2,
+  MoreHorizontal,
   Pencil,
   Plus,
   Save,
@@ -80,6 +82,7 @@ export default function AccountMatrixPanel({
   const [testing, setTesting] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [actionMenu, setActionMenu] = useState<{ name: string; top: number; right: number } | null>(null);
   const [profiles, setProfiles] = useState<string[]>([]);
   const { confirm, node: dialogsNode } = useDialogs();
   const load = () => {
@@ -404,55 +407,40 @@ export default function AccountMatrixPanel({
                         </div>
                       </div>
                       <button
-                        data-id="cloudflare-account-test"
-                        onClick={() => void test(a.name)}
-                        className="rounded-md border border-white/[0.08] px-2.5 py-1.5 text-[11px] text-zinc-300"
+                        data-id="cloudflare-account-more"
+                        type="button"
+                        onClick={(event) => {
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          setActionMenu(actionMenu?.name === a.name ? null : { name: a.name, top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                        }}
+                        title={t("rosterMore", { defaultValue: "更多" })}
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/[0.08] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
                       >
-                        {testing === a.name ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          t("githubAccountTest")
-                        )}
-                      </button>
-                      <button
-                        data-id="cloudflare-account-send-to-agent"
-                        onClick={() => void send(a.name)}
-                        disabled={!paneId || sending === a.name}
-                        className="rounded-md border border-sky-500/20 bg-sky-500/[0.08] p-2 text-sky-400 disabled:opacity-40"
-                      >
-                        {sending === a.name ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Send className="h-3.5 w-3.5" />
-                        )}
-                      </button>
-                      <button
-                        data-id="cloudflare-account-open-chrome"
-                        onClick={() => void openChromeProfile(a.profile)}
-                        disabled={!a.profile}
-                        className="p-2 text-zinc-500 disabled:opacity-20"
-                        title={t("openInChrome")}
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        data-id="cloudflare-account-edit"
-                        onClick={() => void beginEdit(a)}
-                        className="p-2 text-zinc-500"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        data-id="cloudflare-account-delete"
-                        onClick={() => void remove(a.name)}
-                        className="p-2 text-zinc-500 hover:text-rose-300"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <MoreHorizontal className="h-4 w-4" />
                       </button>
                     </article>
                   ))
                 )}
               </div>
+              {actionMenu && (() => {
+                const account = accounts.find((item) => item.name === actionMenu.name);
+                if (!account) return null;
+                const itemClass = "flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06] hover:text-white disabled:opacity-40";
+                return createPortal(
+                  <>
+                    <button data-id="cloudflare-account-more-backdrop" type="button" aria-label={t("cancel", { defaultValue: "关闭" })} className="fixed inset-0 z-[100] cursor-default" onClick={() => setActionMenu(null)} />
+                    <div data-id="cloudflare-account-more-menu" className="fixed z-[101] min-w-[180px] overflow-hidden rounded-lg border border-white/[0.1] bg-[#181818] py-1 shadow-2xl" style={{ top: actionMenu.top, right: actionMenu.right }}>
+                      <button data-id="cloudflare-account-test" type="button" disabled={testing === account.name} className={itemClass} onClick={() => { setActionMenu(null); void test(account.name); }}>{testing === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Cloud className="h-3.5 w-3.5" />}{t("githubAccountTest")}</button>
+                      <button data-id="cloudflare-account-send-to-agent" type="button" disabled={!paneId || sending === account.name} className={itemClass} onClick={() => { setActionMenu(null); void send(account.name); }}>{sending === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}{t("githubAccountSendToAgent", { defaultValue: "发送给当前 Agent" })}</button>
+                      {account.profile && <button data-id="cloudflare-account-open-chrome" type="button" className={itemClass} onClick={() => { setActionMenu(null); void openChromeProfile(account.profile); }}><ExternalLink className="h-3.5 w-3.5" />{t("openInChrome")}</button>}
+                      <button data-id="cloudflare-account-edit" type="button" className={itemClass} onClick={() => { setActionMenu(null); void beginEdit(account); }}><Pencil className="h-3.5 w-3.5" />{t("settingsEdit", { defaultValue: "编辑" })}</button>
+                      <div className="my-1 border-t border-white/[0.07]" />
+                      <button data-id="cloudflare-account-delete" type="button" className={`${itemClass} text-rose-400 hover:text-rose-300`} onClick={() => { setActionMenu(null); void remove(account.name); }}><Trash2 className="h-3.5 w-3.5" />{t("settingsDelete", { defaultValue: "删除" })}</button>
+                    </div>
+                  </>,
+                  document.body,
+                );
+              })()}
             </div>
           )}
         </main>
