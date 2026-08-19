@@ -235,6 +235,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
 }) {
   const { t } = useTranslation('workspace');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [projectSubmenu, setProjectSubmenu] = useState<'move' | 'add' | null>(null);
   const [activeBodyTab, setActiveBodyTab] = useState<'history' | 'terminal' | 'role'>('history');
   const [identityCopied, setIdentityCopied] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -350,7 +351,10 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
 
   const toggleMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    setMenuOpen((value) => !value);
+    setMenuOpen((value) => {
+      if (value) setProjectSubmenu(null);
+      return !value;
+    });
   };
 
   const selectBodyTab = (tab: 'history' | 'terminal' | 'role') => {
@@ -392,29 +396,24 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             <MoreHorizontal className="h-4 w-4" />
           </button>
           {menuOpen ? (
-            <div data-id="project-agent-card-menu" className="absolute right-0 top-9 z-20 min-w-[190px] overflow-hidden rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
-              <div data-id="project-agent-card-projects-label" className="px-3 pb-1 pt-1.5 text-[10px] font-semibold tracking-wide text-zinc-600">移动到</div>
-              {projectOptions.map((project) => (
-                <button
-                  key={`move-${String(project.id)}`}
-                  type="button"
-                  data-id={`project-agent-card-move-project-${project.id}`}
-                  onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onMoveProject(project.id); }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]"
-                >
-                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
-                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                </button>
-              ))}
-              {projectOptions.some((project) => !project.checked) ? <>
-                <div data-id="project-agent-card-add-projects-label" className="mt-1 border-t border-white/[0.07] px-3 pb-1 pt-2 text-[10px] font-semibold tracking-wide text-zinc-600">添加到</div>
-                {projectOptions.filter((project) => !project.checked).map((project) => (
-                  <button key={`add-${String(project.id)}`} type="button" data-id={`project-agent-card-add-project-${project.id}`} onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onAddProject(project.id); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]">
-                    <Plus className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+            <div data-id="project-agent-card-menu" className="absolute right-0 top-9 z-20 min-w-[190px] overflow-visible rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
+              <button type="button" data-id="project-agent-card-move-to" onMouseEnter={() => setProjectSubmenu('move')} onClick={(event) => { event.stopPropagation(); setProjectSubmenu('move'); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]">
+                <ArrowRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                <span className="min-w-0 flex-1">移动到</span>
+                <span className="text-zinc-600">›</span>
+              </button>
+              {projectOptions.some((project) => !project.checked) ? <button type="button" data-id="project-agent-card-add-to" onMouseEnter={() => setProjectSubmenu('add')} onClick={(event) => { event.stopPropagation(); setProjectSubmenu('add'); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]">
+                <Plus className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                <span className="min-w-0 flex-1">添加到</span>
+                <span className="text-zinc-600">›</span>
+              </button> : null}
+              {projectSubmenu ? <div data-id={`project-agent-card-${projectSubmenu}-submenu`} className="absolute right-[calc(100%+4px)] top-0 min-w-[190px] overflow-hidden rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
+                {(projectSubmenu === 'move' ? projectOptions : projectOptions.filter((project) => !project.checked)).map((project) => (
+                  <button key={`${projectSubmenu}-${String(project.id)}`} type="button" data-id={`project-agent-card-${projectSubmenu}-project-${project.id}`} onClick={(event) => { event.stopPropagation(); setMenuOpen(false); setProjectSubmenu(null); if (projectSubmenu === 'move') onMoveProject(project.id); else onAddProject(project.id); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]">
                     <span className="min-w-0 flex-1 truncate">{project.name}</span>
                   </button>
                 ))}
-              </> : null}
+              </div> : null}
               {removable ? (
                 <button
                   type="button"
