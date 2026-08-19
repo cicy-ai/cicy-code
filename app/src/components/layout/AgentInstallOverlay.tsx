@@ -216,16 +216,16 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
           clicks (pointer-events-auto) so nothing leaks through to the dead pane. */}
       <div
         data-id={`agent-install-overlay-mask-${paneId}`}
-        className="pointer-events-auto absolute inset-0 bg-zinc-950/80 backdrop-blur-md"
+        className="pointer-events-auto absolute inset-0 bg-white/80 backdrop-blur-md dark:bg-zinc-950/80"
       />
       <div
         data-id={`agent-install-overlay-card-${paneId}`}
-        className="pointer-events-auto relative w-full max-w-md rounded-2xl border border-white/10 bg-zinc-900/90 p-6 shadow-2xl backdrop-blur-sm"
+        className="pointer-events-auto relative w-full max-w-md rounded-2xl border border-zinc-300 bg-white/95 p-6 shadow-2xl backdrop-blur-sm dark:border-white/10 dark:bg-zinc-900/90"
       >
-        <div data-id={`agent-install-overlay-title-${paneId}`} className="text-base font-medium text-zinc-100">
+        <div data-id={`agent-install-overlay-title-${paneId}`} className="text-base font-medium text-zinc-900 dark:text-zinc-100">
           {phase === 'done' ? t('titleDone', { label }) : t('titleNeed', { label })}
         </div>
-        <div data-id={`agent-install-overlay-subtitle-${paneId}`} className="mt-1 text-sm text-zinc-400">
+        <div data-id={`agent-install-overlay-subtitle-${paneId}`} className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
           {phase === 'idle' && t('subtitleIdle', { label })}
           {busy && busyText}
           {phase === 'done' && t('subtitleDone')}
@@ -233,7 +233,7 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
         </div>
 
         {(busy || phase === 'done') && (
-          <div data-id={`agent-install-overlay-progress-${paneId}`} className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+          <div data-id={`agent-install-overlay-progress-${paneId}`} className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
             <div
               data-id={`agent-install-overlay-progress-bar-${paneId}`}
               className="h-full rounded-full bg-blue-500 transition-all duration-500"
@@ -245,7 +245,7 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
         {log.length > 0 && (
           <div
             data-id={`agent-install-overlay-log-${paneId}`}
-            className="mt-3 h-28 overflow-auto rounded-lg bg-black/60 p-2 font-mono text-[11px] leading-relaxed text-zinc-400"
+            className="mt-3 h-28 overflow-auto rounded-lg border border-zinc-200 bg-zinc-100 p-2 font-mono text-[11px] leading-relaxed text-zinc-600 dark:border-white/[0.06] dark:bg-black/60 dark:text-zinc-400"
           >
             {log.map((l, i) => (
               <div key={i} className="whitespace-pre-wrap break-all">{l}</div>
@@ -267,7 +267,7 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
             <button
               data-id={`agent-install-overlay-installing-btn-${paneId}`}
               disabled
-              className="flex-1 cursor-default rounded-lg bg-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300"
+              className="flex-1 cursor-default rounded-lg bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
             >
               {t('installingBtn')}
             </button>

@@ -952,8 +952,8 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
       collapsed: !!opts.collapsed,
       onToggleCollapse: opts.onToggleCollapse,
       onClick: () => {
-        if (onLocatePane) { onLocatePane(wid); return; }
         if (onOpenInCurrentPane) { onOpenInCurrentPane(wid); return; }
+        if (onLocatePane) { onLocatePane(wid); return; }
         window.location.hash = `#/agent/${wid}`;
       },
       onRestart: () => restartPane(wid, getName(b)),

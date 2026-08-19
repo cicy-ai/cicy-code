@@ -15,6 +15,7 @@ import { appendPromptHistory, canNavigatePromptHistory, readPromptHistory } from
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
 import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
+import { UserTurnAvatar } from '../chat/history/shared/CollapsibleQ';
 import { toolHeadline } from '../chat/history/lib/toolFormat';
 import { isTechnicalTransportFailureText } from '../chat/history/lib/normalizeItem';
 import TerminalView from '../terminal/TerminalView';
@@ -466,13 +467,15 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         data-id="project-agent-card-question-fixed"
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
-        className="max-h-[45%] shrink-0 space-y-2 overflow-y-auto overscroll-contain pr-[18px] pb-3 [scrollbar-width:thin]"
+        className="max-h-[45%] shrink-0 space-y-2 overflow-y-auto overscroll-contain border-b border-zinc-200/80 pr-[18px] pb-5 dark:border-white/[0.07] [scrollbar-width:thin]"
       >
         <div data-id="project-agent-card-history-link-row" className="flex justify-end">
           <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史<ArrowRight className="h-3 w-3" /></button>
         </div>
         {visibleQuestion || visibleQuestionAttachments.length ? (
-          <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown mr-auto w-fit max-w-[92%] rounded-xl rounded-bl-sm border border-[var(--chat-question-border)] bg-[var(--chat-question-bg)] px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-contain">
+          <div data-id="project-agent-card-question-row" className="flex min-w-0 items-start gap-2.5">
+            <UserTurnAvatar />
+            <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown min-w-0 w-fit max-w-[92%] rounded-xl rounded-bl-sm border border-[var(--chat-question-border)] bg-[var(--chat-question-bg)] px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-contain">
             {visibleQuestion ? <MarkdownBlock text={previewableMarkdown(visibleQuestion)} /> : null}
             {visibleQuestionAttachments.length ? (
               <div data-id="project-agent-card-question-attachments" className="mt-2 flex max-w-full flex-wrap gap-2">
@@ -483,6 +486,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
                 ))}
               </div>
             ) : null}
+            </div>
           </div>
         ) : null}
       </div>
@@ -492,9 +496,19 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => { event.stopPropagation(); if (event.deltaY < 0) loadingDetachedRef.current = true; }}
         onScroll={() => { updateScrollToBottomButton(); updateLoadingVisibility(); }}
-        className="min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
+        className="min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] pt-5 text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
       >
-        <div data-id="project-agent-card-current-turn" className="space-y-3.5">
+        <div data-id="project-agent-card-current-turn" className="flex min-w-0 items-start gap-2.5">
+        {(replyItems.length || latest?.latest_response || latest?.latest_tool?.name || working) ? (
+          <AgentAvatar
+            agentType={agent.agentType}
+            title={agent.title || agent.paneId}
+            dataId={`project-agent-card-reply-avatar-${shortPaneId(agent.paneId)}`}
+            variant="select"
+            className="sticky top-1 z-[1] mt-0.5 rounded-full shadow-sm"
+          />
+        ) : null}
+        <div className="min-w-0 flex-1 space-y-3.5">
         {replyItems.length ? replyItems.map((item: any, index: number) => {
           const type = String(item?.type || '');
           if (type === 'thinking' && item?.thinking) return (
@@ -545,6 +559,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           </div>
         ) : null}
         </div>
+        </div>
       </div>
       {showScrollToBottom ? (
         <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); loadingDetachedRef.current = false; bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-2 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur hover:bg-[#292a30] hover:text-white">
@@ -552,7 +567,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </button>
       ) : null}
       {rawQuestion && (working || completed) ? (
-        <div data-id="project-agent-card-output-loading" className="flex h-6 shrink-0 translate-y-1 items-center gap-1.5 pr-[18px] font-mono text-[11px] text-zinc-500" aria-label={working ? 'Loading' : 'Worked'}>
+        <div data-id="project-agent-card-output-loading" className="mt-3 flex h-9 shrink-0 items-center gap-1.5 border-t border-zinc-200/80 pr-[18px] pt-2 font-mono text-[11px] text-zinc-500 dark:border-white/[0.07]" aria-label={working ? 'Loading' : 'Worked'}>
           {working ? <span data-id="project-agent-card-loading-dot" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" /> : <Check className="h-3.5 w-3.5 text-emerald-500" />}
           <span className="font-medium text-zinc-400">{working ? 'Working' : 'Worked'}</span>
           {startedAt ? <span className="tabular-nums text-zinc-500">{working ? `· ${fmtElapsed(elapsedMs)}` : `for ${fmtElapsed(elapsedMs)}`}</span> : null}
@@ -619,6 +634,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [cloudDirectoryAgents, setCloudDirectoryAgents] = useState<any[]>([]);
   const [addError, setAddError] = useState('');
   const [selectedToAdd, setSelectedToAdd] = useState<Set<string>>(new Set());
+  const addResultsRef = useRef<HTMLDivElement>(null);
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
   const agentMembershipKey = agents.map((agent) => agent.paneId).sort().join('|');
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
@@ -650,6 +666,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const promptHistoryIndexRef = useRef<Record<string, number | null>>({});
   const promptHistoryDraftRef = useRef<Record<string, string>>({});
   const cancelReleaseTimersRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    if (addResultsRef.current) addResultsRef.current.scrollTop = 0;
+  }, [addSearch]);
 
   const setQueuedAgentMessages = useCallback((update: (current: Record<string, QueuedAgentMessage[]>) => Record<string, QueuedAgentMessage[]>) => {
     setQueuedAgentMessagesState((current) => {
@@ -2070,8 +2090,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       </AppModal>
 
       <AppModal open={addOpen} title={t('projectAddAgentTitle', { name: selectedProject.name })} onClose={() => setAddOpen(false)} maxWidth="620px">
-        <div data-id="project-add-agent-modal" className="space-y-2">
-          <div data-id="project-add-agent-instance-tabs" className="mb-3 flex gap-1 overflow-x-auto border-b border-white/[0.08] pb-2">
+        <div data-id="project-add-agent-modal" className="flex h-[620px] max-h-[calc(82vh-88px)] min-h-0 flex-col">
+          <div data-id="project-add-agent-instance-tabs" className="mb-3 flex shrink-0 gap-1 overflow-x-auto border-b border-white/[0.08] pb-2">
             <button
               type="button"
               data-id="project-add-agent-instance-local"
@@ -2099,7 +2119,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               );
             })}
           </div>
-          <label data-id="project-add-agent-search-wrap" className="mb-3 flex h-9 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 focus-within:border-sky-500/40">
+          <label data-id="project-add-agent-search-wrap" className="mb-3 flex h-9 shrink-0 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 focus-within:border-sky-500/40">
             <Search className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
             <input
               data-id="project-add-agent-search"
@@ -2110,7 +2130,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               autoFocus
             />
           </label>
-          <div data-id="project-add-agent-results" className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+          <div ref={addResultsRef} data-id="project-add-agent-results" className="min-h-0 flex-1 space-y-2 overflow-y-scroll pr-1 [scrollbar-gutter:stable]">
           {filteredAvailableAgents.length ? filteredAvailableAgents.map((agent) => {
             const checked = selectedToAdd.has(agent.paneId);
             return (
@@ -2133,8 +2153,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             );
           }) : <div data-id="project-add-agent-empty" className="py-10 text-center text-sm text-zinc-600">{t('projectNoAvailableAgents')}</div>}
           </div>
-          {addError ? <p data-id="project-add-agent-error" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{addError}</p> : null}
-          <div data-id="project-add-agent-actions" className="flex justify-end gap-2 pt-4">
+          {addError ? <p data-id="project-add-agent-error" className="mt-2 shrink-0 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{addError}</p> : null}
+          <div data-id="project-add-agent-actions" className="flex shrink-0 justify-end gap-2 pt-4">
             <button type="button" data-id="project-add-agent-cancel" onClick={() => setAddOpen(false)} className="h-8 rounded-lg px-3 text-[12px] text-zinc-400 hover:bg-white/[0.05]">{t('cancel', { ns: 'common' })}</button>
             <button type="button" data-id="project-add-agent-confirm" onClick={() => { void addSelectedAgents(); }} disabled={selectedToAdd.size === 0 || busy} className="h-8 rounded-lg bg-blue-500 px-3 text-[12px] font-medium text-white hover:bg-blue-400 disabled:opacity-40">{busy ? t('projectSaving') : t('projectAddSelected', { count: selectedToAdd.size })}</button>
           </div>
