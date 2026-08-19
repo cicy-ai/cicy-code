@@ -52,7 +52,7 @@ const writeCache = (key: string, persona: RemotePersona) => {
 
 const editorTheme = EditorView.theme({
   '&': { height: '100%', backgroundColor: 'transparent !important', color: '#e4e4e7' },
-  '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
+  '.cm-scroller': { minHeight: '0', overflow: 'auto', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
   '.cm-gutters': { backgroundColor: 'transparent !important', borderRight: '1px solid rgba(255,255,255,0.04)', color: 'rgba(228,228,231,0.3)' },
   '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'rgba(255,255,255,0.03)' },
   '.cm-cursor': { borderLeftColor: '#e4e4e7' },
@@ -146,8 +146,8 @@ export default function RemoteAgentRoleEditor({ cacheKey, agentType, load, save 
       </div>
       {error ? <div data-id="remote-agent-role-error" className="shrink-0 border-b border-rose-500/20 bg-rose-500/10 px-3 py-1.5 text-[11px] text-rose-300">{error}</div> : null}
       {loading ? <div data-id="remote-agent-role-loading" className="grid min-h-0 flex-1 place-items-center text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /></div> : (
-        <div className="min-h-0 flex-1">
-          <CodeMirror aria-label={tabs.find(([key]) => key === active)?.[1]} data-id={`remote-agent-role-content-${active}`} value={persona[active]} onChange={update} extensions={[active === 'meta' ? yaml() : markdown(), ...SEARCH_EXT, EditorView.lineWrapping, editorTheme]} theme={oneDark} basicSetup={{ lineNumbers: true, highlightActiveLine: true, foldGutter: true, bracketMatching: true, closeBrackets: true, autocompletion: false }} height="100%" />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <CodeMirror aria-label={tabs.find(([key]) => key === active)?.[1]} data-id={`remote-agent-role-content-${active}`} value={persona[active]} onChange={update} extensions={[active === 'meta' ? yaml() : markdown(), ...SEARCH_EXT, EditorView.lineWrapping, editorTheme]} theme={oneDark} basicSetup={{ lineNumbers: true, highlightActiveLine: true, foldGutter: true, bracketMatching: true, closeBrackets: true, autocompletion: false }} height="100%" className="h-full min-h-0 overflow-hidden" style={{ height: '100%', minHeight: 0, overflow: 'hidden' }} />
         </div>
       )}
     </div>
