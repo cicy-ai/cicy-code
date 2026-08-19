@@ -392,7 +392,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           </button>
           {menuOpen ? (
             <div data-id="project-agent-card-menu" className="absolute right-0 top-9 z-20 min-w-[190px] overflow-hidden rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
-              <div data-id="project-agent-card-projects-label" className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Projects</div>
+              <div data-id="project-agent-card-projects-label" className="px-3 pb-1 pt-1.5 text-[10px] font-semibold tracking-wide text-zinc-600">{t('projectOtherProjects', { defaultValue: '其他 Projects' })}</div>
               {projectOptions.map((project) => (
                 <button
                   key={String(project.id)}
@@ -1834,7 +1834,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
                 removable={Boolean(selectedProject.api_id)}
-                projectOptions={projects.map((project) => ({
+                projectOptions={projects.filter((project) => String(project.id) !== String(selectedProject.id)).map((project) => ({
                   id: project.id,
                   name: project.name,
                   checked: project.pane_ids.some((paneId) => shortPaneId(paneId) === cardShortId),
@@ -2050,7 +2050,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           <div
             data-id="project-fab-menu"
             className={cn(
-              'flex origin-bottom-right flex-col items-end gap-2 transition-all duration-200',
+              'flex min-w-[184px] origin-bottom-right flex-col rounded-xl border border-white/[0.10] bg-[#202126] p-1 shadow-2xl transition-all duration-200',
               fabOpen ? 'pointer-events-auto translate-y-0 scale-100 opacity-100' : 'pointer-events-none translate-y-2 scale-95 opacity-0',
             )}
           >
@@ -2058,7 +2058,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               type="button"
               data-id="project-fab-create-agent"
               onClick={() => { setFabOpen(false); onCreateAgent(selectedProject.project_template || (selectedProject.builtin ? 'default' : '')); }}
-              className="flex h-9 items-center gap-2 rounded-full border border-white/[0.10] bg-[#202126] px-3 text-[12px] text-zinc-100 shadow-xl hover:bg-[#292a30]"
+              className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[12px] text-zinc-100 transition-colors hover:bg-white/[0.07]"
             >
               <UserPlus data-id="project-fab-create-agent-icon" className="h-4 w-4" />
               <span data-id="project-fab-create-agent-label">{t('projectCreateAgent')}</span>
@@ -2068,7 +2068,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               data-id="project-fab-add-existing"
               onClick={() => { setFabOpen(false); openAddAgents(selectedProject); }}
               disabled={!selectedProject.api_id || availableAgents.length === 0}
-              className="flex h-9 items-center gap-2 rounded-full border border-white/[0.10] bg-[#202126] px-3 text-[12px] text-zinc-100 shadow-xl hover:bg-[#292a30] disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[12px] text-zinc-100 transition-colors hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Users data-id="project-fab-add-existing-icon" className="h-4 w-4" />
               <span data-id="project-fab-add-existing-label">{t('projectAddExistingAgent')}</span>
