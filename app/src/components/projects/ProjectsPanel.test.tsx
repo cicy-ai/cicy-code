@@ -503,6 +503,12 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-add-project-2"]')).not.toBeInTheDocument();
     fireEvent.click(document.querySelector('[data-id="project-agent-card-add-to"]') as HTMLElement);
     expect(document.querySelector('[data-id="project-agent-card-add-submenu"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-submenu-label"]')).toHaveTextContent('添加到');
+    fireEvent.mouseEnter(document.querySelector('[data-id="project-agent-card-move-to"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-agent-card-move-submenu"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-submenu-label"]')).toHaveTextContent('移动到');
+    fireEvent.mouseEnter(document.querySelector('[data-id="project-agent-card-add-to"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-agent-card-add-submenu"]')).toBeInTheDocument();
     fireEvent.click(document.querySelector('[data-id="project-agent-card-add-project-2"]') as HTMLElement);
     expect(api.removeGroupPane).not.toHaveBeenCalled();
     await waitFor(() => expect(api.addGroupPane).toHaveBeenCalledWith(2, 'w-101:main.0', 'add'));
