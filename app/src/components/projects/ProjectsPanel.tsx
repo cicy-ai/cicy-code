@@ -390,7 +390,6 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 data-id="project-agent-card-title" className="truncate text-[18px] font-semibold tracking-[-0.01em] text-zinc-100">{agent.title || agent.paneId}</h3>
             {agent.agentType ? <span data-id="project-agent-card-agent-type" className="shrink-0 font-mono text-[12px] text-zinc-500">{agent.agentType}</span> : null}
-            {agent.remote ? <span data-id="project-agent-card-instance" className="shrink-0 rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-zinc-500">{agent.instanceTeam}</span> : null}
             {metrics?.model ? <ModelTag model={metrics.model} className="shrink-0" /> : null}
           </div>
         </div>
