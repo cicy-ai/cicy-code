@@ -54,6 +54,7 @@ beforeEach(() => {
   api.getCiCyCloudInstances.mockResolvedValue({ data: { instances: [] } });
   api.getCiCyCloudAgents.mockResolvedValue({ data: { agents: [] } });
   api.addGroupPane.mockResolvedValue({ data: { success: true } });
+  api.removeGroupPane.mockResolvedValue({ data: { success: true } });
   api.updateGroupPaneLayout.mockResolvedValue({ data: { success: true } });
   api.uploadAssetFile.mockResolvedValue({ data: { file: { file_ref: '/home/cicy/cicy-ai/assets/queued.png' } } });
   api.getMemoryTemplate.mockResolvedValue({ data: { content: '# Global', path: '/home/cicy/cicy-ai/memory/global.md' } });
@@ -498,7 +499,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-agent-card-project-default"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-projects-label"]')).toHaveTextContent('其他 Projects');
     fireEvent.click(document.querySelector('[data-id="project-agent-card-project-2"]') as HTMLElement);
+    await waitFor(() => expect(api.removeGroupPane).toHaveBeenCalledWith(1, 'w-101:main.0'));
     await waitFor(() => expect(api.addGroupPane).toHaveBeenCalledWith(2, 'w-101:main.0'));
+    expect(document.querySelector('[data-id="project-list-item-default"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('0');
     expect(document.querySelector('[data-id="project-list-item-2"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
   });
 

@@ -1260,13 +1260,31 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     }
     const id = shortPaneId(agent.paneId);
     try {
-      if (checked) await apiService.removeGroupPane(project.api_id, agent.paneId);
-      else await apiService.addGroupPane(project.api_id, agent.paneId);
+      if (checked) {
+        await apiService.removeGroupPane(project.api_id, agent.paneId);
+      } else {
+        // Project membership is exclusive. Selecting another Project is a
+        // move, not an additional membership. Roll the original membership
+        // back if the target add fails so an Agent is never orphaned.
+        if (!selectedProject.api_id) return;
+        await apiService.removeGroupPane(selectedProject.api_id, agent.paneId);
+        try {
+          await apiService.addGroupPane(project.api_id, agent.paneId);
+        } catch (cause) {
+          await apiService.addGroupPane(selectedProject.api_id, agent.paneId).catch(() => undefined);
+          throw cause;
+        }
+      }
       setGroups((current) => current.map((group) => {
-        if (String(group.id) !== String(project.id)) return group;
-        if (checked) return { ...group, pane_ids: group.pane_ids.filter((paneId) => shortPaneId(paneId) !== id), pane_count: Math.max(0, group.pane_count - 1) };
-        if (group.pane_ids.some((paneId) => shortPaneId(paneId) === id)) return group;
-        return { ...group, pane_ids: [...group.pane_ids, agent.paneId], pane_count: group.pane_count + 1 };
+        if (String(group.id) === String(project.id)) {
+          if (checked) return { ...group, pane_ids: group.pane_ids.filter((paneId) => shortPaneId(paneId) !== id), pane_count: Math.max(0, group.pane_count - 1) };
+          if (group.pane_ids.some((paneId) => shortPaneId(paneId) === id)) return group;
+          return { ...group, pane_ids: [...group.pane_ids, agent.paneId], pane_count: group.pane_count + 1 };
+        }
+        if (!checked && String(group.id) === String(selectedProject.id)) {
+          return { ...group, pane_ids: group.pane_ids.filter((paneId) => shortPaneId(paneId) !== id), pane_count: Math.max(0, group.pane_count - 1) };
+        }
+        return group;
       }));
     } catch (cause: any) {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.response?.data?.error || cause?.message || t('projectSaving') }));
