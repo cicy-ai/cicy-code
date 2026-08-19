@@ -65,12 +65,19 @@ describe('<ProjectsPanel /> floating action button', () => {
   it('lists searchable Cloud Agents by Instance and persists a qualified project member id', async () => {
     const lastSeenAt = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
     api.getCiCyCloudInstances.mockResolvedValue({ data: { instances: [{ instanceId: 'code-remote', teamId: 'mac_local', status: 'online', lastSeenAt }] } });
-    api.getCiCyCloudAgents.mockResolvedValue({ data: { agents: [{ instanceId: 'code-remote', teamId: 'mac_local', agentId: 'w-200', title: 'Remote Builder', agentType: 'codex' }] } });
+    api.getCiCyCloudAgents.mockResolvedValue({ data: { agents: [
+      { instanceId: 'code-remote', teamId: 'mac_local', agentId: 'w-200', title: 'Remote Builder', agentType: 'codex' },
+      { instanceId: 'code-remote', teamId: 'mac_local', agentId: 'w-201', title: 'Remote Reviewer', agentType: 'claude' },
+    ] } });
     render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
 
     fireEvent.click(await waitFor(() => document.querySelector('[data-id="project-add-agent"]') as HTMLElement));
     fireEvent.click(document.querySelector('[data-id="project-fab-add-existing"]') as HTMLElement);
     fireEvent.click(await waitFor(() => document.querySelector('[data-id="project-add-agent-instance-code-remote"]') as HTMLElement));
+    const codexFilter = await waitFor(() => document.querySelector('[data-id="project-add-agent-type-codex"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-add-agent-type-claude"]')).toHaveTextContent('1');
+    fireEvent.click(codexFilter);
+    expect(document.querySelector('[data-id="project-add-agent-mac_local.w-201"]')).not.toBeInTheDocument();
     fireEvent.change(document.querySelector('[data-id="project-add-agent-search"]') as HTMLInputElement, { target: { value: 'Builder' } });
     fireEvent.click(await waitFor(() => document.querySelector('[data-id="project-add-agent-mac_local.w-200"]') as HTMLElement));
     fireEvent.click(document.querySelector('[data-id="project-add-agent-confirm"]') as HTMLElement);

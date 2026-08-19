@@ -629,6 +629,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [addOpen, setAddOpen] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
   const [addSearch, setAddSearch] = useState('');
+  const [addAgentType, setAddAgentType] = useState('all');
   const [addInstanceId, setAddInstanceId] = useState('local');
   const [cloudInstances, setCloudInstances] = useState<any[]>([]);
   const [cloudDirectoryAgents, setCloudDirectoryAgents] = useState<any[]>([]);
@@ -828,8 +829,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const assignedAgentIds = useMemo(() => new Set(groups.flatMap((group) => group.pane_ids.map(shortPaneId))), [groups]);
   const availableAgents = allAgents.filter((agent) => !assignedAgentIds.has(shortPaneId(agent.paneId)));
   const availableAgentsForInstance = availableAgents.filter((agent) => addInstanceId === 'local' ? !agent.remote : agent.instanceId === addInstanceId);
+  const availableAgentTypesForInstance = [...new Set(availableAgentsForInstance.map((agent) => String(agent.agentType || '').trim().toLowerCase()).filter(Boolean))].sort();
   const normalizedAddSearch = addSearch.trim().toLowerCase();
-  const filteredAvailableAgents = availableAgentsForInstance.filter((agent) => !normalizedAddSearch || [
+  const filteredAvailableAgents = availableAgentsForInstance.filter((agent) => addAgentType === 'all' || String(agent.agentType || '').trim().toLowerCase() === addAgentType).filter((agent) => !normalizedAddSearch || [
     agent.title,
     agent.paneId,
     agent.agentType,
@@ -2119,7 +2121,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                   role="tab"
                   aria-selected={addInstanceId === instance.id}
                   data-id={instance.id === 'local' ? 'project-add-agent-instance-local' : `project-add-agent-instance-${instance.id}`}
-                  onClick={() => { setAddInstanceId(instance.id); setAddSearch(''); }}
+                  onClick={() => { setAddInstanceId(instance.id); setAddSearch(''); setAddAgentType('all'); }}
                   className={cn('group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors', addInstanceId === instance.id ? 'bg-blue-500/12 text-zinc-100 ring-1 ring-blue-500/25' : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300')}
                 >
                   <span className={cn('h-2 w-2 shrink-0 rounded-full', instance.online ? 'bg-emerald-500' : 'bg-zinc-600')} />
@@ -2133,6 +2135,12 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             <div className="mb-3 flex shrink-0 items-end justify-between gap-3">
               <div><div className="text-[12px] font-medium text-zinc-200">{selectedAddInstance?.label}</div><div className="mt-0.5 text-[10px] text-zinc-600">{filteredAvailableAgents.length} / {availableAgentsForInstance.length} Agents</div></div>
               {selectedToAdd.size > 0 ? <span className="rounded-full bg-blue-500/12 px-2 py-1 text-[10px] font-medium text-blue-400">{t('projectAddSelected', { count: selectedToAdd.size })}</span> : null}
+            </div>
+            <div data-id="project-add-agent-type-filter" className="mb-2.5 flex shrink-0 gap-1.5 overflow-x-auto pb-0.5">
+              {['all', ...availableAgentTypesForInstance].map((agentType) => {
+                const count = agentType === 'all' ? availableAgentsForInstance.length : availableAgentsForInstance.filter((agent) => String(agent.agentType || '').trim().toLowerCase() === agentType).length;
+                return <button key={agentType} type="button" data-id={`project-add-agent-type-${agentType}`} aria-pressed={addAgentType === agentType} onClick={() => setAddAgentType(agentType)} className={cn('flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[10px] font-medium transition-colors', addAgentType === agentType ? 'border-blue-500/35 bg-blue-500/12 text-blue-400' : 'border-white/[0.07] bg-white/[0.02] text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300')}><span>{agentType === 'all' ? t('all', { ns: 'common', defaultValue: '全部' }) : agentType}</span><span className="text-[9px] tabular-nums opacity-65">{count}</span></button>;
+              })}
             </div>
             <label data-id="project-add-agent-search-wrap" className="mb-3 flex h-10 shrink-0 items-center gap-2 rounded-xl border border-white/[0.08] bg-[#0c0d10] px-3 shadow-sm transition-colors focus-within:border-blue-500/45 focus-within:ring-2 focus-within:ring-blue-500/10">
               <Search className="h-4 w-4 shrink-0 text-zinc-500" />
