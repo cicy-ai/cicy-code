@@ -389,6 +389,22 @@ func TestCiCyCloudAgentIdleIsNullableAndStatusAware(t *testing.T) {
 	}
 }
 
+func TestCiCyCloudAgentRosterEnvelopePreservesOrderAndCounts(t *testing.T) {
+	agents := []M{
+		{"id": "w-1002", "online": true},
+		{"id": "w-1001", "online": false},
+		{"id": "w-1003", "online": true},
+	}
+	result := cicyCloudAgentRosterEnvelope(agents)
+	if result["kind"] != "all" || result["count"] != 3 || result["online"] != 2 || result["offline"] != 1 || result["all"] != 3 {
+		t.Fatalf("roster counts = %#v", result)
+	}
+	got, ok := result["agents"].([]M)
+	if !ok || len(got) != 3 || got[0]["id"] != "w-1002" || got[1]["id"] != "w-1001" || got[2]["id"] != "w-1003" {
+		t.Fatalf("roster order changed: %#v", result["agents"])
+	}
+}
+
 func TestCiCyCloudWebSocketDialLogDoesNotLeakCredentials(t *testing.T) {
 	t.Setenv("CICY_CLOUD_DISABLE_WS", "0")
 	const token = "token-must-never-appear"

@@ -893,6 +893,8 @@ func (t *cicyCloudTransport) handleRPCRequest(messageID, senderInstanceID, sende
 			result, rpcErr = agentReplyTextData(target, req.Full)
 		case "agent_status":
 			result, rpcErr = cicyCloudAgentStatus(target)
+		case "agent_roster":
+			result, rpcErr = cicyCloudAgentRosterData()
 		case "current_reply":
 			current, currentErr := aiGatewayReadCurrentSnapshotCached(target)
 			if currentErr != nil && !os.IsNotExist(currentErr) {
@@ -1326,6 +1328,27 @@ func cicyCloudAgentStatus(paneID string) (M, error) {
 	}
 	return cicyCloudAgentRosterState(fullPaneID, title, agentType, defaultModel, workspace,
 		useCustomGateway, agentInspectorLiteMetrics(shortPaneID(fullPaneID))), nil
+}
+
+func cicyCloudAgentRosterEnvelope(agents []M) M {
+	online := 0
+	for _, agent := range agents {
+		if value, ok := agent["online"].(bool); ok && value {
+			online++
+		}
+	}
+	return M{
+		"kind": "all", "count": len(agents), "online": online,
+		"offline": len(agents) - online, "all": len(agents), "agents": agents,
+	}
+}
+
+func cicyCloudAgentRosterData() (M, error) {
+	_, agents, err := collectCiCyCloudAgents()
+	if err != nil {
+		return nil, err
+	}
+	return cicyCloudAgentRosterEnvelope(agents), nil
 }
 
 func collectCiCyCloudAgents() ([]M, []M, error) {
