@@ -940,7 +940,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
 
   const toggleLeft = (p: 'team' | 'skills' | 'customAgents' | 'todo') => {
     setPortsOpen(false);
-    setProjectsOpen(false);
+    // Skills is a companion drawer for the Projects workspace: opening the
+    // marketplace must not navigate away from the active project. Other
+    // activity-bar panels keep their existing top-level navigation behavior.
+    if (p !== 'skills') setProjectsOpen(false);
     setKnowledgeOpen(false);
     setLeftPanelView(prev => prev === p ? null : p);
   };
@@ -2200,6 +2203,30 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <div data-id="main-layout" className="flex h-full min-w-0">
             {projectsOpen ? (
               <>
+              {leftActive === 'skills' && !globalVar?.helper_mode ? (
+                <div
+                  data-testid="left-panel"
+                  data-id="left-panel"
+                  className="h-full w-[360px] min-w-[360px] max-w-[360px] shrink-0"
+                >
+                  <div data-id="left-panel-wrap" className="h-full flex flex-col bg-[#0A0A0A] border-r border-[var(--vsc-border)] relative z-[130]">
+                    <div data-id="left-panel-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
+                      <Brain className="w-3.5 h-3.5 text-zinc-600" />
+                      <span data-id="left-panel-title-skills" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
+                      <button data-id="left-panel-close" onClick={closeLeftPanel} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                    <div data-id="left-panel-body" className="flex-1 relative overflow-hidden bg-[#0A0A0A] z-[131]">
+                      <div data-id="left-panel-skills-view" className="absolute inset-0">
+                        <SkillMarketplacePanel
+                          paneId={activeCliPaneId || paneId}
+                          onOpenDetail={handleSkillDetailOpen}
+                          onCloseDetail={handleSkillDetailClose}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               <ProjectsPanel
                 agents={projectAgents}
                 statuses={pollStatuses}
