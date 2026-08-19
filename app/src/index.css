@@ -125,6 +125,25 @@ html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/[0.
 html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/[0.28]"]:not([class*="fixed"][class*="inset-0"]):not([class*="absolute"][class*="inset-0"]),
 html[data-theme="light"] :is(div, section, article, td, tr)[class~="bg-black/[0.35]"]:not([class*="fixed"][class*="inset-0"]):not([class*="absolute"][class*="inset-0"]) { background-color: #f4f4f5 !important; }
 
+/* Projects > Add Agent: keep the Instance rail airy in light mode. Generic
+   translucent dark surfaces otherwise compound into a muddy gray block. */
+html[data-theme="light"] [data-id="project-add-agent-instance-tabs"] {
+  background-color: #f7f8fa !important;
+  border-right-color: #e4e7ec !important;
+}
+html[data-theme="light"] [data-id="project-add-agent-instance-tabs"] [role="tab"] {
+  color: #667085 !important;
+}
+html[data-theme="light"] [data-id="project-add-agent-instance-tabs"] [role="tab"]:hover {
+  background-color: #eef1f5 !important;
+  color: #344054 !important;
+}
+html[data-theme="light"] [data-id="project-add-agent-instance-tabs"] [role="tab"][aria-selected="true"] {
+  background-color: #eaf2ff !important;
+  color: #175cd3 !important;
+  box-shadow: inset 0 0 0 1px #b2ccff !important;
+}
+
 html[data-theme="light"] [class~="text-white"]:not([class*="bg-"]),
 html[data-theme="light"] [class~="text-zinc-100"],
 html[data-theme="light"] [class~="text-zinc-200"] { color: #18181b !important; }

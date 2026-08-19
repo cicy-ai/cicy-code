@@ -2109,13 +2109,15 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
       <AppModal open={addOpen} title={t('projectAddAgentTitle', { name: selectedProject.name })} onClose={() => setAddOpen(false)} maxWidth="760px">
         <div data-id="project-add-agent-modal" className="flex h-[620px] max-h-[calc(82vh-88px)] min-h-0 overflow-hidden rounded-xl border border-white/[0.07] bg-[#111216]">
-          <aside data-id="project-add-agent-instance-tabs" className="flex w-[190px] shrink-0 flex-col border-r border-white/[0.07] bg-black/[0.12] p-2.5">
+          <aside data-id="project-add-agent-instance-tabs" role="tablist" aria-label="Instance" className="flex w-[190px] shrink-0 flex-col border-r border-white/[0.07] bg-black/[0.12] p-2.5">
             <div className="mb-2 px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-600">Instance</div>
             <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
               {addInstanceOptions.map((instance) => (
                 <button
                   key={instance.id}
                   type="button"
+                  role="tab"
+                  aria-selected={addInstanceId === instance.id}
                   data-id={instance.id === 'local' ? 'project-add-agent-instance-local' : `project-add-agent-instance-${instance.id}`}
                   onClick={() => { setAddInstanceId(instance.id); setAddSearch(''); }}
                   className={cn('group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors', addInstanceId === instance.id ? 'bg-blue-500/12 text-zinc-100 ring-1 ring-blue-500/25' : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300')}
