@@ -609,8 +609,8 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </div>
       </div>
       {showScrollToBottom ? (
-        <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); loadingDetachedRef.current = false; bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-2 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/10 bg-[#202126]/95 text-zinc-300 shadow-lg backdrop-blur hover:bg-[#292a30] hover:text-white">
-          <ArrowDown className="h-3.5 w-3.5" />
+        <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); loadingDetachedRef.current = false; bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-5 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/20 bg-[#27282e]/98 text-zinc-100 shadow-[0_5px_16px_rgba(0,0,0,0.38)] backdrop-blur hover:border-white/30 hover:bg-[#33343b] hover:text-white">
+          <ArrowDown className="h-4 w-4 stroke-[2.4]" />
         </button>
       ) : null}
       {rawQuestion && (working || completed) ? (

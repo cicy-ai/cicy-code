@@ -505,6 +505,17 @@ html[data-theme="light"] [data-id="project-agent-card-attachment-remove"] {
   color: #52525b !important;
   border: 1px solid #d4d4d8;
 }
+html[data-theme="light"] [data-id="project-agent-card-scroll-bottom"] {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+  border-color: #a1a1aa !important;
+  color: #27272a !important;
+  box-shadow: 0 5px 16px rgba(24, 24, 27, 0.20) !important;
+}
+html[data-theme="light"] [data-id="project-agent-card-scroll-bottom"]:hover {
+  background-color: #f4f4f5 !important;
+  border-color: #71717a !important;
+  color: #09090b !important;
+}
 html[data-theme="light"] [data-id="workspace-toast"] {
   background-color: rgba(255, 255, 255, 0.98) !important;
   border-color: #d4d4d8 !important;
