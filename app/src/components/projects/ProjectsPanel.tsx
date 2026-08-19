@@ -208,7 +208,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, terminalOpen, working, teamId, selected, removable, footer, width, height, onSelect, onRemove, onOpenHistory, onToggleTerminal, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, terminalOpen, working, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onToggleProject, onOpenHistory, onToggleTerminal, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   latest?: any;
@@ -220,10 +220,12 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   selected: boolean;
   removable: boolean;
   footer?: ReactNode;
+  projectOptions?: Array<{ id: number | string; name: string; checked: boolean }>;
   width: number;
   height: number;
   onSelect: () => void;
   onRemove: () => void;
+  onToggleProject: (projectId: number | string, checked: boolean) => void;
   onOpenHistory: () => void;
   onToggleTerminal: () => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -389,13 +391,26 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             <MoreHorizontal className="h-4 w-4" />
           </button>
           {menuOpen ? (
-            <div data-id="project-agent-card-menu" className="absolute right-0 top-9 z-20 min-w-[150px] overflow-hidden rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
+            <div data-id="project-agent-card-menu" className="absolute right-0 top-9 z-20 min-w-[190px] overflow-hidden rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
+              <div data-id="project-agent-card-projects-label" className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Projects</div>
+              {projectOptions.map((project) => (
+                <button
+                  key={String(project.id)}
+                  type="button"
+                  data-id={`project-agent-card-project-${project.id}`}
+                  onClick={(event) => { event.stopPropagation(); onToggleProject(project.id, project.checked); }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]"
+                >
+                  <span className={cn('grid h-4 w-4 shrink-0 place-items-center rounded border', project.checked ? 'border-blue-400 bg-blue-500 text-white' : 'border-white/15 text-transparent')}><Check className="h-3 w-3" /></span>
+                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                </button>
+              ))}
               {removable ? (
                 <button
                   type="button"
                   data-id="project-agent-card-remove"
                   onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onRemove(); }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-red-300 hover:bg-red-500/10"
+                  className="mt-1 flex w-full items-center gap-2 border-t border-white/[0.07] rounded-lg px-3 py-2 text-left text-[12px] text-red-300 hover:bg-red-500/10"
                 >
                   <X className="h-3.5 w-3.5" />{t('projectRemoveAgent')}
                 </button>
@@ -554,7 +569,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           </div>
         ) : null}
         {working ? (
-          <div ref={loadingRef} data-id="project-agent-card-stream-loading" className="flex h-5 items-center gap-1 pt-1" aria-label="Loading reply">
+          <div ref={loadingRef} data-id="project-agent-card-stream-loading" className="mt-0.5 flex h-7 items-center gap-1" aria-label="Loading reply">
             {[0, 1, 2].map((index) => (
               <span key={index} data-id="project-agent-card-stream-loading-dot" className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />
             ))}
@@ -1236,6 +1251,28 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     await load(false);
   };
 
+  const toggleAgentProject = async (agent: ProjectAgent, projectId: number | string, checked: boolean) => {
+    const project = projects.find((item) => String(item.id) === String(projectId));
+    if (!project?.api_id) return;
+    if (checked && String(project.id) === String(selectedProject.id)) {
+      await removeAgent(agent);
+      return;
+    }
+    const id = shortPaneId(agent.paneId);
+    try {
+      if (checked) await apiService.removeGroupPane(project.api_id, agent.paneId);
+      else await apiService.addGroupPane(project.api_id, agent.paneId);
+      setGroups((current) => current.map((group) => {
+        if (String(group.id) !== String(project.id)) return group;
+        if (checked) return { ...group, pane_ids: group.pane_ids.filter((paneId) => shortPaneId(paneId) !== id), pane_count: Math.max(0, group.pane_count - 1) };
+        if (group.pane_ids.some((paneId) => shortPaneId(paneId) === id)) return group;
+        return { ...group, pane_ids: [...group.pane_ids, agent.paneId], pane_count: group.pane_count + 1 };
+      }));
+    } catch (cause: any) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.response?.data?.error || cause?.message || t('projectSaving') }));
+    }
+  };
+
   const toggleAgentSelection = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
     setSelectedAgentIds(new Set([id]));
@@ -1797,6 +1834,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
                 removable={Boolean(selectedProject.api_id)}
+                projectOptions={projects.map((project) => ({
+                  id: project.id,
+                  name: project.name,
+                  checked: project.pane_ids.some((paneId) => shortPaneId(paneId) === cardShortId),
+                }))}
                 width={layout.width}
                 height={layout.height}
                 onSelect={() => toggleAgentSelection(agent)}
@@ -1969,6 +2011,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                   </footer>
                 )}
                 onRemove={() => { void removeAgent(agent); }}
+                onToggleProject={(projectId, checked) => { void toggleAgentProject(agent, projectId, checked); }}
                     onOpenHistory={() => onOpenHistory(agent.paneId)}
                 onToggleTerminal={() => setTerminalAgentIds((current) => {
                   const next = new Set(current);

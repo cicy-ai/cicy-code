@@ -465,6 +465,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     // arrives, otherwise the loading indicator disappears and reappears during
     // the handoff to server-side working status.
     expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).toHaveClass('h-7', 'mt-0.5');
     expect(document.querySelectorAll('[data-id="project-agent-card-stream-loading-dot"]')).toHaveLength(3);
     await waitFor(() => expect(input).toHaveFocus());
   });
@@ -478,6 +479,25 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument());
     expect(document.querySelector('[data-id="project-agent-prompt-cancel-w-101"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-inactive-loading-w-101"]')).not.toBeInTheDocument();
+  });
+
+  it('adds an agent to another project from the card More menu', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [
+      { ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 },
+      defaultGroups[1],
+    ] } });
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+
+    const menu = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-menu-w-101"]');
+      if (!node) throw new Error('agent card menu did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(menu);
+    expect(document.querySelector('[data-id="project-agent-card-project-default"]')).toBeInTheDocument();
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-project-2"]') as HTMLElement);
+    await waitFor(() => expect(api.addGroupPane).toHaveBeenCalledWith(2, 'w-101:main.0'));
+    expect(document.querySelector('[data-id="project-list-item-2"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
   });
 
   it('keeps project-card selection synchronized with the shared active agent', async () => {
