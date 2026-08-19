@@ -22,6 +22,7 @@ import TerminalView from '../terminal/TerminalView';
 import MarkdownFileEditor from '../files/MarkdownFileEditor';
 
 const AgentDocRoleEditor = lazy(() => import('../layout/AgentDocRoleEditor'));
+const RemoteAgentRoleEditor = lazy(() => import('./RemoteAgentRoleEditor'));
 
 export interface ProjectAgent {
   paneId: string;
@@ -119,79 +120,6 @@ const cloudRPC = async (agent: ProjectAgent, op: string, payload: Record<string,
   }
   throw new Error('Cloud RPC timed out');
 };
-
-type RemotePersonaField = 'guidance' | 'systemPrompt' | 'meta';
-
-function RemoteAgentRoleEditor({ agent }: { agent: ProjectAgent }) {
-  const [persona, setPersona] = useState<Record<RemotePersonaField, string>>({ guidance: '', systemPrompt: '', meta: '' });
-  const [filename, setFilename] = useState('AGENTS.md');
-  const [active, setActive] = useState<RemotePersonaField>('guidance');
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError('');
-    setSaved(false);
-    cloudRPC(agent, 'persona')
-      .then((data) => {
-        if (cancelled) return;
-        setFilename(String(data?.filename || (String(agent.agentType).toLowerCase() === 'claude' ? 'CLAUDE.md' : 'AGENTS.md')));
-        setPersona({
-          guidance: String(data?.guidance || ''),
-          systemPrompt: String(data?.systemPrompt || ''),
-          meta: String(data?.meta || ''),
-        });
-      })
-      .catch((cause: any) => { if (!cancelled) setError(cause?.message || '加载角色失败'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [agent.instanceId, agent.remoteAgentId]);
-
-  const save = async () => {
-    setSaving(true);
-    setSaved(false);
-    setError('');
-    try {
-      const data = await cloudRPC(agent, 'persona_save', { [active]: persona[active] });
-      setPersona({
-        guidance: String(data?.guidance ?? persona.guidance),
-        systemPrompt: String(data?.systemPrompt ?? persona.systemPrompt),
-        meta: String(data?.meta ?? persona.meta),
-      });
-      setSaved(true);
-    } catch (cause: any) {
-      setError(cause?.message || '保存角色失败');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const tabs: Array<[RemotePersonaField, string]> = String(agent.agentType || '').toLowerCase() === 'cicy'
-    ? [['guidance', filename], ['systemPrompt', 'system.md'], ['meta', 'meta.yaml']]
-    : [['guidance', filename]];
-  return (
-    <div data-id="remote-agent-role-editor" className="flex h-full min-h-0 flex-col bg-[#0b0b0d]">
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-zinc-800 px-2">
-        <div className="flex min-w-0 items-center gap-1">
-          {tabs.map(([key, label]) => (
-            <button key={key} type="button" data-id={`remote-agent-role-tab-${key}`} onClick={() => setActive(key)} className={cn('rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors', active === key ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300')}>{label}</button>
-          ))}
-        </div>
-        <button type="button" data-id="remote-agent-role-save" disabled={loading || saving} onClick={() => void save()} className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100 disabled:opacity-40">
-          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}{saving ? '保存中…' : saved ? '已保存' : '保存'}
-        </button>
-      </div>
-      {error ? <div data-id="remote-agent-role-error" className="shrink-0 border-b border-rose-500/20 bg-rose-500/10 px-3 py-1.5 text-[11px] text-rose-300">{error}</div> : null}
-      {loading ? <div data-id="remote-agent-role-loading" className="grid min-h-0 flex-1 place-items-center text-[11px] text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /></div> : (
-        <textarea data-id={`remote-agent-role-content-${active}`} aria-label={tabs.find(([key]) => key === active)?.[1]} value={persona[active]} onChange={(event) => { setSaved(false); setPersona((value) => ({ ...value, [active]: event.target.value })); }} spellCheck={false} className="min-h-0 flex-1 resize-none bg-transparent p-3 font-mono text-[12px] leading-5 text-zinc-200 outline-none" />
-      )}
-    </div>
-  );
-}
 
 const readProjectAgentQueue = (): Record<string, QueuedAgentMessage[]> => {
   try {
@@ -567,7 +495,14 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       ) : selected && activeBodyTab === 'role' ? (
         <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()} onTouchStart={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()} className="-mx-5 flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0b0b0d] overscroll-contain">
           <Suspense fallback={<div data-id="project-agent-card-role-loading" className="flex h-full items-center justify-center text-[11px] text-zinc-600">Loading…</div>}>
-            {agent.remote ? <RemoteAgentRoleEditor agent={agent} /> : <AgentDocRoleEditor paneId={agent.paneId} className="min-h-0 flex-1" />}
+            {agent.remote ? (
+              <RemoteAgentRoleEditor
+                cacheKey={`${agent.instanceId || ''}:${agent.remoteAgentId || ''}`}
+                agentType={agent.agentType}
+                load={() => cloudRPC(agent, 'persona')}
+                save={(field, content) => cloudRPC(agent, 'persona_save', { [field]: content })}
+              />
+            ) : <AgentDocRoleEditor paneId={agent.paneId} className="min-h-0 flex-1" />}
           </Suspense>
         </div>
       ) : (

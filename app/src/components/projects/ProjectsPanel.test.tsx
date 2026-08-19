@@ -31,6 +31,11 @@ vi.mock('../../services/api', () => ({ default: api }));
 vi.mock('../../services/agentSend', () => agentSend);
 vi.mock('../AgentAvatar', () => ({ default: () => <span data-testid="agent-avatar" /> }));
 vi.mock('../terminal/TerminalView', () => ({ default: ({ ttydSrc }: { ttydSrc: string }) => <div data-id="mock-project-terminal">{ttydSrc}</div> }));
+vi.mock('@uiw/react-codemirror', () => ({
+  default: ({ value, onChange, extensions: _extensions, basicSetup: _basicSetup, theme: _theme, height: _height, ...props }: any) => (
+    <textarea {...props} value={value} onChange={(event) => onChange(event.target.value)} />
+  ),
+}));
 
 import ProjectsPanel from './ProjectsPanel';
 
@@ -385,6 +390,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     fireEvent.click(roleTab);
     const editor = await screen.findByLabelText('AGENTS.md');
     expect(editor).toHaveValue('# Remote role');
+    expect(localStorage.getItem('cicy_remote_agent_persona:v1:code-remote:w-200')).toContain('# Remote role');
     expect(api.sendCiCyCloudMessage).toHaveBeenCalledWith('code-remote', 'w-200', '', JSON.stringify({ op: 'persona' }), 'rpc_request');
 
     fireEvent.change(editor, { target: { value: '# Updated role' } });

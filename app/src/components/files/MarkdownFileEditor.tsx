@@ -5,6 +5,9 @@ import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView } from '@codemirror/view';
+import { cicySearch } from './cmSearchPanel';
+
+const SEARCH_EXT = cicySearch();
 
 const fileEditorTheme = EditorView.theme({
   '&': { height: '100%', backgroundColor: 'transparent !important', color: '#e4e4e7' },
@@ -34,7 +37,7 @@ export default function MarkdownFileEditor({ value, path, onChange, loading = fa
             height="100%"
             theme={oneDark}
             basicSetup={{ lineNumbers: true, highlightActiveLine: true, foldGutter: true, bracketMatching: true, closeBrackets: true, autocompletion: false }}
-            extensions={[markdown(), fileEditorTheme]}
+            extensions={[markdown(), ...SEARCH_EXT, fileEditorTheme]}
             onChange={onChange}
             className="h-full"
             style={{ height: '100%' }}

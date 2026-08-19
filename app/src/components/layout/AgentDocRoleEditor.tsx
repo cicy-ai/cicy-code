@@ -10,6 +10,9 @@ import { Loader2, Check, AlertCircle, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { isCicyLiteAgent } from '../../lib/agentType';
+import { cicySearch } from '../files/cmSearchPanel';
+
+const SEARCH_EXT = cicySearch();
 
 // The roster drawer's per-agent editor. Tab 1 is always the agent's OWN guidance
 // doc — [ CLAUDE.md / AGENTS.md ] — (per-agent, DB-resolved via scope 'agent').
@@ -226,7 +229,7 @@ export default function AgentDocRoleEditor({ paneId, className }: Props) {
             value={file.content}
             onChange={file.setContent}
             theme={oneDark}
-            extensions={[markdown(), EditorView.lineWrapping, cmBlendTheme, saveKeymap]}
+            extensions={[markdown(), ...SEARCH_EXT, EditorView.lineWrapping, cmBlendTheme, saveKeymap]}
             basicSetup={BASIC_SETUP}
             className="h-full text-[13px]"
           />
