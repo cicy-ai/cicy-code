@@ -150,7 +150,7 @@ export function UpdateAgentModal({ paneId, title, onClose }: {
         </div>
         <div
           data-id="update-agent-modal-log"
-          className="mx-5 mb-3 mt-3 h-48 overflow-y-auto rounded-lg bg-black/50 p-2.5 font-mono text-[11px] leading-relaxed text-zinc-400"
+          className="mx-5 mb-3 mt-3 h-48 overflow-y-auto rounded-lg border border-white/[0.08] bg-[#09090b] p-2.5 font-mono text-[11px] leading-relaxed text-zinc-400"
         >
           {log.map((l, i) => <div key={i}>{l}</div>)}
         </div>
