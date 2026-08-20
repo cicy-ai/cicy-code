@@ -539,9 +539,13 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           (visibleQuestion || visibleQuestionAttachments.length) && 'border-b border-zinc-200/80 pb-5 dark:border-white/[0.07]',
         )}
       >
-        {selected ? <div data-id="project-agent-card-history-link-row" className="flex justify-end">
+        <div
+          data-id="project-agent-card-history-link-row"
+          aria-hidden={!selected}
+          className={cn('flex h-7 shrink-0 justify-end', !selected && 'invisible pointer-events-none')}
+        >
           <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史<ArrowRight className="h-3 w-3" /></button>
-        </div> : null}
+        </div>
         {visibleQuestion || visibleQuestionAttachments.length ? (
           <div data-id="project-agent-card-question-row" className="flex min-w-0 items-start gap-2.5">
             <UserTurnAvatar className="!mt-0" />

@@ -594,6 +594,37 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(input).toHaveFocus());
   });
 
+  it('keeps the complete-history row mounted when card selection changes', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    api.getAgentCurrentReply.mockResolvedValue({ data: {
+      question: '现在好了么',
+      items: [{ type: 'text', text: '现在好了。' }],
+      status: 'completed',
+    } });
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    const historyRow = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-history-link-row"]');
+      if (!node) throw new Error('history row did not render');
+      return node;
+    });
+    expect(historyRow).toHaveClass('h-7', 'invisible', 'pointer-events-none');
+    expect(historyRow).toHaveAttribute('aria-hidden', 'true');
+
+    fireEvent.click(card);
+
+    expect(document.querySelector('[data-id="project-agent-card-history-link-row"]')).toBe(historyRow);
+    expect(historyRow).not.toHaveClass('invisible', 'pointer-events-none');
+    expect(historyRow).toHaveAttribute('aria-hidden', 'false');
+  });
+
   it('keeps the loading stop control visible on an inactive card', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
