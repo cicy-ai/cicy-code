@@ -146,7 +146,9 @@ describe('<ProjectsPanel /> floating action button', () => {
 
     rerender(<ProjectsPanel agents={[]} dockOpen={false} onOpenAgent={vi.fn()} />);
     expect(document.querySelector('[data-id="project-fab-wrap"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-fab-wrap"]')).toHaveClass('fixed', 'bottom-16', 'right-5');
+    expect(document.querySelector('[data-id="projects-panel"]')).toHaveClass('relative');
+    expect(document.querySelector('[data-id="project-fab-wrap"]')).toHaveClass('absolute', 'bottom-16', 'right-5');
+    expect(document.querySelector('[data-id="project-fab-wrap"]')).not.toHaveClass('fixed');
     expect(document.querySelector('[data-id="project-fab-menu"]')).toHaveClass('pointer-events-none');
   });
 

@@ -1791,7 +1791,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   };
 
   return (
-    <section data-id="projects-panel" className="flex h-full min-w-0 flex-1 bg-[#090a0d] text-zinc-300">
+    <section data-id="projects-panel" className="relative flex h-full min-w-0 flex-1 bg-[#090a0d] text-zinc-300">
       <aside data-id="projects-list" className={cn('shrink-0 flex-col border-r border-white/[0.07] bg-[#0d0e12]', projectListCollapsed ? 'hidden' : 'flex w-[280px] max-[700px]:w-[180px]')}>
         <header data-id="projects-list-header" className="flex h-12 shrink-0 items-center border-b border-white/[0.07] px-4">
           <h2 data-id="projects-list-title" className="flex-1 text-[15px] font-semibold text-zinc-100">{t('projectsTitle')}</h2>
@@ -2126,7 +2126,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           </div>
         ) : null}
         </div>
-        {!dockOpen ? <div data-id="project-fab-wrap" className="fixed bottom-16 right-5 z-[80] flex flex-col items-end gap-2">
+        {!dockOpen ? <div data-id="project-fab-wrap" className="absolute bottom-16 right-5 z-[80] flex flex-col items-end gap-2">
           <div
             data-id="project-fab-menu"
             className={cn(
