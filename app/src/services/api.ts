@@ -5,6 +5,7 @@ import axios from 'axios';
 import config from '../config';
 import { TokenManager } from './tokenManager';
 import i18n from '../i18n';
+import { createInflightCoalescer } from './inflight';
 
 const BACKEND_KEY = 'cicy_backend';
 
@@ -16,6 +17,7 @@ const pendingPaneDetailRequests = new Map<string, Promise<any>>();
 // that's two identical GET /api/memory/templates/agent/:id requests. Share the
 // in-flight promise so concurrent identical reads collapse to one round-trip.
 const pendingMemoryTemplateRequests = new Map<string, Promise<any>>();
+const coalesceRead = createInflightCoalescer();
 
 function shortPaneRouteId(id: string) {
   return String(id || '').replace(/:main\.0$/, '');
@@ -175,7 +177,11 @@ const api = {
   getAgentUsageAnalysis: (id: string) => http.get(`/api/agents/usage-analysis/${encodeURIComponent(id)}`),
   getAgentUsageBlock: (id: string, idx: number) => http.get(`/api/agents/usage-block/${encodeURIComponent(id)}`, { params: { idx } }),
   getAgentHistoryIDs: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/history-ids/${encodeURIComponent(id)}`, { params }),
-  getAgentCurrentReply: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/current-reply/${encodeURIComponent(id)}`, { params }),
+  getAgentCurrentReply: (id: string, params?: { conversation_id?: string }) => {
+    const route = `/api/agents/current-reply/${encodeURIComponent(id)}`;
+    const conversationId = String(params?.conversation_id || '');
+    return coalesceRead(`${route}?conversation_id=${conversationId}`, () => http.get(route, { params }));
+  },
   // Lite header metrics for many agents in ONE request — the dual-channel
   // fallback when the chat WS push is down/stale, so the team panel never fans
   // out N× /current-reply. Returns { success, metrics: { id: {status,model,…} } }.
@@ -272,7 +278,7 @@ const api = {
 
   // IM (Telegram / WeChat) — restored 2026-05-18
   getIMPlatforms: () => http.get('/api/im/platforms'),
-  getIMAccounts: () => http.get('/api/im/accounts'),
+  getIMAccounts: () => coalesceRead('/api/im/accounts', () => http.get('/api/im/accounts')),
   getIMAccount: (id: number) => http.get(`/api/im/accounts/${id}`),
   createIMAccount: (data: any) => http.post('/api/im/accounts', data),
   updateIMAccount: (id: number, data: any) => http.patch(`/api/im/accounts/${id}`, data),
@@ -292,18 +298,18 @@ const api = {
   cancelWeChatLogin: (sessionId: string) => http.post(`/api/im/wechat/login/${encodeURIComponent(sessionId)}/cancel`),
   startCiCyCloudLogin: (email: string, team: string) => http.post('/api/im/cicy-cloud/login', { email, team }),
   getCiCyCloudLoginStatus: (state: string) => http.get(`/api/im/cicy-cloud/login/${encodeURIComponent(state)}`),
-  getCiCyCloudInstances: () => http.get('/api/im/cicy-cloud/instances'),
+  getCiCyCloudInstances: () => coalesceRead('/api/im/cicy-cloud/instances', () => http.get('/api/im/cicy-cloud/instances')),
   enableCiCyCloudTunnel: () => http.post('/api/im/cicy-cloud/tunnel'),
   getPublishedPorts: () => http.get('/api/ports'),
   savePublishedPort: (port: number, name: string, visibility: 'private' | 'public') =>
     http.post('/api/ports', { port, name, visibility }),
   deletePublishedPort: (port: number) => http.delete('/api/ports', { params: { port } }),
-  getCiCyCloudAgents: () => http.get('/api/im/cicy-cloud/agents'),
+  getCiCyCloudAgents: () => coalesceRead('/api/im/cicy-cloud/agents', () => http.get('/api/im/cicy-cloud/agents')),
   sendCiCyCloudMessage: (targetInstanceId: string, targetAgentId: string, senderAgentId: string, text: string, kind = 'user_message') => http.post('/api/im/cicy-cloud/send', {
     target_instance_id: targetInstanceId, target_agent_id: targetAgentId,
     sender_agent_id: senderAgentId, text, kind,
   }),
-  getCiCyCloudMessageStatus: (messageId: string) => http.get('/api/im/cicy-cloud/status', { params: { id: messageId } }),
+  getCiCyCloudMessageStatus: (messageId: string) => coalesceRead(`/api/im/cicy-cloud/status?id=${messageId}`, () => http.get('/api/im/cicy-cloud/status', { params: { id: messageId } })),
 
   getTokens: () => http.get('/api/auth/tokens'),
   createToken: (data: any) => http.post('/api/auth/tokens', data),

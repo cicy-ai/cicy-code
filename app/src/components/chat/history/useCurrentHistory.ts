@@ -100,11 +100,12 @@ export function useCurrentHistory(opts: {
   // vs 切换/重开/softRebind 后 positional history_id 变化导致的"伪新问题"(完成态,
   // 钉顶会演出一段"打字进场",让人误以为 agent 还在工作)。
   const replyInFlightRef = useRef(false);
-  const lastBusyEmitRef = useRef<boolean | null>(null);
-  const emitBusy = (busy: boolean) => {
-    if (lastBusyEmitRef.current === busy) return;
-    lastBusyEmitRef.current = busy;
-    window.dispatchEvent(new CustomEvent('cicy:dispatcher-busy', { detail: { paneId, busy } }));
+  const lastBusyEmitRef = useRef('');
+  const emitBusy = (busy: boolean, terminal = false) => {
+    const signature = `${busy}:${terminal}`;
+    if (lastBusyEmitRef.current === signature) return;
+    lastBusyEmitRef.current = signature;
+    window.dispatchEvent(new CustomEvent('cicy:dispatcher-busy', { detail: { paneId, busy, terminal } }));
   };
   // items 的最新快照,供轮询 effect 的 onNudge(闭包里的 items 是旧的)读取 baseline。
   const itemsRef = useRef<HistoryTurn[]>([]);
@@ -376,7 +377,8 @@ export function useCurrentHistory(opts: {
         const replyInFlight = answerId > 0 && !complete && !replyFailed;
         replyInFlightRef.current = replyInFlight;
         setReplyPending(optimisticActiveRef.current || replyInFlight);
-        emitBusy(optimisticActiveRef.current || replyInFlight);
+        const effectiveBusy = optimisticActiveRef.current || replyInFlight;
+        emitBusy(effectiveBusy, !effectiveBusy && answerId > 0 && (complete || replyFailed));
 
         // /clear 发出即清后:被清会话的任何数据一律不收(否则 rotate 完成前老内容
         // 闪回)。快速轮询等 rotate;观测到新会话 cid 时解除封锁、走正常 rebind。
