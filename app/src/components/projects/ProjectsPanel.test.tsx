@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({
@@ -261,9 +261,9 @@ describe('<ProjectsPanel /> project view cache', () => {
     });
   });
 
-  it('rechecks visibility when a late server layout replaces visible cached cards', async () => {
+  it('keeps painted cards stable while a late server layout fills uncached cards', async () => {
     api.listGroups.mockResolvedValue({
-      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0'], pane_count: 2 }] },
     });
     let resolveLayout: (value: any) => void = () => {};
     api.getGroup.mockReturnValue(new Promise((resolve) => { resolveLayout = resolve; }));
@@ -273,21 +273,20 @@ describe('<ProjectsPanel /> project view cache', () => {
       layouts: { 'w-101': { x: 40, y: 40, z: 1, width: 300, height: 320 } },
     }));
 
-    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' }]} onOpenAgent={vi.fn()} />);
+    render(<ProjectsPanel agents={[
+      { paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' },
+      { paneId: 'w-102:main.0', title: '测试', agentType: 'codex' },
+    ]} onOpenAgent={vi.fn()} />);
     await waitFor(() => expect(document.querySelector('[data-id="project-canvas-node-w-101"]')).toHaveStyle({ left: '40px', top: '40px' }));
-    const canvas = document.querySelector('[data-id="project-infinite-canvas"]') as HTMLElement;
-    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 1000 });
-    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 700 });
 
-    resolveLayout({ data: { panes: [{ pane_id: 'w-101:main.0', pos_x: -1600, pos_y: -1000, width: 300, height: 320, z_index: 1 }] } });
+    act(() => resolveLayout({ data: { panes: [
+      { pane_id: 'w-101:main.0', pos_x: -1600, pos_y: -1000, width: 300, height: 320, z_index: 1 },
+      { pane_id: 'w-102:main.0', pos_x: 760, pos_y: 500, width: 360, height: 340, z_index: 2 },
+    ] } }));
 
-    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-node-w-101"]')).toHaveStyle({ left: '-1600px', top: '-1000px' }));
-    await waitFor(() => {
-      const cached = JSON.parse(localStorage.getItem('cicy_project_view:default') || '{}');
-      expect(cached.pan).not.toEqual({ x: 60, y: 60 });
-      expect(cached.pan.x).toBeGreaterThan(1000);
-      expect(cached.pan.y).toBeGreaterThan(700);
-    });
+    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-node-w-102"]')).toHaveStyle({ left: '760px', top: '500px' }));
+    expect(document.querySelector('[data-id="project-canvas-node-w-101"]')).toHaveStyle({ left: '40px', top: '40px' });
+    expect(document.querySelector('[data-id="project-agent-card-w-101"]')).toHaveStyle({ width: '300px', height: '320px' });
   });
 });
 

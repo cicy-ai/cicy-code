@@ -1118,13 +1118,16 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           placed.push(layout);
         });
         if (!cancelled) {
-          // A late server layout replaces the initially visible/default layout.
-          // Re-run the one-shot visibility check against these real coordinates;
-          // otherwise an offscreen server layout makes cards flash, then vanish.
-          setAgentLayouts(next);
+          // Never let a late server response move cards that were already
+          // painted from the local cache (or dragged while this request was in
+          // flight). Server coordinates only fill agents missing from the
+          // latest cache, so hydration cannot cause a second layout pass.
+          const latestCached = readProjectViewCache(selectedProject.id);
+          const stableNext = latestCached ? { ...next, ...latestCached.layouts } : next;
+          setAgentLayouts(stableNext);
           setLayoutReadyProjectId(String(selectedProject.id));
           setLayoutVisibilityRevision((value) => value + 1);
-          writeProjectViewCache(selectedProject.id, { layouts: next });
+          writeProjectViewCache(selectedProject.id, { layouts: stableNext });
         }
       } catch {
         if (!cancelled) {
