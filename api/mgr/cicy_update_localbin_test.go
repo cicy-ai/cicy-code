@@ -44,20 +44,24 @@ func fakeCicyCodeTarball(t *testing.T, content []byte) []byte {
 	return buf.Bytes()
 }
 
-func TestMacPlatformPackage(t *testing.T) {
+func TestLocalBinPlatformPackage(t *testing.T) {
 	tests := []struct {
+		goos      string
 		arch      string
 		wantPkg   string
 		wantLabel string
 		wantErr   bool
 	}{
-		{arch: "amd64", wantPkg: "cicy-code-darwin-x64", wantLabel: "x64"},
-		{arch: "arm64", wantPkg: "cicy-code-darwin-arm64", wantLabel: "arm64"},
-		{arch: "386", wantErr: true},
+		{goos: "darwin", arch: "amd64", wantPkg: "cicy-code-darwin-x64", wantLabel: "darwin-x64"},
+		{goos: "darwin", arch: "arm64", wantPkg: "cicy-code-darwin-arm64", wantLabel: "darwin-arm64"},
+		{goos: "linux", arch: "amd64", wantPkg: "cicy-code-linux-x64", wantLabel: "linux-x64"},
+		{goos: "linux", arch: "arm64", wantPkg: "cicy-code-linux-arm64", wantLabel: "linux-arm64"},
+		{goos: "windows", arch: "amd64", wantErr: true},
+		{goos: "linux", arch: "386", wantErr: true},
 	}
 	for _, tt := range tests {
-		t.Run(tt.arch, func(t *testing.T) {
-			pkg, label, err := macPlatformPackage(tt.arch)
+		t.Run(tt.goos+"/"+tt.arch, func(t *testing.T) {
+			pkg, label, err := localBinPlatformPackage(tt.goos, tt.arch)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected unsupported architecture error")
@@ -74,7 +78,7 @@ func TestMacPlatformPackage(t *testing.T) {
 	}
 }
 
-func TestInstallMacLocalBinUpdate(t *testing.T) {
+func TestInstallLocalBinUpdate(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink assertions require Unix semantics")
 	}
@@ -117,8 +121,9 @@ func TestInstallMacLocalBinUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := installMacLocalBinUpdate(context.Background(), macLocalBinUpdateOptions{
+	err := installLocalBinUpdate(context.Background(), localBinUpdateOptions{
 		Version:  targetVersion,
+		GOOS:     "darwin",
 		GOARCH:   "amd64",
 		BinDir:   binDir,
 		Registry: server.URL,
@@ -163,7 +168,7 @@ func TestInstallMacLocalBinUpdate(t *testing.T) {
 	}
 }
 
-func TestInstallMacLocalBinUpdateRejectsBadIntegrityWithoutSwitching(t *testing.T) {
+func TestInstallLocalBinUpdateRejectsBadIntegrityWithoutSwitching(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink assertions require Unix semantics")
 	}
@@ -193,8 +198,9 @@ func TestInstallMacLocalBinUpdateRejectsBadIntegrityWithoutSwitching(t *testing.
 		t.Fatal(err)
 	}
 
-	err := installMacLocalBinUpdate(context.Background(), macLocalBinUpdateOptions{
+	err := installLocalBinUpdate(context.Background(), localBinUpdateOptions{
 		Version:  "9.8.7",
+		GOOS:     "darwin",
 		GOARCH:   "amd64",
 		BinDir:   binDir,
 		Registry: server.URL,

@@ -20,16 +20,16 @@ func configureCicyUpdateHandlerTest(t *testing.T) {
 	origGOARCH := cicyUpdateGOARCH
 	origHomeDir := cicyUpdateUserHomeDir
 	origLatest := cicyUpdateLatestVersion
-	origInstalled := cicyUpdateInstalledMacVersion
-	origInstall := cicyUpdateInstallMacLocalBin
+	origInstalled := cicyUpdateInstalledLocalBinVersion
+	origInstall := cicyUpdateInstallLocalBin
 	t.Cleanup(func() {
 		cicyUpdateIsContainerRuntime = origContainerRuntime
 		cicyUpdateGOOS = origGOOS
 		cicyUpdateGOARCH = origGOARCH
 		cicyUpdateUserHomeDir = origHomeDir
 		cicyUpdateLatestVersion = origLatest
-		cicyUpdateInstalledMacVersion = origInstalled
-		cicyUpdateInstallMacLocalBin = origInstall
+		cicyUpdateInstalledLocalBinVersion = origInstalled
+		cicyUpdateInstallLocalBin = origInstall
 	})
 }
 
@@ -38,7 +38,7 @@ func TestHandleCicyUpdateStatusUsesStagedMacVersion(t *testing.T) {
 	cicyUpdateIsContainerRuntime = func() bool { return false }
 	cicyUpdateGOOS = "darwin"
 	cicyUpdateLatestVersion = func() string { return "99.0.0" }
-	cicyUpdateInstalledMacVersion = func() string { return "99.0.0" }
+	cicyUpdateInstalledLocalBinVersion = func() string { return "99.0.0" }
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/cicy-update", nil)
@@ -71,9 +71,9 @@ func TestHandleCicyUpdateApplyStagesMacLocalBinWithoutRestart(t *testing.T) {
 	cicyUpdateUserHomeDir = func() (string, error) { return homeDir, nil }
 	cicyUpdateLatestVersion = func() string { return "99.0.0" }
 	installCalls := 0
-	cicyUpdateInstallMacLocalBin = func(_ context.Context, opts macLocalBinUpdateOptions) error {
+	cicyUpdateInstallLocalBin = func(_ context.Context, opts localBinUpdateOptions) error {
 		installCalls++
-		if opts.Version != "99.0.0" || opts.GOARCH != "amd64" {
+		if opts.Version != "99.0.0" || opts.GOOS != "darwin" || opts.GOARCH != "amd64" {
 			t.Fatalf("unexpected installer options: %#v", opts)
 		}
 		if opts.BinDir != filepath.Join(homeDir, ".local", "bin") {
@@ -105,7 +105,7 @@ func TestHandleCicyUpdateApplyReturnsMacInstallerError(t *testing.T) {
 	cicyUpdateGOARCH = "arm64"
 	cicyUpdateUserHomeDir = func() (string, error) { return t.TempDir(), nil }
 	cicyUpdateLatestVersion = func() string { return "99.0.0" }
-	cicyUpdateInstallMacLocalBin = func(context.Context, macLocalBinUpdateOptions) error {
+	cicyUpdateInstallLocalBin = func(context.Context, localBinUpdateOptions) error {
 		return errors.New("checksum failed")
 	}
 
@@ -119,10 +119,46 @@ func TestHandleCicyUpdateApplyReturnsMacInstallerError(t *testing.T) {
 	}
 }
 
+func TestHandleCicyUpdateApplyStagesLinuxLocalBinWithoutRestart(t *testing.T) {
+	configureCicyUpdateHandlerTest(t)
+	homeDir := t.TempDir()
+	cicyUpdateIsContainerRuntime = func() bool { return false }
+	cicyUpdateGOOS = "linux"
+	cicyUpdateGOARCH = "arm64"
+	cicyUpdateUserHomeDir = func() (string, error) { return homeDir, nil }
+	cicyUpdateLatestVersion = func() string { return "99.0.0" }
+	installCalls := 0
+	cicyUpdateInstallLocalBin = func(_ context.Context, opts localBinUpdateOptions) error {
+		installCalls++
+		if opts.Version != "99.0.0" || opts.GOOS != "linux" || opts.GOARCH != "arm64" {
+			t.Fatalf("unexpected installer options: %#v", opts)
+		}
+		if opts.BinDir != filepath.Join(homeDir, ".local", "bin") {
+			t.Fatalf("bin dir = %q", opts.BinDir)
+		}
+		return nil
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/cicy-update", nil)
+	handleCicyUpdateApply(recorder, request)
+	body := decodeCicyUpdateResponse(t, recorder)
+
+	if installCalls != 1 {
+		t.Fatalf("installer calls = %d, want 1; response = %#v", installCalls, body)
+	}
+	if body["started"] != true || body["completed"] != true || body["restart_required"] != true {
+		t.Fatalf("unexpected Linux update response: %#v", body)
+	}
+	if body["target"] != "99.0.0" || body["current"] != version {
+		t.Fatalf("unexpected versions in response: %#v", body)
+	}
+}
+
 func TestHandleCicyUpdateApplyRejectsUnsupportedHost(t *testing.T) {
 	configureCicyUpdateHandlerTest(t)
 	cicyUpdateIsContainerRuntime = func() bool { return false }
-	cicyUpdateGOOS = "linux"
+	cicyUpdateGOOS = "windows"
 	cicyUpdateLatestVersion = func() string { return "99.0.0" }
 
 	recorder := httptest.NewRecorder()
@@ -130,7 +166,7 @@ func TestHandleCicyUpdateApplyRejectsUnsupportedHost(t *testing.T) {
 	handleCicyUpdateApply(recorder, request)
 	body := decodeCicyUpdateResponse(t, recorder)
 
-	if body["started"] != false || body["error"] != "in-place update is only available in the container runtime or macOS local-bin installation" {
+	if body["started"] != false || body["error"] != "in-place update is only available in the container runtime or macOS/Linux local-bin installation" {
 		t.Fatalf("unexpected unsupported-host response: %#v", body)
 	}
 }

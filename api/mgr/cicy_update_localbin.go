@@ -28,8 +28,9 @@ const maxCicyUpdateArchiveSize = 256 << 20 // 256 MiB, comfortably above current
 
 var safeCicyUpdateVersion = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]*$`)
 
-type macLocalBinUpdateOptions struct {
+type localBinUpdateOptions struct {
 	Version  string
+	GOOS     string
 	GOARCH   string
 	BinDir   string
 	Registry string
@@ -44,27 +45,33 @@ type npmPlatformPackageMetadata struct {
 	} `json:"dist"`
 }
 
-func macPlatformPackage(goarch string) (packageName, archLabel string, err error) {
+func localBinPlatformPackage(goos, goarch string) (packageName, platformLabel string, err error) {
+	archLabel := ""
 	switch goarch {
 	case "amd64":
-		return "cicy-code-darwin-x64", "x64", nil
+		archLabel = "x64"
 	case "arm64":
-		return "cicy-code-darwin-arm64", "arm64", nil
+		archLabel = "arm64"
 	default:
-		return "", "", fmt.Errorf("unsupported macOS architecture %q", goarch)
+		return "", "", fmt.Errorf("unsupported architecture %q", goarch)
 	}
+	if goos != "darwin" && goos != "linux" {
+		return "", "", fmt.Errorf("unsupported local-bin platform %q", goos)
+	}
+	platformLabel = goos + "-" + archLabel
+	return "cicy-code-" + platformLabel, platformLabel, nil
 }
 
-// installMacLocalBinUpdate stages a published cicy-code binary in the same
+// installLocalBinUpdate stages a published cicy-code binary in the same
 // side-by-side layout used by the Desktop local build flow. It intentionally
 // does not stop or restart the running process; the new symlink is picked up
 // when the user next restarts CiCy Desktop/cicy-code.
-func installMacLocalBinUpdate(ctx context.Context, opts macLocalBinUpdateOptions) error {
+func installLocalBinUpdate(ctx context.Context, opts localBinUpdateOptions) error {
 	version := strings.TrimSpace(opts.Version)
 	if !safeCicyUpdateVersion.MatchString(version) {
 		return fmt.Errorf("invalid update version %q", version)
 	}
-	packageName, archLabel, err := macPlatformPackage(opts.GOARCH)
+	packageName, platformLabel, err := localBinPlatformPackage(opts.GOOS, opts.GOARCH)
 	if err != nil {
 		return err
 	}
@@ -104,7 +111,7 @@ func installMacLocalBinUpdate(ctx context.Context, opts macLocalBinUpdateOptions
 	}
 	defer os.Remove(binaryTmp)
 
-	versionedPath := filepath.Join(binDir, "cicy-code-"+version+"-darwin-"+archLabel)
+	versionedPath := filepath.Join(binDir, "cicy-code-"+version+"-"+platformLabel)
 	if err := os.Rename(binaryTmp, versionedPath); err != nil {
 		return fmt.Errorf("install versioned binary: %w", err)
 	}

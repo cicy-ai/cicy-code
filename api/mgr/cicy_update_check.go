@@ -30,14 +30,14 @@ var (
 	updCheckAt     time.Time
 
 	// Indirections keep the update handler testable without writing to the
-	// user's real ~/.local/bin or pretending the whole test process is Darwin.
-	cicyUpdateIsContainerRuntime  = isContainerRuntime
-	cicyUpdateGOOS                = runtime.GOOS
-	cicyUpdateGOARCH              = runtime.GOARCH
-	cicyUpdateUserHomeDir         = os.UserHomeDir
-	cicyUpdateLatestVersion       = latestCicyCodeVersion
-	cicyUpdateInstalledMacVersion = installedMacLocalBinVersion
-	cicyUpdateInstallMacLocalBin  = installMacLocalBinUpdate
+	// user's real ~/.local/bin or pretending the whole test process is another OS.
+	cicyUpdateIsContainerRuntime       = isContainerRuntime
+	cicyUpdateGOOS                     = runtime.GOOS
+	cicyUpdateGOARCH                   = runtime.GOARCH
+	cicyUpdateUserHomeDir              = os.UserHomeDir
+	cicyUpdateLatestVersion            = latestCicyCodeVersion
+	cicyUpdateInstalledLocalBinVersion = installedLocalBinVersion
+	cicyUpdateInstallLocalBin          = installLocalBinUpdate
 )
 
 // latestCicyCodeVersion returns the newest published cicy-code version, cached
@@ -107,8 +107,8 @@ func handleCicyUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	latest := cicyUpdateLatestVersion()
 	installed := version
-	if !cicyUpdateIsContainerRuntime() && cicyUpdateGOOS == "darwin" {
-		if staged := cicyUpdateInstalledMacVersion(); versionGreater(staged, installed) {
+	if !cicyUpdateIsContainerRuntime() && supportsLocalBinUpdate(cicyUpdateGOOS) {
+		if staged := cicyUpdateInstalledLocalBinVersion(); versionGreater(staged, installed) {
 			installed = staged
 		}
 	}
@@ -121,7 +121,7 @@ func handleCicyUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func installedMacLocalBinVersion() string {
+func installedLocalBinVersion() string {
 	homeDir, err := cicyUpdateUserHomeDir()
 	if err != nil || strings.TrimSpace(homeDir) == "" {
 		return ""
@@ -141,18 +141,22 @@ func installedMacLocalBinVersion() string {
 // handleCicyUpdateApply updates either supported runtime:
 //   - container: launch the existing detached updater, which restarts the
 //     supervised server; the frontend polls until the new process is ready.
-//   - macOS local-bin: download and atomically stage the published platform
+//   - macOS/Linux local-bin: download and atomically stage the published platform
 //     binary, but deliberately leave restart timing to the user.
 func handleCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
 	if cicyUpdateIsContainerRuntime() {
 		handleContainerCicyUpdateApply(w)
 		return
 	}
-	if cicyUpdateGOOS == "darwin" {
-		handleMacLocalBinCicyUpdateApply(w, r)
+	if supportsLocalBinUpdate(cicyUpdateGOOS) {
+		handleLocalBinCicyUpdateApply(w, r)
 		return
 	}
-	J(w, M{"started": false, "error": "in-place update is only available in the container runtime or macOS local-bin installation"})
+	J(w, M{"started": false, "error": "in-place update is only available in the container runtime or macOS/Linux local-bin installation"})
+}
+
+func supportsLocalBinUpdate(goos string) bool {
+	return goos == "darwin" || goos == "linux"
 }
 
 func handleContainerCicyUpdateApply(w http.ResponseWriter) {
@@ -186,7 +190,7 @@ func handleContainerCicyUpdateApply(w http.ResponseWriter) {
 	J(w, M{"started": true, "current": version, "target": target})
 }
 
-func handleMacLocalBinCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
+func handleLocalBinCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
 	target := cicyUpdateLatestVersion()
 	if target == "" {
 		J(w, M{"started": false, "error": "could not resolve the latest version from npm"})
@@ -204,19 +208,20 @@ func handleMacLocalBinCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
 		J(w, M{"started": false, "error": "could not resolve home directory: " + err.Error()})
 		return
 	}
-	opts := macLocalBinUpdateOptions{
+	opts := localBinUpdateOptions{
 		Version:  target,
+		GOOS:     cicyUpdateGOOS,
 		GOARCH:   cicyUpdateGOARCH,
 		BinDir:   filepath.Join(homeDir, ".local", "bin"),
 		Registry: npmRegistryOfficial,
 		Client:   http.DefaultClient,
 	}
-	if err := cicyUpdateInstallMacLocalBin(r.Context(), opts); err != nil {
-		log.Printf("[cicy-update] macOS local-bin install failed: %v", err)
+	if err := cicyUpdateInstallLocalBin(r.Context(), opts); err != nil {
+		log.Printf("[cicy-update] %s local-bin install failed: %v", cicyUpdateGOOS, err)
 		J(w, M{"started": false, "error": "failed to install update: " + err.Error()})
 		return
 	}
-	log.Printf("[cicy-update] staged macOS local-bin update %s -> %s; restart required", version, target)
+	log.Printf("[cicy-update] staged %s local-bin update %s -> %s; restart required", cicyUpdateGOOS, version, target)
 	J(w, M{
 		"started":          true,
 		"completed":        true,

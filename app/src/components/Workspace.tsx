@@ -475,7 +475,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     return () => { window.removeEventListener('focus', onFocus); window.clearInterval(timer); };
   }, [checkVersionUpdate]);
   // Click-to-update supports two backends: containers restart themselves and
-  // need polling; macOS local-bin installs are staged without a restart and
+  // need polling; macOS/Linux local-bin installs are staged without a restart and
   // return an explicit restart_required result.
   const [updating, setUpdating] = useState(false);
   const applyUpdate = useCallback(async () => {
