@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +28,16 @@ var (
 	updCheckMu     sync.Mutex
 	updCheckLatest string
 	updCheckAt     time.Time
+
+	// Indirections keep the update handler testable without writing to the
+	// user's real ~/.local/bin or pretending the whole test process is Darwin.
+	cicyUpdateIsContainerRuntime  = isContainerRuntime
+	cicyUpdateGOOS                = runtime.GOOS
+	cicyUpdateGOARCH              = runtime.GOARCH
+	cicyUpdateUserHomeDir         = os.UserHomeDir
+	cicyUpdateLatestVersion       = latestCicyCodeVersion
+	cicyUpdateInstalledMacVersion = installedMacLocalBinVersion
+	cicyUpdateInstallMacLocalBin  = installMacLocalBinUpdate
 )
 
 // latestCicyCodeVersion returns the newest published cicy-code version, cached
@@ -93,30 +105,62 @@ func handleCicyUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		handleCicyUpdateApply(w, r)
 		return
 	}
-	latest := latestCicyCodeVersion()
+	latest := cicyUpdateLatestVersion()
+	installed := version
+	if !cicyUpdateIsContainerRuntime() && cicyUpdateGOOS == "darwin" {
+		if staged := cicyUpdateInstalledMacVersion(); versionGreater(staged, installed) {
+			installed = staged
+		}
+	}
 	J(w, M{
-		"current":    version,
-		"latest":     latest,
-		"has_update": latest != "" && versionGreater(latest, version),
+		"current":          version,
+		"installed":        installed,
+		"latest":           latest,
+		"has_update":       latest != "" && versionGreater(latest, installed),
+		"restart_required": versionGreater(installed, version),
 	})
 }
 
-// handleCicyUpdateApply runs cicy-code-update.sh for the resolved latest version
-// in a DETACHED process: the script installs the new version, repoints the
-// ~/.local/bin/cicy-code symlink, and `supervisorctl restart cicy-code`s — which
-// kills THIS server, so it must outlive us (setsid, not a child). We pin the
-// npmjs-resolved version (not the "latest" tag) to sidestep npmmirror tag lag.
-// The frontend polls health/version afterwards and reloads once we're back.
+func installedMacLocalBinVersion() string {
+	homeDir, err := cicyUpdateUserHomeDir()
+	if err != nil || strings.TrimSpace(homeDir) == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(homeDir, ".local", "bin", ".cicy-localbin.json"))
+	if err != nil {
+		return ""
+	}
+	var manifest map[string]any
+	if json.Unmarshal(data, &manifest) != nil {
+		return ""
+	}
+	value, _ := manifest["cicy-code"].(string)
+	return strings.TrimSpace(value)
+}
+
+// handleCicyUpdateApply updates either supported runtime:
+//   - container: launch the existing detached updater, which restarts the
+//     supervised server; the frontend polls until the new process is ready.
+//   - macOS local-bin: download and atomically stage the published platform
+//     binary, but deliberately leave restart timing to the user.
 func handleCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
-	if !isContainerRuntime() {
-		J(w, M{"started": false, "error": "in-place update is only available in the container runtime"})
+	if cicyUpdateIsContainerRuntime() {
+		handleContainerCicyUpdateApply(w)
 		return
 	}
+	if cicyUpdateGOOS == "darwin" {
+		handleMacLocalBinCicyUpdateApply(w, r)
+		return
+	}
+	J(w, M{"started": false, "error": "in-place update is only available in the container runtime or macOS local-bin installation"})
+}
+
+func handleContainerCicyUpdateApply(w http.ResponseWriter) {
 	if _, err := os.Stat(legacyUpdaterPath); err != nil {
 		J(w, M{"started": false, "error": "updater not found: " + legacyUpdaterPath})
 		return
 	}
-	target := latestCicyCodeVersion()
+	target := cicyUpdateLatestVersion()
 	if target == "" {
 		J(w, M{"started": false, "error": "could not resolve the latest version from npm"})
 		return
@@ -140,6 +184,46 @@ func handleCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
 	_ = cmd.Process.Release()
 	log.Printf("[cicy-update] launched update %s -> %s (detached); server will restart", version, target)
 	J(w, M{"started": true, "current": version, "target": target})
+}
+
+func handleMacLocalBinCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
+	target := cicyUpdateLatestVersion()
+	if target == "" {
+		J(w, M{"started": false, "error": "could not resolve the latest version from npm"})
+		return
+	}
+	if !versionGreater(target, version) {
+		J(w, M{"started": false, "current": version, "latest": target, "error": "already up to date"})
+		return
+	}
+	homeDir, err := cicyUpdateUserHomeDir()
+	if err != nil || strings.TrimSpace(homeDir) == "" {
+		if err == nil {
+			err = os.ErrNotExist
+		}
+		J(w, M{"started": false, "error": "could not resolve home directory: " + err.Error()})
+		return
+	}
+	opts := macLocalBinUpdateOptions{
+		Version:  target,
+		GOARCH:   cicyUpdateGOARCH,
+		BinDir:   filepath.Join(homeDir, ".local", "bin"),
+		Registry: npmRegistryOfficial,
+		Client:   http.DefaultClient,
+	}
+	if err := cicyUpdateInstallMacLocalBin(r.Context(), opts); err != nil {
+		log.Printf("[cicy-update] macOS local-bin install failed: %v", err)
+		J(w, M{"started": false, "error": "failed to install update: " + err.Error()})
+		return
+	}
+	log.Printf("[cicy-update] staged macOS local-bin update %s -> %s; restart required", version, target)
+	J(w, M{
+		"started":          true,
+		"completed":        true,
+		"restart_required": true,
+		"current":          version,
+		"target":           target,
+	})
 }
 
 // versionGreater reports whether dotted-numeric version a is newer than b

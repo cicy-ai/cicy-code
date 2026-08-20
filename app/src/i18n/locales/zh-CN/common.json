@@ -11,5 +11,10 @@
   "wsConnecting": "正在连接服务器…",
   "wsConnectingRetry": "正在连接服务器…（重试 {{n}}/3）",
   "wsConnectError": "网络错误，无法连接到服务器",
-  "wsReconnect": "重新连接"
+  "wsReconnect": "重新连接",
+  "versionUpdateAvailable": "有新版本可更新",
+  "updateNow": "更新",
+  "updating": "更新中…",
+  "updateFailed": "更新失败",
+  "updateInstalledRestartRequired": "版本 {{version}} 已安装，重启 cicy-code 后生效"
 }

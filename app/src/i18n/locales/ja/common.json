@@ -11,5 +11,10 @@
   "wsConnecting": "サーバーに接続中…",
   "wsConnectingRetry": "サーバーに接続中…（再試行 {{n}}/3）",
   "wsConnectError": "ネットワークエラー — サーバーに接続できません",
-  "wsReconnect": "再接続"
+  "wsReconnect": "再接続",
+  "versionUpdateAvailable": "新しいバージョンがあります",
+  "updateNow": "更新",
+  "updating": "更新中…",
+  "updateFailed": "更新に失敗しました",
+  "updateInstalledRestartRequired": "バージョン {{version}} をインストールしました。適用するには cicy-code を再起動してください。"
 }

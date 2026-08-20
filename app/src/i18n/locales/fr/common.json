@@ -11,5 +11,10 @@
   "wsConnecting": "Connexion au serveur…",
   "wsConnectingRetry": "Connexion au serveur… (essai {{n}}/3)",
   "wsConnectError": "Erreur réseau — serveur injoignable",
-  "wsReconnect": "Reconnecter"
+  "wsReconnect": "Reconnecter",
+  "versionUpdateAvailable": "Une nouvelle version est disponible",
+  "updateNow": "Mettre à jour",
+  "updating": "Mise à jour…",
+  "updateFailed": "Échec de la mise à jour",
+  "updateInstalledRestartRequired": "La version {{version}} est installée. Redémarrez cicy-code pour l’appliquer."
 }

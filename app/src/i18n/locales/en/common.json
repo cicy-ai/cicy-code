@@ -11,5 +11,10 @@
   "wsConnecting": "Connecting to the server…",
   "wsConnectingRetry": "Connecting to the server… (retry {{n}}/3)",
   "wsConnectError": "Network error — cannot reach the server",
-  "wsReconnect": "Reconnect"
+  "wsReconnect": "Reconnect",
+  "versionUpdateAvailable": "A new version is available",
+  "updateNow": "Update",
+  "updating": "Updating…",
+  "updateFailed": "Update failed",
+  "updateInstalledRestartRequired": "Version {{version}} is installed. Restart cicy-code to apply it."
 }

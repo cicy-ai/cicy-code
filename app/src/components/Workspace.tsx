@@ -12,6 +12,7 @@ type ToastState = {
 };
 import { useApp } from '../contexts/AppContext';
 import { isCicyLiteAgent } from '../lib/agentType';
+import { interpretCicyUpdateResponse } from '../lib/cicyUpdate';
 import { electronRPC } from '../lib/speedup/rpc';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
@@ -473,18 +474,47 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const timer = window.setInterval(() => { checkVersionUpdate(); }, 30 * 60 * 1000);
     return () => { window.removeEventListener('focus', onFocus); window.clearInterval(timer); };
   }, [checkVersionUpdate]);
-  // Click-to-update: POST triggers cicy-code-update (server restarts itself), then
-  // we poll until it's back on a new version and reload to pick up the new build.
+  // Click-to-update supports two backends: containers restart themselves and
+  // need polling; macOS local-bin installs are staged without a restart and
+  // return an explicit restart_required result.
   const [updating, setUpdating] = useState(false);
   const applyUpdate = useCallback(async () => {
     if (updating) return;
     setUpdating(true);
     try {
       const res: any = await apiService.applyCicyUpdate();
-      if (!res?.data?.started) { setUpdating(false); return; }
+      const outcome = interpretCicyUpdateResponse(
+        res?.data,
+        t('updateFailed', { defaultValue: '更新失败' }),
+      );
+      if (outcome.kind === 'failed') {
+        setUpdating(false);
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: outcome.message }));
+        return;
+      }
+      if (outcome.kind === 'restart-required') {
+        setUpdating(false);
+        setVersionUpdate(false);
+        window.dispatchEvent(new CustomEvent('show-toast', {
+          detail: {
+            message: t('updateInstalledRestartRequired', {
+              version: outcome.target,
+              defaultValue: `版本 ${outcome.target} 已安装，重启 cicy-code 后生效`,
+            }),
+            variant: 'success',
+          },
+        }));
+        return;
+      }
       const startedAt = Date.now();
       const poll = async () => {
-        if (Date.now() - startedAt > 180000) { setUpdating(false); return; } // give up after 3min
+        if (Date.now() - startedAt > 180000) {
+          setUpdating(false);
+          window.dispatchEvent(new CustomEvent('show-toast', {
+            detail: t('updateFailed', { defaultValue: '更新失败' }),
+          }));
+          return;
+        }
         try {
           const s: any = await apiService.getCicyUpdateStatus();
           const cur = s?.data?.current;
@@ -493,8 +523,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         window.setTimeout(poll, 4000);
       };
       window.setTimeout(poll, 6000); // let the restart begin before first poll
-    } catch { setUpdating(false); }
-  }, [updating]);
+    } catch (cause: any) {
+      setUpdating(false);
+      window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: cause?.response?.data?.error || cause?.message || t('updateFailed', { defaultValue: '更新失败' }),
+      }));
+    }
+  }, [t, updating]);
   // Red badge on the Settings entry + 通用 item: true when the token-delivery
   // email isn't fully set up — SMTP not ready OR no delivery address (default_to).
   // Refetched when the settings modal closes so configuring it clears the badge.
