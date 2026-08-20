@@ -422,6 +422,14 @@ html[data-theme="light"] [data-id="browser-window-shot"] {
   background: linear-gradient(to bottom, #f4f4f5, #e4e4e7) !important;
 }
 
+/* History loading blocks are translucent white in the dark theme. Without an
+   explicit light treatment they disappear against the white conversation
+   surface and look like an empty, broken panel. Keep the existing geometry so
+   the real messages replace the skeleton without a layout shift. */
+html[data-theme="light"] [data-id="current-history-loading"] [class*="bg-white"] {
+  background-color: #e4e4e7 !important;
+}
+
 /* Skill detail markdown uses dark translucent table/code containers that are
    structural content, not modal backdrops. Give those named surfaces an
    explicit light treatment so command references remain readable. */

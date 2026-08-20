@@ -43,6 +43,8 @@ describe('global theme', () => {
     expect(css).toContain('[data-id="knowledge-graph-search"]');
     expect(css).toContain('[data-id="mobile-qr-modal"]');
     expect(css).toContain('[data-id="desktop-snapshot-loading"]');
+    expect(css).toContain('[data-id="current-history-loading"]');
+    expect(css).toContain('background-color: #e4e4e7 !important');
     expect(css).toContain('[data-id="skill-md-table"]');
     expect(css).toContain('[data-id="skill-md-code-block"]');
     expect(css).toContain('html[data-theme="light"] .cm-editor');
