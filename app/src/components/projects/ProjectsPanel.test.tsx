@@ -207,6 +207,36 @@ describe('<ProjectsPanel /> project view cache', () => {
     expect(document.querySelector('[data-id="project-canvas-zoom-value"]')).toHaveTextContent('125%');
   });
 
+  it('reserves stable header metric slots before async metrics arrive', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    const agent = { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' };
+    const { rerender } = render(<ProjectsPanel agents={[agent]} statuses={{}} onOpenAgent={vi.fn()} />);
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-w-101"]')).toBeInTheDocument());
+    const modelSlot = document.querySelector('[data-id="project-agent-card-model-slot"]');
+    const contextSlot = document.querySelector('[data-id="project-agent-card-context-slot"]');
+    const costSlot = document.querySelector('[data-id="project-agent-card-cost-slot"]');
+    expect(modelSlot).toHaveClass('w-24', 'shrink-0');
+    expect(contextSlot).toHaveClass('w-3', 'shrink-0');
+    expect(costSlot).toHaveClass('w-16', 'shrink-0');
+    expect(modelSlot).toBeEmptyDOMElement();
+    expect(contextSlot).toBeEmptyDOMElement();
+    expect(costSlot).toBeEmptyDOMElement();
+
+    rerender(<ProjectsPanel agents={[agent]} statuses={{
+      'w-101:main.0': { status: 'completed', model: 'gpt-5.6-sol', context_used_pct: 42, context_window_size: 256000, cost_credit: 1.14 },
+    }} onOpenAgent={vi.fn()} />);
+
+    expect(document.querySelector('[data-id="project-agent-card-model-slot"]')).toBe(modelSlot);
+    expect(document.querySelector('[data-id="project-agent-card-context-slot"]')).toBe(contextSlot);
+    expect(document.querySelector('[data-id="project-agent-card-cost-slot"]')).toBe(costSlot);
+    expect(modelSlot).toHaveTextContent('gpt-5.6-sol');
+    expect(contextSlot?.querySelector('[data-id="project-agent-card-context"]')).toBeInTheDocument();
+    expect(costSlot).toHaveTextContent('$1.14');
+  });
+
   it('brings default-project cards into view when agents arrive after the project', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },

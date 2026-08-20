@@ -391,7 +391,13 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 data-id="project-agent-card-title" className="truncate text-[18px] font-semibold tracking-[-0.01em] text-zinc-100">{agent.title || agent.paneId}</h3>
             {agent.agentType ? <span data-id="project-agent-card-agent-type" className="shrink-0 font-mono text-[12px] text-zinc-500">{agent.agentType}</span> : null}
-            {metrics?.model ? <ModelTag model={metrics.model} className="shrink-0" /> : null}
+            <span
+              data-id="project-agent-card-model-slot"
+              aria-hidden={!metrics?.model}
+              className="inline-flex w-24 shrink-0 overflow-hidden"
+            >
+              {metrics?.model ? <ModelTag model={metrics.model} className="max-w-full" /> : null}
+            </span>
           </div>
         </div>
         <div data-id="project-agent-card-header-actions" className="flex shrink-0 items-center gap-0.5">
@@ -458,12 +464,24 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         >
           {identityCopied ? t('copied', { defaultValue: '已复制' }) : identity}
         </button>
-        {metrics && metrics.ctx > 0 ? (
-          <span data-id="project-agent-card-context" className="flex shrink-0 items-center" title={`Context ${metrics.ctx}% / ${metrics.ctxK}k`}>
-            <CtxRing pct={metrics.ctx} />
-          </span>
-        ) : null}
-        {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost" className="shrink-0 text-sky-500">{fmtCost(metrics.cost)}</span> : null}
+        <span
+          data-id="project-agent-card-context-slot"
+          aria-hidden={!metrics || metrics.ctx <= 0}
+          className="flex w-3 shrink-0 items-center"
+        >
+          {metrics && metrics.ctx > 0 ? (
+            <span data-id="project-agent-card-context" className="flex items-center" title={`Context ${metrics.ctx}% / ${metrics.ctxK}k`}>
+              <CtxRing pct={metrics.ctx} />
+            </span>
+          ) : null}
+        </span>
+        <span
+          data-id="project-agent-card-cost-slot"
+          aria-hidden={!metrics || metrics.cost <= 0}
+          className="w-16 shrink-0 truncate text-sky-500"
+        >
+          {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost">{fmtCost(metrics.cost)}</span> : null}
+        </span>
       </div>
       <div
         data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`}
