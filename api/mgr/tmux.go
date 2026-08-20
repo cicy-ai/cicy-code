@@ -471,7 +471,9 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 				FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
 	} else {
 		rows, err = store.Query(`SELECT t.pane_id, t.title, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.use_mitm, 1), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, ''), COALESCE(json_extract(t.config,'$.is_kefu'), 0)
-				FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
+				FROM agent_config t
+				LEFT JOIN (SELECT win_id, MIN(group_id) AS group_id FROM group_windows GROUP BY win_id) gp ON t.pane_id=gp.win_id
+				WHERE t.active=1 ORDER BY t.created_at DESC`)
 	}
 	if err != nil {
 		httpErr(w, 500, err.Error())

@@ -89,6 +89,22 @@ func TestDefaultGroupIsPersistedAndCanManageAgents(t *testing.T) {
 		t.Fatalf("add mode removed the original membership: %#v", stillInOther["panes"])
 	}
 
+	if _, err := store.Exec(`INSERT INTO agent_config (pane_id, title, agent_type, active) VALUES ('w-123:main.0', 'Shared Agent', 'codex', 1)`); err != nil {
+		t.Fatalf("seed shared agent: %v", err)
+	}
+	allPanesRecorder := httptest.NewRecorder()
+	handlePanes(allPanesRecorder, httptest.NewRequest("GET", "/api/tmux/panes", nil))
+	allPanes := decodeGroupResponse(t, allPanesRecorder)["panes"].([]interface{})
+	sharedCount := 0
+	for _, raw := range allPanes {
+		if raw.(map[string]interface{})["pane_id"] == "w-123:main.0" {
+			sharedCount++
+		}
+	}
+	if sharedCount != 1 {
+		t.Fatalf("multi-project agent appeared %d times in global pane list: %#v", sharedCount, allPanes)
+	}
+
 	denied := callGroupsHandler(t, "DELETE", fmt.Sprintf("/api/groups/%d", groupID), "")
 	if denied.Code != 400 {
 		t.Fatalf("delete default status = %d body=%s", denied.Code, denied.Body.String())
