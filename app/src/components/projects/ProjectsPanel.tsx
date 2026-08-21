@@ -98,6 +98,9 @@ const PROJECT_AGENT_QUEUE_KEY = 'cicy_project_agent_queue:v1';
 const PROJECT_AGENT_BODY_TABS_KEY = 'cicy_project_agent_body_tabs:v1';
 const PROJECT_LIST_COLLAPSED_KEY = 'cicy_projects_list_collapsed';
 type ProjectAgentBodyTab = 'history' | 'terminal' | 'role';
+const DEFAULT_PROJECT_AGENT_WIDTH = 600;
+const DEFAULT_PROJECT_AGENT_HEIGHT = 320;
+const PROJECT_AGENT_COLUMN_STEP = DEFAULT_PROJECT_AGENT_WIDTH + 40;
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
 const projectAgentIdentity = (agent: ProjectAgent) => agent.remote
   ? `remote:${String(agent.instanceId || agent.instanceTeam || '')}:${String(agent.remoteAgentId || shortPaneId(agent.paneId))}`
@@ -891,11 +894,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       if (!canvas) return;
       visibilityCheckedKeyRef.current = checkKey;
       const layouts = visibleAgents.map((agent, index) => agentLayouts[shortPaneId(agent.paneId)] || {
-        x: 40 + (index % 4) * 340,
+        x: 40 + (index % 4) * PROJECT_AGENT_COLUMN_STEP,
         y: 40 + Math.floor(index / 4) * 260,
         z: index + 1,
-        width: 300,
-        height: 320,
+        width: DEFAULT_PROJECT_AGENT_WIDTH,
+        height: DEFAULT_PROJECT_AGENT_HEIGHT,
       });
       const viewportWidth = canvas.clientWidth;
       const viewportHeight = Math.max(1, canvas.clientHeight - 48);
@@ -1142,13 +1145,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       for (const [offset, paneId] of paneIds.entries()) {
         await apiService.addGroupPane(selectedProject.api_id, paneId);
         const index = visibleAgents.length + offset;
-        const width = 300;
-        const height = 320;
+        const width = DEFAULT_PROJECT_AGENT_WIDTH;
+        const height = DEFAULT_PROJECT_AGENT_HEIGHT;
         let x = 40;
         let y = 40;
         const overlaps = () => occupied.some((item) => x < item.x + item.width + 20 && x + width + 20 > item.x && y < item.y + item.height + 20 && y + height + 20 > item.y);
         while (overlaps()) {
-          x += 340;
+          x += PROJECT_AGENT_COLUMN_STEP;
           if (x > 1400) { x = 40; y += 360; }
         }
         const layout = { x, y, width, height, z: index + 1 };
@@ -1544,11 +1547,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   };
 
   const layoutForAgent = (agent: ProjectAgent, index: number): ProjectAgentLayout => agentLayouts[shortPaneId(agent.paneId)] || {
-    x: 40 + (index % 4) * 340,
+    x: 40 + (index % 4) * PROJECT_AGENT_COLUMN_STEP,
     y: 40 + Math.floor(index / 4) * 260,
     z: index + 1,
-    width: 300,
-    height: 320,
+    width: DEFAULT_PROJECT_AGENT_WIDTH,
+    height: DEFAULT_PROJECT_AGENT_HEIGHT,
   };
 
   const beginAgentDrag = (event: ReactPointerEvent<HTMLDivElement>, agent: ProjectAgent, index: number) => {
@@ -1576,7 +1579,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
     setAgentLayouts((current) => ({
       ...current,
-      [drag.id]: { ...(current[drag.id] || { x: drag.originX, y: drag.originY, z: 1, width: 300, height: 320 }), x: drag.originX + dx, y: drag.originY + dy },
+      [drag.id]: { ...(current[drag.id] || { x: drag.originX, y: drag.originY, z: 1, width: DEFAULT_PROJECT_AGENT_WIDTH, height: DEFAULT_PROJECT_AGENT_HEIGHT }), x: drag.originX + dx, y: drag.originY + dy },
     }));
   };
 
@@ -1591,7 +1594,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     const x = drag.originX + (event.clientX - drag.startX) / canvasZoom;
     const y = drag.originY + (event.clientY - drag.startY) / canvasZoom;
     setAgentLayouts((current) => {
-      const next = { ...current, [drag.id]: { ...(current[drag.id] || { x, y, z: 1, width: 300, height: 320 }), x, y } };
+      const next = { ...current, [drag.id]: { ...(current[drag.id] || { x, y, z: 1, width: DEFAULT_PROJECT_AGENT_WIDTH, height: DEFAULT_PROJECT_AGENT_HEIGHT }), x, y } };
       writeProjectViewCache(selectedProject.id, { layouts: next });
       return next;
     });

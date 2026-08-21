@@ -169,6 +169,7 @@ describe('<ProjectsPanel /> floating action button', () => {
     fireEvent.click(document.querySelector('[data-id="project-add-agent-confirm"]') as HTMLElement);
 
     await waitFor(() => expect(api.addGroupPane).toHaveBeenCalledWith(1, 'mac_local.w-200'));
+    await waitFor(() => expect(api.updateGroupPaneLayout).toHaveBeenCalledWith(1, 'mac_local.w-200', expect.objectContaining({ width: 600 })));
   });
 
   it('shows dot-only Instance status and prevents adding Agents from an offline Instance', async () => {
