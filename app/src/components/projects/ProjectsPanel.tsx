@@ -233,7 +233,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onDelete, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   terminalOpen?: boolean;
@@ -254,6 +254,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selec
   onBindWechat?: () => void;
   onBindFeishu?: () => void;
   onFork?: () => void;
+  onDelete?: () => void;
   onTerminalOpenChange: (open: boolean) => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -406,6 +407,16 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selec
                   className="mt-1 flex w-full items-center gap-2 border-t border-white/[0.07] rounded-lg px-3 py-2 text-left text-[12px] text-red-300 hover:bg-red-500/10"
                 >
                   <X className="h-3.5 w-3.5" />{t('projectRemoveAgent')}
+                </button>
+              ) : null}
+              {onDelete ? (
+                <button
+                  type="button"
+                  data-id="project-agent-card-delete"
+                  onClick={(event) => runMenuAction(event, onDelete)}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-red-300 hover:bg-red-500/10"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />{t('delete', { ns: 'teamPanel', defaultValue: '删除' })}
                 </button>
               ) : null}
             </div>
@@ -1197,6 +1208,34 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     } catch {
       window.dispatchEvent(new CustomEvent('show-toast', {
         detail: t('toastRestartFailed', { ns: 'teamPanel', title, defaultValue: `${title} 重启失败` }),
+      }));
+    }
+  };
+
+  const deleteAgent = async (agent: ProjectAgent) => {
+    if (agent.remote) return;
+    const id = shortPaneId(agent.paneId);
+    const title = agent.title || id;
+    const ok = await confirm({
+      body: <Trans i18nKey="confirmDelete" ns="teamPanel" values={{ title }} components={{ strong: <span className="font-medium text-zinc-100" /> }} />,
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await apiService.deletePane(id);
+      setGroups((current) => current.map((group) => group.pane_ids.some((paneId) => shortPaneId(paneId) === id)
+        ? { ...group, pane_ids: group.pane_ids.filter((paneId) => shortPaneId(paneId) !== id), pane_count: Math.max(0, group.pane_count - 1) }
+        : group));
+      setAgentLayouts((current) => {
+        const next = { ...current };
+        delete next[id];
+        writeProjectViewCache(selectedProject.id, { layouts: next });
+        return next;
+      });
+      await onAgentsRefresh();
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: t('toastDeleteFailed', { ns: 'teamPanel', title, defaultValue: `删除 ${title} 失败` }),
       }));
     }
   };
@@ -2013,6 +2052,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 onBindWechat={hasLocalActions ? () => setWechatTarget(agent) : undefined}
                 onBindFeishu={hasLocalActions ? () => setFeishuTarget(agent) : undefined}
                 onFork={hasLocalActions ? () => setForkTarget(agent) : undefined}
+                onDelete={hasLocalActions && cardShortId !== shortPaneId(masterPaneId) ? () => { void deleteAgent(agent); } : undefined}
                 onTerminalOpenChange={(open) => setTerminalAgentIds((current) => {
                   if (current.has(cardShortId) === open) return current;
                   const next = new Set(current);

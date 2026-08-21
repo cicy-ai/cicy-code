@@ -47,6 +47,7 @@ const api = vi.hoisted(() => ({
   getMemoryTemplate: vi.fn(),
   saveMemoryTemplate: vi.fn(),
   restartPane: vi.fn(),
+  deletePane: vi.fn(),
 }));
 const agentSend = vi.hoisted(() => ({ sendToAgent: vi.fn() }));
 
@@ -115,6 +116,7 @@ beforeEach(() => {
   api.getMemoryTemplate.mockResolvedValue({ data: { content: '# Global', path: '/home/cicy/cicy-ai/memory/global.md' } });
   api.saveMemoryTemplate.mockResolvedValue({ data: { saved: true } });
   api.restartPane.mockResolvedValue({ data: { success: true } });
+  api.deletePane.mockResolvedValue({ data: { success: true } });
   vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:queued-image'), revokeObjectURL: vi.fn() });
 });
 
@@ -1005,6 +1007,35 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await openMenu();
     fireEvent.click(document.querySelector('[data-id="project-agent-card-action-fork-w-101"]') as HTMLElement);
     expect(await waitFor(() => document.querySelector('[data-id="mock-fork-confirm-modal"]'))).toHaveTextContent('w-101:w-1001:1');
+  });
+
+  it('deletes a local non-master Agent from the Project card after confirmation', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [
+      { ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 },
+    ] } });
+    const onAgentsRefresh = vi.fn();
+    render(
+      <ProjectsPanel
+        agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]}
+        masterPaneId="w-1001"
+        onAgentsRefresh={onAgentsRefresh}
+        onOpenAgent={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-menu-w-101"]');
+      if (!node) throw new Error('project Agent More menu did not render');
+      return node as HTMLElement;
+    }));
+    const deleteButton = document.querySelector('[data-id="project-agent-card-delete"]') as HTMLElement;
+    expect(deleteButton).toHaveTextContent('删除');
+    fireEvent.click(deleteButton);
+    fireEvent.click(await waitFor(() => document.querySelector('[data-id="modal-confirm"]') as HTMLElement));
+
+    await waitFor(() => expect(api.deletePane).toHaveBeenCalledWith('w-101'));
+    expect(api.removeGroupPane).not.toHaveBeenCalled();
+    await waitFor(() => expect(onAgentsRefresh).toHaveBeenCalled());
   });
 
   it('matches TeamPanel action eligibility for a local cicy Agent', async () => {
