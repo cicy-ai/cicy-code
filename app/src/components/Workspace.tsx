@@ -61,7 +61,6 @@ import config, { defaultWorkerWorkspace, syncHostHomeFromPath, urls } from '../c
 import apiService from '../services/api';
 import { loadHandled } from './audit/auditHandled';
 import { sendToAgent } from '../services/agentSend';
-import { mergeAgentStatusPush } from '../services/agentStatus';
 import { clearAgentSendTarget, getAgentSendTarget, setAgentSendTarget, subscribeAgentSendTarget } from '../services/agentSendTarget';
 import { chatWs } from '../services/chatWs';
 import { ApiSwitchDialog } from './layout/ApiSwitchDialog';
@@ -1262,10 +1261,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       window.dispatchEvent(new CustomEvent('cicy:cloud-reply', { detail: msg.data }));
     } else if (msg?.type === 'status_change' && msg.data) {
       window.dispatchEvent(new CustomEvent('agent-status-change', { detail: msg.data }));
-      // Project/Team busy state is driven by pollStatuses. Merge the WS push
-      // immediately so a completed/failed/idle Agent releases its composer and
-      // queued messages without waiting for the next 5-second poll_data tick.
-      setPollStatuses((prev) => mergeAgentStatusPush(prev, msg.data, masterPaneId));
       const nextStatus = String(msg.data?.status || '').toLowerCase();
       if (nextStatus === 'thinking') setChatWsLiveStatus('pending');
       else if (nextStatus === 'working' || nextStatus === 'tool_call' || nextStatus === 'tool_use') setChatWsLiveStatus('tool_use');
