@@ -359,19 +359,16 @@ describe('<ProjectsPanel /> project view cache', () => {
     expect(costSlot).toHaveTextContent('$1.14');
   });
 
-  it('shows legacy and authoritative status dots side by side', async () => {
+  it('shows the legacy status dot used for delivery', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
     });
     const staleAgent = { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'idle' };
     const { rerender } = render(<ProjectsPanel agents={[staleAgent]} statuses={{}} onOpenAgent={vi.fn()} />);
-    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-status-legacy-w-101"]')).toHaveAttribute('title', '旧状态: idle'));
-    expect(document.querySelector('[data-id="project-agent-card-status-live-w-101"]')).toHaveAttribute('title', '权威状态: unknown');
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-status-w-101"]')).toHaveAttribute('title', 'idle'));
 
     rerender(<ProjectsPanel agents={[staleAgent]} statuses={{ 'w-101:main.0': { status: 'working' } }} onOpenAgent={vi.fn()} />);
-    expect(document.querySelector('[data-id="project-agent-card-status-legacy-w-101"]')).toHaveClass('bg-amber-500');
-    expect(document.querySelector('[data-id="project-agent-card-status-live-w-101"]')).toHaveAttribute('title', '权威状态: working');
-    expect(document.querySelector('[data-id="project-agent-card-status-live-w-101"]')).toHaveClass('bg-amber-500');
+    expect(document.querySelector('[data-id="project-agent-card-status-w-101"]')).toHaveClass('bg-amber-500');
   });
 
   it('brings default-project cards into view when agents arrive after the project', async () => {
@@ -1192,7 +1189,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
     // The pane list can lag and still say thinking. The fresher status snapshot
     // reaching completed must release the queue.
-    rerender(<ProjectsPanel agents={[thinkingAgent]} statuses={{ 'w-101:main.0': { status: 'completed', updated_at: '2' } }} onOpenAgent={vi.fn()} />);
+    rerender(<ProjectsPanel agents={[{ ...thinkingAgent, status: 'completed' }]} statuses={{ 'w-101:main.0': { status: 'completed', updated_at: '2' } }} onOpenAgent={vi.fn()} />);
     await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledWith(
       'w-101:main.0',
       '第一条\n\n第二条',
@@ -1228,6 +1225,31 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       'unknown 也直接发送',
       { submit: true, agentType: 'codex', fromComposer: true },
     ));
+    expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).not.toBeInTheDocument();
+  });
+
+  it('uses the first legacy status for delivery even when the authoritative status is thinking', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'idle' }]} statuses={{ 'w-101:main.0': { status: 'thinking' } }} onOpenAgent={vi.fn()} />);
+
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(card);
+    const input = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
+      if (!node) throw new Error('prompt did not open');
+      return node as HTMLTextAreaElement;
+    });
+    fireEvent.change(input, { target: { value: '以第一个状态发送' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledTimes(1));
     expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).not.toBeInTheDocument();
   });
 

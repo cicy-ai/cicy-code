@@ -234,10 +234,9 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, status, terminalOpen, working, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
-  status: string;
   terminalOpen?: boolean;
   working: boolean;
   teamId?: string;
@@ -271,9 +270,6 @@ function ProjectAgentCard({ agent, metrics, status, terminalOpen, working, teamI
   const legacyStatus = String(agent.remote && agent.instanceOnline === false ? 'offline' : agent.status || 'idle').toLowerCase();
   const legacyUnhealthy = /failed|error|offline|stopped/.test(legacyStatus);
   const legacyBusy = /running|working|thinking|streaming/.test(legacyStatus);
-  const effectiveStatus = String(agent.remote && agent.instanceOnline === false ? 'offline' : status || 'unknown').toLowerCase();
-  const unhealthy = /failed|error|offline|stopped/.test(effectiveStatus);
-  const liveBusy = projectAgentStatusIsBusy({ status: effectiveStatus });
   const identity = agent.remote ? agent.paneId : (teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId));
   const hasAgentActions = Boolean(onRestart || onUpdate || onBindWechat || onBindFeishu || onFork);
 
@@ -420,8 +416,7 @@ function ProjectAgentCard({ agent, metrics, status, terminalOpen, working, teamI
       </div>
 
       <div data-id="project-agent-card-metrics" className="mt-2.5 flex h-8 min-w-0 items-center gap-2 pb-2.5 font-mono text-[13px] text-zinc-500">
-        <span data-id={`project-agent-card-status-legacy-${shortPaneId(agent.paneId)}`} className={cn('h-2.5 w-2.5 shrink-0 rounded-full', legacyUnhealthy ? 'bg-red-400' : legacyBusy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={`旧状态: ${legacyStatus}`} />
-        <span data-id={`project-agent-card-status-live-${shortPaneId(agent.paneId)}`} className={cn('h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20', unhealthy ? 'bg-red-400' : liveBusy ? 'bg-amber-500' : projectAgentStatusIsTerminal({ status: effectiveStatus }) ? 'bg-emerald-700' : 'bg-zinc-700')} title={`权威状态: ${effectiveStatus}`} />
+        <span data-id={`project-agent-card-status-${shortPaneId(agent.paneId)}`} className={cn('h-2.5 w-2.5 shrink-0 rounded-full', legacyUnhealthy ? 'bg-red-400' : legacyBusy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={legacyStatus} />
         <button
           type="button"
           data-id="project-agent-card-identity"
@@ -1331,11 +1326,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     // its input prompt. Sending immediately can type the text before the shell is
     // ready and have the accompanying Enter swallowed by the cancel transition.
     if (canceledAgentIds.has(id)) return true;
-    const summary = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id] || {};
-    // poll/status is the freshest source. Do not OR it with stale agent/reply
-    // snapshots: an old "thinking" there would keep queued prompts stuck forever
-    // after the live status has already reached completed/idle.
-    const status = String(summary?.status || '').toLowerCase();
+    const status = String(agent.status || '').toLowerCase();
     return sendingAgentIds.has(id) || projectAgentStatusIsBusy({ status });
   };
 
@@ -1801,14 +1792,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               const layout = layoutForAgent(agent, index);
               const cardMetrics = liveMetrics[shortPaneId(agent.paneId)] || (agentReplies[shortPaneId(agent.paneId)] ? metricsFromCurrentReply(agentReplies[shortPaneId(agent.paneId)]) : undefined);
               const cardShortId = shortPaneId(agent.paneId);
-              const cardLatest = statuses[agent.paneId] || statuses[`${cardShortId}:main.0`] || statuses[cardShortId] || {};
-              // Keep the loading sentinel continuous across the send handoff:
-              // sendToAgent resolves once input reaches the terminal, before the
-              // server's live status necessarily flips to working. The optimistic
-              // reply is already `pending`, so it bridges that gap until the
-              // current-reply poll replaces it with an authoritative terminal state.
-              const authoritativeStatus = String(cardLatest?.status || '').toLowerCase();
-              const cardBusy = !canceledAgentIds.has(cardShortId) && (sendingAgentIds.has(cardShortId) || projectAgentStatusIsBusy({ status: authoritativeStatus }));
+              const cardBusy = !canceledAgentIds.has(cardShortId) && (sendingAgentIds.has(cardShortId) || projectAgentStatusIsBusy({ status: agent.status }));
               const hasLocalActions = !agent.remote;
               const hasCliLifecycleActions = hasLocalActions && normalizeAgentType(agent.agentType) !== 'cicy';
               return (
@@ -1825,7 +1809,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                   <ProjectAgentCard
                     agent={agent}
                     metrics={cardMetrics}
-                    status={authoritativeStatus}
                     terminalOpen={terminalAgentIds.has(cardShortId)}
                     working={cardBusy}
                     teamId={teamId}
