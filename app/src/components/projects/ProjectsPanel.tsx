@@ -267,8 +267,12 @@ function ProjectAgentCard({ agent, metrics, status, terminalOpen, working, teamI
   const [activeBodyTab, setActiveBodyTab] = useState<ProjectAgentBodyTab>(() => readProjectAgentBodyTab(agent));
   const [identityCopied, setIdentityCopied] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const legacyStatus = String(agent.remote && agent.instanceOnline === false ? 'offline' : agent.status || 'idle').toLowerCase();
+  const legacyUnhealthy = /failed|error|offline|stopped/.test(legacyStatus);
+  const legacyBusy = /running|working|thinking|streaming/.test(legacyStatus);
   const effectiveStatus = String(agent.remote && agent.instanceOnline === false ? 'offline' : status || 'unknown').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(effectiveStatus);
+  const liveBusy = /running|working|thinking|streaming|pending|tool_use|tool_call|in_progress/.test(effectiveStatus);
   const identity = agent.remote ? agent.paneId : (teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId));
   const hasAgentActions = Boolean(onRestart || onUpdate || onBindWechat || onBindFeishu || onFork);
 
@@ -415,7 +419,8 @@ function ProjectAgentCard({ agent, metrics, status, terminalOpen, working, teamI
       </div>
 
       <div data-id="project-agent-card-metrics" className="mt-2.5 flex h-8 min-w-0 items-center gap-2 pb-2.5 font-mono text-[13px] text-zinc-500">
-        <span data-id={`project-agent-card-status-${shortPaneId(agent.paneId)}`} className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : working ? 'bg-amber-500' : projectAgentStatusIsTerminal({ status: effectiveStatus }) ? 'bg-emerald-700' : 'bg-zinc-700')} title={effectiveStatus} />
+        <span data-id={`project-agent-card-status-legacy-${shortPaneId(agent.paneId)}`} className={cn('h-2.5 w-2.5 shrink-0 rounded-full', legacyUnhealthy ? 'bg-red-400' : legacyBusy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={`旧状态: ${legacyStatus}`} />
+        <span data-id={`project-agent-card-status-live-${shortPaneId(agent.paneId)}`} className={cn('h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20', unhealthy ? 'bg-red-400' : liveBusy ? 'bg-amber-500' : projectAgentStatusIsTerminal({ status: effectiveStatus }) ? 'bg-emerald-700' : 'bg-zinc-700')} title={`权威状态: ${effectiveStatus}`} />
         <button
           type="button"
           data-id="project-agent-card-identity"

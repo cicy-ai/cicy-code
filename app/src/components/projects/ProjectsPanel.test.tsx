@@ -359,17 +359,19 @@ describe('<ProjectsPanel /> project view cache', () => {
     expect(costSlot).toHaveTextContent('$1.14');
   });
 
-  it('uses the authoritative status snapshot for the card dot and never defaults unknown to idle', async () => {
+  it('shows legacy and authoritative status dots side by side', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
     });
     const staleAgent = { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'idle' };
     const { rerender } = render(<ProjectsPanel agents={[staleAgent]} statuses={{}} onOpenAgent={vi.fn()} />);
-    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-status-w-101"]')).toHaveAttribute('title', 'unknown'));
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-status-legacy-w-101"]')).toHaveAttribute('title', '旧状态: idle'));
+    expect(document.querySelector('[data-id="project-agent-card-status-live-w-101"]')).toHaveAttribute('title', '权威状态: unknown');
 
     rerender(<ProjectsPanel agents={[staleAgent]} statuses={{ 'w-101:main.0': { status: 'working' } }} onOpenAgent={vi.fn()} />);
-    expect(document.querySelector('[data-id="project-agent-card-status-w-101"]')).toHaveAttribute('title', 'working');
-    expect(document.querySelector('[data-id="project-agent-card-status-w-101"]')).toHaveClass('bg-amber-500');
+    expect(document.querySelector('[data-id="project-agent-card-status-legacy-w-101"]')).toHaveClass('bg-amber-500');
+    expect(document.querySelector('[data-id="project-agent-card-status-live-w-101"]')).toHaveAttribute('title', '权威状态: working');
+    expect(document.querySelector('[data-id="project-agent-card-status-live-w-101"]')).toHaveClass('bg-amber-500');
   });
 
   it('brings default-project cards into view when agents arrive after the project', async () => {
