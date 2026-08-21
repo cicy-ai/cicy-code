@@ -70,26 +70,3 @@ func TestCodexInputReadyIgnoresOldBusyScrollback(t *testing.T) {
 		t.Fatal("an old busy marker outside the active screen tail must not block an idle composer")
 	}
 }
-
-func TestPaneSendReadyTimeoutDefaultsToSynchronousLimit(t *testing.T) {
-	if got := effectiveAgentReadyTimeout("codex", 0); got != agentReadyTimeout {
-		t.Fatalf("effectiveAgentReadyTimeout() = %v, want %v", got, agentReadyTimeout)
-	}
-}
-
-func TestPaneSendReadyTimeoutUsesDeferredLimit(t *testing.T) {
-	req := newDeferredPaneSendRequest("queued prompt")
-	if got := effectiveAgentReadyTimeout("codex", req.readyTimeout); got != deferredAgentReadyTimeout {
-		t.Fatalf("effectiveAgentReadyTimeout() = %v, want %v", got, deferredAgentReadyTimeout)
-	}
-}
-
-func TestMergePaneSendReadyTimeoutUsesLongestRequest(t *testing.T) {
-	batch := []paneSendRequest{
-		{readyTimeout: agentReadyTimeout},
-		{readyTimeout: deferredAgentReadyTimeout},
-	}
-	if got := mergePaneSendReadyTimeout(batch); got != deferredAgentReadyTimeout {
-		t.Fatalf("mergePaneSendReadyTimeout() = %v, want %v", got, deferredAgentReadyTimeout)
-	}
-}

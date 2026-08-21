@@ -111,7 +111,6 @@ const projectAgentStatusSignature = (status: any) => [
   status?.latest_question,
 ].map((value) => String(value || '')).join('|');
 const projectAgentStatusIsTerminal = (status: any) => /^(completed|complete|done|idle|aborted|error|canceled|cancelled|failed|stopped)$/.test(String(status?.status || '').trim().toLowerCase());
-const projectAgentStatusIsBusy = (status: any) => /^(thinking|working|running|streaming)$/.test(String(status?.status || '').trim().toLowerCase());
 const projectAgentCanUseTerminal = (agent: ProjectAgent) => !agent.remote
   && String(agent.agentType || '').toLowerCase() !== 'cicy'
   && Boolean(agent.ttydSrc)
@@ -267,9 +266,9 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selec
   const [activeBodyTab, setActiveBodyTab] = useState<ProjectAgentBodyTab>(() => readProjectAgentBodyTab(agent));
   const [identityCopied, setIdentityCopied] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const legacyStatus = String(agent.remote && agent.instanceOnline === false ? 'offline' : agent.status || 'idle').toLowerCase();
-  const legacyUnhealthy = /failed|error|offline|stopped/.test(legacyStatus);
-  const legacyBusy = /running|working|thinking|streaming/.test(legacyStatus);
+  const status = String(agent.remote && agent.instanceOnline === false ? 'offline' : agent.status || 'idle').toLowerCase();
+  const unhealthy = /failed|error|offline|stopped/.test(status);
+  const busy = /running|working|thinking|streaming/.test(status);
   const identity = agent.remote ? agent.paneId : (teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId));
   const hasAgentActions = Boolean(onRestart || onUpdate || onBindWechat || onBindFeishu || onFork);
 
@@ -416,7 +415,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selec
       </div>
 
       <div data-id="project-agent-card-metrics" className="mt-2.5 flex h-8 min-w-0 items-center gap-2 pb-2.5 font-mono text-[13px] text-zinc-500">
-        <span data-id={`project-agent-card-status-${shortPaneId(agent.paneId)}`} className={cn('h-2.5 w-2.5 shrink-0 rounded-full', legacyUnhealthy ? 'bg-red-400' : legacyBusy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={legacyStatus} />
+        <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
         <button
           type="button"
           data-id="project-agent-card-identity"
@@ -1326,8 +1325,12 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     // its input prompt. Sending immediately can type the text before the shell is
     // ready and have the accompanying Enter swallowed by the cancel transition.
     if (canceledAgentIds.has(id)) return true;
-    const status = String(agent.status || '').toLowerCase();
-    return sendingAgentIds.has(id) || projectAgentStatusIsBusy({ status });
+    const summary = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id] || {};
+    // poll/status is the freshest source. Do not OR it with stale agent/reply
+    // snapshots: an old "thinking" there would keep queued prompts stuck forever
+    // after the live status has already reached completed/idle.
+    const status = String(summary?.status || agentReplies[id]?.status || agent.status || '').toLowerCase();
+    return sendingAgentIds.has(id) || Boolean(liveMetrics[id]?.working) || /thinking|working|running|streaming|pending|tool_use|tool_call|in_progress/.test(status);
   };
 
   const deliverAgentMessage = async (agent: ProjectAgent, message: string, displayQuestion: string, previousReply: any, sentAttachments: ProjectAttachment[] = [], restoreText = '') => {
@@ -1441,6 +1444,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     for (const agent of allAgents) {
       const id = shortPaneId(agent.paneId);
       const queued = queuedAgentMessages[id] || [];
+      const liveStatus = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id];
+      // Never release a queue during the reload gap before the first live
+      // status arrives. Treating that unknown state as idle clears and sends a
+      // restored queue as soon as the panel mounts.
+      if (!liveStatus) continue;
       if (!queued.length || agentIsThinking(agent)) continue;
       const payload = queued.map((item) => item.payload).join('\n\n');
       const displayQuestion = payload;
@@ -1792,7 +1800,14 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               const layout = layoutForAgent(agent, index);
               const cardMetrics = liveMetrics[shortPaneId(agent.paneId)] || (agentReplies[shortPaneId(agent.paneId)] ? metricsFromCurrentReply(agentReplies[shortPaneId(agent.paneId)]) : undefined);
               const cardShortId = shortPaneId(agent.paneId);
-              const cardBusy = !canceledAgentIds.has(cardShortId) && (sendingAgentIds.has(cardShortId) || projectAgentStatusIsBusy({ status: agent.status }));
+              const cardLatest = statuses[agent.paneId] || statuses[`${cardShortId}:main.0`] || statuses[cardShortId] || {};
+              // Keep the loading sentinel continuous across the send handoff:
+              // sendToAgent resolves once input reaches the terminal, before the
+              // server's live status necessarily flips to working. The optimistic
+              // reply is already `pending`, so it bridges that gap until the
+              // current-reply poll replaces it with an authoritative terminal state.
+              const observedReplyStatus = String(agentReplies[cardShortId]?.status || cardLatest?.status || agent.status || '').toLowerCase();
+              const cardBusy = !canceledAgentIds.has(cardShortId) && (sendingAgentIds.has(cardShortId) || Boolean(cardMetrics?.working) || /running|working|thinking|streaming|pending|tool_use|tool_call|in_progress/.test(observedReplyStatus));
               const hasLocalActions = !agent.remote;
               const hasCliLifecycleActions = hasLocalActions && normalizeAgentType(agent.agentType) !== 'cicy';
               return (

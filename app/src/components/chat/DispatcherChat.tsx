@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUp, Loader2, Square, Paperclip, X, FileText, FileSpreadsheet, FileCode, FileArchive, Brain, Maximize2, Minimize2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import CurrentHistoryView from './CurrentHistoryView';
-import { dispatcherBusySignalFromStatus, nextDispatcherBusy } from './dispatcherBusy';
+import { nextDispatcherBusy } from './dispatcherBusy';
 import { isCicyLiteAgent } from '../../lib/agentType';
 import apiService from '../../services/api';
 import { MAX_ATTACHMENT_MB } from '../../config';
@@ -260,18 +260,6 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     };
     window.addEventListener('cicy:dispatcher-busy', onBusy as EventListener);
     return () => window.removeEventListener('cicy:dispatcher-busy', onBusy as EventListener);
-  }, [paneId]);
-
-  useEffect(() => {
-    const onStatus = (event: Event) => {
-      const detail = (event as CustomEvent)?.detail || {};
-      const target = String(detail.agent_id || '').trim().split(':')[0];
-      if (!target || target !== String(paneId).split(':')[0]) return;
-      const signal = dispatcherBusySignalFromStatus(detail.status);
-      if (signal) setBusy((current) => nextDispatcherBusy(current, signal));
-    };
-    window.addEventListener('agent-status-change', onStatus as EventListener);
-    return () => window.removeEventListener('agent-status-change', onStatus as EventListener);
   }, [paneId]);
 
   // "Send to agent" for a cicy-lite agent (no terminal) lands here: append the
