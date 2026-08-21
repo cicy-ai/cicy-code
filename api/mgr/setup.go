@@ -1158,6 +1158,9 @@ var preinstalledSkills = []string{
 	"agent-chrome", "agent-electron", "agent-editor", "agent-desktop", "agent-webpage",
 	"cicy-agent", "cicy-todo", "cicy-mihomo", "cicy-ssh", "proxy_ssh", "global-api-token",
 	"agent-summary",
+	// Account-scoped GitHub operations plus Cloudflare API and named-tunnel
+	// management are available to agents on every fresh install.
+	"github", "cf", "cf-tunnel",
 	// Team knowledge Layer 2 store CLI (add/list/recall/promote/...) — fresh
 	// installs get it so agents can record/recall team knowledge out of the box.
 	"cicy-knowledge",
