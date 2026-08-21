@@ -26,7 +26,11 @@ import (
 
 const maxCicyUpdateArchiveSize = 256 << 20 // 256 MiB, comfortably above current packages.
 
-var safeCicyUpdateVersion = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]*$`)
+var (
+	safeCicyUpdateVersion            = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]*$`)
+	cicyUpdateWriteLocalBinManifest  = updateLocalBinManifest
+	cicyUpdateReplaceLocalBinSymlink = replaceSymlinkAtomically
+)
 
 type localBinUpdateOptions struct {
 	Version  string
@@ -63,9 +67,9 @@ func localBinPlatformPackage(goos, goarch string) (packageName, platformLabel st
 }
 
 // installLocalBinUpdate stages a published cicy-code binary in the same
-// side-by-side layout used by the Desktop local build flow. It intentionally
-// does not stop or restart the running process; the new symlink is picked up
-// when the user next restarts CiCy Desktop/cicy-code.
+// side-by-side layout used by the Desktop local build flow. Process replacement
+// happens in the HTTP update handler only after this function has successfully
+// downloaded, verified and switched the symlink.
 func installLocalBinUpdate(ctx context.Context, opts localBinUpdateOptions) error {
 	version := strings.TrimSpace(opts.Version)
 	if !safeCicyUpdateVersion.MatchString(version) {
@@ -118,11 +122,41 @@ func installLocalBinUpdate(ctx context.Context, opts localBinUpdateOptions) erro
 	if err := os.Chmod(versionedPath, 0o755); err != nil {
 		return fmt.Errorf("mark versioned binary executable: %w", err)
 	}
-	if err := updateLocalBinManifest(filepath.Join(binDir, ".cicy-localbin.json"), version); err != nil {
+	stablePath := filepath.Join(binDir, "cicy-code")
+	previousTarget, stableExisted, err := readStableSymlink(stablePath)
+	if err != nil {
 		return err
 	}
-	if err := replaceSymlinkAtomically(filepath.Join(binDir, "cicy-code"), versionedPath); err != nil {
+	if err := cicyUpdateReplaceLocalBinSymlink(stablePath, versionedPath); err != nil {
 		return err
+	}
+	manifestPath := filepath.Join(binDir, ".cicy-localbin.json")
+	if err := cicyUpdateWriteLocalBinManifest(manifestPath, version); err != nil {
+		if rollbackErr := restoreStableSymlink(stablePath, previousTarget, stableExisted); rollbackErr != nil {
+			return fmt.Errorf("%v; rollback stable cicy-code symlink: %w", err, rollbackErr)
+		}
+		return err
+	}
+	return nil
+}
+
+func readStableSymlink(stablePath string) (target string, existed bool, err error) {
+	target, err = os.Readlink(stablePath)
+	if err == nil {
+		return target, true, nil
+	}
+	if os.IsNotExist(err) {
+		return "", false, nil
+	}
+	return "", false, fmt.Errorf("read stable cicy-code symlink: %w", err)
+}
+
+func restoreStableSymlink(stablePath, previousTarget string, existed bool) error {
+	if existed {
+		return replaceSymlinkAtomically(stablePath, previousTarget)
+	}
+	if err := os.Remove(stablePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove new stable cicy-code symlink: %w", err)
 	}
 	return nil
 }
@@ -333,8 +367,18 @@ func updateLocalBinManifest(path, version string) error {
 }
 
 func replaceSymlinkAtomically(stablePath, versionedPath string) error {
-	tmpPath := stablePath + ".update-link"
-	_ = os.Remove(tmpPath)
+	tmp, err := os.CreateTemp(filepath.Dir(stablePath), "."+filepath.Base(stablePath)+".update-link-*")
+	if err != nil {
+		return fmt.Errorf("reserve stable cicy-code symlink: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close stable cicy-code symlink reservation: %w", err)
+	}
+	if err := os.Remove(tmpPath); err != nil {
+		return fmt.Errorf("prepare stable cicy-code symlink: %w", err)
+	}
 	if err := os.Symlink(versionedPath, tmpPath); err != nil {
 		return fmt.Errorf("create stable cicy-code symlink: %w", err)
 	}

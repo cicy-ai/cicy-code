@@ -11,6 +11,7 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -42,6 +43,32 @@ func fakeCicyCodeTarball(t *testing.T, content []byte) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+func fakeLocalBinRegistry(t *testing.T, packageName, targetVersion string, binary []byte) *httptest.Server {
+	t.Helper()
+	tarball := fakeCicyCodeTarball(t, binary)
+	sum := sha512.Sum512(tarball)
+	integrity := "sha512-" + base64.StdEncoding.EncodeToString(sum[:])
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/" + packageName + "/" + targetVersion:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"dist": map[string]string{
+					"tarball":   server.URL + "/package.tgz",
+					"integrity": integrity,
+				},
+			})
+		case "/package.tgz":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
 }
 
 func TestLocalBinPlatformPackage(t *testing.T) {
@@ -218,5 +245,118 @@ func TestInstallLocalBinUpdateRejectsBadIntegrityWithoutSwitching(t *testing.T) 
 	}
 	if _, statErr := os.Stat(filepath.Join(binDir, "cicy-code-9.8.7-darwin-x64")); !os.IsNotExist(statErr) {
 		t.Fatalf("unverified binary should not be installed; stat error = %v", statErr)
+	}
+}
+
+func TestInstallLocalBinUpdateDoesNotChangeManifestWhenSymlinkSwitchFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink assertions require Unix semantics")
+	}
+	const targetVersion = "9.8.7"
+	server := fakeLocalBinRegistry(t, "cicy-code-linux-x64", targetVersion, []byte("new-linux-binary"))
+	binDir := t.TempDir()
+	oldBinary := filepath.Join(binDir, "cicy-code-1.0.0-linux-x64")
+	if err := os.WriteFile(oldBinary, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stablePath := filepath.Join(binDir, "cicy-code")
+	if err := os.Symlink(oldBinary, stablePath); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(binDir, ".cicy-localbin.json")
+	if err := os.WriteFile(manifestPath, []byte("{\n  \"cicy-code\": \"1.0.0\"\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origReplaceSymlink := cicyUpdateReplaceLocalBinSymlink
+	cicyUpdateReplaceLocalBinSymlink = func(string, string) error {
+		return errors.New("injected symlink switch failure")
+	}
+	t.Cleanup(func() { cicyUpdateReplaceLocalBinSymlink = origReplaceSymlink })
+
+	err := installLocalBinUpdate(context.Background(), localBinUpdateOptions{
+		Version: targetVersion, GOOS: "linux", GOARCH: "amd64", BinDir: binDir,
+		Registry: server.URL, Client: server.Client(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "symlink switch failure") {
+		t.Fatalf("error = %v, want injected symlink failure", err)
+	}
+	gotTarget, readErr := os.Readlink(stablePath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if gotTarget != oldBinary {
+		t.Fatalf("stable symlink changed after failed switch: %q", gotTarget)
+	}
+	var manifest map[string]any
+	data, readErr := os.ReadFile(manifestPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest["cicy-code"] != "1.0.0" {
+		t.Fatalf("manifest changed before symlink switch succeeded: %#v", manifest)
+	}
+}
+
+func TestInstallLocalBinUpdateRollsBackSymlinkWhenManifestWriteFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink assertions require Unix semantics")
+	}
+	const targetVersion = "9.8.7"
+	server := fakeLocalBinRegistry(t, "cicy-code-linux-x64", targetVersion, []byte("new-linux-binary"))
+	binDir := t.TempDir()
+	oldBinary := filepath.Join(binDir, "cicy-code-1.0.0-linux-x64")
+	if err := os.WriteFile(oldBinary, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stablePath := filepath.Join(binDir, "cicy-code")
+	if err := os.Symlink(oldBinary, stablePath); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(binDir, ".cicy-localbin.json")
+	if err := os.WriteFile(manifestPath, []byte("{\n  \"cicy-code\": \"1.0.0\"\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	versionedPath := filepath.Join(binDir, "cicy-code-"+targetVersion+"-linux-x64")
+	sawNewStableLink := false
+	origWriteManifest := cicyUpdateWriteLocalBinManifest
+	cicyUpdateWriteLocalBinManifest = func(string, string) error {
+		gotTarget, err := os.Readlink(stablePath)
+		sawNewStableLink = err == nil && gotTarget == versionedPath
+		return errors.New("injected manifest write failure")
+	}
+	t.Cleanup(func() { cicyUpdateWriteLocalBinManifest = origWriteManifest })
+
+	err := installLocalBinUpdate(context.Background(), localBinUpdateOptions{
+		Version: targetVersion, GOOS: "linux", GOARCH: "amd64", BinDir: binDir,
+		Registry: server.URL, Client: server.Client(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "manifest write failure") {
+		t.Fatalf("error = %v, want injected manifest failure", err)
+	}
+	if !sawNewStableLink {
+		t.Fatal("manifest write was attempted before the stable symlink switched")
+	}
+	gotTarget, readErr := os.Readlink(stablePath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if gotTarget != oldBinary {
+		t.Fatalf("stable symlink was not rolled back: got %q, want %q", gotTarget, oldBinary)
+	}
+	var manifest map[string]any
+	data, readErr := os.ReadFile(manifestPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest["cicy-code"] != "1.0.0" {
+		t.Fatalf("manifest changed after failed transaction: %#v", manifest)
 	}
 }

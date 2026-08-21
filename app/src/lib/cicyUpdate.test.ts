@@ -31,9 +31,17 @@ describe('interpretCicyUpdateResponse', () => {
     });
   });
 
-  it('keeps polling for the detached container updater', () => {
+  it('keeps the exact target while polling a restarting updater', () => {
     expect(interpretCicyUpdateResponse({ started: true, target: '2.3.556' }, 'Update failed')).toEqual({
       kind: 'poll',
+      target: '2.3.556',
+    });
+  });
+
+  it('rejects a started response that omits the exact target version', () => {
+    expect(interpretCicyUpdateResponse({ started: true }, 'Update failed')).toEqual({
+      kind: 'failed',
+      message: 'Update failed',
     });
   });
 });

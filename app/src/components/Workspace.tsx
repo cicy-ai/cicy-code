@@ -474,9 +474,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const timer = window.setInterval(() => { checkVersionUpdate(); }, 30 * 60 * 1000);
     return () => { window.removeEventListener('focus', onFocus); window.clearInterval(timer); };
   }, [checkVersionUpdate]);
-  // Click-to-update supports two backends: containers restart themselves and
-  // need polling; macOS/Linux local-bin installs are staged without a restart and
-  // return an explicit restart_required result.
+  // Every supported updater restarts itself after it has durably installed the
+  // requested target. Keep polling through the short disconnect and reload only
+  // after the new process reports that exact version.
   const [updating, setUpdating] = useState(false);
   const applyUpdate = useCallback(async () => {
     if (updating) return;
@@ -506,6 +506,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         }));
         return;
       }
+      const targetVersion = outcome.target;
       const startedAt = Date.now();
       const poll = async () => {
         if (Date.now() - startedAt > 180000) {
@@ -518,7 +519,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         try {
           const s: any = await apiService.getCicyUpdateStatus();
           const cur = s?.data?.current;
-          if (cur && cur !== config.version) { window.location.reload(); return; }
+          if (cur === targetVersion) { window.location.reload(); return; }
         } catch { /* server restarting — keep polling */ }
         window.setTimeout(poll, 4000);
       };

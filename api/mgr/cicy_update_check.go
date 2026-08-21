@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -38,7 +39,36 @@ var (
 	cicyUpdateLatestVersion            = latestCicyCodeVersion
 	cicyUpdateInstalledLocalBinVersion = installedLocalBinVersion
 	cicyUpdateInstallLocalBin          = installLocalBinUpdate
+	cicyUpdateProcessArgs              = func() []string { return append([]string(nil), os.Args...) }
+	cicyUpdateScheduleLocalBinRestart  = scheduleLocalBinRestart
+	cicyUpdateLocalBinCoordinator      = &localBinUpdateCoordinator{}
 )
+
+type localBinUpdateCoordinator struct {
+	mu     sync.Mutex
+	target string
+}
+
+// begin elects one request as the installer for target. A duplicate request
+// for the same target joins the already-running update; a different target is
+// rejected so two published versions can never race the stable symlink.
+func (c *localBinUpdateCoordinator) begin(target string) (owner bool, activeTarget string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.target == "" {
+		c.target = target
+		return true, target
+	}
+	return false, c.target
+}
+
+func (c *localBinUpdateCoordinator) cancel(target string) {
+	c.mu.Lock()
+	if c.target == target {
+		c.target = ""
+	}
+	c.mu.Unlock()
+}
 
 // latestCicyCodeVersion returns the newest published cicy-code version, cached
 // for updCheckTTL. npmjs is authoritative for the `latest` dist-tag (npmmirror's
@@ -116,7 +146,7 @@ func handleCicyUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		"current":          version,
 		"installed":        installed,
 		"latest":           latest,
-		"has_update":       latest != "" && versionGreater(latest, installed),
+		"has_update":       latest != "" && versionGreater(latest, version),
 		"restart_required": versionGreater(installed, version),
 	})
 }
@@ -142,7 +172,8 @@ func installedLocalBinVersion() string {
 //   - container: launch the existing detached updater, which restarts the
 //     supervised server; the frontend polls until the new process is ready.
 //   - macOS/Linux local-bin: download and atomically stage the published platform
-//     binary, but deliberately leave restart timing to the user.
+//     binary, flush a success response, then replace this process with the new
+//     binary while preserving its command-line arguments and environment.
 func handleCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
 	if cicyUpdateIsContainerRuntime() {
 		handleContainerCicyUpdateApply(w)
@@ -216,18 +247,69 @@ func handleLocalBinCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
 		Registry: npmRegistryOfficial,
 		Client:   http.DefaultClient,
 	}
+	owner, activeTarget := cicyUpdateLocalBinCoordinator.begin(target)
+	if !owner {
+		if activeTarget != target {
+			J(w, M{
+				"started":       false,
+				"current":       version,
+				"target":        target,
+				"active_target": activeTarget,
+				"error":         "another update is already in progress",
+			})
+			return
+		}
+		writeLocalBinRestartingResponse(w, target)
+		return
+	}
 	if err := cicyUpdateInstallLocalBin(r.Context(), opts); err != nil {
+		cicyUpdateLocalBinCoordinator.cancel(target)
 		log.Printf("[cicy-update] %s local-bin install failed: %v", cicyUpdateGOOS, err)
 		J(w, M{"started": false, "error": "failed to install update: " + err.Error()})
 		return
 	}
-	log.Printf("[cicy-update] staged %s local-bin update %s -> %s; restart required", cicyUpdateGOOS, version, target)
+	restartExecutable := filepath.Join(opts.BinDir, "cicy-code")
+	processArgs := cicyUpdateProcessArgs()
+	restartArgs := []string{restartExecutable}
+	if len(processArgs) > 1 {
+		restartArgs = append(restartArgs, processArgs[1:]...)
+	}
+	log.Printf("[cicy-update] staged %s local-bin update %s -> %s; restarting with original args", cicyUpdateGOOS, version, target)
+	writeLocalBinRestartingResponse(w, target)
+	cicyUpdateScheduleLocalBinRestart(restartExecutable, restartArgs)
+}
+
+func writeLocalBinRestartingResponse(w http.ResponseWriter, target string) {
 	J(w, M{
-		"started":          true,
-		"completed":        true,
-		"restart_required": true,
-		"current":          version,
-		"target":           target,
+		"started":    true,
+		"restarting": true,
+		"current":    version,
+		"target":     target,
+	})
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// scheduleLocalBinRestart gives net/http enough time to deliver the successful
+// update response, then atomically replaces the current process image. Exec
+// preserves the PID and parent-process supervision while the rebuilt argv keeps
+// the same port, email and other startup flags the user originally supplied.
+func scheduleLocalBinRestart(executable string, args []string) {
+	executable = strings.TrimSpace(executable)
+	argv := append([]string(nil), args...)
+	env := append([]string(nil), os.Environ()...)
+	time.AfterFunc(500*time.Millisecond, func() {
+		if executable == "" {
+			log.Printf("[cicy-update] restart failed: executable is empty")
+			return
+		}
+		if len(argv) == 0 {
+			argv = []string{executable}
+		}
+		if err := syscall.Exec(executable, argv, env); err != nil {
+			log.Printf("[cicy-update] restart exec failed: %v", err)
+		}
 	})
 }
 

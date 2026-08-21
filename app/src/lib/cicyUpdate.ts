@@ -12,7 +12,7 @@ export type CicyUpdateResponse = {
 export type CicyUpdateOutcome =
   | { kind: 'failed'; message: string }
   | { kind: 'restart-required'; target: string }
-  | { kind: 'poll' };
+  | { kind: 'poll'; target: string };
 
 export function interpretCicyUpdateResponse(
   data: CicyUpdateResponse | null | undefined,
@@ -22,8 +22,12 @@ export function interpretCicyUpdateResponse(
     const message = String(data?.error || '').trim() || fallbackError;
     return { kind: 'failed', message };
   }
-  if (data.completed && data.restart_required) {
-    return { kind: 'restart-required', target: String(data.target || '').trim() };
+  const target = String(data.target || '').trim();
+  if (!target) {
+    return { kind: 'failed', message: fallbackError };
   }
-  return { kind: 'poll' };
+  if (data.completed && data.restart_required) {
+    return { kind: 'restart-required', target };
+  }
+  return { kind: 'poll', target };
 }
