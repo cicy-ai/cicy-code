@@ -1177,7 +1177,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledWith(
       'w-101:main.0',
       '第一条\n\n第二条',
-      { submit: true, agentType: 'codex', fromComposer: true, deferUntilReady: true },
+      { submit: true, agentType: 'codex', fromComposer: true },
     ));
     expect(document.querySelectorAll('[data-id="project-agent-message-queue-item"]')).toHaveLength(0);
     expect(await screen.findByText(/第一条/)).toBeInTheDocument();
@@ -1211,7 +1211,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledWith(
       'w-101:main.0',
       '刷新后继续发送',
-      { submit: true, agentType: 'codex', fromComposer: true, deferUntilReady: true },
+      { submit: true, agentType: 'codex', fromComposer: true },
     ));
   });
 
