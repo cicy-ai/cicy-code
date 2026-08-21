@@ -8,9 +8,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
-func TestWaitForAgentInputReadyChecksCodexPaneBeforeSending(t *testing.T) {
+func TestWaitForAgentInputReadyDoesNotDelayCodexSend(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix tmux command shim test")
 	}
@@ -19,16 +20,23 @@ func TestWaitForAgentInputReadyChecksCodexPaneBeforeSending(t *testing.T) {
 	script := filepath.Join(dir, "tmux")
 	body := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$*\" >> \"" + logPath + "\"\n" +
-		"printf 'OpenAI Codex (v0.1)\\ndirectory: ~/cicy-ai/workers/w-test\\n› \\n· 100%% left ~/cicy-ai/workers/w-test\\n'\n"
+		"exit 1\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	if err := waitForAgentInputReady("w-test:main.0", "codex", nil); err != nil {
-		t.Fatalf("ready Codex pane was rejected: %v", err)
+	result := make(chan error, 1)
+	go func() { result <- waitForAgentInputReady("w-test:main.0", "codex", nil) }()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("Codex send was delayed by readiness detection: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Codex send waited for terminal readiness")
 	}
-	if _, err := os.Stat(logPath); err != nil {
-		t.Fatalf("Codex readiness was not checked before send: %v", err)
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("Codex send unexpectedly invoked tmux readiness detection: %v", err)
 	}
 }

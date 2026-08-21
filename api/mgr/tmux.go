@@ -3958,9 +3958,9 @@ func waitForAgentInputReady(paneID, agentType string, trace *tmuxSendTrace) erro
 	agentType = normalizeAgentType(agentType)
 	// The headless dispatcher reads buffered stdin, so it has no not-ready
 	// state. Agent types without a reliable ready marker retain the historical
-	// best-effort path. Codex/OpenCode/Kiro must be checked: a newly created pane
-	// can still be running boot.sh, and typing into it loses the prompt.
-	if agentType == "" || agentType == "gemini" || agentType == "hermes" || agentType == "cicy" {
+	// best-effort path. Codex also retains its pre-v2.3.559 direct-send behavior:
+	// its evolving footer is not a reliable transport readiness boundary.
+	if agentType == "" || agentType == "codex" || agentType == "gemini" || agentType == "hermes" || agentType == "cicy" {
 		return nil
 	}
 	if trace != nil {
