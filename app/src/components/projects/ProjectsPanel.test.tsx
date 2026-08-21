@@ -359,6 +359,19 @@ describe('<ProjectsPanel /> project view cache', () => {
     expect(costSlot).toHaveTextContent('$1.14');
   });
 
+  it('uses the authoritative status snapshot for the card dot and never defaults unknown to idle', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    const staleAgent = { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'idle' };
+    const { rerender } = render(<ProjectsPanel agents={[staleAgent]} statuses={{}} onOpenAgent={vi.fn()} />);
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-status-w-101"]')).toHaveAttribute('title', 'unknown'));
+
+    rerender(<ProjectsPanel agents={[staleAgent]} statuses={{ 'w-101:main.0': { status: 'working' } }} onOpenAgent={vi.fn()} />);
+    expect(document.querySelector('[data-id="project-agent-card-status-w-101"]')).toHaveAttribute('title', 'working');
+    expect(document.querySelector('[data-id="project-agent-card-status-w-101"]')).toHaveClass('bg-amber-500');
+  });
+
   it('brings default-project cards into view when agents arrive after the project', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
