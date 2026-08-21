@@ -46,6 +46,7 @@ type PromptLang = 'en' | 'zh';
 interface ForkConfirmModalProps {
   sourcePaneId: string;
   masterPaneId: string;
+  projectId?: number | string;
   onClose: () => void;
   onForked: () => void;
   // Opens a file (workspace-relative path) in the source agent's file editor.
@@ -74,7 +75,7 @@ function fmtTokens(n: unknown): string {
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, { ns: 'teamPanel', ...o });
 
-export default function ForkConfirmModal({ sourcePaneId, masterPaneId, onClose, onForked, onOpenAgentFile }: ForkConfirmModalProps) {
+export default function ForkConfirmModal({ sourcePaneId, masterPaneId, projectId, onClose, onForked, onOpenAgentFile }: ForkConfirmModalProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<ForkPreview | null>(null);
@@ -190,6 +191,7 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, onClose, 
       const { data } = await apiService.forkPane({
         source_pane_id: preview.source_pane_id,
         master_pane_id: masterPaneId,
+        project_id: projectId,
         prompt,
       });
       if (data?.pane_id) {
@@ -203,7 +205,7 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, onClose, 
       setError(t('toastForkFailed') as string);
       setSending(false);
     }
-  }, [sending, preview, masterPaneId, prompt, onForked, onClose]);
+  }, [sending, preview, masterPaneId, projectId, prompt, onForked, onClose]);
 
   const fileRow = (label: string, icon: React.ReactNode, f?: ForkFile) => {
     if (!f) return null;

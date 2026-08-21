@@ -65,8 +65,8 @@ vi.mock('../layout/WechatBindModal', () => ({
   ),
 }));
 vi.mock('../layout/ForkConfirmModal', () => ({
-  default: ({ sourcePaneId, masterPaneId, onClose }: { sourcePaneId: string; masterPaneId: string; onClose: () => void }) => (
-    <div data-id="mock-fork-confirm-modal">{sourcePaneId}:{masterPaneId}<button data-id="mock-fork-confirm-close" onClick={onClose}>close</button></div>
+  default: ({ sourcePaneId, masterPaneId, projectId, onClose }: { sourcePaneId: string; masterPaneId: string; projectId?: number | string; onClose: () => void }) => (
+    <div data-id="mock-fork-confirm-modal">{sourcePaneId}:{masterPaneId}:{projectId}<button data-id="mock-fork-confirm-close" onClick={onClose}>close</button></div>
   ),
 }));
 vi.mock('@uiw/react-codemirror', () => ({
@@ -1004,7 +1004,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
     await openMenu();
     fireEvent.click(document.querySelector('[data-id="project-agent-card-action-fork-w-101"]') as HTMLElement);
-    expect(await waitFor(() => document.querySelector('[data-id="mock-fork-confirm-modal"]'))).toHaveTextContent('w-101:w-1001');
+    expect(await waitFor(() => document.querySelector('[data-id="mock-fork-confirm-modal"]'))).toHaveTextContent('w-101:w-1001:1');
   });
 
   it('matches TeamPanel action eligibility for a local cicy Agent', async () => {

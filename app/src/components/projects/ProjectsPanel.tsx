@@ -2321,8 +2321,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         <ForkConfirmModal
           sourcePaneId={shortPaneId(forkTarget.paneId)}
           masterPaneId={shortPaneId(masterPaneId)}
+          projectId={selectedProject.api_id}
           onClose={() => setForkTarget(null)}
-          onForked={() => { void onAgentsRefresh(); }}
+          onForked={() => { void onAgentsRefresh(); void load(false); }}
           onOpenAgentFile={onOpenAgentFile}
         />
       ) : null}

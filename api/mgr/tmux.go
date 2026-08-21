@@ -6077,6 +6077,7 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		SourcePaneID string `json:"source_pane_id"`
 		Title        string `json:"title"`
 		MasterPaneID string `json:"master_pane_id"`
+		ProjectID    int64  `json:"project_id"`
 		// Prompt, when non-empty, overrides the auto-generated inherit prompt —
 		// the fork-confirm modal sends the user-edited text here. Applies to both
 		// the CLI path (sent verbatim to the input box) and headless cicy forks
@@ -6089,6 +6090,13 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 	if srcID == "" {
 		httpErr(w, 400, "source_pane_id required")
 		return
+	}
+	if req.ProjectID > 0 {
+		var exists int
+		if err := store.QueryRow("SELECT COUNT(*) FROM agent_groups WHERE id=?", req.ProjectID).Scan(&exists); err != nil || exists == 0 {
+			httpErr(w, 404, "project not found")
+			return
+		}
 	}
 	masterID := normPaneID(strings.TrimSpace(req.MasterPaneID))
 	// Default the master to w-1001 (the PM/dispatcher) when none is given, so a
@@ -6207,6 +6215,12 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		newPaneID, _ = result["session"].(string)
 	}
 	newPaneID = normPaneID(newPaneID)
+	if req.ProjectID > 0 && newPaneID != "" {
+		if err := addForkToProject(req.ProjectID, newPaneID); err != nil {
+			httpErr(w, 500, "add fork to project failed: "+err.Error())
+			return
+		}
+	}
 
 	// Tag the fork's provenance so the TeamPanel can nest it as a sub-group under
 	// its source agent. source_kind/source_ref already flow DB → /api/agents/bound
@@ -6324,4 +6338,12 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		"prompt_pending": newPaneID != "",
 		"prompt_path":    usedPath,
 	})
+}
+
+func addForkToProject(projectID int64, paneID string) error {
+	_, err := store.Exec(
+		store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}),
+		projectID, paneID, "agent_ttyd", paneID,
+	)
+	return err
 }
