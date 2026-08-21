@@ -47,6 +47,35 @@ func TestCodexInputReadyRejectsVisibleBusyComposer(t *testing.T) {
 	}
 }
 
+func TestDeferredCodexSendUsesVisibleBusyComposerQueue(t *testing.T) {
+	out := `• Working (23s • esc to interrupt)
+
+› another prompt
+
+  tab to queue message                                      26% context left ~/cicy-ai/workers/w-test`
+	if !canQueuePromptWhileBusy("codex", out, deferredAgentReadyTimeout) {
+		t.Fatal("deferred Codex send should use the visible busy composer queue")
+	}
+}
+
+func TestSynchronousCodexSendStillWaitsForIdle(t *testing.T) {
+	out := `• Working (23s • esc to interrupt)
+
+› another prompt
+
+  tab to queue message                                      26% context left ~/cicy-ai/workers/w-test`
+	if canQueuePromptWhileBusy("codex", out, 0) {
+		t.Fatal("synchronous Codex send must retain idle-wait semantics")
+	}
+}
+
+func TestDeferredCodexSendWaitsWhileComposerIsMissing(t *testing.T) {
+	out := `OpenAI Codex starting…`
+	if canQueuePromptWhileBusy("codex", out, deferredAgentReadyTimeout) {
+		t.Fatal("deferred Codex send must wait until the composer exists")
+	}
+}
+
 func TestCodexInputReadyIgnoresOldBusyScrollback(t *testing.T) {
 	out := `• Working (2m • esc to interrupt)
 • old tool output

@@ -3877,6 +3877,15 @@ func isCodexInputReady(out string) bool {
 	return false
 }
 
+func canQueuePromptWhileBusy(agentType, out string, readyTimeout time.Duration) bool {
+	if normalizeAgentType(agentType) != "codex" || readyTimeout <= 0 {
+		return false
+	}
+	recent := recentTmuxPaneText(out, 80)
+	active := recentTmuxPaneText(out, 8)
+	return isCodexPromptVisible(recent) && isCodexBusyStateVisible(active)
+}
+
 func isOpenCodeInputReady(out string) bool {
 	// The ready/splash screen shows the input box ("Ask anything...") and the
 	// status bar ("ctrl+p commands"), but NOT necessarily the literal
@@ -3955,6 +3964,15 @@ func ensurePaneReadyForSendWithTimeout(paneID string, trace *tmuxSendTrace, read
 			trace.logStep("lazy-ready-error", map[string]any{"error": err.Error()}, "")
 		}
 		return err
+	}
+	if readyTimeout > 0 && normalizeAgentType(agentType) == "codex" {
+		out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", promptConfirmCaptureStart)
+		if err == nil && canQueuePromptWhileBusy(agentType, out, readyTimeout) {
+			if trace != nil {
+				trace.logStep("busy-queue-confirmed", map[string]any{}, out)
+			}
+			return nil
+		}
 	}
 	return waitForAgentInputReadyWithTimeout(paneID, agentType, trace, readyTimeout)
 }
