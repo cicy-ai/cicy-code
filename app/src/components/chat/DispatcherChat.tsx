@@ -382,7 +382,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy', tit
     window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId, text: body } }));
     scrollHistoryToBottom();
     try {
-      await sendToAgent(paneId, body, { submit: true, agentType, fromComposer: true });
+      await sendToAgent(paneId, body, { submit: true, agentType, fromComposer: true, deferUntilReady: true });
       window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId } }));
     } catch {
       setText(value);

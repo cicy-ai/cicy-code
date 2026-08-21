@@ -1364,7 +1364,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         if (!agent.instanceId || !agent.remoteAgentId) throw new Error('Cloud Agent address is incomplete');
         await apiService.sendCiCyCloudMessage(agent.instanceId, agent.remoteAgentId, '', message);
       } else {
-        await sendToAgent(agent.paneId, message, { submit: true, agentType: agent.agentType, fromComposer: true });
+        await sendToAgent(agent.paneId, message, { submit: true, agentType: agent.agentType, fromComposer: true, deferUntilReady: true });
       }
       sentAttachments.forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
     } catch (cause: any) {

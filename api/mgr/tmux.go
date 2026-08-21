@@ -50,6 +50,7 @@ const promptConfirmCaptureStart = "-160"
 const agentReadyPollInterval = 500 * time.Millisecond
 const codexAgentReadyPollInterval = 120 * time.Millisecond
 const agentReadyTimeout = 90 * time.Second
+const deferredAgentReadyTimeout = 30 * time.Minute
 const openClawAgentReadyTimeout = 150 * time.Second
 const submitConfirmPollInterval = 200 * time.Millisecond
 const codexSubmitConfirmPollInterval = 80 * time.Millisecond
@@ -125,8 +126,9 @@ type tmuxSendTrace struct {
 }
 
 type paneSendRequest struct {
-	text   string
-	result chan error
+	text         string
+	result       chan error
+	readyTimeout time.Duration
 }
 
 type paneSendWorker struct {
@@ -3931,6 +3933,10 @@ func lazyAgentMarkerPath(agentType, paneID string) string {
 }
 
 func ensurePaneReadyForSend(paneID string, trace *tmuxSendTrace) error {
+	return ensurePaneReadyForSendWithTimeout(paneID, trace, 0)
+}
+
+func ensurePaneReadyForSendWithTimeout(paneID string, trace *tmuxSendTrace, readyTimeout time.Duration) error {
 	paneID = normPaneID(paneID)
 	var agentType string
 	if err := store.QueryRow("SELECT COALESCE(agent_type,'') FROM agent_config WHERE pane_id=?", paneID).
@@ -3950,7 +3956,7 @@ func ensurePaneReadyForSend(paneID string, trace *tmuxSendTrace) error {
 		}
 		return err
 	}
-	return waitForAgentInputReady(paneID, agentType, trace)
+	return waitForAgentInputReadyWithTimeout(paneID, agentType, trace, readyTimeout)
 }
 
 func ensureLazyAgentReady(paneID, agentType string) error {
@@ -3960,6 +3966,10 @@ func ensureLazyAgentReady(paneID, agentType string) error {
 }
 
 func waitForAgentInputReady(paneID, agentType string, trace *tmuxSendTrace) error {
+	return waitForAgentInputReadyWithTimeout(paneID, agentType, trace, 0)
+}
+
+func waitForAgentInputReadyWithTimeout(paneID, agentType string, trace *tmuxSendTrace, readyTimeout time.Duration) error {
 	agentType = normalizeAgentType(agentType)
 	// The headless dispatcher reads buffered stdin, so it has no not-ready
 	// state. Agent types without a reliable ready marker retain the historical
@@ -3971,7 +3981,8 @@ func waitForAgentInputReady(paneID, agentType string, trace *tmuxSendTrace) erro
 	if trace != nil {
 		trace.logStep("ready-wait-start", map[string]any{}, "")
 	}
-	deadline := time.Now().Add(agentReadyTimeoutForAgent(agentType))
+	readyTimeout = effectiveAgentReadyTimeout(agentType, readyTimeout)
+	deadline := time.Now().Add(readyTimeout)
 	var lastCapture string
 	for time.Now().Before(deadline) {
 		out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", promptConfirmCaptureStart)
@@ -4008,6 +4019,13 @@ func agentReadyTimeoutForAgent(agentType string) time.Duration {
 	default:
 		return agentReadyTimeout
 	}
+}
+
+func effectiveAgentReadyTimeout(agentType string, override time.Duration) time.Duration {
+	if override > 0 {
+		return override
+	}
+	return agentReadyTimeoutForAgent(agentType)
 }
 
 func promptConfirmPollIntervalForAgent(agentType string) time.Duration {
@@ -5017,6 +5035,16 @@ func mergePaneSendBatch(batch []paneSendRequest) string {
 	return strings.Join(parts, "\n")
 }
 
+func mergePaneSendReadyTimeout(batch []paneSendRequest) time.Duration {
+	var timeout time.Duration
+	for _, req := range batch {
+		if req.readyTimeout > timeout {
+			timeout = req.readyTimeout
+		}
+	}
+	return timeout
+}
+
 func runPaneSendWorker(paneID string, worker *paneSendWorker) {
 	idle := time.NewTimer(paneSendWorkerIdleTimeout)
 	defer idle.Stop()
@@ -5052,7 +5080,7 @@ func runPaneSendWorker(paneID string, worker *paneSendWorker) {
 				log.Printf("[tmux-send-queue] pane=%s merged=%d line_count=%d rune_count=%d",
 					shortPaneID(paneID), len(batch), promptLineCount(text), utf8.RuneCountInString(text))
 			}
-			err := sendTextToPaneDirect(paneID, text)
+			err := sendTextToPaneDirectWithReadyTimeout(paneID, text, mergePaneSendReadyTimeout(batch))
 			for _, item := range batch {
 				item.result <- err
 				close(item.result)
@@ -5116,12 +5144,22 @@ func enqueuePaneText(winID, text string) <-chan error {
 	return req.result
 }
 
+func newDeferredPaneSendRequest(text string) paneSendRequest {
+	return paneSendRequest{
+		text:         text,
+		result:       make(chan error, 1),
+		readyTimeout: deferredAgentReadyTimeout,
+	}
+}
+
 // sendTextToPaneDeferred accepts a prompt immediately while preserving the
 // pane worker's ordered delivery. The worker waits for a supported Agent TUI to
 // become input-ready, so callers such as the knowledge governance button do
 // not hold an HTTP request open throughout a cold CLI startup.
 func sendTextToPaneDeferred(winID, text string) {
-	result := enqueuePaneText(winID, text)
+	req := newDeferredPaneSendRequest(text)
+	enqueuePaneSend(winID, req)
+	result := req.result
 	go func() {
 		if err := <-result; err != nil {
 			log.Printf("[tmux-send] pane=%s deferred delivery failed: %v", shortPaneID(winID), err)
@@ -5132,6 +5170,10 @@ func sendTextToPaneDeferred(winID, text string) {
 }
 
 func sendTextToPaneDirect(winID, text string) error {
+	return sendTextToPaneDirectWithReadyTimeout(winID, text, 0)
+}
+
+func sendTextToPaneDirectWithReadyTimeout(winID, text string, readyTimeout time.Duration) error {
 	winID = normPaneID(winID)
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	if winID == "" {
@@ -5147,7 +5189,7 @@ func sendTextToPaneDirect(winID, text string) error {
 		"line_count": promptLineCount(text),
 		"rune_count": utf8.RuneCountInString(text),
 	}, text)
-	if err := ensurePaneReadyForSend(winID, trace); err != nil {
+	if err := ensurePaneReadyForSendWithTimeout(winID, trace, readyTimeout); err != nil {
 		trace.logStep("request-error", map[string]any{"error": err.Error()}, "")
 		statusCode := http.StatusInternalServerError
 		if strings.Contains(strings.ToLower(err.Error()), "not ready for send") {
