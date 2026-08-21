@@ -1,12 +1,13 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowRight, ArrowUpCircle, BookOpen, Check, FileText, FolderKanban, GitBranch, Hand, History, LayoutGrid, Loader2, MessageCircle, Minus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, Pin, PinOff, Plus, RefreshCw, Search, SendHorizontal, Square, Trash2, UserPlus, Users, X, Zap } from 'lucide-react';
 import { Trans, useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
+import { clearAgentSendTarget, getAgentSendTarget, setAgentSendTarget } from '../../services/agentSendTarget';
 import { cn, copyToClipboard } from '../../lib/utils';
 import { normalizeAgentType } from '../../lib/agentType';
 import type { AgentLiveMetrics } from '../../lib/agentMetrics';
@@ -42,6 +43,12 @@ export interface ProjectAgent {
   instanceTeam?: string;
   remoteAgentId?: string;
   instanceOnline?: boolean;
+}
+
+export interface ProjectCreateAgentRequest {
+  projectId: number | string;
+  projectTemplate: string;
+  onCreated: (paneId: string) => Promise<void>;
 }
 
 interface AgentProject {
@@ -539,7 +546,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   masterPaneId?: string;
   onActiveAgentChange?: (paneId: string) => void;
   onOpenAgent: (paneId: string) => void;
-  onCreateAgent?: (projectTemplate: string) => void;
+  onCreateAgent?: (request: ProjectCreateAgentRequest) => void;
   onOpenGuidance?: (paneId: string) => void;
   onOpenHistory?: (paneId: string) => void;
   onActiveProjectChange?: (project: { id: number | string; name: string }) => void;
@@ -1222,8 +1229,19 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const toggleAgentSelection = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
     setSelectedAgentIds(new Set([id]));
+    setAgentSendTarget({ source: 'project', paneId: agent.paneId });
     if (!agent.remote) onActiveAgentChange(id);
   };
+
+  useEffect(() => {
+    const id = Array.from(selectedAgentIds)[0] || '';
+    const agent = visibleAgents.find((item) => shortPaneId(item.paneId) === id);
+    if (agent) {
+      setAgentSendTarget({ source: 'project', paneId: agent.paneId });
+      return;
+    }
+    if (getAgentSendTarget().source === 'project') clearAgentSendTarget('project');
+  }, [selectedAgentIds, visibleAgentKey]);
 
   useEffect(() => {
     const id = shortPaneId(activeAgentId);
@@ -1255,6 +1273,25 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     window.addEventListener('cicy:route-agent-prompt', routeToSelectedPrompt as EventListener);
     return () => window.removeEventListener('cicy:route-agent-prompt', routeToSelectedPrompt as EventListener);
   }, [selectedAgentIds, t]);
+
+  useLayoutEffect(() => {
+    const fillTargetPrompt = (event: Event) => {
+      const detail = (event as CustomEvent<{ paneId?: string; text?: string }>).detail || {};
+      const id = shortPaneId(String(detail.paneId || ''));
+      const text = String(detail.text || '').trim();
+      if (!id || !text || !visibleAgents.some((agent) => shortPaneId(agent.paneId) === id)) return;
+      setSelectedAgentIds(new Set([id]));
+      setAgentMessages((current) => ({
+        ...current,
+        [id]: [current[id], text].filter(Boolean).join('\n'),
+      }));
+      window.requestAnimationFrame(() => {
+        document.querySelector<HTMLTextAreaElement>(`[data-id="project-agent-prompt-input-${id}"]`)?.focus({ preventScroll: true });
+      });
+    };
+    window.addEventListener('cicy:fill-project-composer', fillTargetPrompt as EventListener);
+    return () => window.removeEventListener('cicy:fill-project-composer', fillTargetPrompt as EventListener);
+  }, [visibleAgentKey]);
 
   const addAgentFiles = (agent: ProjectAgent, files: FileList | File[]) => {
     const agentId = shortPaneId(agent.paneId);
@@ -2037,7 +2074,16 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             <button
               type="button"
               data-id="project-fab-create-agent"
-              onClick={() => { setFabOpen(false); onCreateAgent(selectedProject.project_template || (selectedProject.builtin ? 'default' : '')); }}
+              onClick={() => {
+                setFabOpen(false);
+                onCreateAgent({
+                  projectId: selectedProject.api_id,
+                  projectTemplate: selectedProject.project_template || (selectedProject.builtin ? 'default' : ''),
+                  onCreated: async (createdPaneId: string) => {
+                    await apiService.addGroupPane(selectedProject.api_id, createdPaneId);
+                  },
+                });
+              }}
               className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[12px] text-zinc-100 transition-colors hover:bg-white/[0.07]"
             >
               <UserPlus data-id="project-fab-create-agent-icon" className="h-4 w-4" />

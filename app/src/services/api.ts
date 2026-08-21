@@ -159,7 +159,12 @@ const api = {
   updateAgentRole: (slug: string) =>
     http.post(`/api/agent-role-market/${encodeURIComponent(slug)}/update`, {}),
 
-  sendCommand: (winId: string, text: string, submit = true) => unwrapTmuxSend(http.post('/api/tmux/send', { win_id: winId, text, submit })),
+  sendCommand: (winId: string, text: string, submit = true, options?: { deferUntilReady?: boolean }) => unwrapTmuxSend(http.post('/api/tmux/send', {
+    win_id: winId,
+    text,
+    submit,
+    ...(options?.deferUntilReady === true ? { defer_until_ready: true } : {}),
+  })),
   sendKeys: (winId: string, keys: string) => unwrapTmuxSend(http.post('/api/tmux/send-keys', { win_id: winId, keys })),
   // 打断 headless cicy 正在跑的 turn(它没有 tmux pane,send-keys 够不着,走专用端点)。
   cancelCicyReply: (paneId: string) => http.post('/api/cicy/cancel', { pane_id: paneId }),

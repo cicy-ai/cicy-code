@@ -11,6 +11,7 @@
   "selectAgentTypeHint": "Veuillez choisir un type d'agent.",
   "noAgentTypesAvailable": "Aucun type d'agent disponible.",
   "templateProjectLabel": "Mémoire projet",
+  "templateProjectNone": "Ne rejoindre aucun Project",
   "templateRoleLabel": "Bibliothèque de rôles",
   "templateNone": "Aucun",
   "templateHint": "Le modèle global est toujours ajouté ; projet/rôle sont optionnels et copiés dans le fichier mémoire du nouvel agent. Gérez les modèles dans l'onglet « Mémoire » de l'Inspector.",

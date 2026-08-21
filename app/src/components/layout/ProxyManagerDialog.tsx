@@ -312,41 +312,23 @@ export function ProxyManagerDialog({
     });
   }, [fetchNodeConfig]);
 
-  // sendToAgent ships a chat-prompt to the currently bound agent, with the
-  // same "show sent chip → close drawer" UX as the original single-button
-  // flow but parameterized by which workflow (proxy / group / user) the
-  // user clicked. Three buttons share this; the only difference between
-  // them is the prompt body.
+  // Route through the globally selected Team/Project target. A missing target
+  // leaves the drawer open; sendToAgent owns the "未选中 Agent" toast.
   const sendToAgent = useCallback(async (kind: AskKind, prompt: string) => {
     const target = String(paneId || '').trim();
-    if (!target) {
-      // No bound agent — nothing was attempted, so leave the drawer open and
-      // show the reason. This is the only branch where we DON'T close.
-      setAskAgentResult('failed');
-      setAskAgentError('no agent bound');
-      return;
-    }
     setAskAgentSending(kind);
     setAskAgentResult('');
     setAskAgentError('');
     let resp: any = null;
     let errorMessage = '';
     try {
-      // submit=false: drop the prompt into the agent's input WITHOUT pressing
-      // Enter, so the user reviews/edits before sending. Routes by agent type —
-      // cicy-lite agents get it in their chat composer instead of a (nonexistent)
-      // terminal.
-      await dispatchToAgent(target, prompt, { submit: false });
+      const handled = await dispatchToAgent(target, prompt, { submit: false });
+      if (!handled) return;
     } catch (e: any) {
       errorMessage = String(e?.response?.data?.detail || e?.message || e);
     } finally {
       setAskAgentSending('');
     }
-    // Once we've actually issued the send call, we treat the request as
-    // "shipped" regardless of outcome — tmux can't un-Enter, and partial
-    // failures usually mean the prompt is already in the agent's buffer.
-    // Surface the warning/error to the user but still close the drawer so
-    // they can switch focus to the chat pane.
     const warning = String(resp?.data?.warning || '').trim();
     if (errorMessage) {
       setAskAgentResult('failed');
@@ -360,8 +342,8 @@ export function ProxyManagerDialog({
     window.setTimeout(() => onClose(), 400);
   }, [paneId, onClose]);
 
-  // Single "let the agent manage my proxy" button: drops a fixed cicy-mihomo
-  // request into the agent input (no auto-submit — see sendToAgent submit=false).
+  // Single "let the agent manage my proxy" button. Team targets send now;
+  // Project targets receive the prompt in their footer for review.
   const askManageProxy = useCallback(() => {
     const prompt = '请帮我用 cicy-mihomo skill 帮我来管理我的本机的 proxy，配置文件在 ~/cicy-ai/db/mihomo.yaml';
     return sendToAgent('proxy', prompt);
@@ -629,9 +611,8 @@ export function ProxyManagerDialog({
               data-id="proxy-manager-drawer-ask-add-proxy"
               type="button"
               onClick={askManageProxy}
-              disabled={!!askAgentSending || !paneId}
+              disabled={!!askAgentSending}
               className="inline-flex items-center gap-1.5 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1 text-zinc-100 transition-colors hover:bg-indigo-500/20 disabled:opacity-40"
-              title={!paneId ? t('proxyManagerAskAgentNoPane') : undefined}
             >
               <Sparkles size={11} />
               {askAgentSending ? t('proxyManagerAskAgentSending') : t('proxyManagerManageProxy')}

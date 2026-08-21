@@ -173,7 +173,6 @@ export default function GithubAccountsPanel({
     }
   };
   const sendToCurrentAgent = async (name: string) => {
-    if (!paneId) return;
     setSending(name);
     const prompt = t("githubAccountAgentPrompt", {
       name,
@@ -181,15 +180,17 @@ export default function GithubAccountsPanel({
         "请使用 github skill 管理 GitHub，指定账号为「{{name}}」。先执行 github whoami --account {{name}} 确认身份，然后等待我的下一步指令。不要读取、输出或泄露 Token。",
     });
     try {
-      await sendToAgent(paneId, prompt, { submit: true });
-      window.dispatchEvent(
-        new CustomEvent("show-toast", {
-          detail: t("githubAccountSentToAgent", {
-            name,
-            defaultValue: `已将账号 ${name} 发送给当前 Agent`,
+      const handled = await sendToAgent(paneId, prompt, { submit: true });
+      if (handled) {
+        window.dispatchEvent(
+          new CustomEvent("show-toast", {
+            detail: t("githubAccountSentToAgent", {
+              name,
+              defaultValue: `已将账号 ${name} 发送给当前 Agent`,
+            }),
           }),
-        }),
-      );
+        );
+      }
     } catch {
       window.dispatchEvent(
         new CustomEvent("show-toast", {
@@ -450,7 +451,7 @@ export default function GithubAccountsPanel({
                 <button data-id="github-account-refresh-usage" type="button" disabled={usageLoading[account.name]} className={itemClass} onClick={() => { setActionMenu(null); void fetchUsage(account.name); }}><RefreshCw className={`h-3.5 w-3.5 ${usageLoading[account.name] ? "animate-spin" : ""}`} />{t("githubUsageRefresh")}</button>
                 {account["2fa_set"] && <button data-id="github-account-generate-2fa" type="button" disabled={generating2FA === account.name} className={itemClass} onClick={() => { setActionMenu(null); void generate2FA(account.name); }}>{generating2FA === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <span className="w-3.5 text-center text-[10px] font-semibold text-amber-300">2F</span>}{t("github2FAModalTitle", { name: account.name })}</button>}
                 {account.profile && <button data-id="github-account-open-chrome" type="button" className={itemClass} onClick={() => { setActionMenu(null); void openChromeProfile(account.profile).catch((e) => setError(String(e?.message || e))); }}><ExternalLink className="h-3.5 w-3.5" />{t("openInChrome")}</button>}
-                <button data-id="github-account-send-to-agent" type="button" disabled={!paneId || sending === account.name} className={itemClass} onClick={() => { setActionMenu(null); void sendToCurrentAgent(account.name); }}>{sending === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}{t("githubAccountSendToAgent", { defaultValue: "发送给当前 Agent" })}</button>
+                <button data-id="github-account-send-to-agent" type="button" disabled={sending === account.name} className={itemClass} onClick={() => { setActionMenu(null); void sendToCurrentAgent(account.name); }}>{sending === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}{t("githubAccountSendToAgent", { defaultValue: "发送给当前 Agent" })}</button>
                 <button data-id="github-account-edit" type="button" className={itemClass} onClick={() => { setActionMenu(null); void beginEdit(account); }}><Pencil className="h-3.5 w-3.5" />{t("settingsEdit", { defaultValue: "编辑" })}</button>
                 <div className="my-1 border-t border-white/[0.07]" />
                 <button data-id="github-account-delete" type="button" className={`${itemClass} text-rose-400 hover:text-rose-300`} onClick={() => { setActionMenu(null); void remove(account.name); }}><Trash2 className="h-3.5 w-3.5" />{t("settingsDelete", { defaultValue: "删除" })}</button>

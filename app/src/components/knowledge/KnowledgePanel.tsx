@@ -8,7 +8,6 @@ import { useTranslation } from 'react-i18next';
 import FilesView from '../files/FilesView';
 import DispatcherChat from '../chat/DispatcherChat';
 import apiService from '../../services/api';
-import { sendToAgent } from '../../services/agentSend';
 
 const KnowledgeGraphView = lazy(() => import('./KnowledgeGraphView'));
 const KNOWLEDGE_CHAT_FRAME_KEY = 'knowledge-agent-chat-frame';
@@ -39,7 +38,6 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
   const [configSaved, setConfigSaved] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatPane, setChatPane] = useState('w-1001:main.0');
-  const [governanceSending, setGovernanceSending] = useState(false);
   const [chatFrame, setChatFrame] = useState(() => {
     const fallback = { right: 16, bottom: 16, width: 440, height: 640 };
     try {
@@ -204,29 +202,18 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
         title: '知识专员',
         roleTemplate: 'knowledge-specialist',
         roleTemplateLocked: true,
-        agentTypeLocked: true,
+        agentTypeLocked: false,
+        projectTemplate: '',
         onCreated: (paneId: string) => { void switchKnowledgeAgent(paneId); },
       },
     }));
   };
 
-  const requestPendingGovernance = async () => {
-    if (pendingCount <= 0 || governanceSending) return;
-    setGovernanceSending(true);
-    try {
-      await sendToAgent(chatPane, '请处理所有的待治理条目', {
-        submit: true,
-        agentType: selectedKnowledgeAgent?.agentType,
-      });
-      window.requestAnimationFrame(() => {
-        const history = document.querySelector<HTMLElement>('[data-id="knowledge-agent-chat-float"] [data-id="current-history-scroll"]');
-        if (history) history.scrollTop = history.scrollHeight;
-      });
-    } catch (error: any) {
-      setConfigError(error?.response?.data?.error || error?.message || '发送治理任务失败');
-    } finally {
-      setGovernanceSending(false);
-    }
+  const fillPendingGovernance = () => {
+    if (pendingCount <= 0) return;
+    window.dispatchEvent(new CustomEvent('cicy:fill-composer', {
+      detail: { paneId: chatPane, text: '请处理所有的待治理条目' },
+    }));
   };
 
   if (!open) return null;
@@ -289,8 +276,8 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
                 {knowledgeAgents.map((item) => <option key={item.paneId} value={item.paneId}>{item.title} · {item.paneId.replace(/:main\.0$/, '')}</option>)}
               </select>
               {pendingCount > 0 ? (
-                <button type="button" data-id="knowledge-agent-chat-govern-pending" disabled={governanceSending} onClick={() => { void requestPendingGovernance(); }} className="shrink-0 rounded-md bg-red-500/15 px-1.5 py-1 text-[11px] font-semibold text-red-400 ring-1 ring-inset ring-red-500/30 transition-colors hover:bg-red-500/25 hover:text-red-300 disabled:opacity-50" title="发送：请处理所有的待治理条目">
-                  {governanceSending ? '发送中…' : '待治理'}
+                <button type="button" data-id="knowledge-agent-chat-govern-pending" onClick={fillPendingGovernance} className="shrink-0 rounded-md bg-red-500/15 px-1.5 py-1 text-[11px] font-semibold text-red-400 ring-1 ring-inset ring-red-500/30 transition-colors hover:bg-red-500/25 hover:text-red-300" title="填入输入框：请处理所有的待治理条目">
+                  待治理
                 </button>
               ) : null}
               <span data-id="knowledge-agent-chat-pending-count" className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-[0_0_10px_rgba(239,68,68,0.55)]">{pendingCount}</span>

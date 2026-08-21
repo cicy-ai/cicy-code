@@ -139,12 +139,10 @@ export default function CustomAgentsPanel({ paneId, marketOnly = false }: Props)
   // create/edit conversation. No UI form.
   const dispatchToAgent = (prompt: string) => {
     const target = (paneId || '').trim();
-    if (!target) {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('noActiveAgent') }));
-      return;
-    }
     sendToAgent(target, prompt, { submit: true })
-      .then(() => window.dispatchEvent(new CustomEvent('show-toast', { detail: t('sentToAgent') })))
+      .then((handled) => {
+        if (handled) window.dispatchEvent(new CustomEvent('show-toast', { detail: t('sentToAgent') }));
+      })
       .catch(() => window.dispatchEvent(new CustomEvent('show-toast', { detail: t('sentToAgentFailed') })));
   };
 

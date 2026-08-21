@@ -37,8 +37,9 @@ type knowledgeMemoryDispatch struct {
 }
 
 var (
-	knowledgeMemoryMu     sync.Mutex
-	knowledgeMemoryRecent = map[string]knowledgeMemoryDispatch{} // "pane|path" → last dispatch
+	knowledgeMemoryMu              sync.Mutex
+	knowledgeMemoryRecent          = map[string]knowledgeMemoryDispatch{} // "pane|path" → last dispatch
+	deliverKnowledgeAgentMessageFn = deliverAgentMessage
 )
 
 // knowledgeHookEnabled reports whether the memory-write hook runs. Defaults to
@@ -86,12 +87,27 @@ func setKnowledgeSpecialistPane(pane string) error {
 	return writeGlobalJSONConfig(cfg)
 }
 
+func notifyKnowledgeSpecialistPending(id, title, sourcePane string) {
+	spec := knowledgeSpecialistPaneID()
+	if spec == "" {
+		return
+	}
+	source := shortPaneID(sourcePane)
+	if source == "" {
+		source = "manual"
+	}
+	brief := fmt.Sprintf("📚 [knowledge] %s 新增待评审「%s」→ _inbox/%s.md。请立即核实并处置:cicy-knowledge get %s → promote / reject / supersede。",
+		source, strings.TrimSpace(title), id, id)
+	log.Printf("[knowledge] notify specialist=%s pending=%s source=%s", shortPaneID(spec), id, source)
+	deliverKnowledgeAgentMessageFn(spec, brief)
+}
+
 type memoryWriteHook struct {
 	sourcePane string
 }
 
 func (h *memoryWriteHook) handleEvents(_ []aiGatewayReplyEvent) {}
-func (h *memoryWriteHook) onItems(_ []map[string]interface{})    {}
+func (h *memoryWriteHook) onItems(_ []map[string]interface{})   {}
 
 func (h *memoryWriteHook) finalize(reply aiGatewayReplySnapshot) {
 	if h == nil || len(reply.ToolCalls) == 0 {
@@ -172,7 +188,7 @@ func (h *memoryWriteHook) dispatch(path, title, body string) {
 		shortPaneID(pane), path, id, id)
 	// Deliver the cicy-agent-msg way (the 知识专员 is a headless cicy agent with no
 	// tmux pane; send-keys would silently fail).
-	deliverAgentMessage(spec, brief)
+	deliverKnowledgeAgentMessageFn(spec, brief)
 }
 
 // knowledgeMemorySlug is a deterministic slug for a memory file so repeated

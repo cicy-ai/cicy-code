@@ -137,6 +137,8 @@
   "networkDisconnected": "Not connected",
   "networkSending": "Sending...",
   "networkSendClientId": "Send to Agent",
+  "networkClientIdSent": "Sent",
+  "networkClientIdFilled": "Filled",
   "tabTodo": "Todo",
   "marketplaceSidebarIdentifier": "Identifier",
   "marketplaceSidebarVersion": "Version",

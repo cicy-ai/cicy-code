@@ -137,6 +137,8 @@
   "networkDisconnected": "未连接",
   "networkSending": "发送中...",
   "networkSendClientId": "发送给 Agent",
+  "networkClientIdSent": "已发送",
+  "networkClientIdFilled": "已填入",
   "tabTodo": "待办",
   "marketplaceSidebarIdentifier": "标识符",
   "marketplaceSidebarVersion": "版本",

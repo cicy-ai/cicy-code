@@ -41,9 +41,9 @@ type knowledgeRow struct {
 	SourcePane   string `json:"source_pane"`
 	SourceKind   string `json:"source_kind"`
 	OriginRef    string `json:"origin_ref"`
-	Status       string `json:"status"` // resolved maturity: draft|pending|canon|rejected|deprecated (folder-derived, overridable by frontmatter `status:`)
+	Status       string `json:"status"`             // resolved maturity: draft|pending|canon|rejected|deprecated (folder-derived, overridable by frontmatter `status:`)
 	Declared     string `json:"declared,omitempty"` // the frontmatter `status:` value (a maturity flag set in-place); when present it OVERRIDES the folder-derived status
-	Domain       string `json:"domain"` // canon folder (empty for inbox/archive)
+	Domain       string `json:"domain"`             // canon folder (empty for inbox/archive)
 	Path         string `json:"path"`
 	VerifiedBy   string `json:"verified_by"`
 	SupersededBy string `json:"superseded_by"`
@@ -581,6 +581,9 @@ func handleKnowledge(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if initStatus == knowledgeStatusPending {
+			notifyKnowledgeSpecialistPending(id, title, getString(req, "source_pane"))
 		}
 		J(w, M{"id": id, "status": initStatus})
 	default:

@@ -1136,14 +1136,18 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
 
   // Stable sender — referentially identical across renders so memoized
   // children (MarkdownPane) don't re-render on every parent state tick.
-  // Optimistic: close instantly, send in the background, toast the result.
+  // Team targets send immediately; Project targets are filled for review.
+  // Missing targets keep the detail open and sendToAgent shows the toast.
   const sendToAgent = useCallback((text: string) => {
     const trimmed = (text || '').trim();
-    if (!trimmed || !paneId) return;
-    onClose();
+    if (!trimmed) return;
     const toast = (msg: string) => window.dispatchEvent(new CustomEvent('show-toast', { detail: msg }));
     dispatchToAgent(paneId, trimmed, { submit: true })
-      .then(() => toast(i18n.t('marketplaceSentToast', { ns: 'workspace', pane: paneId })))
+      .then((handled) => {
+        if (!handled) return;
+        onClose();
+        toast(i18n.t('marketplaceSentToast', { ns: 'workspace', pane: paneId }));
+      })
       .catch(() => toast(i18n.t('marketplaceSentToastFailed', { ns: 'workspace', pane: paneId })));
   }, [paneId, onClose]);
 
@@ -1331,8 +1335,9 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
                     <button
                       data-id="skill-detail-google-connect"
                       onClick={() => {
-                        dispatchToAgent(paneId, GOOGLE_AUTH_PROMPT, { submit: true }).catch(() => {});
-                        onClose();
+                        dispatchToAgent(paneId, GOOGLE_AUTH_PROMPT, { submit: true })
+                          .then((handled) => { if (handled) onClose(); })
+                          .catch(() => {});
                       }}
                       className="text-[12px] px-3 py-1.5 rounded bg-blue-500/20 text-blue-200 hover:bg-blue-500/30 transition-colors inline-flex items-center gap-1"
                     >

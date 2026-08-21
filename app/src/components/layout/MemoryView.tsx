@@ -31,6 +31,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent as dispatchToAgent } from '../../services/agentSend';
+import { getAgentSendTarget } from '../../services/agentSendTarget';
 import MarkdownPreview from '../files/MarkdownPreview';
 
 // Memory editor for the inspector's Memory tab. Unlike the old file-explorer
@@ -202,10 +203,11 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
       // Same `file://<abs-path-without-leading-slash>` form the file explorer's
       // code.send_path handler emits, so the agent resolves it identically.
       const promptText = `file://${path.replace(/^\/+/, '')}`;
-      window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: agentId, q: promptText } }));
-      // Routes by agent type — cicy agents get it in their chat composer, terminal
-      // agents typed into tmux (both WITHOUT auto-submit, for the user to review).
-      await dispatchToAgent(agentId, promptText, { submit: false });
+      const target = getAgentSendTarget();
+      const handled = await dispatchToAgent(agentId, promptText, { submit: false });
+      if (handled && target.source === 'team') {
+        window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: target.paneId, q: promptText } }));
+      }
     } catch {
       /* best-effort */
     }

@@ -5,8 +5,25 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+type capturedKnowledgeNotification struct {
+	pane string
+	text string
+}
+
+func captureKnowledgeNotifications(t *testing.T) *[]capturedKnowledgeNotification {
+	t.Helper()
+	previous := deliverKnowledgeAgentMessageFn
+	got := []capturedKnowledgeNotification{}
+	deliverKnowledgeAgentMessageFn = func(pane, text string) {
+		got = append(got, capturedKnowledgeNotification{pane: pane, text: text})
+	}
+	t.Cleanup(func() { deliverKnowledgeAgentMessageFn = previous })
+	return &got
+}
 
 func knowledgeReq(t *testing.T, handler http.HandlerFunc, method, target string, body interface{}) (int, map[string]interface{}) {
 	t.Helper()
@@ -85,5 +102,64 @@ func TestKnowledgeHTTPFlow(t *testing.T) {
 	code, _ = knowledgeReq(t, handleKnowledge, "POST", "/api/knowledge", M{"title": "x"})
 	if code != http.StatusBadRequest {
 		t.Fatalf("missing body should 400, got %d", code)
+	}
+}
+
+func TestKnowledgeHTTPAddNotifiesLatestSelectedSpecialist(t *testing.T) {
+	withTempCicyRoot(t)
+	withTestStore(t)
+	notifications := captureKnowledgeNotifications(t)
+
+	code, body := knowledgeReq(t, handleKnowledgeSpecialist, "POST", "/api/knowledge/specialist", M{"pane": "w-30099"})
+	if code != http.StatusOK || body["pane"] != "w-30099:main.0" {
+		t.Fatalf("select first specialist code=%d body=%v", code, body)
+	}
+	code, added := knowledgeReq(t, handleKnowledge, "POST", "/api/knowledge", M{
+		"title": "Restart runbook",
+		"body":  "Restart the service with the versioned binary.",
+	})
+	if code != http.StatusOK {
+		t.Fatalf("add first knowledge code=%d body=%v", code, added)
+	}
+	if len(*notifications) != 1 {
+		t.Fatalf("first pending add notifications=%d, want 1", len(*notifications))
+	}
+	first := (*notifications)[0]
+	firstID, _ := added["id"].(string)
+	if first.pane != "w-30099:main.0" || !strings.Contains(first.text, firstID) || !strings.Contains(first.text, "Restart runbook") {
+		t.Fatalf("first notification=%+v id=%q", first, firstID)
+	}
+
+	code, body = knowledgeReq(t, handleKnowledgeSpecialist, "POST", "/api/knowledge/specialist", M{"pane": "w-30100"})
+	if code != http.StatusOK || body["pane"] != "w-30100:main.0" {
+		t.Fatalf("select second specialist code=%d body=%v", code, body)
+	}
+	code, added = knowledgeReq(t, handleKnowledge, "POST", "/api/knowledge", M{
+		"title": "Proxy runbook",
+		"body":  "Validate the proxy before publishing it.",
+	})
+	if code != http.StatusOK {
+		t.Fatalf("add second knowledge code=%d body=%v", code, added)
+	}
+	if len(*notifications) != 2 || (*notifications)[1].pane != "w-30100:main.0" {
+		t.Fatalf("notifications after specialist switch=%+v", *notifications)
+	}
+}
+
+func TestKnowledgeHTTPDraftDoesNotNotifySpecialist(t *testing.T) {
+	withTempCicyRoot(t)
+	withTestStore(t)
+	notifications := captureKnowledgeNotifications(t)
+
+	code, body := knowledgeReq(t, handleKnowledge, "POST", "/api/knowledge", M{
+		"title":  "Unfinished note",
+		"body":   "This still needs evidence.",
+		"status": "draft",
+	})
+	if code != http.StatusOK || body["status"] != "draft" {
+		t.Fatalf("add draft code=%d body=%v", code, body)
+	}
+	if len(*notifications) != 0 {
+		t.Fatalf("draft notifications=%+v, want none", *notifications)
 	}
 }

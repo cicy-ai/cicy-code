@@ -4,12 +4,29 @@
 import apiService from './api';
 import { sendCommandToTmux } from './mockApi';
 import { isCicyLiteAgent } from '../lib/agentType';
+import { getAgentSendTarget } from './agentSendTarget';
 
 // pane short-id → agent_type, filled lazily from /api/tmux/panes.
 const agentTypeCache = new Map<string, string>();
+const recentGlobalSends = new Map<string, number>();
+const GLOBAL_SEND_DEDUPE_MS = 5_000;
 
 function shortId(paneId: string): string {
   return String(paneId || '').split(':')[0];
+}
+
+function claimGlobalSend(source: 'team' | 'project', paneId: string, text: string): { duplicate: boolean; key: string } {
+  const now = Date.now();
+  const key = `${source}\u0000${paneId}\u0000${text}`;
+  const previous = recentGlobalSends.get(key) || 0;
+  if (now - previous < GLOBAL_SEND_DEDUPE_MS) return { duplicate: true, key };
+  recentGlobalSends.set(key, now);
+  if (recentGlobalSends.size > 100) {
+    for (const [candidate, sentAt] of recentGlobalSends) {
+      if (now - sentAt >= GLOBAL_SEND_DEDUPE_MS) recentGlobalSends.delete(candidate);
+    }
+  }
+  return { duplicate: false, key };
 }
 
 // Let callers pre-seed the cache (e.g. Workspace already knows pane types) so
@@ -34,43 +51,57 @@ async function resolveAgentType(paneId: string): Promise<string> {
 }
 
 /**
- * Route a prompt/text to an agent by its type — the single entry point every
- * "send/ask the agent" button should use.
+ * Single entry point for UI actions that hand text to an Agent.
  *
- *  - cicy-lite agents have a CHAT COMPOSER, not a terminal:
- *      submit=false → drop the text into the composer (DispatcherChat) for the
- *                     operator to review/edit/send (`cicy:fill-composer` event).
- *      submit=true  → deliver straight to the cicy REPL (same pipe DispatcherChat
- *                     uses), i.e. auto-send.
- *  - terminal agents (claude/codex/opencode/…) → type into tmux; `submit`
- *    decides whether Enter is pressed.
+ * Normal actions use the global selection:
+ *  - Team Agent → send immediately through /api/tmux/send.
+ *  - Project Agent → fill that card's footer without submitting.
+ *  - no selection → show "未选中 Agent" and return false.
  *
- * Why: many call sites used sendCommandToTmux / apiService.sendCommand(..., false)
- * directly, which is a no-op for cicy agents (the text lands in the REPL stdin
- * buffer, never the composer). Funnel them through here so cicy works everywhere.
+ * Composer-owned sends use `fromComposer`; directed background workflows use
+ * `routing: 'explicit'`. Both bypass the global target and retain the legacy
+ * cicy-lite/terminal transport distinction. The Knowledge panel is deliberately
+ * separate: it fills its knowledge-specialist DispatcherChat directly.
  */
 export async function sendToAgent(
   paneId: string,
   text: string,
-  opts: { submit?: boolean; agentType?: string; fromComposer?: boolean } = {},
-): Promise<void> {
-  if (!opts.fromComposer) {
-    const routeEvent = new CustomEvent('cicy:route-agent-prompt', {
-      cancelable: true,
-      detail: { paneId: shortId(paneId), text },
-    });
-    window.dispatchEvent(routeEvent);
-    if (routeEvent.defaultPrevented) return;
+  opts: { submit?: boolean; agentType?: string; fromComposer?: boolean; deferUntilReady?: boolean; routing?: 'global' | 'explicit' } = {},
+): Promise<boolean> {
+  if (!opts.fromComposer && opts.routing !== 'explicit') {
+    const target = getAgentSendTarget();
+    if (!target.paneId || target.source === 'none') {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '未选中 Agent' }));
+      return false;
+    }
+    const claim = claimGlobalSend(target.source, target.paneId, text);
+    if (claim.duplicate) return true;
+    if (target.source === 'project') {
+      window.dispatchEvent(new CustomEvent('cicy:fill-project-composer', {
+        detail: { paneId: target.paneId, text },
+      }));
+      return true;
+    }
+    try {
+      await apiService.sendCommand(target.paneId, text, true, { deferUntilReady: true });
+    } catch (error) {
+      recentGlobalSends.delete(claim.key);
+      throw error;
+    }
+    return true;
   }
   const submit = opts.submit ?? false;
   const type = opts.agentType ?? (await resolveAgentType(paneId));
   if (isCicyLiteAgent(type)) {
     if (submit) {
-      await apiService.sendCommand(paneId, text, true);
+      if (opts.deferUntilReady) await apiService.sendCommand(paneId, text, true, { deferUntilReady: true });
+      else await apiService.sendCommand(paneId, text, true);
     } else {
       window.dispatchEvent(new CustomEvent('cicy:fill-composer', { detail: { paneId, text } }));
     }
-    return;
+    return true;
   }
-  await sendCommandToTmux(text, paneId, submit);
+  if (opts.deferUntilReady) await sendCommandToTmux(text, paneId, submit, { deferUntilReady: true });
+  else await sendCommandToTmux(text, paneId, submit);
+  return true;
 }

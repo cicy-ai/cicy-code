@@ -76,6 +76,7 @@ vi.mock('@uiw/react-codemirror', () => ({
 }));
 
 import ProjectsPanel from './ProjectsPanel';
+import { clearAgentSendTarget, getAgentSendTarget } from '../../services/agentSendTarget';
 
 const defaultGroups = [
   { id: 1, name: 'Default project', description: '', is_default: true, pane_ids: [], pane_count: 0 },
@@ -84,6 +85,7 @@ const defaultGroups = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  clearAgentSendTarget();
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     disconnect() {}
@@ -117,6 +119,33 @@ beforeEach(() => {
 });
 
 describe('<ProjectsPanel /> floating action button', () => {
+  it('passes the current Project identity when creating an Agent from the canvas', async () => {
+    const onCreateAgent = vi.fn();
+    api.listGroups.mockResolvedValue({ data: { groups: [
+      defaultGroups[0],
+      { ...defaultGroups[1], project_template: 'existing-project' },
+    ] } });
+    render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} onCreateAgent={onCreateAgent} />);
+
+    const project = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-list-item-2"]');
+      if (!node) throw new Error('custom Project did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(project);
+    fireEvent.click(document.querySelector('[data-id="project-add-agent"]') as HTMLElement);
+    fireEvent.click(document.querySelector('[data-id="project-fab-create-agent"]') as HTMLElement);
+
+    expect(onCreateAgent).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 2,
+      projectTemplate: 'existing-project',
+      onCreated: expect.any(Function),
+    }));
+    const request = onCreateAgent.mock.calls[0][0];
+    await request.onCreated('w-999:main.0');
+    expect(api.addGroupPane).toHaveBeenCalledWith(2, 'w-999:main.0');
+  }, 15_000);
+
   it('lists searchable Cloud Agents by Instance and persists a qualified project member id', async () => {
     const lastSeenAt = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
     api.getCiCyCloudInstances.mockResolvedValue({ data: { instances: [{ instanceId: 'code-remote', teamId: 'mac_local', status: 'online', lastSeenAt }] } });
@@ -1034,6 +1063,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(first.className).toContain('border-blue-500');
     fireEvent.click(second);
     expect(onActiveAgentChange).toHaveBeenCalledWith('w-102');
+    expect(getAgentSendTarget()).toEqual({ source: 'project', paneId: 'w-102:main.0' });
 
     rerender(
       <ProjectsPanel
@@ -1054,6 +1084,33 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     window.dispatchEvent(routed);
     expect(routed.defaultPrevented).toBe(true);
     await waitFor(() => expect(document.querySelector('[data-id="project-agent-prompt-input-w-102"]')).toHaveValue('请先检查这个任务'));
+  });
+
+  it('fills a targeted Project Agent prompt without submitting it', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    render(
+      <ProjectsPanel
+        agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]}
+        activeAgentId="w-101"
+        onOpenAgent={vi.fn()}
+      />,
+    );
+    const input = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
+      if (!node) throw new Error('project agent prompt did not render');
+      return node as HTMLTextAreaElement;
+    });
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('cicy:fill-project-composer', {
+        detail: { paneId: 'w-101:main.0', text: '请先检查这个任务' },
+      }));
+    });
+
+    await waitFor(() => expect(input).toHaveValue('请先检查这个任务'));
+    expect(agentSend.sendToAgent).not.toHaveBeenCalled();
   });
 
   it('blocks contextual sends and shows a toast when no project agent is selected', async () => {

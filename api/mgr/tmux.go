@@ -3956,9 +3956,11 @@ func ensureLazyAgentReady(paneID, agentType string) error {
 
 func waitForAgentInputReady(paneID, agentType string, trace *tmuxSendTrace) error {
 	agentType = normalizeAgentType(agentType)
-	// dispatcher: the REPL reads buffered stdin — input sent at any moment is
-	// consumed on the next loop iteration, so there is no "not ready" state.
-	if agentType == "" || agentType == "opencode" || agentType == "codex" || agentType == "gemini" || agentType == "hermes" || agentType == "kiro-cli" || agentType == "cicy" {
+	// The headless dispatcher reads buffered stdin, so it has no not-ready
+	// state. Agent types without a reliable ready marker retain the historical
+	// best-effort path. Codex/OpenCode/Kiro must be checked: a newly created pane
+	// can still be running boot.sh, and typing into it loses the prompt.
+	if agentType == "" || agentType == "gemini" || agentType == "hermes" || agentType == "cicy" {
 		return nil
 	}
 	if trace != nil {
@@ -5097,12 +5099,31 @@ func sendTextToPane(winID, text string, submit bool) error {
 		}
 		return nil
 	}
+	return <-enqueuePaneText(winID, text)
+}
+
+func enqueuePaneText(winID, text string) <-chan error {
 	req := paneSendRequest{
 		text:   text,
 		result: make(chan error, 1),
 	}
 	enqueuePaneSend(winID, req)
-	return <-req.result
+	return req.result
+}
+
+// sendTextToPaneDeferred accepts a prompt immediately while preserving the
+// pane worker's ordered delivery. The worker waits for a supported Agent TUI to
+// become input-ready, so callers such as the knowledge governance button do
+// not hold an HTTP request open throughout a cold CLI startup.
+func sendTextToPaneDeferred(winID, text string) {
+	result := enqueuePaneText(winID, text)
+	go func() {
+		if err := <-result; err != nil {
+			log.Printf("[tmux-send] pane=%s deferred delivery failed: %v", shortPaneID(winID), err)
+			return
+		}
+		log.Printf("[tmux-send] pane=%s deferred delivery completed", shortPaneID(winID))
+	}()
 }
 
 func sendTextToPaneDirect(winID, text string) error {
@@ -5241,6 +5262,7 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		if raw, ok := req["submit"].(bool); ok {
 			submit = raw
 		}
+		deferUntilReady, _ := req["defer_until_ready"].(bool)
 		// agent→agent message store: record every send that carries a sender
 		// context — a callback_to (default) or, for --no-callback sends, the
 		// 📮 [sender] stamp on the text. webUI / IM sends have neither, so they
@@ -5310,6 +5332,15 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 				go deliverCicyMessage(short, ws, text)
 			}
 			resp := M{"success": true, "win_id": short}
+			if msgID != "" {
+				resp["msg_id"] = msgID
+			}
+			J(w, resp)
+			return
+		}
+		if deferUntilReady && submit {
+			sendTextToPaneDeferred(winID, text)
+			resp := M{"success": true, "queued": true, "win_id": shortPaneID(winID)}
 			if msgID != "" {
 				resp["msg_id"] = msgID
 			}

@@ -233,7 +233,10 @@ export default function CreateAgentDialog({
                 className="w-full"
                 value={values.project_template}
                 onChange={(v) => set({ project_template: v })}
-                options={projects.map((p) => ({ value: p.slug, label: p.name }))}
+                options={[
+                  { value: '', label: t('templateProjectNone') },
+                  ...projects.map((p) => ({ value: p.slug, label: p.name })),
+                ]}
                 disabled={projectTemplateLocked}
               />
             </div>

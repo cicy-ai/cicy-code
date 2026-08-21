@@ -100,16 +100,18 @@ export default function AccountMatrixPanel({
   const send = async (name: string) => {
     setSending(name);
     try {
-      await sendToAgent(
+      const handled = await sendToAgent(
         paneId,
         t("cloudflareAccountAgentPrompt", { name }),
         { submit: true },
       );
-      window.dispatchEvent(
-        new CustomEvent("show-toast", {
-          detail: t("accountMatrixSent", { name }),
-        }),
-      );
+      if (handled) {
+        window.dispatchEvent(
+          new CustomEvent("show-toast", {
+            detail: t("accountMatrixSent", { name }),
+          }),
+        );
+      }
     } finally {
       setSending("");
     }
@@ -431,7 +433,7 @@ export default function AccountMatrixPanel({
                     <button data-id="cloudflare-account-more-backdrop" type="button" aria-label={t("cancel", { defaultValue: "关闭" })} className="fixed inset-0 z-[100] cursor-default" onClick={() => setActionMenu(null)} />
                     <div data-id="cloudflare-account-more-menu" className="fixed z-[101] min-w-[180px] overflow-hidden rounded-lg border border-white/[0.1] bg-[#181818] py-1 shadow-2xl" style={{ top: actionMenu.top, right: actionMenu.right }}>
                       <button data-id="cloudflare-account-test" type="button" disabled={testing === account.name} className={itemClass} onClick={() => { setActionMenu(null); void test(account.name); }}>{testing === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Cloud className="h-3.5 w-3.5" />}{t("githubAccountTest")}</button>
-                      <button data-id="cloudflare-account-send-to-agent" type="button" disabled={!paneId || sending === account.name} className={itemClass} onClick={() => { setActionMenu(null); void send(account.name); }}>{sending === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}{t("githubAccountSendToAgent", { defaultValue: "发送给当前 Agent" })}</button>
+                      <button data-id="cloudflare-account-send-to-agent" type="button" disabled={sending === account.name} className={itemClass} onClick={() => { setActionMenu(null); void send(account.name); }}>{sending === account.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}{t("githubAccountSendToAgent", { defaultValue: "发送给当前 Agent" })}</button>
                       {account.profile && <button data-id="cloudflare-account-open-chrome" type="button" className={itemClass} onClick={() => { setActionMenu(null); void openChromeProfile(account.profile); }}><ExternalLink className="h-3.5 w-3.5" />{t("openInChrome")}</button>}
                       <button data-id="cloudflare-account-edit" type="button" className={itemClass} onClick={() => { setActionMenu(null); void beginEdit(account); }}><Pencil className="h-3.5 w-3.5" />{t("settingsEdit", { defaultValue: "编辑" })}</button>
                       <div className="my-1 border-t border-white/[0.07]" />

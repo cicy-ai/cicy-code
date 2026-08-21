@@ -1,7 +1,7 @@
 {
   "name": "cicy-code-ide-v1",
   "private": true,
-  "version": "2.3.558",
+  "version": "2.3.559",
   "type": "module",
   "scripts": {
     "dev": "vite --port=8022 --host=0.0.0.0",
@@ -10,6 +10,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e:agent-send": "vitest run --maxWorkers=1 src/components/agentSend.e2e.test.tsx src/services/agentSend.test.ts src/components/TodoPanel.test.tsx src/components/projects/ProjectsPanel.test.tsx src/components/knowledge/KnowledgePanel.test.tsx --testNamePattern=\"send-to-Agent UI E2E|^sendToAgent|keeps a batch selection|fills a targeted Project Agent prompt|blocks contextual sends and shows a toast|fills pending governance\"",
     "test:watch": "vitest"
   },
   "dependencies": {

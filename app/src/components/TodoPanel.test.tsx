@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { advanceStatus, statusClasses, humanTime, shortId } from './TodoPanel';
 import type { TodoStatus } from './TodoPanel';
 
@@ -125,5 +125,28 @@ describe('<TodoPanel />', () => {
     expect(await screen.findByText('new optimistic task')).toBeInTheDocument();
     expect(api.addTodo).toHaveBeenCalled();
     resolveAdd({});
+  });
+
+  it('keeps a batch selection when no global Agent target is selected', async () => {
+    api.listTodos.mockResolvedValue({
+      data: { todos: [mkTodo({ id: '7', title: 'keep selected' })] },
+    });
+    render(<TodoPanel paneId="w-1001" active isMaster />);
+
+    const checkbox = await waitFor(() => {
+      const node = document.querySelector('[data-id="todo-panel-card-checkbox-7"]');
+      if (!node) throw new Error('todo checkbox did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(checkbox);
+    expect(document.querySelector('[data-id="todo-panel-batch-bar"]')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-id="todo-panel-batch-send"]') as HTMLElement);
+      await Promise.resolve();
+    });
+
+    expect(document.querySelector('[data-id="todo-panel-batch-bar"]')).toBeInTheDocument();
+    expect(api.sendCommand).not.toHaveBeenCalled();
   });
 });

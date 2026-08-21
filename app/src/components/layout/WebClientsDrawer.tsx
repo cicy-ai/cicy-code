@@ -139,7 +139,8 @@ function ClientCard({
     setSendOk(false);
     try {
       const text = t('webClientsTestPrompt', { clientId: client.client_id });
-      await sendToAgent(paneId, text, { submit: true });
+      const handled = await sendToAgent(paneId, text, { submit: true });
+      if (!handled) return;
       setSendOk(true);
       // Brief flash then close the drawer
       setTimeout(onSent, 600);

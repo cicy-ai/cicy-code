@@ -11,6 +11,7 @@
   "selectAgentTypeHint": "エージェント種別を選んでください。",
   "noAgentTypesAvailable": "利用可能なエージェント種別がありません。",
   "templateProjectLabel": "プロジェクトメモリ",
+  "templateProjectNone": "Project に参加しない",
   "templateRoleLabel": "ロールライブラリ",
   "templateNone": "なし",
   "templateHint": "グローバルテンプレートは常に追加されます。プロジェクト/ロールは任意で、新しいエージェントのメモリファイルにコピーされます。テンプレートは Inspector の「メモリ」タブで管理します。",

@@ -136,6 +136,8 @@
   "networkDisconnected": "未接続",
   "networkSending": "送信中…",
   "networkSendClientId": "エージェントへ送信",
+  "networkClientIdSent": "送信済み",
+  "networkClientIdFilled": "入力済み",
   "tabTodo": "タスク",
   "marketplaceSidebarIdentifier": "識別子",
   "marketplaceSidebarVersion": "バージョン",

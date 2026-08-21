@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useRef, useCallback, useMemo, memo, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore, memo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation, Trans } from 'react-i18next';
 import { TRANSLATED_LNGS } from '../i18n';
@@ -61,6 +61,7 @@ import config, { defaultWorkerWorkspace, syncHostHomeFromPath, urls } from '../c
 import apiService from '../services/api';
 import { loadHandled } from './audit/auditHandled';
 import { sendToAgent } from '../services/agentSend';
+import { clearAgentSendTarget, getAgentSendTarget, setAgentSendTarget, subscribeAgentSendTarget } from '../services/agentSendTarget';
 import { chatWs } from '../services/chatWs';
 import { ApiSwitchDialog } from './layout/ApiSwitchDialog';
 import CreateAgentDialog, { CreateAgentValues } from './CreateAgentDialog';
@@ -340,16 +341,20 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [createAgentProjectLocked, setCreateAgentProjectLocked] = useState(false);
   const [createAgentRoleLocked, setCreateAgentRoleLocked] = useState(false);
   const [createAgentTypeLocked, setCreateAgentTypeLocked] = useState(false);
-  const createAgentOnCreatedRef = useRef<((paneId: string) => void) | null>(null);
+  const createAgentOnCreatedRef = useRef<((paneId: string) => void | Promise<void>) | null>(null);
   useEffect(() => {
     const requestCreateAgent = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
-      setCreateAgentInitialValues({
+      const nextValues: Partial<CreateAgentValues> = {
         title: String(detail.title || '').trim(),
-        agent_type: 'cicy',
+        agent_type: String(detail.agentType || '').trim() || 'cicy',
         role_template: String(detail.roleTemplate || '').trim() || 'assistant',
-      });
-      setCreateAgentProjectLocked(false);
+      };
+      if (Object.prototype.hasOwnProperty.call(detail, 'projectTemplate')) {
+        nextValues.project_template = String(detail.projectTemplate ?? '').trim();
+      }
+      setCreateAgentInitialValues(nextValues);
+      setCreateAgentProjectLocked(detail.projectTemplateLocked === true);
       setCreateAgentRoleLocked(detail.roleTemplateLocked === true);
       setCreateAgentTypeLocked(detail.agentTypeLocked === true);
       createAgentOnCreatedRef.current = typeof detail.onCreated === 'function' ? detail.onCreated : null;
@@ -583,6 +588,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       });
       const id = data?.pane_id || data?.id;
       if (id) {
+        const createdPaneId = String(id).includes(':') ? String(id) : `${id}:main.0`;
+        const onCreated = createAgentOnCreatedRef.current;
+        createAgentOnCreatedRef.current = null;
+        await onCreated?.(createdPaneId);
         const { data: fresh } = await apiService.getPanes();
         setAgents(Array.isArray(fresh) ? fresh : fresh?.panes || []);
         setCreateAgentOpen(false);
@@ -590,8 +599,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         setCreateAgentProjectLocked(false);
         setCreateAgentRoleLocked(false);
         setCreateAgentTypeLocked(false);
-        createAgentOnCreatedRef.current?.(String(id).includes(':') ? String(id) : `${id}:main.0`);
-        createAgentOnCreatedRef.current = null;
       }
     } catch {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastCreateWorkerFailed') }));
@@ -789,6 +796,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     cache.set(leftPanelKey(paneId), leftActive);
   }, [leftActive, paneId]);
   useEffect(() => { cache.set(projectsOpenKey(paneId), projectsOpen); }, [paneId, projectsOpen]);
+  useEffect(() => {
+    if (!projectsOpen) clearAgentSendTarget('project');
+  }, [projectsOpen]);
   useEffect(() => {
     if (!projectsOpen) return;
     setLeftPanelView(null);
@@ -1056,6 +1066,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCanvasLocateRequest({ paneId: nextStoredPaneId, nonce: Date.now(), zoomToActual: true });
   }, [canvasPaneIds, paneId, activeTeamPaneId]);
   const activeCliPaneId = canvasPaneIds.includes(activeTeamPaneId[paneId]) ? activeTeamPaneId[paneId] : paneId;
+  useEffect(() => {
+    const target = getAgentSendTarget();
+    if (target.source !== 'team') return;
+    const id = target.paneId.replace(/:.*$/, '');
+    if (canvasPaneIds.includes(id)) return;
+    clearAgentSendTarget('team');
+  }, [canvasPaneIds]);
   // Keep a ref so long-lived effects (chat-ws lifecycle) can read the latest
   // value at firing time without taking activeCliPaneId as a dep — otherwise
   // poll-driven auto-switches between agents would tear down + recreate the
@@ -1485,15 +1502,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleSendPageClientIdToAgent = useCallback(async () => {
     const currentClientId = String(chatWsClientId || pageClientId || '').trim();
     const workspaceState = devStore.getSnapshot().Workspace?.state || {};
-    const tmuxTarget = String(workspaceState.activeCliPaneId || '').trim();
-    if (!currentClientId || !tmuxTarget) return;
+    const tmuxTarget = String(workspaceState.activeCliPaneId || activeCliPaneId || paneId).trim();
+    if (!currentClientId) return false;
     const promptText = `My browser page clientId: ${currentClientId}.`;
     try {
-      window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
-      await sendToAgent(tmuxTarget, promptText, { submit: true });
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastClientIdSent') }));
+      const target = getAgentSendTarget();
+      const handled = await sendToAgent(tmuxTarget, promptText, { submit: true });
+      if (!handled) return false;
+      if (target.source === 'team') {
+        window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: target.paneId, q: promptText } }));
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastClientIdSent') }));
+      }
+      return true;
     } catch {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastClientIdFailed') }));
+      return false;
     }
   }, [activeCliPaneId, chatWsClientId, pageClientId, paneId]);
 
@@ -1519,6 +1542,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const openPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
+    setAgentSendTarget({ source: 'team', paneId: targetPaneId });
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
   }, [paneId]);
   const openPaneSettings = useCallback((targetPaneId: string) => {
@@ -2107,6 +2131,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleActiveProjectChange = useCallback((project: { name: string }) => {
     setActiveProjectTitle(project.name);
     setProjectAgentSelected(false);
+    clearAgentSendTarget('project');
   }, []);
   const handleProjectActiveAgentChange = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
@@ -2118,6 +2143,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     openPaneRequestView(targetPaneId, lastSessionSubTab);
   }, [openPaneRequestView, lastSessionSubTab]);
   const handleStackActivePaneIdChange = useCallback((targetPaneId: string) => {
+    setAgentSendTarget({ source: 'team', paneId: targetPaneId });
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: targetPaneId }));
   }, [paneId]);
   const rightContent = (
@@ -2309,9 +2335,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   setProjectsOpen(false);
                   onSelectAgent(targetPaneId.replace(/:.*$/, ''));
                 }}
-                onCreateAgent={(projectTemplate) => {
+                onCreateAgent={({ projectTemplate, onCreated }) => {
                   setCreateAgentInitialValues({ project_template: projectTemplate });
                   setCreateAgentProjectLocked(true);
+                  setCreateAgentRoleLocked(false);
+                  setCreateAgentTypeLocked(false);
+                  createAgentOnCreatedRef.current = onCreated;
                   setCreateAgentOpen(true);
                 }}
                 onOpenGuidance={openAgentGuidanceDetail}
@@ -2351,7 +2380,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                           statuses={pollStatuses}
                           onSelectAgent={onSelectAgent}
                           onAgentsChange={setAgents}
-                          onCreateAgent={() => { setCreateAgentInitialValues(undefined); setCreateAgentProjectLocked(false); setCreateAgentOpen(true); }}
+                          onCreateAgent={() => {
+                            setCreateAgentInitialValues(undefined);
+                            setCreateAgentProjectLocked(false);
+                            setCreateAgentRoleLocked(false);
+                            setCreateAgentTypeLocked(false);
+                            createAgentOnCreatedRef.current = null;
+                            setCreateAgentOpen(true);
+                          }}
                           onOpenSettings={(targetPaneId) => {
                             onSelectAgent(targetPaneId);
                             openInspectorForPane(targetPaneId, 'settings');
@@ -3668,11 +3704,15 @@ function networkQuality(connected: boolean, latency: number | null): { bars: 0 |
   return { bars: 1, color: 'bg-rose-400', tone: 'text-rose-300', ring: 'ring-rose-400/40' };
 }
 
-function NetworkSignal({ latency, connected = true, clientId, onSendClientId }: { latency: number | null; connected?: boolean; clientId?: string | null; onSendClientId?: () => Promise<void> | void }) {
+export function NetworkSignal({ latency, connected = true, clientId, onSendClientId }: { latency: number | null; connected?: boolean; clientId?: string | null; onSendClientId?: () => Promise<boolean | void> | boolean | void }) {
   const { t } = useTranslation('workspace');
   const [copiedId, setCopiedId] = useState(false);
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sentKey, setSentKey] = useState('');
+  const sendTarget = useSyncExternalStore(subscribeAgentSendTarget, getAgentSendTarget, getAgentSendTarget);
+  const currentSendKey = `${clientId || ''}\u0000${sendTarget.source}\u0000${sendTarget.paneId}`;
+  const sent = Boolean(clientId && sendTarget.paneId && sentKey === currentSendKey);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -3710,10 +3750,11 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId }: 
             : 'Poor';
 
   const handleSend = async () => {
-    if (!onSendClientId || sending) return;
+    if (!onSendClientId || sending || sent) return;
     setSending(true);
     try {
-      await onSendClientId();
+      const handled = await onSendClientId();
+      if (handled !== false) setSentKey(currentSendKey);
     } finally {
       setSending(false);
     }
@@ -3839,11 +3880,11 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId }: 
               type="button"
               data-id="network-signal-send-client-id"
               onClick={() => { void handleSend(); }}
-              disabled={sending || !onSendClientId}
+              disabled={sending || sent || !onSendClientId}
               className="inline-flex items-center justify-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-1.5 text-[11px] font-medium text-zinc-200 transition-all hover:border-white/[0.12] hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Send className={`h-3 w-3 ${sending ? 'animate-pulse' : ''}`} />
-              <span data-id="network-signal-send-client-id-label">{sending ? t('networkSending') : t('networkSendClientId')}</span>
+              {sent ? <Check className="h-3 w-3 text-emerald-400" /> : <Send className={`h-3 w-3 ${sending ? 'animate-pulse' : ''}`} />}
+              <span data-id="network-signal-send-client-id-label">{sent ? t(sendTarget.source === 'project' ? 'networkClientIdFilled' : 'networkClientIdSent') : sending ? t('networkSending') : t('networkSendClientId')}</span>
             </button>
           </div>
         </div>

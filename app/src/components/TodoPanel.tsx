@@ -190,7 +190,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
     try {
       // Move ownership to the worker, then dispatch the task to its pane.
       await (apiService as any).updateTodo(paneId, todo.id, { assignee: workerPane });
-      await sendToAgent(workerPane, prompt, { submit: true });
+      await sendToAgent(workerPane, prompt, { submit: true, routing: 'explicit' });
       await refresh();
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'assign failed');
@@ -262,8 +262,8 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
     const list = chosen.map((t, i) => `${i + 1}. [${t.id}] ${t.title}`).join('\n');
     const prompt = tr('promptBatch', { count: chosen.length, list });
     try {
-      await sendToAgent(paneId, prompt, { submit: true });
-      clearSelection();
+      const handled = await sendToAgent(paneId, prompt, { submit: true });
+      if (handled) clearSelection();
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'batch send failed');
     } finally {
