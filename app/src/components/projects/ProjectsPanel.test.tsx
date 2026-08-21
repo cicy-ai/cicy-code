@@ -1095,6 +1095,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       return node as HTMLElement;
     });
     expect(first.className).toContain('border-blue-500');
+    expect(first.className).not.toContain('ring-blue-500');
     fireEvent.click(second);
     expect(onActiveAgentChange).toHaveBeenCalledWith('w-102');
     expect(getAgentSendTarget()).toEqual({ source: 'project', paneId: 'w-102:main.0' });
