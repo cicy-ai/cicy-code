@@ -3841,12 +3841,17 @@ func isCodexStatusFooterVisible(out string) bool {
 
 func isCodexInputReady(out string) bool {
 	recent := recentTmuxPaneText(out, 80)
+	active := recentTmuxPaneText(out, 8)
+	// Codex keeps its composer visible while a turn is running. Pressing Enter in
+	// that state does not start a new turn: it creates a TUI-owned "Messages to be
+	// submitted after next tool call" entry. Keep CiCy's pane queue authoritative
+	// instead and wait until the active busy markers disappear.
+	if isCodexBusyStateVisible(active) {
+		return false
+	}
 	// If the active prompt and footer are visible, treat Codex as ready even if
 	// an older trust/update prompt remains in scrollback.
 	if isCodexPromptVisible(recent) && isCodexStatusFooterVisible(recent) {
-		return true
-	}
-	if isCodexPromptVisible(recent) && isCodexBusyStateVisible(recent) {
 		return true
 	}
 	if isCodexTrustPrompt(out) {
