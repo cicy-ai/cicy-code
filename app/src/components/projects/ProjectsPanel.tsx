@@ -111,6 +111,7 @@ const projectAgentStatusSignature = (status: any) => [
   status?.latest_question,
 ].map((value) => String(value || '')).join('|');
 const projectAgentStatusIsTerminal = (status: any) => /^(completed|complete|done|idle|aborted|error|canceled|cancelled|failed|stopped)$/.test(String(status?.status || '').trim().toLowerCase());
+const projectAgentStatusIsBusy = (status: any) => /^(thinking|working|running|streaming)$/.test(String(status?.status || '').trim().toLowerCase());
 const projectAgentCanUseTerminal = (agent: ProjectAgent) => !agent.remote
   && String(agent.agentType || '').toLowerCase() !== 'cicy'
   && Boolean(agent.ttydSrc)
@@ -272,7 +273,7 @@ function ProjectAgentCard({ agent, metrics, status, terminalOpen, working, teamI
   const legacyBusy = /running|working|thinking|streaming/.test(legacyStatus);
   const effectiveStatus = String(agent.remote && agent.instanceOnline === false ? 'offline' : status || 'unknown').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(effectiveStatus);
-  const liveBusy = /running|working|thinking|streaming|pending|tool_use|tool_call|in_progress/.test(effectiveStatus);
+  const liveBusy = projectAgentStatusIsBusy({ status: effectiveStatus });
   const identity = agent.remote ? agent.paneId : (teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId));
   const hasAgentActions = Boolean(onRestart || onUpdate || onBindWechat || onBindFeishu || onFork);
 
@@ -1334,9 +1335,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     // poll/status is the freshest source. Do not OR it with stale agent/reply
     // snapshots: an old "thinking" there would keep queued prompts stuck forever
     // after the live status has already reached completed/idle.
-    if (!summary) return true;
     const status = String(summary?.status || '').toLowerCase();
-    return sendingAgentIds.has(id) || !projectAgentStatusIsTerminal({ status });
+    return sendingAgentIds.has(id) || projectAgentStatusIsBusy({ status });
   };
 
   const deliverAgentMessage = async (agent: ProjectAgent, message: string, displayQuestion: string, previousReply: any, sentAttachments: ProjectAttachment[] = [], restoreText = '') => {
@@ -1450,11 +1450,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     for (const agent of allAgents) {
       const id = shortPaneId(agent.paneId);
       const queued = queuedAgentMessages[id] || [];
-      const liveStatus = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id];
-      // Never release a queue during the reload gap before the first live
-      // status arrives. Treating that unknown state as idle clears and sends a
-      // restored queue as soon as the panel mounts.
-      if (!liveStatus) continue;
       if (!queued.length || agentIsThinking(agent)) continue;
       const payload = queued.map((item) => item.payload).join('\n\n');
       const displayQuestion = payload;
@@ -1813,7 +1808,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               // reply is already `pending`, so it bridges that gap until the
               // current-reply poll replaces it with an authoritative terminal state.
               const authoritativeStatus = String(cardLatest?.status || '').toLowerCase();
-              const cardBusy = !canceledAgentIds.has(cardShortId) && (sendingAgentIds.has(cardShortId) || (!projectAgentStatusIsTerminal({ status: authoritativeStatus }) && authoritativeStatus !== ''));
+              const cardBusy = !canceledAgentIds.has(cardShortId) && (sendingAgentIds.has(cardShortId) || projectAgentStatusIsBusy({ status: authoritativeStatus }));
               const hasLocalActions = !agent.remote;
               const hasCliLifecycleActions = hasLocalActions && normalizeAgentType(agent.agentType) !== 'cicy';
               return (

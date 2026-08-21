@@ -722,7 +722,11 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).toBeInTheDocument());
 
     fireEvent.click(document.querySelector('[data-id="project-list-item-2"]') as HTMLElement);
-    const card = await waitFor(() => document.querySelector('[data-id="project-agent-card-w-101"]') as HTMLElement);
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
     fireEvent.click(card);
 
     await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-tab-terminal-w-101"]')).toHaveAttribute('aria-selected', 'true'));
@@ -1196,6 +1200,35 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     ));
     expect(document.querySelectorAll('[data-id="project-agent-message-queue-item"]')).toHaveLength(0);
     expect(await screen.findByText(/第一条/)).toBeInTheDocument();
+  });
+
+  it('sends immediately when the authoritative status is unknown', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'idle' }]} statuses={{}} onOpenAgent={vi.fn()} />);
+
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(card);
+    const input = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
+      if (!node) throw new Error('prompt did not open');
+      return node as HTMLTextAreaElement;
+    });
+    fireEvent.change(input, { target: { value: 'unknown 也直接发送' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledWith(
+      'w-101:main.0',
+      'unknown 也直接发送',
+      { submit: true, agentType: 'codex', fromComposer: true },
+    ));
+    expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).not.toBeInTheDocument();
   });
 
   it('restores a queued prompt after the project panel reloads', async () => {
