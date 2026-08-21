@@ -828,7 +828,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(inactiveTabs).not.toHaveClass('invisible', 'pointer-events-none');
     expect(inactiveTabs).not.toHaveAttribute('aria-hidden', 'true');
     expect(inactiveFooterSlot).toBeInTheDocument();
-    expect(inactiveFooterSlot).toHaveClass('invisible', 'pointer-events-none');
+    expect(inactiveFooterSlot).not.toHaveClass('invisible');
+    expect(inactiveFooterSlot).toHaveClass('pointer-events-none', '[&>footer]:invisible');
+    expect(inactiveFooterSlot).toHaveClass('bg-[#15161b]');
     expect(inactiveFooterSlot).toHaveAttribute('aria-hidden', 'true');
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).not.toBeInTheDocument();

@@ -518,7 +518,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selec
         <div
           data-id={`project-agent-card-footer-slot-${shortPaneId(agent.paneId)}`}
           aria-hidden={!(selected || working) || activeBodyTab === 'role'}
-          className={cn('shrink-0', (!(selected || working) || activeBodyTab === 'role') && 'invisible pointer-events-none')}
+          className={cn('shrink-0 bg-[#15161b]', (!(selected || working) || activeBodyTab === 'role') && 'pointer-events-none [&>footer]:invisible')}
         >
           {footer}
         </div>
