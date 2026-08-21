@@ -736,6 +736,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
     await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-102"]')).toBeInTheDocument());
     await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-role-body-w-103"]')).toBeInTheDocument());
+    expect(document.querySelector('[data-id="project-agent-card-footer-slot-w-103"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-w-102"] [data-id="project-agent-card-live-body-wrap"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-w-103"] [data-id="project-agent-card-live-body-wrap"]')).not.toBeInTheDocument();
   });

@@ -528,7 +528,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selec
         </div>
       ) : null}
       </div>
-      {!selected || activeBodyTab !== 'role' ? (
+      {activeBodyTab !== 'role' ? (
         <div
           data-id={`project-agent-card-footer-slot-${shortPaneId(agent.paneId)}`}
           aria-hidden={!(selected || working) || activeBodyTab === 'role'}
