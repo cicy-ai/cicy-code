@@ -15,9 +15,10 @@ export default function CodingAgentHistoryView({
   agentType = '',
   fullWidth = false,
   leftAlignQuestions = false,
+  pollLive = true,
 }: CurrentHistoryViewProps) {
   // Coding agents (claude/codex/…) ignore WS deltas and rely on polling.
-  const state = useCurrentHistory({ paneId, open, promptsOnly, hideTools, agentType, consumeWsDeltas: false });
+  const state = useCurrentHistory({ paneId, open, promptsOnly, hideTools, agentType, consumeWsDeltas: false, pollLive });
   const [greeting, setGreeting] = useState('');
   useEffect(() => {
     setGreeting('');

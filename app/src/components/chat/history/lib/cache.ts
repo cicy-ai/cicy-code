@@ -10,12 +10,25 @@ import {
 } from '../constants';
 import type { RawHistoryItem, HistoryTurn, HistoryMemSnapshot } from '../types';
 
+const CURRENT_HISTORY_DB_OPEN_TIMEOUT_MS = 1_000;
+
 export function openCurrentHistoryToolDB(): Promise<IDBDatabase | null> {
   if (typeof window === 'undefined' || !window.indexedDB) {
     return Promise.resolve(null);
   }
   return new Promise((resolve) => {
     const request = window.indexedDB.open(CURRENT_HISTORY_TOOL_DB_NAME, CURRENT_HISTORY_TOOL_DB_VERSION);
+    let settled = false;
+    const timeout = window.setTimeout(() => finish(null), CURRENT_HISTORY_DB_OPEN_TIMEOUT_MS);
+    const finish = (db: IDBDatabase | null) => {
+      if (settled) {
+        db?.close();
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timeout);
+      resolve(db);
+    };
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(CURRENT_HISTORY_TOOL_STORE)) {
@@ -29,8 +42,9 @@ export function openCurrentHistoryToolDB(): Promise<IDBDatabase | null> {
         db.createObjectStore(CURRENT_HISTORY_PROMPTS_STORE, { keyPath: 'key' });
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => resolve(null);
+    request.onsuccess = () => finish(request.result);
+    request.onerror = () => finish(null);
+    request.onblocked = () => finish(null);
   });
 }
 

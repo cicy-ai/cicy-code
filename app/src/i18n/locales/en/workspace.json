@@ -584,6 +584,8 @@
   "projectZoomOut": "Zoom out",
   "projectZoomIn": "Zoom in",
   "projectResetView": "Arrange Agent Cards",
+  "projectWheelZoomEnable": "Enable mouse wheel zoom",
+  "projectWheelZoomDisable": "Disable mouse wheel zoom",
   "projectAddAgentTitle": "Add agents to {{name}}",
   "projectAddSelected": "Add {{count}}",
   "projectNoAgents": "No agents in this project",

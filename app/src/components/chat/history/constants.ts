@@ -28,8 +28,9 @@ export const ANSWER_RENDER_CAP = 8;
 //   尾巴渲染(零轮询延迟);reply.json 轮询降级为校正锚 —— 中途打开、WS 丢包/重连、
 //   工具卡与多回合结构由 poll 对齐(后端先写 reply.json 再 publish,poll 快照永远
 //   ⊇ 已推 delta;替换守卫保证同一 turn 内容只前进不回退)。
-// - 非 cicy:维持原 reply.json 轮询 loop,WS 事件一概不消费。in-flight 时 ACTIVE
-//   节拍,空闲时退回 IDLE 节拍,只为发现下一轮开始。
+// - 非 cicy:不自行拼 WS delta；每个 WS 信号会提前触发一次 reply.json 重读，
+//   读取期间的新信号会合并成一次 follow-up read，确保内容/终态不丢。轮询仍作为
+//   WS 丢包兜底：in-flight 时 ACTIVE，空闲时退回 IDLE。
 export const CURRENT_HISTORY_POLL_ACTIVE_MS = 500;
 export const CURRENT_HISTORY_POLL_IDLE_MS = 2500;
 // Short retry while the committed window is still loading on open, so the live

@@ -26,6 +26,9 @@ export type CurrentHistoryViewProps = {
   // Left-align the question bubbles (default right/chat-style). The inline
   // webframe history sets this; DispatcherChat keeps the default.
   leftAlignQuestions?: boolean;
+  // Project canvases can keep an inactive card's already-loaded history visible
+  // without letting every card run its own current-reply polling loop.
+  pollLive?: boolean;
 };
 
 export default function CurrentHistoryView(props: CurrentHistoryViewProps) {

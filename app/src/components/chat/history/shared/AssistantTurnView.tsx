@@ -5,10 +5,10 @@ import { memo } from 'react';
 import AgentAvatar from '../../../AgentAvatar';
 import type { HistoryTurn } from '../types';
 import { getVisibleHistorySteps } from '../lib/turns';
-import { buildToolCardId, normalizeToolStepsForDisplay } from '../lib/toolFormat';
+import { normalizeToolStepsForDisplay } from '../lib/toolFormat';
 import { ThinkingBlock } from './ThinkingBlock';
 import { MarkdownBlock } from './Markdown';
-import { ToolCard } from './ToolCard';
+import { buildToolRunGroupId, collectToolRuns, ToolRunGroup } from './ToolRunGroup';
 import { PendingThinkingPlaceholder } from './notices';
 
 // AssistantTurnView renders ONE assistant turn (avatar + ordered thinking/text/
@@ -27,6 +27,8 @@ export const AssistantTurnView = memo(function AssistantTurnView({ turn, turnKey
   // running right now (the CLI is executing it) — render a spinner, not a ✓.
   const turnActive = isLatestTurn && /^(thinking|streaming|pending|tool_use|running|in_progress|working)$/.test(String(turn?.status || '').trim());
   const lastToolStepIndex = turnActive ? steps.reduce((acc: number, s: any, i: number) => (s?.type === 'tool' ? i : acc), -1) : -1;
+  const toolRuns = collectToolRuns(steps, turnKey, lastToolStepIndex);
+  const toolRunsByStep = new Map(toolRuns.map((run) => [run.stepIndex, run]));
   const toolOnlyTurn = steps.length > 0 && steps.every((step: any) => step?.type === 'tool');
   const hasRenderableAssistantStep = steps.some((step: any) => {
     if (step?.type === 'thinking' && String(step?.text || '').trim()) return true;
@@ -49,12 +51,16 @@ export const AssistantTurnView = memo(function AssistantTurnView({ turn, turnKey
           if (step.type === 'text') {
             return <div key={stepIndex} data-id={`current-history-turn-step-text-${turnKey}-${stepIndex}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><MarkdownBlock text={step.text} /></div>;
           }
-          const tools = Array.isArray(step.tools) ? step.tools : [];
-          return <div key={stepIndex} data-id={`current-history-turn-step-tools-${turnKey}-${stepIndex}`} className={`${toolOnlyTurn ? '' : 'my-2'} space-y-1.5`}>{tools.map((tool: any, toolIndex: number) => {
-            const toolId = buildToolCardId(turnKey, stepIndex, tool, toolIndex);
-            const running = stepIndex === lastToolStepIndex && !String(tool?.result || '').trim() && tool?.isError !== true;
-            return <ToolCard key={toolId} tool={tool} toolId={toolId} running={running} />;
-          })}</div>;
+          const toolRun = toolRunsByStep.get(stepIndex);
+          if (!toolRun) return null;
+          return (
+            <ToolRunGroup
+              key={`tool-run-${turnKey}-${toolRun.groupIndex}`}
+              entries={toolRun.entries}
+              groupId={buildToolRunGroupId(turnKey, toolRun.groupIndex)}
+              className={toolOnlyTurn ? '' : 'my-2'}
+            />
+          );
         })}
         {!hasRenderableAssistantStep && fallbackAnswer ? (
           <div data-id={`current-history-turn-fallback-${turnKey}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300">

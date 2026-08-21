@@ -24,8 +24,9 @@ export function useCurrentHistory(opts: {
   hideTools: boolean;
   agentType: string;
   consumeWsDeltas: boolean;
+  pollLive?: boolean;
 }) {
-  const { paneId, open, promptsOnly, consumeWsDeltas } = opts;
+  const { paneId, open, promptsOnly, consumeWsDeltas, pollLive = true } = opts;
   const [items, setItems] = useState<HistoryTurn[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -58,6 +59,8 @@ export function useCurrentHistory(opts: {
   const maxLoadedIdRef = useRef(0);         // largest history id currently in `items`
   const committedReadyRef = useRef(false);  // Part 1 (committed window) finished loading
   const firstReplyDoneRef = useRef(false);  // Part 2's first poll resolved → safe to reveal
+  const pollLiveRef = useRef(pollLive);
+  pollLiveRef.current = pollLive;
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);   // sentinel: when it scrolls into view, auto-load earlier
   const loadMoreFnRef = useRef<() => void>(() => {});  // latest loadMore, so the observer never calls a stale closure
@@ -293,7 +296,10 @@ export function useCurrentHistory(opts: {
         // skeleton until Part 2's first poll resolves, so committed + the live
         // tail paint together with no open-time flash.
         committedReadyRef.current = true;
-        if (firstReplyDoneRef.current) setLoading(false);
+        if (!pollLiveRef.current) {
+          firstReplyDoneRef.current = true;
+          setLoading(false);
+        } else if (firstReplyDoneRef.current) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -325,11 +331,12 @@ export function useCurrentHistory(opts: {
   // + new q_last appended) → fetchTailBeyondBoundary pulls ONLY that new tail.
   // We never re-pull the committed window.
   useEffect(() => {
-    if (!open || !paneId) return;
+    if (!open || !paneId || !pollLive) return;
     let cancelled = false;
     let timer: number | null = null;
     let lastSig = '';
     let pollInFlight = false;
+    let pollRequestedWhileInFlight = false;
     let lastPollStartAt = 0;
     // 连续"快照比本地短"的次数(WS 直推领先是常态,但持续领先可能是拼重了)。
     let regressStreak = 0;
@@ -350,7 +357,11 @@ export function useCurrentHistory(opts: {
     };
 
     const poll = async () => {
-      if (cancelled || pollInFlight) return;
+      if (cancelled) return;
+      if (pollInFlight) {
+        pollRequestedWhileInFlight = true;
+        return;
+      }
       // Wait for Part 1 (committed window) so the tail attaches to a real
       // boundary and the poll never races the open load.
       if (!committedReadyRef.current) { schedule(CURRENT_HISTORY_POLL_WAIT_MS); return; }
@@ -407,6 +418,29 @@ export function useCurrentHistory(opts: {
           return;
         }
         if (cid && !conversationId) setConversationId((prev) => prev || cid);
+
+        // current.json uses positional history ids. Context compaction can
+        // rewrite the SAME conversation into a shorter snapshot, so the remote
+        // max moves backwards while our committed boundary still points at the
+        // pre-compaction tail. The normal tail path only handles growth and
+        // would otherwise keep stale turns forever (and reject every new reply
+        // below that old boundary). Confirm the regression against current.json
+        // before replacing the visible window, because reply.json may briefly
+        // lag one tool reseed behind the committed snapshot.
+        if (replyMaxId < maxLoadedIdRef.current) {
+          const ids = await getHistoryIDs(paneId);
+          if (cancelled) return;
+          const verifiedCid = String(ids?.conversation_id || '').trim();
+          const verifiedMax = Number(ids?.id || 0);
+          const activeCid = cid || conversationId;
+          if (verifiedCid && activeCid && verifiedCid === activeCid
+            && verifiedMax < maxLoadedIdRef.current) {
+            revealOnce();
+            await softRebind(verifiedCid);
+            schedule(CURRENT_HISTORY_POLL_WAIT_MS);
+            return;
+          }
+        }
         // The conversation the live-tail ANSWER actually belongs to. Only attach
         // the tail when it matches committed (or backend didn't supply it).
         const replyCid = String(data?.reply_conversation_id || '').trim();
@@ -556,6 +590,7 @@ export function useCurrentHistory(opts: {
               liveTurnRef.current = {
                 history_id: effectiveAnswerId,
                 conversation_id: cid || conversationId,
+                turn_id: turnId,
                 role: 'assistant',
                 q: '',
                 text: '',
@@ -581,6 +616,13 @@ export function useCurrentHistory(opts: {
         if (!cancelled) { revealOnce(); schedule(CURRENT_HISTORY_POLL_IDLE_MS); }
       } finally {
         pollInFlight = false;
+        // A WS signal can arrive after this request has already read reply.json.
+        // Coalesce all such signals into exactly one follow-up read so the last
+        // disk snapshot always wins and no terminal transition is lost.
+        if (pollRequestedWhileInFlight && !cancelled) {
+          pollRequestedWhileInFlight = false;
+          schedule(0);
+        }
       }
     };
 
@@ -590,9 +632,14 @@ export function useCurrentHistory(opts: {
     // 事件。cicy:delta 直接追加进 live 尾巴渲染,零轮询延迟;reply.json 轮询降级为
     // 校正锚 —— 中途打开页面、WS 丢包/重连、工具卡(名字/参数/结果)与多回合结构都由
     // 下一次 poll 对齐(后端先写 reply.json 再 publish,poll 快照永远 ⊇ 已推 delta)。
-    // 非 cicy:保持原 reply.json 轮询 loop,WS 事件一概不消费。
+    // 非 cicy 不拼接 WS delta；每个信号只负责立即重读 reply.json，让磁盘快照
+    // 始终是 UI 真源。cicy 仍可直拼 delta，但状态/结构也要重读快照定稿。
     const requestPollSoon = () => {
       if (cancelled) return;
+      if (pollInFlight) {
+        pollRequestedWhileInFlight = true;
+        return;
+      }
       const since = Date.now() - lastPollStartAt;
       schedule(since >= 180 ? 0 : 180 - since);
     };
@@ -621,18 +668,19 @@ export function useCurrentHistory(opts: {
       const aid = String(d.agent_id || '').trim();
       if (!aid) return;
       if (aid !== paneId && !paneId.endsWith(aid) && !aid.endsWith(paneId)) return;
-      if (!consumeWsDeltas) return; // 非 cicy:原轮询 loop,不消费 WS
       // 换轮/换对话的迟到 delta 不能拼进当前尾巴 —— 槽位对不上就交给 poll。
       const turnId = String(d.turn_id || '').trim();
       if (turnId && liveTurnIdRef.current && turnId !== liveTurnIdRef.current) { requestPollSoon(); return; }
       const delta = String(d.delta || '');
       const kind = d.kind === 'thinking' ? 'thinking' : (d.kind === 'text' ? 'text' : '');
+      // Codex / Claude 等非 cicy Agent 不在浏览器内自行拼流。事件只做失效
+      // 通知，立刻重读已由后端原子写好的 reply.json，保证内容和终态一致。
+      if (!consumeWsDeltas) { requestPollSoon(); return; }
       if (delta && kind) { appendStreamDelta(kind as 'text' | 'thinking', delta); return; }
-      // status_change:tool_use 的工具卡内容(名字/参数)只在 reply.json 里,催 poll;
-      // 其余状态只在尾巴还没挂上时催一把。
+      // 所有状态变化都要用 reply.json 校正：工具结构只存在于快照中，终态
+      // 也必须从快照读取 complete/final answer，不能让 live 尾巴停在 loading。
       const status = String(d.status || '').toLowerCase();
-      if (status === 'tool_use' || status === 'tool_call' || status === 'working') requestPollSoon();
-      else if (!liveTurnRef.current) requestPollSoon();
+      if (status || !liveTurnRef.current) requestPollSoon();
     };
 
     // 外部"立即刷新"信号(如办公室发完指令)→ 取消等待中的 idle 轮询,马上拉一次,
@@ -707,6 +755,7 @@ export function useCurrentHistory(opts: {
     window.addEventListener('cicy:current-history-cancel-optimistic', onCancelOptimistic as EventListener);
     window.addEventListener('cicy:agent-stream-delta', onStreamDelta as EventListener);
     window.addEventListener('agent-status-change', onStreamDelta as EventListener);
+    window.addEventListener('cicy:current-history-updated', onStreamDelta as EventListener);
     // Hidden tabs throttle chained setTimeout (Chrome intensive throttling →
     // ~1/min), so the window can be minutes stale when the user returns. Kick
     // an immediate poll on tab-visible so the view catches up on this frame.
@@ -725,9 +774,18 @@ export function useCurrentHistory(opts: {
       window.removeEventListener('cicy:current-history-cancel-optimistic', onCancelOptimistic as EventListener);
       window.removeEventListener('cicy:agent-stream-delta', onStreamDelta as EventListener);
       window.removeEventListener('agent-status-change', onStreamDelta as EventListener);
+      window.removeEventListener('cicy:current-history-updated', onStreamDelta as EventListener);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [conversationId, open, paneId, model, consumeWsDeltas]);
+  }, [conversationId, open, paneId, model, consumeWsDeltas, pollLive]);
+
+  // Pausing a card must stop its poll without blanking history or leaving an
+  // initial skeleton waiting forever for a poll that is intentionally disabled.
+  useEffect(() => {
+    if (!open || pollLive || !committedReadyRef.current) return;
+    firstReplyDoneRef.current = true;
+    setLoading(false);
+  }, [open, pollLive]);
 
   // 「加载更早」前插内容时保持用户原滚动位置。
   useLayoutEffect(() => {
@@ -851,7 +909,6 @@ export function useCurrentHistory(opts: {
     () => items.reduce((m, t) => Math.max(m, Number(t?.history_id || 0)), 0),
     [items],
   );
-
   // Keep a live snapshot of `items` for the poll effect's onNudge (its closure
   // captures a stale `items` — deps don't include it).
   useEffect(() => { itemsRef.current = items; }, [items]);

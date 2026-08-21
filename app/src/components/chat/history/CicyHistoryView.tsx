@@ -15,8 +15,9 @@ export default function CicyHistoryView({
   agentType = '',
   fullWidth = false,
   leftAlignQuestions = false,
+  pollLive = true,
 }: CurrentHistoryViewProps) {
-  const state = useCurrentHistory({ paneId, open, promptsOnly, hideTools, agentType, consumeWsDeltas: true });
+  const state = useCurrentHistory({ paneId, open, promptsOnly, hideTools, agentType, consumeWsDeltas: true, pollLive });
   // Opening greeting shown on the empty-history state — role agents draw it from
   // their role template's 开场白 (GET /api/agents/greeting/{id}); falls back to the
   // static placeholder when empty/unfetched. Keyed by paneId so switching agents

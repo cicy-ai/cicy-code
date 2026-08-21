@@ -188,6 +188,7 @@ function mergeHistoryTurnVersions(prev: HistoryTurn | undefined, incoming: Histo
     ...base,
     history_id: Number(base?.history_id || fallback?.history_id || 0) || undefined,
     conversation_id: String(base?.conversation_id || fallback?.conversation_id || ''),
+    turn_id: String(base?.turn_id || fallback?.turn_id || ''),
     q: String(base?.q || fallback?.q || ''),
     role: String(base?.role || fallback?.role || ''),
     text: String(base?.text || fallback?.text || ''),

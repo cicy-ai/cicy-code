@@ -155,6 +155,9 @@ html[data-theme="light"] [class~="text-white"][class*="bg-white"],
 html[data-theme="light"] [class~="text-white"][class*="bg-[var(--vsc-bg"] {
   color: #18181b !important;
 }
+html[data-theme="light"] [data-id="login-token-input"] {
+  color: #27272a !important;
+}
 html[data-theme="light"] [class~="text-zinc-300"] { color: #3f3f46 !important; }
 html[data-theme="light"] [class~="text-zinc-400"] { color: #52525b !important; }
 html[data-theme="light"] [class~="text-zinc-500"] { color: #71717a !important; }
@@ -813,6 +816,23 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
 .animate-select-in {
   animation: selectIn 140ms cubic-bezier(0.16, 1, 0.3, 1);
   transform-origin: top center;
+}
+
+@keyframes toolRunCountPop {
+  0% { color: rgb(251 191 36); transform: scale(0.72); }
+  55% { color: rgb(253 224 71); transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+.tool-run-count-pop {
+  animation: toolRunCountPop 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes toolRunLatestIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tool-run-latest-in {
+  animation: toolRunLatestIn 180ms ease-out;
 }
 
 /* Custom select */

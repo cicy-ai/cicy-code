@@ -1,14 +1,33 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('react-i18next', () => ({
-  initReactI18next: { type: '3rdParty', init: vi.fn() },
-  useTranslation: () => ({ t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue || key }),
-}));
+vi.mock('react-i18next', async () => {
+  const React = await import('react');
+  return {
+    initReactI18next: { type: '3rdParty', init: vi.fn() },
+    useTranslation: () => ({
+      t: (key: string, options?: { defaultValue?: string; title?: string }) => (
+        key === 'confirmRestart'
+          ? `重启 <strong>${options?.title || ''}</strong>？`
+          : options?.defaultValue || key
+      ),
+    }),
+    Trans: ({ values, components }: { values?: { title?: string }; components?: { strong?: React.ReactElement } }) => (
+      React.createElement(
+        React.Fragment,
+        null,
+        '重启 ',
+        components?.strong ? React.cloneElement(components.strong, {}, values?.title || '') : values?.title || '',
+        '？',
+      )
+    ),
+  };
+});
 
 const api = vi.hoisted(() => ({
   listGroups: vi.fn(),
   getGroup: vi.fn(),
+  getPane: vi.fn(),
   createGroup: vi.fn(),
   updateGroup: vi.fn(),
   deleteGroup: vi.fn(),
@@ -16,6 +35,9 @@ const api = vi.hoisted(() => ({
   removeGroupPane: vi.fn(),
   updateGroupPaneLayout: vi.fn(),
   getAgentCurrentReply: vi.fn(),
+  getAgentHistoryIDs: vi.fn(),
+  getAgentCurrentHistory: vi.fn(),
+  getAgentGreeting: vi.fn(),
   getIMAccounts: vi.fn(),
   getCiCyCloudInstances: vi.fn(),
   getCiCyCloudAgents: vi.fn(),
@@ -24,6 +46,7 @@ const api = vi.hoisted(() => ({
   uploadAssetFile: vi.fn(),
   getMemoryTemplate: vi.fn(),
   saveMemoryTemplate: vi.fn(),
+  restartPane: vi.fn(),
 }));
 const agentSend = vi.hoisted(() => ({ sendToAgent: vi.fn() }));
 
@@ -31,6 +54,21 @@ vi.mock('../../services/api', () => ({ default: api }));
 vi.mock('../../services/agentSend', () => agentSend);
 vi.mock('../AgentAvatar', () => ({ default: () => <span data-testid="agent-avatar" /> }));
 vi.mock('../terminal/TerminalView', () => ({ default: ({ ttydSrc }: { ttydSrc: string }) => <div data-id="mock-project-terminal">{ttydSrc}</div> }));
+vi.mock('../layout/UpdateAgentModal', () => ({
+  default: ({ paneId, title, onClose }: { paneId: string; title: string; onClose: () => void }) => (
+    <div data-id="mock-update-agent-modal">{paneId}:{title}<button data-id="mock-update-agent-close" onClick={onClose}>close</button></div>
+  ),
+}));
+vi.mock('../layout/WechatBindModal', () => ({
+  default: ({ paneId, title, platform = 'wechat', onClose }: { paneId: string; title: string; platform?: string; onClose: () => void }) => (
+    <div data-id={`mock-${platform}-bind-modal`}>{paneId}:{title}<button data-id={`mock-${platform}-bind-close`} onClick={onClose}>close</button></div>
+  ),
+}));
+vi.mock('../layout/ForkConfirmModal', () => ({
+  default: ({ sourcePaneId, masterPaneId, onClose }: { sourcePaneId: string; masterPaneId: string; onClose: () => void }) => (
+    <div data-id="mock-fork-confirm-modal">{sourcePaneId}:{masterPaneId}<button data-id="mock-fork-confirm-close" onClick={onClose}>close</button></div>
+  ),
+}));
 vi.mock('@uiw/react-codemirror', () => ({
   default: ({ value, onChange, extensions: _extensions, basicSetup: _basicSetup, theme: _theme, height: _height, ...props }: any) => (
     <textarea {...props} value={value} onChange={(event) => onChange(event.target.value)} />
@@ -50,11 +88,21 @@ beforeEach(() => {
     observe() {}
     disconnect() {}
   });
+  vi.stubGlobal('IntersectionObserver', class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+  window.history.replaceState(null, '', '#/project/default');
   localStorage.clear();
   api.listGroups.mockResolvedValue({ data: { groups: defaultGroups } });
   api.getGroup.mockResolvedValue({ data: { panes: [] } });
+  api.getPane.mockResolvedValue({ data: { agent_type: 'codex', role_template: '' } });
   api.createGroup.mockResolvedValue({ data: { id: 3 } });
   api.getAgentCurrentReply.mockResolvedValue({ data: { question: '', items: [], status: 'completed' } });
+  api.getAgentHistoryIDs.mockResolvedValue({ data: { conversation_id: '', id: 0, model: '', prompts: [] } });
+  api.getAgentCurrentHistory.mockResolvedValue({ data: { items: [] } });
+  api.getAgentGreeting.mockResolvedValue({ data: { greeting: '' } });
   api.getIMAccounts.mockResolvedValue({ data: { accounts: [{ platform: 'cicy_cloud', config: { team_id: 'local_team' } }] } });
   api.getCiCyCloudInstances.mockResolvedValue({ data: { instances: [] } });
   api.getCiCyCloudAgents.mockResolvedValue({ data: { agents: [] } });
@@ -64,6 +112,7 @@ beforeEach(() => {
   api.uploadAssetFile.mockResolvedValue({ data: { file: { file_ref: '/home/cicy/cicy-ai/assets/queued.png' } } });
   api.getMemoryTemplate.mockResolvedValue({ data: { content: '# Global', path: '/home/cicy/cicy-ai/memory/global.md' } });
   api.saveMemoryTemplate.mockResolvedValue({ data: { saved: true } });
+  api.restartPane.mockResolvedValue({ data: { success: true } });
   vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:queued-image'), revokeObjectURL: vi.fn() });
 });
 
@@ -168,6 +217,48 @@ describe('<ProjectsPanel /> floating action button', () => {
 });
 
 describe('<ProjectsPanel /> project view cache', () => {
+  it('polls live replies only for the selected agent card', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-10265:main.0', 'w-10281:main.0'], pane_count: 2 }] },
+    });
+    render(<ProjectsPanel
+      agents={[
+        { paneId: 'w-10265:main.0', title: 'Selected', agentType: 'codex' },
+        { paneId: 'w-10281:main.0', title: 'Inactive', agentType: 'codex' },
+      ]}
+      activeAgentId="w-10265"
+      onOpenAgent={vi.fn()}
+    />);
+
+    await waitFor(() => expect(api.getAgentCurrentReply).toHaveBeenCalledWith('w-10265'));
+
+    const polledAgentIds = new Set(api.getAgentCurrentReply.mock.calls.map(([paneId]) => paneId));
+    expect(polledAgentIds).toEqual(new Set(['w-10265']));
+  });
+
+  it('only zooms with the mouse wheel while hand mode is active', async () => {
+    render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
+    await screen.findByText('projectDefault');
+
+    const canvas = document.querySelector('[data-id="project-infinite-canvas"]') as HTMLElement;
+    const zoom = document.querySelector('[data-id="project-canvas-zoom-value"]') as HTMLElement;
+    const hand = document.querySelector('[data-id="project-canvas-wheel-zoom-toggle"]') as HTMLButtonElement;
+
+    expect(hand).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.wheel(canvas, { clientX: 120, clientY: 100, deltaY: -100 });
+    expect(zoom).toHaveTextContent('100%');
+
+    fireEvent.click(hand);
+    expect(hand).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.wheel(canvas, { clientX: 120, clientY: 100, deltaY: -100 });
+    expect(zoom).toHaveTextContent('102%');
+
+    fireEvent.click(hand);
+    expect(hand).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.wheel(canvas, { clientX: 120, clientY: 100, deltaY: -100 });
+    expect(zoom).toHaveTextContent('102%');
+  });
+
   it('renders duplicate roster records for one pane only once', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-1010:main.0'], pane_count: 1 }] } });
     render(<ProjectsPanel agents={[
@@ -341,24 +432,176 @@ describe('<ProjectsPanel /> project creation', () => {
 });
 
 describe('<ProjectsPanel /> agent prompt footer', () => {
-  it('switches card body tabs and opens the full history in the right panel', async () => {
+  it('clears the pending button when a newer authoritative status is completed', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
-    api.getAgentCurrentReply.mockResolvedValue({ data: { question: '已有问题', items: [], status: 'completed' } });
-    const onOpenHistory = vi.fn();
-    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} onOpenHistory={onOpenHistory} />);
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+    const agent = { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'idle' };
+    const view = render(
+      <ProjectsPanel
+        agents={[agent]}
+        statuses={{ 'w-101:main.0': { status: 'completed', updated_at: '2026-08-21T00:00:00Z', latest_question: '上一轮' } }}
+        activeAgentId="w-101"
+        onOpenAgent={vi.fn()}
+      />,
+    );
 
-    const card = await waitFor(() => {
-      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
-      if (!node) throw new Error('agent card did not render');
+    const input = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
+      if (!node) throw new Error('project agent prompt did not render');
+      return node as HTMLTextAreaElement;
+    });
+    fireEvent.change(input, { target: { value: '本轮已经完成' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-prompt-cancel-w-101"]')).toBeInTheDocument());
+
+    view.rerender(
+      <ProjectsPanel
+        agents={[agent]}
+        statuses={{ 'w-101:main.0': { status: 'completed', updated_at: '2026-08-21T00:01:00Z', latest_question: '本轮已经完成' } }}
+        activeAgentId="w-101"
+        onOpenAgent={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-prompt-cancel-w-101"]')).not.toBeInTheDocument());
+    expect(document.querySelector('[data-id="project-agent-prompt-send-w-101"]')).toBeInTheDocument();
+  });
+
+  it('keeps the complete Q&A history after sending a new project-card prompt', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    api.getAgentHistoryIDs.mockResolvedValue({ data: { conversation_id: 'conv-trim', id: 6, model: 'gpt-5', prompts: [] } });
+    api.getAgentCurrentHistory.mockResolvedValue({ data: { items: [
+      { history_id: 1, conversation_id: 'conv-trim', role: 'user', content: '第一问保留' },
+      { history_id: 2, conversation_id: 'conv-trim', role: 'assistant', content: '第一答保留' },
+      { history_id: 3, conversation_id: 'conv-trim', role: 'user', content: '第二问保留' },
+      { history_id: 4, conversation_id: 'conv-trim', role: 'assistant', content: '第二答保留' },
+      { history_id: 5, conversation_id: 'conv-trim', role: 'user', content: '第三问保留' },
+      { history_id: 6, conversation_id: 'conv-trim', role: 'assistant', content: '第三答保留' },
+    ] } });
+    api.getAgentCurrentReply.mockResolvedValue({ data: {
+      conversation_id: 'conv-trim',
+      history_id: 0,
+      complete: true,
+      status: 'completed',
+      answer: '',
+      thinking: '',
+      items: [],
+    } });
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} activeAgentId="w-101" onOpenAgent={vi.fn()} />);
+
+    expect(await screen.findByText('第一问保留', undefined, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByText('第二问保留')).toBeInTheDocument();
+    expect(screen.getByText('第三问保留')).toBeInTheDocument();
+
+    const input = document.querySelector('[data-id="project-agent-prompt-input-w-101"]') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: '第四问正在发送' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('第四问正在发送')).toBeInTheDocument();
+    expect(screen.getByText('第一问保留')).toBeInTheDocument();
+    expect(screen.getByText('第一答保留')).toBeInTheDocument();
+    expect(screen.getByText('第二问保留')).toBeInTheDocument();
+    expect(screen.getByText('第二答保留')).toBeInTheDocument();
+    expect(screen.getByText('第三问保留')).toBeInTheDocument();
+    expect(screen.getByText('第三答保留')).toBeInTheDocument();
+  });
+
+  it('always shows card body tabs and renders every Q&A with the shared history view', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    api.getAgentHistoryIDs.mockResolvedValue({ data: { conversation_id: 'conv-all', id: 4, model: 'gpt-5', prompts: [] } });
+    api.getAgentCurrentHistory.mockResolvedValue({ data: { items: [
+      { history_id: 1, conversation_id: 'conv-all', role: 'user', content: '第一问' },
+      { history_id: 2, conversation_id: 'conv-all', role: 'assistant', content: '第一答' },
+      { history_id: 3, conversation_id: 'conv-all', role: 'user', content: '第二问' },
+      { history_id: 4, conversation_id: 'conv-all', role: 'assistant', content: '第二答' },
+    ] } });
+    api.getAgentCurrentReply.mockResolvedValue({ data: {
+      conversation_id: 'conv-all',
+      history_id: 0,
+      complete: true,
+      status: 'completed',
+      answer: '',
+      thinking: '',
+      items: [],
+    } });
+
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+
+    const tabs = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-tabs-w-101"]');
+      if (!node) throw new Error('agent card tabs did not render');
       return node as HTMLElement;
     });
-    fireEvent.click(card);
+    expect(tabs).not.toHaveAttribute('aria-hidden', 'true');
+    expect(tabs).not.toHaveClass('invisible', 'pointer-events-none');
+    expect(screen.getByRole('tab', { name: '会话' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByText('第一问')).toBeInTheDocument();
+    expect(screen.getByText('第一答')).toBeInTheDocument();
+    expect(screen.getByText('第二问')).toBeInTheDocument();
+    expect(screen.getByText('第二答')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="current-history-view"]')).toBeInTheDocument();
+  });
+
+  it('reloads the committed window when compaction shrinks the same conversation history', async () => {
+    const checkpointPrompt = 'You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.';
+    let servedOldWindow = false;
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-901:main.0'], pane_count: 1 }] } });
+    api.getAgentHistoryIDs.mockImplementation(() => Promise.resolve({ data: {
+      conversation_id: 'conv-compact',
+      id: servedOldWindow ? 5 : 10,
+      model: 'gpt-5',
+      prompts: [],
+    } }));
+    api.getAgentCurrentHistory
+      .mockImplementationOnce(() => {
+        servedOldWindow = true;
+        return Promise.resolve({ data: { items: [
+          { history_id: 9, conversation_id: 'conv-compact', role: 'user', content: checkpointPrompt },
+          { history_id: 10, conversation_id: 'conv-compact', role: 'assistant', content: '旧压缩摘要' },
+        ] } });
+      })
+      .mockResolvedValue({ data: { items: [
+        { history_id: 4, conversation_id: 'conv-compact', role: 'assistant', content: '压缩后的上下文' },
+        { history_id: 5, conversation_id: 'conv-compact', role: 'user', content: '压缩后的真实问题' },
+      ] } });
+    api.getAgentCurrentReply.mockResolvedValue({ data: {
+      conversation_id: 'conv-compact',
+      reply_conversation_id: 'conv-compact',
+      history_id: 6,
+      complete: false,
+      status: 'thinking',
+      answer: '',
+      thinking: '',
+      items: [],
+    } });
+
+    render(<ProjectsPanel agents={[{ paneId: 'w-901:main.0', title: '压缩测试', agentType: 'codex' }]} activeAgentId="w-901" onOpenAgent={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('压缩后的真实问题')).toBeInTheDocument());
+    expect(screen.queryByText(checkpointPrompt)).not.toBeInTheDocument();
+    expect(api.getAgentCurrentHistory).toHaveBeenCalledTimes(2);
+  });
+
+  it('switches card body tabs while keeping the shared history inline', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-w-101"]')).toBeInTheDocument());
     const historyTab = await screen.findByRole('tab', { name: '会话' });
     expect(historyTab).toHaveAttribute('aria-selected', 'true');
-    expect(document.querySelector('[data-id="project-agent-card-history-sentinel"]')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '完整历史' }));
-    expect(onOpenHistory).toHaveBeenCalledWith('w-101:main.0');
+    const historyBody = document.querySelector('[data-id="project-agent-card-history-body-w-101"]');
+    expect(historyBody).toBeInTheDocument();
+    expect(historyBody).toHaveClass('-mb-4');
+    expect(historyBody?.querySelector('[data-id="current-history-view"]')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '角色' }));
     expect(document.querySelector('[data-id="project-agent-card-history-body-w-101"]')).not.toBeInTheDocument();
+    fireEvent.click(historyTab);
+    expect(document.querySelector('[data-id="project-agent-card-history-body-w-101"]')).toBeInTheDocument();
   });
 
   it('toggles an inline terminal for non-cicy agents only', async () => {
@@ -372,15 +615,97 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
     const toggle = await screen.findByRole('tab', { name: 'Terminal' });
     expect(document.querySelector('[data-id="project-agent-card-tab-terminal-w-102"]')).not.toBeInTheDocument();
+    const sharedFooter = document.querySelector('[data-id="project-agent-card-footer-w-101"]');
+    expect(sharedFooter).toBeInTheDocument();
     fireEvent.click(toggle);
     expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBe(sharedFooter);
     expect(document.querySelector('[data-id="mock-project-terminal"]')).toHaveTextContent('/ttyd/w-101/');
     fireEvent.click(toggle);
     expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).toBeInTheDocument();
     fireEvent.click(document.querySelector('[data-id="project-agent-card-tab-history-w-101"]') as HTMLElement);
     expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
+  });
+
+  it('restores each agent card body tab from localStorage after a page remount', async () => {
+    const agents = [
+      { paneId: 'w-101:main.0', title: 'Codex', agentType: 'codex', ttydSrc: '/ttyd/w-101/?token=test' },
+      { paneId: 'w-102:main.0', title: 'Claude', agentType: 'claude', ttydSrc: '/ttyd/w-102/?token=test' },
+    ];
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: agents.map((agent) => agent.paneId), pane_count: 2 }] },
+    });
+
+    const view = render(<ProjectsPanel agents={agents} activeAgentId="w-101" onOpenAgent={vi.fn()} />);
+    const firstTerminalTab = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-tab-terminal-w-101"]');
+      if (!node) throw new Error('first Agent Terminal tab did not render');
+      return node as HTMLButtonElement;
+    });
+    fireEvent.click(firstTerminalTab);
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('cicy_project_agent_body_tabs:v1') || '{}')).toEqual({
+      'local:w-101': 'terminal',
+    }));
+
+    view.rerender(<ProjectsPanel agents={agents} activeAgentId="w-102" onOpenAgent={vi.fn()} />);
+    const secondRoleTab = await waitFor(() => document.querySelector('[data-id="project-agent-card-tab-role-w-102"]') as HTMLButtonElement);
+    fireEvent.click(secondRoleTab);
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('cicy_project_agent_body_tabs:v1') || '{}')).toEqual({
+      'local:w-101': 'terminal',
+      'local:w-102': 'role',
+    }));
+
+    view.unmount();
+    const restored = render(<ProjectsPanel agents={agents} activeAgentId="w-101" onOpenAgent={vi.fn()} />);
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-tab-terminal-w-101"]')).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).toBeInTheDocument());
+
+    restored.rerender(<ProjectsPanel agents={agents} activeAgentId="w-102" onOpenAgent={vi.fn()} />);
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-tab-role-w-102"]')).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-role-body-w-102"]')).toBeInTheDocument());
+  });
+
+  it('keeps a restored Terminal open when switching projects resets parent state', async () => {
+    localStorage.setItem('cicy_project_agent_body_tabs:v1', JSON.stringify({ 'local:w-101': 'terminal' }));
+    const agent = { paneId: 'w-101:main.0', title: 'Codex', agentType: 'codex', ttydSrc: '/ttyd/w-101/?token=test' };
+    api.listGroups.mockResolvedValue({ data: { groups: [
+      { ...defaultGroups[0], pane_ids: [agent.paneId], pane_count: 1 },
+      { ...defaultGroups[1], pane_ids: [agent.paneId], pane_count: 1 },
+    ] } });
+
+    render(<ProjectsPanel agents={[agent]} activeAgentId="w-101" onOpenAgent={vi.fn()} />);
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).toBeInTheDocument());
+
+    fireEvent.click(document.querySelector('[data-id="project-list-item-2"]') as HTMLElement);
+    const card = await waitFor(() => document.querySelector('[data-id="project-agent-card-w-101"]') as HTMLElement);
+    fireEvent.click(card);
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-tab-terminal-w-101"]')).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-101"]')).toBeInTheDocument());
+    expect(document.querySelector('[data-id="project-agent-card-live-body-wrap"]')).not.toBeInTheDocument();
+  });
+
+  it('keeps inactive cards on their saved Terminal or role body', async () => {
+    localStorage.setItem('cicy_project_agent_body_tabs:v1', JSON.stringify({
+      'local:w-102': 'terminal',
+      'local:w-103': 'role',
+    }));
+    const agents = [
+      { paneId: 'w-101:main.0', title: 'Active', agentType: 'codex', ttydSrc: '/ttyd/w-101/?token=test' },
+      { paneId: 'w-102:main.0', title: 'Terminal', agentType: 'codex', ttydSrc: '/ttyd/w-102/?token=test' },
+      { paneId: 'w-103:main.0', title: 'Role', agentType: 'codex', ttydSrc: '/ttyd/w-103/?token=test' },
+    ];
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: agents.map((agent) => agent.paneId), pane_count: agents.length }] },
+    });
+
+    render(<ProjectsPanel agents={agents} activeAgentId="w-101" onOpenAgent={vi.fn()} />);
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-terminal-body-w-102"]')).toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-role-body-w-103"]')).toBeInTheDocument());
+    expect(document.querySelector('[data-id="project-agent-card-w-102"] [data-id="project-agent-card-live-body-wrap"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-w-103"] [data-id="project-agent-card-live-body-wrap"]')).not.toBeInTheDocument();
   });
 
   it('hides the Terminal tab for remote Agents', async () => {
@@ -456,83 +781,6 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(api.sendCiCyCloudMessage).toHaveBeenCalledWith('code-remote', 'w-200', '', JSON.stringify({ op: 'persona_save', meta: 'name: updated' }), 'rpc_request'));
   });
 
-  it('shows the realtime latest question instead of a stale reply snapshot', async () => {
-    api.listGroups.mockResolvedValue({
-      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
-    });
-    api.getAgentCurrentReply.mockResolvedValue({ data: { question: '上一条消息', items: [], status: 'thinking' } });
-    render(<ProjectsPanel
-      agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'thinking' }]}
-      statuses={{ 'w-101:main.0': { status: 'thinking', latest_question: '最新消息', updated_at: '2' } }}
-      onOpenAgent={vi.fn()}
-    />);
-
-    expect(await screen.findByText('最新消息')).toBeInTheDocument();
-    expect(screen.queryByText('上一条消息')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-output-loading"]')).toHaveTextContent('Working· 0s');
-    expect(document.querySelector('[data-id="project-agent-card-live-body"] [data-id="project-agent-card-stream-loading"]')).toBeInTheDocument();
-    expect(document.querySelectorAll('[data-id="project-agent-card-stream-loading-dot"]')).toHaveLength(3);
-  });
-
-  it('renders reply markdown and unwraps Codex exec tool calls', async () => {
-    api.listGroups.mockResolvedValue({
-      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
-    });
-    api.getAgentCurrentReply.mockResolvedValue({
-      data: {
-        question: '检查输出\n\n[image.png](/home/cicy/cicy-ai/assets/2026/08/15/example.png)',
-        items: [
-          { type: 'text', text: '**结论**\n\n- 第一项\n- 第二项' },
-          { type: 'text', text: '⚠️ 生成失败（HTTP 502）\n\nlocal error: tls: bad record MAC' },
-          { type: 'tool_use', name: 'read', input: '{"path":"/tmp/old.txt"}', output: '旧工具结果' },
-          {
-            type: 'tool_use',
-            name: 'exec',
-            input: 'const r = await tools.exec_command({cmd:"cicy-knowledge recall \\\"tool use\\\"",workdir:"/tmp"}); text(r.output);',
-            output: 'Script completed\nWall time 0.1 seconds\nOutput:\n- 命中一\n- 命中二',
-          },
-          { type: 'tool_use', name: 'wait', input: '{"cell_id":"117","yield_time_ms":30000}' },
-          { type: 'thinking', thinking: '继续检查另一部分' },
-          { type: 'tool_use', name: 'search', input: '{"query":"new"}' },
-        ],
-        status: 'completed',
-        started_at: '2026-08-17T04:00:00Z',
-        updated_at: '2026-08-17T04:00:05Z',
-      },
-    });
-
-    const onOpenHistory = vi.fn();
-    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} onOpenHistory={onOpenHistory} />);
-
-    const response = await waitFor(() => {
-      const node = document.querySelector('[data-id="project-agent-card-latest-response"]');
-      if (!node) throw new Error('reply did not render');
-      return node as HTMLElement;
-    });
-    expect(response.querySelector('strong')).toHaveTextContent('结论');
-    expect(await screen.findByText('检查输出')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-latest-question"] img')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-latest-question"]')).not.toHaveTextContent('image.png');
-    expect(document.querySelector('[data-id="project-agent-card-question-attachment"]')).not.toHaveTextContent('/home/cicy/cicy-ai/assets/');
-    expect(response.querySelectorAll('li')).toHaveLength(2);
-    expect(await screen.findByText('exec_command')).toBeInTheDocument();
-    expect(document.querySelectorAll('[data-id="project-agent-card-reply-tool"]')).toHaveLength(2);
-    expect(Array.from(document.querySelectorAll('[data-id="project-agent-card-tool-count"]')).map((node) => node.textContent)).toEqual(['2', '1']);
-    expect(document.querySelector('[data-id="project-agent-card-output-loading"]')).toHaveTextContent('Workedfor 5s');
-    expect(document.querySelector('[data-id="project-agent-card-live-body"]')).not.toContainElement(document.querySelector('[data-id="project-agent-card-latest-question"]'));
-    expect(document.querySelector('[data-id="project-agent-card-live-body"]')).not.toContainElement(document.querySelector('[data-id="project-agent-card-output-loading"]'));
-    expect(screen.queryByText('read')).not.toBeInTheDocument();
-    expect(screen.queryByText('旧工具结果')).not.toBeInTheDocument();
-    expect(screen.queryByText('wait')).not.toBeInTheDocument();
-    expect(screen.queryByText(/cell_id/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/bad record MAC/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/const r = await tools\.exec_command/)).not.toBeInTheDocument();
-
-    fireEvent.click(document.querySelector('[data-id="project-agent-card-reply-tool"]') as HTMLElement);
-    expect(onOpenHistory).toHaveBeenCalledWith('w-101:main.0');
-    expect(document.querySelector('[data-id="project-agent-card-tool-result-markdown"]')).not.toBeInTheDocument();
-  });
-
   it('shows card controls only when active and ignores IME confirmation Enter', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
@@ -548,8 +796,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     const inactiveTabs = document.querySelector('[data-id="project-agent-card-tabs-w-101"]');
     const inactiveFooterSlot = document.querySelector('[data-id="project-agent-card-footer-slot-w-101"]');
     expect(inactiveTabs).toBeInTheDocument();
-    expect(inactiveTabs).toHaveClass('invisible', 'pointer-events-none');
-    expect(inactiveTabs).toHaveAttribute('aria-hidden', 'true');
+    expect(inactiveTabs).not.toHaveClass('invisible', 'pointer-events-none');
+    expect(inactiveTabs).not.toHaveAttribute('aria-hidden', 'true');
     expect(inactiveFooterSlot).toBeInTheDocument();
     expect(inactiveFooterSlot).toHaveClass('invisible', 'pointer-events-none');
     expect(inactiveFooterSlot).toHaveAttribute('aria-hidden', 'true');
@@ -558,7 +806,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     const canvasNode = card.closest('[data-id="project-canvas-node-w-101"]') as HTMLElement;
     fireEvent.pointerDown(canvasNode, { button: 0, pointerId: 1, clientX: 120, clientY: 120 });
     fireEvent.pointerUp(canvasNode, { pointerId: 1, clientX: 120, clientY: 120 });
-    fireEvent.click(document.querySelector('[data-id="project-agent-card-live-body"]') as HTMLElement);
+    fireEvent.click(card);
 
     const input = await waitFor(() => {
       const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
@@ -589,22 +837,15 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     // pending reply must keep the three dots mounted until a terminal snapshot
     // arrives, otherwise the loading indicator disappears and reappears during
     // the handoff to server-side working status.
-    expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).toHaveClass('h-7');
-    expect(document.querySelector('[data-id="project-agent-card-stream-loading"]')).not.toHaveClass('mt-0.5');
-    expect(document.querySelectorAll('[data-id="project-agent-card-stream-loading-dot"]')).toHaveLength(3);
+    expect(document.querySelector('[data-id="current-history-stream-loading"]')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-id^="current-history-view-pending-placeholder-dot-"]')).toHaveLength(3);
     await waitFor(() => expect(input).toHaveFocus());
   });
 
-  it('keeps the complete-history row mounted when card selection changes', async () => {
+  it('keeps the shared history body mounted when card selection changes', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
     });
-    api.getAgentCurrentReply.mockResolvedValue({ data: {
-      question: '现在好了么',
-      items: [{ type: 'text', text: '现在好了。' }],
-      status: 'completed',
-    } });
     render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
 
     const card = await waitFor(() => {
@@ -612,19 +853,16 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       if (!node) throw new Error('agent card did not render');
       return node as HTMLElement;
     });
-    const historyRow = await waitFor(() => {
-      const node = document.querySelector('[data-id="project-agent-card-history-link-row"]');
-      if (!node) throw new Error('history row did not render');
+    const historyBody = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-history-body-w-101"]');
+      if (!node) throw new Error('shared history body did not render');
       return node;
     });
-    expect(historyRow).toHaveClass('h-7', 'invisible', 'pointer-events-none');
-    expect(historyRow).toHaveAttribute('aria-hidden', 'true');
+    expect(historyBody.querySelector('[data-id="current-history-view"]')).toBeInTheDocument();
 
     fireEvent.click(card);
 
-    expect(document.querySelector('[data-id="project-agent-card-history-link-row"]')).toBe(historyRow);
-    expect(historyRow).not.toHaveClass('invisible', 'pointer-events-none');
-    expect(historyRow).toHaveAttribute('aria-hidden', 'false');
+    expect(document.querySelector('[data-id="project-agent-card-history-body-w-101"]')).toBe(historyBody);
   });
 
   it('keeps the loading stop control visible on an inactive card', async () => {
@@ -676,6 +914,95 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(document.querySelector('[data-id="project-list-item-default"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
     expect(document.querySelector('[data-id="project-list-item-2"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
     window.removeEventListener('show-toast', toast);
+  });
+
+  it('reuses the existing Agent lifecycle and IM modals from the card More menu', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [
+      { ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 },
+    ] } });
+    const onAgentsRefresh = vi.fn();
+    render(
+      <ProjectsPanel
+        agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]}
+        masterPaneId="w-1001"
+        onAgentsRefresh={onAgentsRefresh}
+        onOpenAgentFile={vi.fn()}
+        onOpenAgent={vi.fn()}
+      />,
+    );
+
+    const openMenu = async () => {
+      const button = await waitFor(() => {
+        const node = document.querySelector('[data-id="project-agent-card-menu-w-101"]');
+        if (!node) throw new Error('project Agent More menu did not render');
+        return node as HTMLElement;
+      });
+      fireEvent.click(button);
+    };
+
+    await openMenu();
+    expect(document.querySelector('[data-id="project-agent-card-action-restart-w-101"]')).toHaveTextContent('重启');
+    expect(document.querySelector('[data-id="project-agent-card-action-update-w-101"]')).toHaveTextContent('更新');
+    expect(document.querySelector('[data-id="project-agent-card-action-wechat-w-101"]')).toHaveTextContent('绑定微信');
+    expect(document.querySelector('[data-id="project-agent-card-action-feishu-w-101"]')).toHaveTextContent('飞书会话');
+    expect(document.querySelector('[data-id="project-agent-card-action-fork-w-101"]')).toHaveTextContent('Fork');
+
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-action-restart-w-101"]') as HTMLElement);
+    const restartBody = await waitFor(() => document.querySelector('[data-id="modal-body"]') as HTMLElement);
+    expect(restartBody).toHaveTextContent('重启 架构师？');
+    expect(restartBody).not.toHaveTextContent('<strong>');
+    expect(restartBody.querySelector('span')).toHaveTextContent('架构师');
+    fireEvent.click(await waitFor(() => document.querySelector('[data-id="modal-confirm"]') as HTMLElement));
+    await waitFor(() => expect(api.restartPane).toHaveBeenCalledWith('w-101'));
+    await waitFor(() => expect(onAgentsRefresh).toHaveBeenCalled());
+
+    await openMenu();
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-action-update-w-101"]') as HTMLElement);
+    expect(await waitFor(() => document.querySelector('[data-id="mock-update-agent-modal"]'))).toHaveTextContent('w-101:架构师');
+    fireEvent.click(document.querySelector('[data-id="mock-update-agent-close"]') as HTMLElement);
+
+    await openMenu();
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-action-wechat-w-101"]') as HTMLElement);
+    expect(await waitFor(() => document.querySelector('[data-id="mock-wechat-bind-modal"]'))).toHaveTextContent('w-101:架构师');
+    fireEvent.click(document.querySelector('[data-id="mock-wechat-bind-close"]') as HTMLElement);
+
+    await openMenu();
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-action-feishu-w-101"]') as HTMLElement);
+    expect(await waitFor(() => document.querySelector('[data-id="mock-feishu-bind-modal"]'))).toHaveTextContent('w-101:架构师');
+    fireEvent.click(document.querySelector('[data-id="mock-feishu-bind-close"]') as HTMLElement);
+
+    await openMenu();
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-action-fork-w-101"]') as HTMLElement);
+    expect(await waitFor(() => document.querySelector('[data-id="mock-fork-confirm-modal"]'))).toHaveTextContent('w-101:w-1001');
+  });
+
+  it('matches TeamPanel action eligibility for a local cicy Agent', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: 'CiCy', agentType: 'cicy' }]} onOpenAgent={vi.fn()} />);
+    fireEvent.click(await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-menu-w-101"]');
+      if (!node) throw new Error('local project Agent More menu did not render');
+      return node as HTMLElement;
+    }));
+    expect(document.querySelector('[data-id="project-agent-card-action-restart-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-action-update-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-action-wechat-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-action-feishu-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-action-fork-w-101"]')).toBeInTheDocument();
+  });
+
+  it('hides local-only TeamPanel actions for a Cloud Agent', async () => {
+    const lastSeenAt = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['mac_local.w-200'], pane_count: 1 }] } });
+    api.getCiCyCloudInstances.mockResolvedValue({ data: { instances: [{ instanceId: 'code-remote', teamId: 'mac_local', status: 'online', lastSeenAt }] } });
+    api.getCiCyCloudAgents.mockResolvedValue({ data: { agents: [{ instanceId: 'code-remote', teamId: 'mac_local', agentId: 'w-200', title: 'Remote', agentType: 'codex' }] } });
+    render(<ProjectsPanel agents={[]} activeAgentId="mac_local.w-200" onOpenAgent={vi.fn()} />);
+    fireEvent.click(await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-menu-mac_local.w-200"]');
+      if (!node) throw new Error('remote project Agent More menu did not render');
+      return node as HTMLElement;
+    }));
+    expect(document.querySelector('[data-id^="project-agent-card-action-"]')).not.toBeInTheDocument();
   });
 
   it('keeps project-card selection synchronized with the shared active agent', async () => {
@@ -896,7 +1223,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(input).toHaveValue('');
     expect(document.querySelector('[data-id="project-agent-card-attachments"]')).not.toBeInTheDocument();
     expect(await screen.findByText('检查图片')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-question-attachment"] img')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="current-history-optimistic-q"] img')).toBeInTheDocument();
     finishSend();
   });
 });

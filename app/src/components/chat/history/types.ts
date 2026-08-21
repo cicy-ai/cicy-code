@@ -4,6 +4,7 @@
 export type HistoryTurn = {
   history_id?: number;
   conversation_id?: string;
+  turn_id?: string;
   role?: string;
   text?: string;
   q: string;

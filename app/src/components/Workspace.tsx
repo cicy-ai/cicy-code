@@ -1258,6 +1258,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         });
       }
     } else if (msg?.type === 'current_updated') {
+      // current_updated is published only after current.json + reply.json have
+      // been written. Forward it as an invalidation signal; history views then
+      // re-read those canonical files instead of trusting an independently
+      // assembled browser snapshot.
+      if (msg.data) {
+        window.dispatchEvent(new CustomEvent('cicy:current-history-updated', { detail: msg.data }));
+      }
       setChatWsHistoryVersion((value) => {
         const next = value + 1;
         setChatWsState({ chatWsHistoryVersion: next });
@@ -2270,8 +2277,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 agents={projectAgents}
                 statuses={pollStatuses}
                 activeAgentId={activeCliPaneId}
+                masterPaneId={paneId}
                 onActiveAgentChange={handleProjectActiveAgentChange}
                 onActiveProjectChange={handleActiveProjectChange}
+                onAgentsRefresh={refreshPanes}
+                onOpenAgentFile={openAgentFile}
                 topRightControls={!cliContentOpen ? (
                   <AgentCardMoreMenu
                     paneId={activeCliPaneId}

@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowDown } from 'lucide-react';
 import { Spinner } from '../../ui/Spinner';
@@ -10,10 +10,11 @@ import type { HistoryTurn } from './types';
 import { OPTIMISTIC_Q_KEY } from './constants';
 import { OpenUrlContext, QAlignContext } from './contexts';
 import { isActiveAssistantStatus } from './lib/misc';
-import { buildToolCardId, normalizeToolForDisplay, normalizeToolStepsForDisplay } from './lib/toolFormat';
+import { getVisibleHistorySteps } from './lib/turns';
+import { normalizeToolStepsForDisplay } from './lib/toolFormat';
 import { MarkdownBlock, LinkConfirmModal } from './shared/Markdown';
 import { CollapsibleQ, UserTurnAvatar } from './shared/CollapsibleQ';
-import { ToolCard } from './shared/ToolCard';
+import { buildToolRunGroupId, collectToolRuns, ToolRunGroup } from './shared/ToolRunGroup';
 import { LiveStreamStep } from './shared/LiveStreamStep';
 import { SystemNoticeCard, OutcomeNoticeCard, PendingThinkingPlaceholder, CompactionMarker } from './shared/notices';
 import { cicyCompactSummaryOf } from './lib/normalizeItem';
@@ -30,6 +31,42 @@ type HistoryListProps = ReturnType<typeof useCurrentHistory> & {
   leftAlignQuestions: boolean;
   greeting: string;
 };
+
+function isToolOnlyAssistantTurn(turn: HistoryTurn) {
+  if (turn?.role !== 'assistant' || turn?.outcome) return false;
+  const steps = getVisibleHistorySteps(turn, false) || [];
+  return steps.length > 0 && steps.every((step: any) => step?.type === 'tool');
+}
+
+function mergeAdjacentToolOnlyAssistantTurns(turns: HistoryTurn[]) {
+  const merged: HistoryTurn[] = [];
+  for (const turn of turns) {
+    const previous = merged[merged.length - 1];
+    if (!previous || !isToolOnlyAssistantTurn(previous) || !isToolOnlyAssistantTurn(turn)) {
+      merged.push(turn);
+      continue;
+    }
+    merged[merged.length - 1] = {
+      ...previous,
+      status: turn.status || previous.status,
+      steps: [...(previous.steps || []), ...(turn.steps || [])],
+    };
+  }
+  return merged;
+}
+
+function nextUserTurnIndex(turns: HistoryTurn[], from: number) {
+  for (let index = from + 1; index < turns.length; index += 1) {
+    if (turns[index]?.role === 'user') return index;
+  }
+  return -1;
+}
+
+function assistantTurnHasVisibleReply(turn: HistoryTurn) {
+  if (turn?.role !== 'assistant') return false;
+  if (turn.outcome || String(turn.a || '').trim()) return true;
+  return getVisibleHistorySteps(turn, false).length > 0;
+}
 
 export function HistoryList(props: HistoryListProps) {
   const {
@@ -65,6 +102,7 @@ export function HistoryList(props: HistoryListProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const loadingVisibleRef = useRef(false);
   const loadingDetachedRef = useRef(false);
+  const latestPositionKeyRef = useRef('');
   // Content column width: full-bleed when embedded (AgentStack popover), else a
   // centered reading column.
   const listWidthClass = fullWidth ? 'w-full' : 'mx-auto w-full max-w-4xl';
@@ -81,6 +119,21 @@ export function HistoryList(props: HistoryListProps) {
     const visible = marker.bottom > viewport.top && marker.top < viewport.bottom;
     loadingVisibleRef.current = visible;
   }, [scrollRef]);
+
+  // A newly opened full conversation starts at its latest complete Q&A. Keep
+  // the older history available above, but do not make the user land on a stale
+  // viewport after switching back from Terminal or role.
+  useLayoutEffect(() => {
+    if (promptsOnly || loading || (!displayItems.length && !liveTurn && !optimisticQ)) return;
+    const node = scrollRef.current;
+    if (!node) return;
+    const positionKey = `${paneId}:${conversationId}`;
+    if (latestPositionKeyRef.current === positionKey) return;
+    latestPositionKeyRef.current = positionKey;
+    loadingDetachedRef.current = false;
+    node.scrollTop = node.scrollHeight;
+    updateLoadingVisibility();
+  }, [conversationId, displayItems.length, liveTurn, loading, optimisticQ, paneId, promptsOnly, scrollRef, updateLoadingVisibility]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -131,12 +184,18 @@ export function HistoryList(props: HistoryListProps) {
     return () => node.removeEventListener('wheel', detachOnUp);
   }, [scrollRef]);
 
-  // Memoized on `displayItems`: while a turn streams (only `liveTurn` changes),
+  // Some providers persist each tool loop as a separate assistant record. They
+  // are one visual run until user/system/text/thinking content interrupts them.
+  // Merge only the render copy: pagination, committed ids and live de-duping
+  // continue to use the untouched `displayItems`.
+  const renderDisplayItems = useMemo(() => mergeAdjacentToolOnlyAssistantTurns(displayItems), [displayItems]);
+
+  // Memoized on `renderDisplayItems`: while a turn streams (only `liveTurn` changes),
   // these element refs stay identical, so React skips re-rendering every
   // committed history row (no Markdown re-parse per token).
-  const renderedTurns = useMemo(() => displayItems.map((turn, index) => {
+  const renderedTurns = useMemo(() => renderDisplayItems.map((turn, index) => {
     const turnKey = turn?.history_id || `${turn?.text || turn?.q || 'turn'}-${index}`;
-    const isLatestTurn = index === displayItems.length - 1;
+    const isLatestTurn = index === renderDisplayItems.length - 1;
     const itemId = Number(turn?.history_id || 0);
     // Prompts-only: render just the user questions, drop everything else.
     if (promptsOnly && turn?.role !== 'user') return null;
@@ -182,26 +241,50 @@ export function HistoryList(props: HistoryListProps) {
           </div>
         );
       }
-      // Prompts-only: each real q (scaffold already filtered out in displayItems)
-      // renders as a self-managed PromptRow — local expand + lazy answer load on
-      // caret click, so expanding one q never re-renders the whole list.
-      if (promptsOnly) {
-        if (itemId > 0) {
+      // Prompts-only always uses the lazy row. Full history normally renders its
+      // committed Q/A inline, but a pagination/window gap can leave a historical
+      // Q with no visible assistant turn before the next Q. Give only that orphan
+      // Q the same caret so its answer can be fetched on demand. The latest live
+      // Q keeps the normal live-tail renderer to avoid duplicate loading/answers.
+      const nextUserIndex = nextUserTurnIndex(renderDisplayItems, index);
+      const nextQid = nextUserIndex >= 0 ? Number(renderDisplayItems[nextUserIndex]?.history_id || 0) || undefined : undefined;
+      const responseEnd = nextUserIndex >= 0 ? nextUserIndex : renderDisplayItems.length;
+      const hasLoadedAnswer = renderDisplayItems.slice(index + 1, responseEnd).some(assistantTurnHasVisibleReply);
+      const hasLiveAnswer = nextUserIndex < 0 && (
+        replyPending || (!!liveTurn && Number(liveTurn.history_id || 0) > itemId)
+      );
+      // Adjacent positional ids mean current.json explicitly contains no slot
+      // between the two questions. That is a burst/steer of consecutive user
+      // messages, not a paginated answer gap, so never offer a bogus loader.
+      const hasPotentialAnswerGap = nextQid !== undefined && nextQid > itemId + 1;
+      const useLazyAnswer = itemId > 0 && (
+        promptsOnly
+        || (hasPotentialAnswerGap && !hasLoadedAnswer && !hasLiveAnswer)
+      );
+      if (useLazyAnswer) {
+        const promptRow = (
+          <PromptRow
+            key={turnKey}
+            turn={turn}
+            qid={itemId}
+            nextQid={nextQid}
+            dataId={!promptsOnly && leftAlignQuestions ? undefined : String(itemId)}
+            paneId={paneId}
+            conversationId={conversationId}
+            agentType={agentType}
+            hideTools={hideTools}
+            isLatest={nextUserIndex < 0}
+          />
+        );
+        if (!promptsOnly && leftAlignQuestions) {
           return (
-            <PromptRow
-              key={turnKey}
-              turn={turn}
-              qid={itemId}
-              nextQid={Number(displayItems[index + 1]?.history_id || 0) || undefined}
-              dataId={String(itemId)}
-              paneId={paneId}
-              conversationId={conversationId}
-              agentType={agentType}
-              hideTools={hideTools}
-              isLatest={isLatestTurn}
-            />
+            <div data-id={String(itemId)} data-turn-key={String(turnKey)} key={turnKey} className="mb-5 flex items-start gap-2.5">
+              <UserTurnAvatar />
+              <div className="min-w-0 flex-1">{promptRow}</div>
+            </div>
           );
         }
+        return promptRow;
       }
       return (
         <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey} className="mb-5">
@@ -222,7 +305,7 @@ export function HistoryList(props: HistoryListProps) {
       // 同宽的左侧空位保持内容列对齐。往回看时跳过 system 通知。
       let prevRole = '';
       for (let j = index - 1; j >= 0; j -= 1) {
-        const r = String(displayItems[j]?.role || '');
+        const r = String(renderDisplayItems[j]?.role || '');
         if (r === 'system') continue;
         prevRole = r;
         break;
@@ -233,8 +316,8 @@ export function HistoryList(props: HistoryListProps) {
       // Use the same 6px rhythm as ToolCard's `space-y-1.5` between consecutive
       // assistant records; reserve the larger turn gap for the final record.
       let nextRole = '';
-      for (let j = index + 1; j < displayItems.length; j += 1) {
-        const r = String(displayItems[j]?.role || '');
+      for (let j = index + 1; j < renderDisplayItems.length; j += 1) {
+        const r = String(renderDisplayItems[j]?.role || '');
         if (r === 'system') continue;
         nextRole = r;
         break;
@@ -249,7 +332,7 @@ export function HistoryList(props: HistoryListProps) {
       );
     }
     return null;
-  }), [displayItems, promptsOnly, hideTools, recapResponses, agentType, paneId, retryingKey, conversationId, leftAlignQuestions]);
+  }), [renderDisplayItems, promptsOnly, hideTools, recapResponses, agentType, paneId, retryingKey, conversationId, leftAlignQuestions]);
 
   // Part 2 — the live tail (reply.json's answer for the latest turn). It is the
   // ANSWER to committed's last turn (q_last), so it renders answer-only and sits
@@ -264,9 +347,18 @@ export function HistoryList(props: HistoryListProps) {
   const optimisticLanded = !!optimisticQ && items.some((t) => t?.role === 'user' && Number(t?.history_id || 0) > optimisticBaselineUserIdRef.current);
   const showOptimistic = !!optimisticQ && !optimisticLanded;
   const liveTurnSteps = liveVisible && Array.isArray(liveTurn?.steps) ? liveTurn!.steps : [];
+  const normalizedLiveTurnSteps = normalizeToolStepsForDisplay(liveTurnSteps);
   // 本轮还在流式输出 → 最后一个 thinking/text 块走平滑生长(useSmoothStreamText)。
   const liveStreaming = liveVisible && isActiveAssistantStatus(String(liveTurn?.status || ''));
-  const liveReplyPending = liveVisible && replyPending;
+  const liveLastToolStepIndex = normalizedLiveTurnSteps.reduce((acc: number, step: any, index: number) => (step?.type === 'tool' ? index : acc), -1);
+  const liveToolTurnKey = `live-${String(liveTurn?.turn_id || liveTurn?.history_id || 0)}`;
+  const liveToolRuns = collectToolRuns(normalizedLiveTurnSteps, liveToolTurnKey, liveStreaming ? liveLastToolStepIndex : -1);
+  const liveToolRunsByStep = new Map(liveToolRuns.map((run) => [run.stepIndex, run]));
+  // replyPending also becomes true immediately for a newly sent optimistic Q.
+  // A completed previous answer may still occupy the live slot until the next
+  // poll migrates it into committed history; never attach the NEW turn's dots
+  // to that old answer.
+  const liveReplyPending = liveVisible && liveStreaming && replyPending;
   // live 尾巴的头像同样按"每轮一个":它前面(committed 末尾,跳过 system)已是同轮的
   // assistant item 时不重复,只留空位对齐。
   const liveShowAvatar = (() => {
@@ -284,19 +376,23 @@ export function HistoryList(props: HistoryListProps) {
           ? <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-live-turn-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
           : <div aria-hidden="true" className="h-7 w-7 shrink-0" />}
         <div data-id="current-history-live-turn-body" className="min-w-0 flex-1">
-        {normalizeToolStepsForDisplay(liveTurnSteps).map((step: any, i: number) => {
+        {normalizedLiveTurnSteps.map((step: any, i: number) => {
           {/* live 尾巴 = 最新一轮回复(其后还没有新 q)→ thinking 全程展开,不折叠。
               折叠的触发是「出现新 q、本轮迁入 committed」,而不是「流式刚结束」——届时它
               改走 committed 渲染(ThinkingBlock 默认 live=false)自动塌成小标。 */}
           if (step?.type === 'thinking') return <div key={i}><LiveStreamStep kind="thinking" text={step.text} smooth={liveStreaming && i === liveTurnSteps.length - 1} /></div>;
           if (step?.type === 'text') return <div key={i}><LiveStreamStep kind="text" text={step.text} smooth={liveStreaming && i === liveTurnSteps.length - 1} /></div>;
           if (step?.type === 'tool' && !hideTools && Array.isArray(step?.tools) && step.tools.length > 0) {
-            const visibleTools = step.tools.map(normalizeToolForDisplay).filter(Boolean);
-            if (!visibleTools.length) return null;
-            return <div key={i} data-id={`current-history-live-turn-step-tools-${i}`} className="my-2 space-y-1.5">{visibleTools.map((tool: any, toolIndex: number) => {
-              const toolId = buildToolCardId(`live-${liveTurn!.history_id}`, i, tool, toolIndex);
-              return <ToolCard key={toolId} tool={tool} toolId={toolId} />;
-            })}</div>;
+            const toolRun = liveToolRunsByStep.get(i);
+            if (!toolRun) return null;
+            return (
+              <ToolRunGroup
+                key={`live-tool-run-${liveToolTurnKey}-${toolRun.groupIndex}`}
+                entries={toolRun.entries}
+                groupId={buildToolRunGroupId(liveToolTurnKey, toolRun.groupIndex)}
+                className="my-2"
+              />
+            );
           }
           return null;
         })}
@@ -423,7 +519,7 @@ export function HistoryList(props: HistoryListProps) {
                     - 但上一轮 completed 的答案会赖在 live 尾巴(cicy 懒迁移,liveVisible=true 但
                       status=completed → liveStreaming=false)。此时发新 Q 必须**立刻**画 thinking,
                       不能被上一轮的尾巴误杀 —— 否则 thinking 要等 poll 拉回新一轮才出(“a 半天才显示”)。 */}
-                {!liveVisible && replyPending ? (
+                {!liveStreaming && replyPending ? (
                   <div data-id="current-history-optimistic-a" className="mb-5 flex items-start gap-2.5">
                     <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-optimistic-a-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
                     <div data-id="current-history-stream-loading" className="min-w-0 flex-1">

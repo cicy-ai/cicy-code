@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowRight, Atom, BookOpen, Check, FileText, FolderKanban, History, LayoutGrid, Loader2, Minus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, Pin, PinOff, Plus, Search, SendHorizontal, Square, SquareTerminal, Trash2, UserPlus, Users, X } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
+import { createPortal } from 'react-dom';
+import { ArrowDown, ArrowRight, ArrowUpCircle, BookOpen, Check, FileText, FolderKanban, GitBranch, Hand, History, LayoutGrid, Loader2, MessageCircle, Minus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, Pin, PinOff, Plus, RefreshCw, Search, SendHorizontal, Square, Trash2, UserPlus, Users, X, Zap } from 'lucide-react';
+import { Trans, useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
 import { cn, copyToClipboard } from '../../lib/utils';
+import { normalizeAgentType } from '../../lib/agentType';
 import type { AgentLiveMetrics } from '../../lib/agentMetrics';
 import { metricsFromCurrentReply } from '../../lib/agentMetrics';
 import { ModelTag } from '../../lib/modelTag';
@@ -14,12 +16,13 @@ import { chatAttachmentMarkdown, replAttachmentMarkdown } from '../../lib/attach
 import { appendPromptHistory, canNavigatePromptHistory, readPromptHistory } from '../../lib/promptHistory';
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
-import { MarkdownBlock, MarkdownImg } from '../chat/history/shared/Markdown';
-import { UserTurnAvatar } from '../chat/history/shared/CollapsibleQ';
-import { toolHeadline } from '../chat/history/lib/toolFormat';
-import { isTechnicalTransportFailureText } from '../chat/history/lib/normalizeItem';
+import CurrentHistoryView from '../chat/CurrentHistoryView';
+import { MarkdownImg } from '../chat/history/shared/Markdown';
 import TerminalView from '../terminal/TerminalView';
 import MarkdownFileEditor from '../files/MarkdownFileEditor';
+import UpdateAgentModal from '../layout/UpdateAgentModal';
+import WechatBindModal from '../layout/WechatBindModal';
+import ForkConfirmModal from '../layout/ForkConfirmModal';
 
 const AgentDocRoleEditor = lazy(() => import('../layout/AgentDocRoleEditor'));
 const RemoteAgentRoleEditor = lazy(() => import('./RemoteAgentRoleEditor'));
@@ -85,11 +88,47 @@ interface QueuedAgentMessage {
 const DEFAULT_PROJECT_ID = 'default';
 const PROJECT_VIEW_CACHE_PREFIX = 'cicy_project_view:';
 const PROJECT_AGENT_QUEUE_KEY = 'cicy_project_agent_queue:v1';
+const PROJECT_AGENT_BODY_TABS_KEY = 'cicy_project_agent_body_tabs:v1';
 const PROJECT_LIST_COLLAPSED_KEY = 'cicy_projects_list_collapsed';
+type ProjectAgentBodyTab = 'history' | 'terminal' | 'role';
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
 const projectAgentIdentity = (agent: ProjectAgent) => agent.remote
   ? `remote:${String(agent.instanceId || agent.instanceTeam || '')}:${String(agent.remoteAgentId || shortPaneId(agent.paneId))}`
   : `local:${shortPaneId(agent.paneId)}`;
+const projectAgentStatusSignature = (status: any) => [
+  status?.status,
+  status?.updated_at,
+  status?.started_at,
+  status?.turn_id,
+  status?.history_id,
+  status?.latest_question,
+].map((value) => String(value || '')).join('|');
+const projectAgentStatusIsTerminal = (status: any) => /^(completed|complete|done|idle|aborted|error|canceled|cancelled|failed|stopped)$/.test(String(status?.status || '').trim().toLowerCase());
+const projectAgentCanUseTerminal = (agent: ProjectAgent) => !agent.remote
+  && String(agent.agentType || '').toLowerCase() !== 'cicy'
+  && Boolean(agent.ttydSrc)
+  && !agent.isApiOnly;
+const readProjectAgentBodyTabs = (): Record<string, ProjectAgentBodyTab> => {
+  try {
+    const value = JSON.parse(localStorage.getItem(PROJECT_AGENT_BODY_TABS_KEY) || '{}');
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+};
+const readProjectAgentBodyTab = (agent: ProjectAgent): ProjectAgentBodyTab => {
+  const value = readProjectAgentBodyTabs()[projectAgentIdentity(agent)];
+  if (value !== 'history' && value !== 'terminal' && value !== 'role') return 'history';
+  return value === 'terminal' && !projectAgentCanUseTerminal(agent) ? 'history' : value;
+};
+const persistProjectAgentBodyTab = (agent: ProjectAgent, tab: ProjectAgentBodyTab) => {
+  try {
+    localStorage.setItem(PROJECT_AGENT_BODY_TABS_KEY, JSON.stringify({
+      ...readProjectAgentBodyTabs(),
+      [projectAgentIdentity(agent)]: tab,
+    }));
+  } catch {}
+};
 const projectAgentCompleteness = (agent: ProjectAgent) => [
   agent.title,
   agent.agentType,
@@ -134,34 +173,11 @@ const persistProjectAgentQueue = (queue: Record<string, QueuedAgentMessage[]>) =
   }))]));
   try { localStorage.setItem(PROJECT_AGENT_QUEUE_KEY, JSON.stringify(persisted)); } catch {}
 };
-const previewableMarkdown = (value: unknown) => String(value || '').replace(/\(file:\/\/(\/?[^)]+)\)/g, (_match, path: string) => `(/${path.replace(/^\/+/, '')})`);
 const questionWithoutUploadedAttachments = (value: unknown) => String(value || '')
   .replace(/!?\[[^\]]*\]\((?:file:\/\/)?\/?[^)\n]*\/cicy-ai\/assets\/[^)\n]+\)/gi, '')
   .replace(/!?\[[^\]]*\]\(\/?assets\/files\/[^)\n]+\)/gi, '')
   .replace(/\n{3,}/g, '\n\n')
   .trim();
-const uploadedAttachmentsFromQuestion = (value: unknown) => String(value || '').match(
-  /!?\[[^\]]*\]\((?:file:\/\/)?\/?[^)\n]*(?:\/cicy-ai\/assets\/|\/assets\/files\/)[^)\n]+\)/gi,
-) || [];
-const decodeJSString = (literal: string) => {
-  const value = String(literal || '');
-  if (value.startsWith('"')) {
-    try { return JSON.parse(value); } catch { return value.slice(1, -1); }
-  }
-  return value.slice(1, -1)
-    .replace(/\\n/g, '\n')
-    .replace(/\\r/g, '\r')
-    .replace(/\\t/g, '\t')
-    .replace(/\\([\\'"`])/g, '$1');
-};
-const codexExecCommands = (input: unknown) => {
-  const source = String(input || '');
-  const commands: string[] = [];
-  const pattern = /tools\.exec_command\s*\(\s*\{[\s\S]*?\bcmd\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)/g;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(source))) commands.push(decodeJSString(match[1]).trim());
-  return commands.filter(Boolean);
-};
 const projectIdFromURL = () => {
   const match = window.location.hash.match(/^#\/project\/([^/?#]+)/);
   return match ? decodeURIComponent(match[1]) : DEFAULT_PROJECT_ID;
@@ -198,15 +214,6 @@ const fmtCost = (cost: number) =>
           : cost >= 0.001 ? `$${cost.toFixed(3)}`
             : `$${cost.toFixed(4)}`;
 
-const fmtElapsed = (elapsedMs: number) => {
-  const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m`;
-};
-
 function CtxRing({ pct }: { pct: number }) {
   const radius = 4.5;
   const circumference = 2 * Math.PI * radius;
@@ -219,12 +226,9 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, terminalOpen, working, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onMoveProject, onAddProject, onOpenHistory, onToggleTerminal, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
-  latest?: any;
-  reply?: any;
-  optimisticQuestion?: string;
   terminalOpen?: boolean;
   working: boolean;
   teamId?: string;
@@ -238,68 +242,33 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   onRemove: () => void;
   onMoveProject: (projectId: number | string) => void;
   onAddProject: (projectId: number | string) => void;
-  onOpenHistory: () => void;
-  onToggleTerminal: () => void;
+  onRestart?: () => void;
+  onUpdate?: () => void;
+  onBindWechat?: () => void;
+  onBindFeishu?: () => void;
+  onFork?: () => void;
+  onTerminalOpenChange: (open: boolean) => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizePointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const { t } = useTranslation('workspace');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuDropUp, setMenuDropUp] = useState(false);
   const [projectSubmenu, setProjectSubmenu] = useState<'move' | 'add' | null>(null);
-  const [activeBodyTab, setActiveBodyTab] = useState<'history' | 'terminal' | 'role'>('history');
+  const [activeBodyTab, setActiveBodyTab] = useState<ProjectAgentBodyTab>(() => readProjectAgentBodyTab(agent));
   const [identityCopied, setIdentityCopied] = useState(false);
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const [clockNow, setClockNow] = useState(Date.now());
-  const localTurnStartRef = useRef({ question: '', startedAt: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
-  const bodyScrollRef = useRef<HTMLDivElement>(null);
-  const loadingRef = useRef<HTMLDivElement>(null);
-  const loadingVisibleRef = useRef(false);
-  const loadingDetachedRef = useRef(false);
   const status = String(agent.remote && agent.instanceOnline === false ? 'offline' : agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
   const identity = agent.remote ? agent.paneId : (teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId));
-  const replyItems = Array.isArray(reply?.items) ? reply.items : [];
-  const toolGroupsByLastIndex = new Map<number, number>();
-  let currentToolGroup: number[] = [];
-  const finishToolGroup = () => {
-    if (currentToolGroup.length) toolGroupsByLastIndex.set(currentToolGroup[currentToolGroup.length - 1], currentToolGroup.length);
-    currentToolGroup = [];
-  };
-  replyItems.forEach((item: any, index: number) => {
-    if (String(item?.type || '') === 'tool_use') {
-      if (String(item?.name || '').toLowerCase() !== 'wait') currentToolGroup.push(index);
-      return;
-    }
-    finishToolGroup();
-  });
-  finishToolGroup();
-  const latestQuestion = String(latest?.latest_question || '');
-  const replyQuestion = String(reply?.question || '');
-  const latestUpdatedAt = Date.parse(String(latest?.updated_at || '')) || 0;
-  const replyUpdatedAt = Date.parse(String(reply?.updated_at || '')) || 0;
-  const freshestQuestion = latestQuestion && latestUpdatedAt >= replyUpdatedAt ? latestQuestion : replyQuestion || latestQuestion;
-  const rawQuestion = String(optimisticQuestion || freshestQuestion);
-  const visibleQuestion = questionWithoutUploadedAttachments(rawQuestion);
-  const visibleQuestionAttachments = uploadedAttachmentsFromQuestion(rawQuestion);
-  const hasConversationContent = Boolean(rawQuestion || replyItems.length || latest?.latest_response || latest?.latest_tool?.name || working);
-  const replyStatus = String(reply?.status || latest?.status || status).toLowerCase();
-  const completed = /completed|complete|done/.test(replyStatus);
-  const serverStartedAt = Date.parse(String(reply?.started_at || latest?.started_at || '')) || 0;
-  if (serverStartedAt && rawQuestion) localTurnStartRef.current = { question: rawQuestion, startedAt: serverStartedAt };
-  else if (working && rawQuestion && localTurnStartRef.current.question !== rawQuestion) localTurnStartRef.current = { question: rawQuestion, startedAt: Date.now() };
-  const startedAt = serverStartedAt || (localTurnStartRef.current.question === rawQuestion ? localTurnStartRef.current.startedAt : 0);
-  const finishedAt = Date.parse(String(reply?.updated_at || latest?.updated_at || '')) || 0;
-  const elapsedMs = startedAt ? Math.max(0, (working ? clockNow : finishedAt || clockNow) - startedAt) : 0;
+  const hasAgentActions = Boolean(onRestart || onUpdate || onBindWechat || onBindFeishu || onFork);
 
   useEffect(() => {
-    if (!working || !startedAt) return;
-    setClockNow(Date.now());
-    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [working, startedAt]);
+    if (activeBodyTab !== 'terminal' || terminalOpen || !projectAgentCanUseTerminal(agent)) return;
+    onTerminalOpenChange(true);
+  }, [activeBodyTab, agent, onTerminalOpenChange, terminalOpen]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -310,68 +279,29 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen]);
 
-  const updateScrollToBottomButton = useCallback(() => {
-    const node = bodyScrollRef.current;
-    if (!node) return;
-    const overflow = node.scrollHeight > node.clientHeight + 2;
-    const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 8;
-    setShowScrollToBottom(overflow && !atBottom);
-  }, []);
-
-  const updateLoadingVisibility = useCallback(() => {
-    const node = bodyScrollRef.current;
-    const loading = loadingRef.current;
-    if (!node || !loading) {
-      loadingVisibleRef.current = false;
-      return;
-    }
-    const viewport = node.getBoundingClientRect();
-    const marker = loading.getBoundingClientRect();
-    const visible = marker.bottom > viewport.top && marker.top < viewport.bottom;
-    loadingVisibleRef.current = visible;
-  }, []);
-
-  useEffect(() => {
-    const node = bodyScrollRef.current;
-    if (!node) return;
-    const observer = new ResizeObserver(updateScrollToBottomButton);
-    observer.observe(node);
-    if (node.firstElementChild) observer.observe(node.firstElementChild);
-    updateScrollToBottomButton();
-    return () => observer.disconnect();
-  }, [reply, latest, updateScrollToBottomButton]);
-
-  useEffect(() => {
-    const node = bodyScrollRef.current;
-    const content = node?.firstElementChild;
-    if (!node || !content || !working) {
-      loadingVisibleRef.current = false;
-      loadingDetachedRef.current = false;
-      return;
-    }
-    loadingDetachedRef.current = false;
-    updateLoadingVisibility();
-    if (loadingVisibleRef.current) node.scrollTop = node.scrollHeight;
-    const observer = new ResizeObserver(() => {
-      if (loadingVisibleRef.current && !loadingDetachedRef.current) node.scrollTop = node.scrollHeight;
-      updateLoadingVisibility();
-    });
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [working, rawQuestion, updateLoadingVisibility]);
-
   const toggleMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenuDropUp(window.innerHeight - rect.bottom < 390);
     setMenuOpen((value) => {
       if (value) setProjectSubmenu(null);
       return !value;
     });
   };
 
-  const selectBodyTab = (tab: 'history' | 'terminal' | 'role') => {
-    if (tab === 'terminal' && !terminalOpen) onToggleTerminal();
-    if (tab !== 'terminal' && terminalOpen) onToggleTerminal();
+  const runMenuAction = (event: ReactMouseEvent<HTMLButtonElement>, action?: () => void) => {
+    event.stopPropagation();
+    if (!action) return;
+    setMenuOpen(false);
+    setProjectSubmenu(null);
+    action();
+  };
+
+  const selectBodyTab = (tab: ProjectAgentBodyTab) => {
+    if (tab === 'terminal' && !terminalOpen) onTerminalOpenChange(true);
+    if (tab !== 'terminal' && terminalOpen) onTerminalOpenChange(false);
     setActiveBodyTab(tab);
+    persistProjectAgentBodyTab(agent, tab);
   };
 
   return (
@@ -385,7 +315,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         selected ? 'border-blue-500 ring-1 ring-blue-500/60' : 'border-white/[0.08]',
       )}
     >
-      <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-4 pt-5">
+      <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-visible px-5 pb-4 pt-5">
       <div data-id="project-agent-card-header" className="flex items-start gap-3">
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
@@ -412,8 +342,38 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             <MoreHorizontal className="h-4 w-4" />
           </button>
           {menuOpen ? (
-            <div data-id="project-agent-card-menu" className="absolute right-0 top-9 z-20 min-w-[190px] overflow-visible rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
-              <button type="button" data-id="project-agent-card-move-to" onMouseEnter={() => setProjectSubmenu((current) => current === null ? null : 'move')} onClick={(event) => { event.stopPropagation(); setProjectSubmenu('move'); }} className={cn('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]', projectSubmenu === 'move' && 'bg-white/[0.06] text-zinc-100')}>
+            <div data-id="project-agent-card-menu" className={cn('absolute right-0 z-[220] min-w-[210px] overflow-visible rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl', menuDropUp ? 'bottom-9' : 'top-9')}>
+              {onRestart ? (
+                <button type="button" data-id={`project-agent-card-action-restart-${shortPaneId(agent.paneId)}`} onClick={(event) => runMenuAction(event, onRestart)} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-zinc-100">
+                  <RefreshCw className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                  <span>{t('restart', { ns: 'teamPanel', defaultValue: '重启' })}</span>
+                </button>
+              ) : null}
+              {onUpdate ? (
+                <button type="button" data-id={`project-agent-card-action-update-${shortPaneId(agent.paneId)}`} onClick={(event) => runMenuAction(event, onUpdate)} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-zinc-100">
+                  <ArrowUpCircle className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                  <span>{t('update', { ns: 'teamPanel', defaultValue: '更新' })}</span>
+                </button>
+              ) : null}
+              {onBindWechat ? (
+                <button type="button" data-id={`project-agent-card-action-wechat-${shortPaneId(agent.paneId)}`} onClick={(event) => runMenuAction(event, onBindWechat)} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-zinc-100">
+                  <MessageCircle className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                  <span>{t('wechatBindTitle', { ns: 'teamPanel', defaultValue: '绑定微信' })}</span>
+                </button>
+              ) : null}
+              {onBindFeishu ? (
+                <button type="button" data-id={`project-agent-card-action-feishu-${shortPaneId(agent.paneId)}`} onClick={(event) => runMenuAction(event, onBindFeishu)} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-zinc-100">
+                  <Zap className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                  <span>{t('feishuBindTitle', { ns: 'teamPanel', defaultValue: '飞书会话' })}</span>
+                </button>
+              ) : null}
+              {onFork ? (
+                <button type="button" data-id={`project-agent-card-action-fork-${shortPaneId(agent.paneId)}`} onClick={(event) => runMenuAction(event, onFork)} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-zinc-100">
+                  <GitBranch className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                  <span>{t('fork', { ns: 'teamPanel', defaultValue: 'Fork' })}</span>
+                </button>
+              ) : null}
+              <button type="button" data-id="project-agent-card-move-to" onMouseEnter={() => setProjectSubmenu((current) => current === null ? null : 'move')} onClick={(event) => { event.stopPropagation(); setProjectSubmenu('move'); }} className={cn('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]', hasAgentActions && 'mt-1 border-t border-white/[0.07]', projectSubmenu === 'move' && 'bg-white/[0.06] text-zinc-100')}>
                 <ArrowRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
                 <span className="min-w-0 flex-1">移动到</span>
                 <span className="text-zinc-600">›</span>
@@ -447,7 +407,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
         </div>
       </div>
 
-      <div data-id="project-agent-card-metrics" className={cn('mt-2.5 flex h-8 min-w-0 items-center gap-2 pb-2.5 font-mono text-[13px] text-zinc-500', hasConversationContent && 'border-b border-white/[0.08]')}>
+      <div data-id="project-agent-card-metrics" className="mt-2.5 flex h-8 min-w-0 items-center gap-2 pb-2.5 font-mono text-[13px] text-zinc-500">
         <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
         <button
           type="button"
@@ -486,14 +446,13 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
       <div
         data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`}
         role="tablist"
-        aria-hidden={!selected}
-        className={cn('flex h-9 shrink-0 items-end gap-5 border-b border-white/[0.08]', !selected && 'invisible pointer-events-none')}
+        className="flex h-9 shrink-0 items-end gap-5 border-b border-white/[0.08]"
       >
         {([
           ['history', '会话'],
           ...(agent.remote || String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
           ['role', '角色'],
-        ] as Array<['history' | 'terminal' | 'role', string]>).map(([tab, label]) => {
+        ] as Array<[ProjectAgentBodyTab, string]>).map(([tab, label]) => {
           const unavailable = tab === 'terminal' && (!agent.ttydSrc || agent.isApiOnly);
           return (
             <button
@@ -511,11 +470,29 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
           );
         })}
       </div>
-      {selected && activeBodyTab === 'terminal' && terminalOpen && agent.ttydSrc ? (
-        <div data-id={`project-agent-card-terminal-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mx-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-lg bg-black">
-          <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" />
+      {activeBodyTab === 'history' ? (
+        <div
+          data-id={`project-agent-card-history-body-${shortPaneId(agent.paneId)}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onWheel={(event) => event.stopPropagation()}
+          className="-mx-5 -mb-4 min-h-0 flex-1 overflow-hidden bg-[#0b0b0d]"
+        >
+          <CurrentHistoryView
+            paneId={shortPaneId(agent.paneId)}
+            open
+            pollLive={selected}
+            fullWidth
+            leftAlignQuestions
+            agentType={agent.agentType}
+          />
         </div>
-      ) : selected && activeBodyTab === 'role' ? (
+      ) : activeBodyTab === 'terminal' ? (
+        <div data-id={`project-agent-card-terminal-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mx-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-lg bg-black">
+          {terminalOpen && agent.ttydSrc ? <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" /> : (
+            <div data-id={`project-agent-card-terminal-loading-${shortPaneId(agent.paneId)}`} className="grid h-full place-items-center text-[11px] text-zinc-600"><Loader2 className="h-4 w-4 animate-spin" /></div>
+          )}
+        </div>
+      ) : activeBodyTab === 'role' ? (
         <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()} onTouchStart={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()} className="-mx-5 flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0b0b0d] overscroll-contain">
           <Suspense fallback={<div data-id="project-agent-card-role-loading" className="flex h-full items-center justify-center text-[11px] text-zinc-600">Loading…</div>}>
             {agent.remote ? (
@@ -528,133 +505,13 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
             ) : <AgentDocRoleEditor paneId={agent.paneId} className="min-h-0 flex-1" />}
           </Suspense>
         </div>
-      ) : (
-      <div data-id="project-agent-card-live-body-wrap" className="relative -mr-4 mt-3 flex min-h-0 flex-1 flex-col">
-      {visibleQuestion || visibleQuestionAttachments.length ? <div
-        data-id="project-agent-card-question-fixed"
-        onPointerDown={(event) => event.stopPropagation()}
-        onWheel={(event) => event.stopPropagation()}
-        className={cn(
-          'max-h-[45%] shrink-0 space-y-2 overflow-y-auto overscroll-contain pr-[18px] [scrollbar-width:thin]',
-          (visibleQuestion || visibleQuestionAttachments.length) && 'border-b border-zinc-200/80 pb-5 dark:border-white/[0.07]',
-        )}
-      >
-        <div
-          data-id="project-agent-card-history-link-row"
-          aria-hidden={!selected}
-          className={cn('flex h-7 shrink-0 justify-end', !selected && 'invisible pointer-events-none')}
-        >
-          <button type="button" data-id={`project-agent-card-history-${shortPaneId(agent.paneId)}`} onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="完整历史">完整历史<ArrowRight className="h-3 w-3" /></button>
-        </div>
-        {visibleQuestion || visibleQuestionAttachments.length ? (
-          <div data-id="project-agent-card-question-row" className="flex min-w-0 items-start gap-2.5">
-            <UserTurnAvatar className="!mt-0" />
-            <div data-id="project-agent-card-latest-question" className="chat-markdown current-history-markdown min-w-0 w-fit max-w-[92%] rounded-xl rounded-bl-sm border border-[var(--chat-question-border)] bg-[var(--chat-question-bg)] px-3 py-2 text-left text-zinc-200 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:rounded-md [&_[data-id=current-history-md-img]]:object-contain">
-            {visibleQuestion ? <MarkdownBlock text={previewableMarkdown(visibleQuestion)} /> : null}
-            {visibleQuestionAttachments.length ? (
-              <div data-id="project-agent-card-question-attachments" className="mt-2 flex max-w-full flex-wrap gap-2">
-                {visibleQuestionAttachments.map((attachment, index) => (
-                  <div key={`${attachment}-${index}`} data-id="project-agent-card-question-attachment" className="min-w-0">
-                    <MarkdownBlock text={previewableMarkdown(attachment)} />
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            </div>
-          </div>
-        ) : null}
-      </div> : null}
-      <div
-        ref={bodyScrollRef}
-        data-id="project-agent-card-live-body"
-        onPointerDown={(event) => event.stopPropagation()}
-        onWheel={(event) => { event.stopPropagation(); if (event.deltaY < 0) loadingDetachedRef.current = true; }}
-        onScroll={() => { updateScrollToBottomButton(); updateLoadingVisibility(); }}
-        className="min-h-0 w-full flex-1 cursor-text select-text touch-auto space-y-3.5 overflow-y-auto overscroll-contain pr-[18px] pt-5 text-left text-[14px] leading-[22px] [scrollbar-width:thin]"
-      >
-        <div data-id="project-agent-card-current-turn" className="flex min-w-0 items-start gap-2.5">
-        {(replyItems.length || latest?.latest_response || latest?.latest_tool?.name || working) ? (
-          <AgentAvatar
-            agentType={agent.agentType}
-            title={agent.title || agent.paneId}
-            dataId={`project-agent-card-reply-avatar-${shortPaneId(agent.paneId)}`}
-            variant="select"
-            className="sticky top-1 z-[1] rounded-full shadow-sm"
-          />
-        ) : null}
-        <div className="min-w-0 flex-1 space-y-3.5">
-        {replyItems.length ? replyItems.map((item: any, index: number) => {
-          const type = String(item?.type || '');
-          if (type === 'thinking' && item?.thinking) return (
-            <div key={`thinking-${index}`} data-id="project-agent-card-reply-thinking" className="flex min-w-0 items-start gap-2 text-zinc-500">
-              <Atom className="mt-0.5 h-4 w-4 shrink-0" />
-              <span className="shrink-0 font-medium text-zinc-400">Think</span>
-              <span aria-hidden="true">·</span>
-              <div className="chat-markdown current-history-markdown min-w-0 flex-1"><MarkdownBlock text={previewableMarkdown(String(item.thinking))} /></div>
-            </div>
-          );
-          if (type === 'text' && item?.text) return (
-            isTechnicalTransportFailureText(item.text) ? null :
-            <div key={`text-${index}`} data-id="project-agent-card-latest-response" className="chat-markdown current-history-markdown text-zinc-300"><MarkdownBlock text={previewableMarkdown(String(item.text))} /></div>
-          );
-          if (type === 'tool_use') {
-            const toolGroupCount = toolGroupsByLastIndex.get(index);
-            if (!toolGroupCount) return null;
-            const input = item?.input == null ? '' : typeof item.input === 'string' ? item.input : JSON.stringify(item.input);
-            const commands = String(item?.name || '') === 'exec' ? codexExecCommands(input) : [];
-            const tool = { name: commands.length ? 'exec_command' : String(item?.name || 'Tool'), arg: commands.length ? JSON.stringify({ command: commands.join('\n\n') }) : input };
-            const headline = toolHeadline(tool);
-            return (
-              <button key={`tool-${index}`} type="button" data-id="project-agent-card-reply-tool" onClick={(event) => { event.stopPropagation(); onOpenHistory(); }} className="group/tool flex w-full cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left text-zinc-500 transition hover:bg-white/[0.035] hover:text-zinc-300">
-                  <SquareTerminal className="h-4 w-4 shrink-0" />
-                  <span className="shrink-0 font-medium text-zinc-400">{tool.name}</span>
-                  {headline ? <><span aria-hidden="true">·</span><span className="min-w-0 truncate">{headline}</span></> : null}
-                  <span data-id="project-agent-card-tool-count" className="ml-auto inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded bg-white/[0.07] px-1 font-mono text-[9px] font-semibold leading-none text-zinc-400">{toolGroupCount}</span>
-                  <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-50 transition group-hover/tool:translate-x-0.5 group-hover/tool:opacity-100" />
-              </button>
-            );
-          }
-          return null;
-        }) : !reply?.question && latest?.latest_response && !isTechnicalTransportFailureText(latest.latest_response) ? (
-          <div data-id="project-agent-card-latest-response" className="chat-markdown current-history-markdown text-zinc-400 [&_[data-id=current-history-attachment]]:my-0 [&_[data-id=current-history-attachment]]:w-fit [&_[data-id=current-history-attachment]]:max-w-full [&_[data-id=current-history-attachment-actions]]:py-1 [&_[data-id=current-history-attachment-download]]:hidden [&_[data-id=current-history-md-img]]:!h-auto [&_[data-id=current-history-md-img]]:!max-h-40 [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-full [&_[data-id=current-history-md-img]]:object-contain">
-            <MarkdownBlock text={previewableMarkdown(latest.latest_response)} />
-          </div>
-        ) : null}
-        {!reply?.question && !replyItems.length && latest?.latest_tool?.name ? (
-          <div data-id="project-agent-card-latest-tool" className="min-w-0 line-clamp-2 font-mono text-[13px] leading-5 text-zinc-500">
-            {`${latest.latest_tool.name}${latest.latest_tool.input ? ` ${latest.latest_tool.input}` : ''}`}
-          </div>
-        ) : null}
-        {working ? (
-          <div ref={loadingRef} data-id="project-agent-card-stream-loading" className="flex h-7 items-center gap-1" aria-label="Loading reply">
-            {[0, 1, 2].map((index) => (
-              <span key={index} data-id="project-agent-card-stream-loading-dot" className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${index * 140}ms` }} />
-            ))}
-          </div>
-        ) : null}
-        </div>
-        </div>
-      </div>
-      {showScrollToBottom ? (
-        <button type="button" data-id="project-agent-card-scroll-bottom" aria-label={t('scrollToBottom', { defaultValue: '滚动到底部' })} title={t('scrollToBottom', { defaultValue: '滚动到底部' })} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); loadingDetachedRef.current = false; bodyScrollRef.current?.scrollTo({ top: bodyScrollRef.current.scrollHeight, behavior: 'smooth' }); }} className="absolute bottom-5 right-3 grid h-7 w-7 place-items-center rounded-full border border-white/20 bg-[#27282e]/98 text-zinc-100 shadow-[0_5px_16px_rgba(0,0,0,0.38)] backdrop-blur hover:border-white/30 hover:bg-[#33343b] hover:text-white">
-          <ArrowDown className="h-4 w-4 stroke-[2.4]" />
-        </button>
-      ) : null}
-      {rawQuestion && (working || completed) ? (
-        <div data-id="project-agent-card-output-loading" className="mt-3 flex h-9 shrink-0 items-center gap-1.5 border-t border-zinc-200/80 pr-[18px] pt-2 font-mono text-[11px] text-zinc-500 dark:border-white/[0.07]" aria-label={working ? 'Loading' : 'Worked'}>
-          {working ? <span data-id="project-agent-card-loading-dot" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" /> : <Check className="h-3.5 w-3.5 text-emerald-500" />}
-          <span className="font-medium text-zinc-400">{working ? 'Working' : 'Worked'}</span>
-          {startedAt ? <span className="tabular-nums text-zinc-500">{working ? `· ${fmtElapsed(elapsedMs)}` : `for ${fmtElapsed(elapsedMs)}`}</span> : null}
-        </div>
       ) : null}
       </div>
-      )}
-      </div>
-      {!selected || activeBodyTab === 'history' ? (
+      {!selected || activeBodyTab !== 'role' ? (
         <div
           data-id={`project-agent-card-footer-slot-${shortPaneId(agent.paneId)}`}
-          aria-hidden={!(selected || working) || activeBodyTab !== 'history'}
-          className={cn('shrink-0', (!(selected || working) || activeBodyTab !== 'history') && 'invisible pointer-events-none')}
+          aria-hidden={!(selected || working) || activeBodyTab === 'role'}
+          className={cn('shrink-0', (!(selected || working) || activeBodyTab === 'role') && 'invisible pointer-events-none')}
         >
           {footer}
         </div>
@@ -671,7 +528,7 @@ function ProjectAgentCard({ agent, metrics, latest, reply, optimisticQuestion, t
   );
 }
 
-export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, dockOpen = false, activeAgentId = '', onActiveAgentChange = () => {}, onOpenAgent, onCreateAgent = () => {}, onOpenGuidance: _onOpenGuidance = () => {}, onOpenHistory = () => {}, onActiveProjectChange = () => {} }: {
+export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, dockOpen = false, activeAgentId = '', masterPaneId = 'w-1001', onActiveAgentChange = () => {}, onOpenAgent, onCreateAgent = () => {}, onOpenGuidance: _onOpenGuidance = () => {}, onOpenHistory: _onOpenHistory = () => {}, onActiveProjectChange = () => {}, onAgentsRefresh = () => {}, onOpenAgentFile = () => {} }: {
   agents: ProjectAgent[];
   statuses?: Record<string, any>;
   topRightControls?: ReactNode;
@@ -679,12 +536,15 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   shellPanel?: ReactNode;
   dockOpen?: boolean;
   activeAgentId?: string;
+  masterPaneId?: string;
   onActiveAgentChange?: (paneId: string) => void;
   onOpenAgent: (paneId: string) => void;
   onCreateAgent?: (projectTemplate: string) => void;
   onOpenGuidance?: (paneId: string) => void;
   onOpenHistory?: (paneId: string) => void;
   onActiveProjectChange?: (project: { id: number | string; name: string }) => void;
+  onAgentsRefresh?: () => void | Promise<void>;
+  onOpenAgentFile?: (paneId: string, relativePath: string) => void;
 }) {
   const { t } = useTranslation('workspace');
   const { confirm, prompt, node: dialogsNode } = useDialogs();
@@ -708,6 +568,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [creating, setCreating] = useState(false);
   const [projectMenuId, setProjectMenuId] = useState<string>('');
   const [projectMenuAnchor, setProjectMenuAnchor] = useState<string>('');
+  const [updateTarget, setUpdateTarget] = useState<ProjectAgent | null>(null);
+  const [wechatTarget, setWechatTarget] = useState<ProjectAgent | null>(null);
+  const [feishuTarget, setFeishuTarget] = useState<ProjectAgent | null>(null);
+  const [forkTarget, setForkTarget] = useState<ProjectAgent | null>(null);
   const [projectListCollapsed, setProjectListCollapsed] = useState(() => localStorage.getItem(PROJECT_LIST_COLLAPSED_KEY) === '1');
   const setProjectListVisibility = (collapsed: boolean) => {
     setProjectListCollapsed(collapsed);
@@ -738,6 +602,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [layoutVisibilityRevision, setLayoutVisibilityRevision] = useState(0);
   const [canvasPan, setCanvasPan] = useState({ x: 60, y: 60 });
   const [canvasZoom, setCanvasZoom] = useState(1);
+  const [wheelZoomActive, setWheelZoomActive] = useState(false);
   const [dockHeight, setDockHeight] = useState(0);
   const liveMetrics = useMemo(() => {
     const result: Record<string, AgentLiveMetrics> = {};
@@ -976,48 +841,29 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     return () => window.removeEventListener('cicy:cloud-reply', receiveCloudReply);
   }, [visibleAgentKey]);
 
+  // A local send installs an optimistic `pending` reply before the terminal
+  // status has advanced. Keep that bridge while poll_data still matches the
+  // pre-send snapshot, then discard it as soon as a newer terminal snapshot
+  // arrives. Without this reconciliation the project footer stays in its stop /
+  // loading state forever after a completed Codex turn.
   useEffect(() => {
-    let cancelled = false;
-    const ids = visibleAgents.map((agent) => shortPaneId(agent.paneId));
-    if (!ids.length) { setAgentReplies({}); return () => { cancelled = true; }; }
-    let polling = false;
-    const pollReplies = async () => {
-      if (polling || cancelled) return;
-      polling = true;
-      const rows = await Promise.all(visibleAgents.map(async (agent) => {
-        const id = shortPaneId(agent.paneId);
-        try {
-          if (agent.remote) return [id, await cloudRPC(agent, 'current_reply')] as const;
-          const response = await apiService.getAgentCurrentReply(id);
-          return [id, response?.data || {}] as const;
-        } catch {
-          return [id, null] as const;
-        }
-      }));
-      polling = false;
-      if (cancelled) return;
-      setAgentReplies((current) => {
-        let changed = false;
-        const next = { ...current };
-        for (const [id, reply] of rows) {
-          if (!reply) continue;
-          const optimistic = optimisticQuestionsRef.current[id];
-          if (optimistic && String(reply.question || '').trim() !== optimistic) continue;
-          if (optimistic) delete optimisticQuestionsRef.current[id];
-          if (JSON.stringify(current[id] || {}) === JSON.stringify(reply)) continue;
-          next[id] = reply;
-          changed = true;
-        }
-        return changed ? next : current;
-      });
-    };
-    void pollReplies();
-    // Local Agents retain the fast compatibility poll. Cross-Instance replies
-    // arrive over the Cloud subscription; this slow poll is only recovery for
-    // a temporarily disconnected browser/backend WebSocket.
-    const timer = window.setInterval(() => { void pollReplies(); }, visibleAgents.some((agent) => agent.remote) ? 15_000 : 500);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [visibleAgentKey]);
+    setAgentReplies((current) => {
+      let next = current;
+      for (const [id, reply] of Object.entries(current)) {
+        const baseline = String(reply?._status_baseline || '');
+        if (!baseline) continue;
+        const live = statuses[`${id}:main.0`] || statuses[id];
+        const signature = projectAgentStatusSignature(live);
+        if (!live || signature === baseline || !projectAgentStatusIsTerminal(live)) continue;
+        const reconciled = { ...reply, ...live, status: live.status, complete: true };
+        delete reconciled._status_baseline;
+        if (next === current) next = { ...current };
+        next[id] = reconciled;
+        delete optimisticQuestionsRef.current[id];
+      }
+      return next;
+    });
+  }, [statuses]);
 
   useEffect(() => {
     const checkKey = `${selectedProject.id}:${paneMembershipKey}:${visibleAgentKey}:${layoutVisibilityRevision}`;
@@ -1327,6 +1173,27 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     await load(false);
   };
 
+  const restartAgent = async (agent: ProjectAgent) => {
+    if (agent.remote) return;
+    const id = shortPaneId(agent.paneId);
+    const title = agent.title || id;
+    const ok = await confirm({
+      body: <Trans i18nKey="confirmRestart" ns="teamPanel" values={{ title }} components={{ strong: <span className="font-medium text-zinc-100" /> }} />,
+    });
+    if (!ok) return;
+    try {
+      await apiService.restartPane(id);
+      window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: t('toastRestarting', { ns: 'teamPanel', title, defaultValue: `${title} 正在重启…` }),
+      }));
+      await onAgentsRefresh();
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: t('toastRestartFailed', { ns: 'teamPanel', title, defaultValue: `${title} 重启失败` }),
+      }));
+    }
+  };
+
   const changeAgentProject = async (agent: ProjectAgent, projectId: number | string, mode: 'move' | 'add') => {
     const project = projects.find((item) => String(item.id) === String(projectId));
     if (!project?.api_id) return;
@@ -1431,6 +1298,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
   const deliverAgentMessage = async (agent: ProjectAgent, message: string, displayQuestion: string, previousReply: any, sentAttachments: ProjectAttachment[] = [], restoreText = '') => {
     const id = shortPaneId(agent.paneId);
+    const statusBeforeSend = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id];
+    const statusBaseline = projectAgentStatusSignature(statusBeforeSend);
     setCanceledAgentIds((current) => {
       if (!current.has(id)) return current;
       const next = new Set(current);
@@ -1441,8 +1310,17 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     optimisticQuestionsRef.current[id] = displayQuestion;
     setAgentReplies((current) => ({
       ...current,
-      [id]: { question: displayQuestion, items: [], answer: '', thinking: '', status: 'pending', started_at: new Date().toISOString() },
+      [id]: {
+        question: displayQuestion,
+        items: [],
+        answer: '',
+        thinking: '',
+        status: 'pending',
+        started_at: new Date().toISOString(),
+        _status_baseline: statusBaseline,
+      },
     }));
+    window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId: id, text: displayQuestion } }));
     try {
       if (agent.remote) {
         if (!agent.instanceOnline) throw new Error(`${agent.instanceTeam || 'Instance'} is offline`);
@@ -1453,6 +1331,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       }
       sentAttachments.forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
     } catch (cause: any) {
+      window.dispatchEvent(new CustomEvent('cicy:current-history-cancel-optimistic', { detail: { paneId: id } }));
       delete optimisticQuestionsRef.current[id];
       setAgentMessages((current) => ({ ...current, [id]: [restoreText, current[id]].filter(Boolean).join('\n') }));
       setAgentAttachments((current) => ({ ...current, [id]: [...sentAttachments, ...(current[id] || [])] }));
@@ -1863,6 +1742,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           onPointerUp={endCanvasPan}
           onPointerCancel={endCanvasPan}
           onWheel={(event) => {
+            if (!wheelZoomActive) return;
             event.preventDefault();
             zoomCanvasAt(event.clientX, event.clientY, event.deltaY > 0 ? -0.02 : 0.02);
           }}
@@ -1891,6 +1771,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               // current-reply poll replaces it with an authoritative terminal state.
               const observedReplyStatus = String(agentReplies[cardShortId]?.status || cardLatest?.status || agent.status || '').toLowerCase();
               const cardBusy = !canceledAgentIds.has(cardShortId) && (sendingAgentIds.has(cardShortId) || Boolean(cardMetrics?.working) || /running|working|thinking|streaming|pending|tool_use|tool_call|in_progress/.test(observedReplyStatus));
+              const hasLocalActions = !agent.remote;
+              const hasCliLifecycleActions = hasLocalActions && normalizeAgentType(agent.agentType) !== 'cicy';
               return (
               <div
                 key={agent.paneId}
@@ -1905,9 +1787,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                   <ProjectAgentCard
                     agent={agent}
                     metrics={cardMetrics}
-                    latest={cardLatest}
-                    reply={agentReplies[cardShortId]}
-                    optimisticQuestion={optimisticQuestionsRef.current[cardShortId]}
                     terminalOpen={terminalAgentIds.has(cardShortId)}
                     working={cardBusy}
                     teamId={teamId}
@@ -2092,11 +1971,16 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 onRemove={() => { void removeAgent(agent); }}
                 onMoveProject={(projectId) => { void changeAgentProject(agent, projectId, 'move'); }}
                 onAddProject={(projectId) => { void changeAgentProject(agent, projectId, 'add'); }}
-                    onOpenHistory={() => onOpenHistory(agent.paneId)}
-                onToggleTerminal={() => setTerminalAgentIds((current) => {
+                onRestart={hasCliLifecycleActions ? () => { void restartAgent(agent); } : undefined}
+                onUpdate={hasCliLifecycleActions ? () => setUpdateTarget(agent) : undefined}
+                onBindWechat={hasLocalActions ? () => setWechatTarget(agent) : undefined}
+                onBindFeishu={hasLocalActions ? () => setFeishuTarget(agent) : undefined}
+                onFork={hasLocalActions ? () => setForkTarget(agent) : undefined}
+                onTerminalOpenChange={(open) => setTerminalAgentIds((current) => {
+                  if (current.has(cardShortId) === open) return current;
                   const next = new Set(current);
-                  if (next.has(cardShortId)) next.delete(cardShortId);
-                  else next.add(cardShortId);
+                  if (open) next.add(cardShortId);
+                  else next.delete(cardShortId);
                   return next;
                 })}
                 onResizePointerDown={(event) => beginAgentResize(event, agent, index)}
@@ -2119,6 +2003,22 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           <span data-id="project-canvas-zoom-value" className="w-9 text-center font-mono text-[9px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
           <button type="button" data-id="project-canvas-zoom-in" onClick={() => changeZoom(0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomIn')}><Plus className="h-3.5 w-3.5" /></button>
           <button type="button" data-id="project-canvas-reset" onClick={resetCanvasView} className="grid h-7 w-7 place-items-center rounded-md text-zinc-500 hover:bg-white/[0.08] hover:text-white" title={t('projectResetView')}><LayoutGrid className="h-3.5 w-3.5" /></button>
+          <button
+            type="button"
+            data-id="project-canvas-wheel-zoom-toggle"
+            aria-pressed={wheelZoomActive}
+            aria-label={t(wheelZoomActive ? 'projectWheelZoomDisable' : 'projectWheelZoomEnable')}
+            title={t(wheelZoomActive ? 'projectWheelZoomDisable' : 'projectWheelZoomEnable')}
+            onClick={() => setWheelZoomActive((active) => !active)}
+            className={cn(
+              'grid h-7 w-7 place-items-center rounded-md transition-colors',
+              wheelZoomActive
+                ? 'bg-blue-500/15 text-blue-300 hover:bg-blue-500/25 hover:text-blue-200'
+                : 'text-zinc-500 hover:bg-white/[0.08] hover:text-white',
+            )}
+          >
+            <Hand className="h-3.5 w-3.5" />
+          </button>
         </div>
         {footerControls ? (
           <div data-id="project-canvas-footer-controls" className="absolute bottom-1.5 right-4 flex items-center gap-2 px-2 py-1">
@@ -2343,6 +2243,43 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           </div>
         </div>
       </AppModal>
+      {updateTarget ? createPortal(
+        <UpdateAgentModal
+          paneId={shortPaneId(updateTarget.paneId)}
+          title={updateTarget.title || shortPaneId(updateTarget.paneId)}
+          onClose={() => {
+            setUpdateTarget(null);
+            void onAgentsRefresh();
+          }}
+        />,
+        document.body,
+      ) : null}
+      {wechatTarget ? createPortal(
+        <WechatBindModal
+          paneId={shortPaneId(wechatTarget.paneId)}
+          title={wechatTarget.title || shortPaneId(wechatTarget.paneId)}
+          onClose={() => setWechatTarget(null)}
+        />,
+        document.body,
+      ) : null}
+      {feishuTarget ? createPortal(
+        <WechatBindModal
+          platform="feishu"
+          paneId={shortPaneId(feishuTarget.paneId)}
+          title={feishuTarget.title || shortPaneId(feishuTarget.paneId)}
+          onClose={() => setFeishuTarget(null)}
+        />,
+        document.body,
+      ) : null}
+      {forkTarget ? (
+        <ForkConfirmModal
+          sourcePaneId={shortPaneId(forkTarget.paneId)}
+          masterPaneId={shortPaneId(masterPaneId)}
+          onClose={() => setForkTarget(null)}
+          onForked={() => { void onAgentsRefresh(); }}
+          onOpenAgentFile={onOpenAgentFile}
+        />
+      ) : null}
       {dialogsNode}
     </section>
   );

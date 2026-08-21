@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -81,7 +81,13 @@ export function ShellCommandBlock({ text }: { text: string }) {
 // memo:WS 直推下 live 尾巴每个 delta 都重渲染一次,工具卡的 body 解析(input/diff/
 // result 格式化)不便宜;WS 追加路径只换最后一个生长中的 step 对象,其余 step 的
 // tool 引用不变 → memo 直接命中,只有真变的卡才重算。
-export const ToolCard = memo(function ToolCard({ tool, toolId, running }: { tool: any; toolId: string; running?: boolean }) {
+export const ToolCard = memo(function ToolCard({ tool, toolId, running, runControl, hideExpandIndicator = false }: {
+  tool: any;
+  toolId: string;
+  running?: boolean;
+  runControl?: ReactNode;
+  hideExpandIndicator?: boolean;
+}) {
   const { t } = useTranslation('chat');
   const [open, setOpen] = useState(() => toolCardOpenState.get(toolId) ?? false);
   const normalizedTool = normalizeToolForDisplay(tool);
@@ -154,9 +160,12 @@ export const ToolCard = memo(function ToolCard({ tool, toolId, running }: { tool
         {headline ? (
           <span data-id="current-history-tool-toggle-arg-preview" className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-400/90" title={headline}>{headline}</span>
         ) : <span data-id="current-history-tool-toggle-spacer" className="flex-1" />}
-        <span data-id="current-history-tool-toggle-expand" className="shrink-0 text-zinc-600" aria-label={open ? t('collapse') : t('expand')}>
-          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        </span>
+        {runControl}
+        {!hideExpandIndicator ? (
+          <span data-id="current-history-tool-toggle-expand" className="shrink-0 text-zinc-600" aria-label={open ? t('collapse') : t('expand')}>
+            {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          </span>
+        ) : null}
       </div>
       {open ? (
         <>

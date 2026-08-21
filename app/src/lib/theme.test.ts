@@ -32,6 +32,26 @@ describe('global theme', () => {
     expect(getCicyTheme()).toBe('dark');
   });
 
+  it('keeps the login token input readable after its dark surface is converted to light', () => {
+    applyCicyTheme('light');
+    const style = document.createElement('style');
+    style.textContent = `
+      [class~="text-white"] { color: rgb(255, 255, 255); }
+      ${readFileSync('src/index.css', 'utf8')}
+    `;
+    document.head.appendChild(style);
+    const input = document.createElement('input');
+    input.dataset.id = 'login-token-input';
+    input.className = 'bg-[#141414] text-white';
+    document.body.appendChild(input);
+
+    expect(getComputedStyle(input).backgroundColor).toBe('rgb(250, 250, 250)');
+    expect(getComputedStyle(input).color).toBe('rgb(39, 39, 42)');
+
+    input.remove();
+    style.remove();
+  });
+
   it('keeps the project shell, canvas and footer in the light theme contract', () => {
     const css = readFileSync('src/index.css', 'utf8');
     expect(css).toContain('[data-id="projects-panel"]');
