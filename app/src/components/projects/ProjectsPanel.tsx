@@ -322,8 +322,8 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selec
       onClick={onSelect}
       style={{ width, height }}
       className={cn(
-        'relative flex min-h-[240px] min-w-[260px] cursor-pointer flex-col rounded-2xl border bg-[#111216] shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
-        'border-white/[0.08]',
+        'relative flex min-h-[240px] min-w-[260px] cursor-pointer flex-col overflow-hidden rounded-2xl border bg-[#111216] shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
+        selected ? 'border-blue-500' : 'border-white/[0.08]',
       )}
     >
       <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-visible px-5 pb-4 pt-5">

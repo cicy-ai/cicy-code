@@ -1095,7 +1095,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       if (!node) throw new Error('second project agent card did not render');
       return node as HTMLElement;
     });
-    expect(first.className).not.toContain('border-blue-500');
+    expect(first.className).toContain('border-blue-500');
+    expect(first.className).toContain('overflow-hidden');
     expect(first.className).not.toContain('ring-blue-500');
     fireEvent.click(second);
     expect(onActiveAgentChange).toHaveBeenCalledWith('w-102');
@@ -1113,7 +1114,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       />,
     );
     await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-w-102"]')).toHaveAttribute('aria-pressed', 'true'));
-    expect(document.querySelector('[data-id="project-agent-card-w-102"]')?.className).not.toContain('border-blue-500');
+    expect(document.querySelector('[data-id="project-agent-card-w-102"]')?.className).toContain('border-blue-500');
     const routed = new CustomEvent('cicy:route-agent-prompt', {
       cancelable: true,
       detail: { paneId: 'w-102', text: '请先检查这个任务' },
