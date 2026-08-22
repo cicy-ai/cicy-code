@@ -8,6 +8,75 @@ import (
 	"testing"
 )
 
+func TestHandleUpdatePaneChangesRoleTemplateAndRewritesGuidance(t *testing.T) {
+	withTempCicyRoot(t)
+	withTestStore(t)
+	if err := os.MkdirAll(roleDir("assistant"), 0755); err != nil {
+		t.Fatalf("mkdir role: %v", err)
+	}
+	if err := os.WriteFile(roleTemplatePath("assistant"), []byte("# assistant role\n"), 0644); err != nil {
+		t.Fatalf("write role: %v", err)
+	}
+	workspace := t.TempDir()
+	guidancePath := workspace + "/AGENTS.md"
+	if err := os.WriteFile(guidancePath, []byte("custom guidance"), 0644); err != nil {
+		t.Fatalf("write existing guidance: %v", err)
+	}
+	if _, err := store.Exec(`INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, agent_type, project_template, role_template) VALUES (?,?,?,?,?,?,?,?,?)`,
+		"w-10027:main.0", "Codex", workspace, "", `{}`, "worker", "codex", "default", "knowledge-specialist"); err != nil {
+		t.Fatalf("insert pane: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PATCH", "/api/tmux/panes/w-10027", strings.NewReader(`{"role_template":"assistant"}`))
+	handleUpdatePane(rec, req, "w-10027")
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var roleTemplate string
+	if err := store.QueryRow("SELECT role_template FROM agent_config WHERE pane_id=?", "w-10027:main.0").Scan(&roleTemplate); err != nil {
+		t.Fatalf("read role template: %v", err)
+	}
+	if roleTemplate != "assistant" {
+		t.Fatalf("role_template = %q, want assistant", roleTemplate)
+	}
+	content, err := os.ReadFile(guidancePath)
+	if err != nil {
+		t.Fatalf("read rewritten guidance: %v", err)
+	}
+	if string(content) == "custom guidance" || !strings.Contains(string(content), "assistant") {
+		t.Fatalf("guidance was not regenerated from assistant template: %s", content)
+	}
+}
+
+func TestHandleUpdatePaneRejectsUnknownRoleTemplate(t *testing.T) {
+	withTempCicyRoot(t)
+	withTestStore(t)
+	if err := os.MkdirAll(roleDir("assistant"), 0755); err != nil {
+		t.Fatalf("mkdir role: %v", err)
+	}
+	if err := os.WriteFile(roleTemplatePath("assistant"), []byte("# assistant role\n"), 0644); err != nil {
+		t.Fatalf("write role: %v", err)
+	}
+	workspace := t.TempDir()
+	if _, err := store.Exec(`INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, agent_type, role_template) VALUES (?,?,?,?,?,?,?,?)`,
+		"w-10027:main.0", "Codex", workspace, "", `{}`, "worker", "codex", "assistant"); err != nil {
+		t.Fatalf("insert pane: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PATCH", "/api/tmux/panes/w-10027", strings.NewReader(`{"role_template":"does-not-exist"}`))
+	handleUpdatePane(rec, req, "w-10027")
+	if rec.Code != 400 {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	var roleTemplate string
+	_ = store.QueryRow("SELECT role_template FROM agent_config WHERE pane_id=?", "w-10027:main.0").Scan(&roleTemplate)
+	if roleTemplate != "assistant" {
+		t.Fatalf("role_template changed after rejection: %q", roleTemplate)
+	}
+}
+
 func TestHandleGetPaneIncludesStructuredRuntimeAI(t *testing.T) {
 	withTempCicyRoot(t)
 	withTestStore(t)

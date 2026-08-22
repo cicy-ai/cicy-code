@@ -758,6 +758,38 @@ func writeAgentGuidanceFile(workspace, agentType, paneID, projectTemplate, roleT
 	}
 }
 
+// rewriteAgentGuidanceFile deliberately replaces an agent's live guidance.
+// Unlike the create-time writer above, this is only used after the user has
+// confirmed a role-template change in Settings.
+func rewriteAgentGuidanceFile(workspace, agentType, paneID, projectTemplate, roleTemplate, lang string) error {
+	workspace = strings.TrimSpace(workspace)
+	rel := guidanceFilenameForAgentType(agentType)
+	if workspace == "" || rel == "" {
+		return fmt.Errorf("agent guidance file not available")
+	}
+	path := filepath.Join(workspace, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	content := composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleTemplate, lang)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".guidance-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err = tmp.WriteString(content); err == nil {
+		err = tmp.Chmod(0644)
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
 // composeGuidanceContent builds the content of an agent's guidance file from
 // the CURRENT templates. Shared by the create-time seed (writeAgentGuidanceFile)
 // and the reseed CLI (reseed_memory.go).
@@ -1138,6 +1170,7 @@ var paneUpdateCols = map[string]bool{
 	"private_mode":       true,
 	"allowed_users":      true,
 	"preview":            true,
+	"role_template":      true,
 }
 
 func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
@@ -1154,6 +1187,46 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 	if len(filtered) == 0 {
 		httpErr(w, 400, "No valid fields to update")
 		return
+	}
+	var roleTemplateChange *struct {
+		old, next, workspace, agentType, projectTemplate, lang string
+	}
+	if raw, ok := filtered["role_template"]; ok {
+		ensureRoleMemoryTemplates()
+		next, ok := raw.(string)
+		if !ok {
+			httpErr(w, 400, "role_template must be a string")
+			return
+		}
+		next = sanitizeTemplateSlug(next)
+		valid := next == "" || strings.TrimSpace(roleTemplateRaw(next, "")) != ""
+		for _, slug := range listRoleTemplates() {
+			if slug == next {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			_, valid = customAgentFor(next)
+		}
+		if !valid {
+			httpErr(w, 400, "unknown role_template")
+			return
+		}
+		change := &struct {
+			old, next, workspace, agentType, projectTemplate, lang string
+		}{next: next}
+		var replyInChinese bool
+		if err := store.QueryRow(`SELECT COALESCE(role_template,''), COALESCE(workspace,''), COALESCE(agent_type,''), COALESCE(project_template,''), COALESCE(reply_in_chinese,0) FROM agent_config WHERE pane_id=?`, paneID).
+			Scan(&change.old, &change.workspace, &change.agentType, &change.projectTemplate, &replyInChinese); err != nil {
+			httpErr(w, 404, "Pane "+id+" not found")
+			return
+		}
+		if replyInChinese {
+			change.lang = "zh"
+		}
+		filtered["role_template"] = next
+		roleTemplateChange = change
 	}
 	if rawAgentType, ok := filtered["agent_type"]; ok {
 		agentType, ok := rawAgentType.(string)
@@ -1343,6 +1416,14 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	_ = res
+	if roleTemplateChange != nil && roleTemplateChange.next != roleTemplateChange.old {
+		change := roleTemplateChange
+		if err := rewriteAgentGuidanceFile(change.workspace, change.agentType, paneID, change.projectTemplate, change.next, change.lang); err != nil {
+			_, _ = store.Exec("UPDATE agent_config SET role_template=? WHERE pane_id=?", change.old, paneID)
+			httpErr(w, 500, "rewrite guidance failed: "+err.Error())
+			return
+		}
+	}
 
 	response := M{"success": true, "pane_id": shortPaneID(paneID), "updated": filtered}
 	if rawTitle, ok := filtered["title"]; ok {

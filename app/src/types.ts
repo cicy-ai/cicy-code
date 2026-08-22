@@ -28,6 +28,7 @@ export interface EditPaneData {
   url?: string;
   config?: string;
   role?: string;
+  role_template?: string;
   default_model?: string;
   runtime_ai?: {
     provider_name?: string;

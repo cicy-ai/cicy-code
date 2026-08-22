@@ -57,6 +57,7 @@ function compactText(value?: string, fallback = '', limit?: number) {
 function serializeGeneralSettings(value: EditPaneData | null) {
   return JSON.stringify({
     title: String(value?.title || ''),
+    role_template: String(value?.role_template || ''),
     active: value?.active !== false,
     allow_all_actions: !!value?.allow_all_actions,
     desktop_notify: !!value?.desktop_notify,
@@ -66,6 +67,28 @@ function serializeGeneralSettings(value: EditPaneData | null) {
       rule: String(value?.proxy?.rule || ''),
     },
   });
+}
+
+export function roleTemplateSelectOptions(roles: string[]): SelectOption[] {
+  return roles.map((role) => ({ value: role, label: role }));
+}
+
+export function buildGeneralSettingsPayload(merged: EditPaneData) {
+  const proxy = merged.proxy && (String(merged.proxy.password || '').trim() || String(merged.proxy.rule || '').trim())
+    ? { password: String(merged.proxy.password || '').trim(), rule: String(merged.proxy.rule || '').trim() }
+    : null;
+  return {
+    title: String(merged.title || '').trim(),
+    role_template: String(merged.role_template || '').trim(),
+    active: merged.active !== false,
+    allow_all_actions: !!merged.allow_all_actions,
+    desktop_notify: !!merged.desktop_notify,
+    tg_enable: !!merged.tg_enable,
+    tg_token: String(merged.tg_token || '').trim(),
+    tg_chat_id: String(merged.tg_chat_id || '').trim(),
+    use_proxy: !!merged.use_proxy,
+    proxy,
+  };
 }
 
 function serializeModelSettings(value: EditPaneData | null) {
@@ -291,6 +314,15 @@ export default function AgentInspector({
   const settingsPaneLoadedRef = useRef<string>('');
   const [generalSettingsBaseline, setGeneralSettingsBaseline] = useState('null');
   const [modelSettingsBaseline, setModelSettingsBaseline] = useState('null');
+  const [roleTemplates, setRoleTemplates] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    apiService.listMemoryTemplates().then(({ data: templates }) => {
+      const roles = Array.isArray(templates?.roles) ? templates.roles.map((role: any) => String(role)).filter(Boolean) : [];
+      setRoleTemplates(roles);
+    }).catch(() => setRoleTemplates([]));
+  }, [open]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(queryDraft.trim()), 220);
@@ -541,34 +573,18 @@ export default function AgentInspector({
         window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastTokenAlreadyBound') }));
         return;
       }
-      const proxy = merged.proxy && (String(merged.proxy.password || '').trim() || String(merged.proxy.rule || '').trim())
-        ? {
-            password: String(merged.proxy.password || '').trim(),
-            rule: String(merged.proxy.rule || '').trim(),
-          }
-        : null;
       // Whitelist editable fields only. Spreading the whole settingsData here
       // would silently overwrite immutable identity fields (agent_type / workspace
       // / role / init_script / config) on the server. See bug report 2026-05-14
       // where switching panes mid-edit corrupted agent_type/title across panes.
-      const payload: Record<string, any> = {
-        title: String(merged.title || '').trim(),
-        active: merged.active !== false,
-        allow_all_actions: !!merged.allow_all_actions,
-        desktop_notify: !!merged.desktop_notify,
-        tg_enable: !!merged.tg_enable,
-        tg_token: String(merged.tg_token || '').trim(),
-        tg_chat_id: String(merged.tg_chat_id || '').trim(),
-        use_proxy: !!merged.use_proxy,
-        proxy,
-      };
+      const payload: Record<string, any> = buildGeneralSettingsPayload(merged);
       // Optimistic: broadcast the patch BEFORE the PATCH round-trip so any other
       // component subscribed to shared agent detail (footer ModelPicker, card title,
       // etc.) re-renders with the new value immediately instead of waiting for the
       // server to confirm. If the PATCH fails we toast an error; we don't bother
       // reverting since the inspector's own local state is the user's intent.
       onPanePatch?.(paneId, payload);
-      setGeneralSettingsBaseline(serializeGeneralSettings({ ...merged, proxy }));
+      setGeneralSettingsBaseline(serializeGeneralSettings({ ...merged, proxy: payload.proxy }));
       // (A) Per-pane save serialization. Two rapid edits on the same pane will be
       // sent in click order; if PATCH 1 reorders ahead of PATCH 2 on the wire the
       // server would otherwise end with PATCH 1's value while the UI shows PATCH 2.
@@ -815,6 +831,32 @@ export default function AgentInspector({
                   <div data-id="agent-inspector-settings-general-identity" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
                     <InspectorField label={t('fieldTitle')} mutedLabel>
                       <InspectorInput value={settingsData?.title || ''} onChange={(value) => patchSettingsData({ title: value })} onBlur={() => { void saveSettings(); }} placeholder={t('fieldTitlePlaceholder')} />
+                    </InspectorField>
+                    <InspectorField label={t('fieldRoleTemplate')} mutedLabel>
+                      <Select
+                        dataId="agent-inspector-role-template"
+                        value={settingsData?.role_template || ''}
+                        options={roleTemplateSelectOptions(
+                          settingsData?.role_template && !roleTemplates.includes(settingsData.role_template)
+                            ? [settingsData.role_template, ...roleTemplates]
+                            : roleTemplates,
+                        )}
+                        searchable
+                        placeholder={t('fieldRoleTemplatePlaceholder')}
+                        onOpenChange={(isOpen) => {
+                          if (!isOpen) return;
+                          apiService.listMemoryTemplates().then(({ data: templates }) => {
+                            setRoleTemplates(Array.isArray(templates?.roles) ? templates.roles.map(String).filter(Boolean) : []);
+                          }).catch(() => {});
+                        }}
+                        onChange={(value) => {
+                          if (value === settingsData?.role_template) return;
+                          if (!window.confirm(t('roleTemplateOverwriteConfirm'))) return;
+                          patchSettingsData({ role_template: value });
+                          void saveSettings({ role_template: value });
+                        }}
+                      />
+                      <p className="mt-1 text-[10px] leading-4 text-amber-400/80">{t('roleTemplateOverwriteHint')}</p>
                     </InspectorField>
                   </div>
 
