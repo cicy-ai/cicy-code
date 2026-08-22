@@ -544,7 +544,7 @@ export function HistoryList(props: HistoryListProps) {
             <div
               data-id="current-history-final-answer-placeholder"
               aria-hidden="true"
-              className="h-8 shrink-0"
+              className={`${replyPending || liveStreaming || retryingKey ? 'h-8' : 'h-2'} shrink-0`}
             />
           </>}
         </div>
