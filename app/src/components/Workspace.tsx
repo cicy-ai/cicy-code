@@ -18,7 +18,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, Folder, X, Settings, Brain, Search,
   LayoutList, Users, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Bot, BookOpen, Store, Timer, Grid3X3, Globe2, Smartphone, FolderKanban, History,
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Bot, BookOpen, Store, Timer, Grid3X3, Globe2, Smartphone, FolderKanban,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag, isChatModel } from '../lib/modelTag';
@@ -47,7 +47,6 @@ import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentPro
 import AgentUsageLogView from './layout/AgentUsageLogView';
 import PolicyTab from './audit/PolicyTab';
 import AgentUsageAnalysisView from './layout/AgentUsageAnalysisView';
-import CurrentHistoryView from './chat/CurrentHistoryView';
 import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
 import type { AgentCanvasItem } from './layout/AgentStack';
@@ -252,11 +251,11 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'customAgents' | 'agents' | 'todo' | null;
-type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'audit' | 'github' | 'history' | RequestViewTab;
+type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'audit' | 'github' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'todo' || value === 'audit' || value === 'github' || value === 'history') {
+  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'todo' || value === 'audit' || value === 'github') {
     return value;
   }
   return 'files';
@@ -1733,7 +1732,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     cliContentTab: setCliContentTab,
   });
   const cliContentTabs: { id: string; label: string; icon: React.ReactNode }[] = [
-    { id: 'history', label: t('history', { ns: 'chat', defaultValue: '历史' }), icon: <History className="h-3.5 w-3.5" /> },
     ...(todoSkillInstalled ? [{ id: 'todo', label: t('tabTodo', 'Todo'), icon: <ListTodo className="h-3.5 w-3.5" /> }] : []),
     { id: 'files', label: t('tabFiles'), icon: <Folder className="h-3.5 w-3.5" /> },
     { id: 'session', label: t('tabSession'), icon: <LineChart className="h-3.5 w-3.5" /> },
@@ -1878,26 +1876,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
       ) : null}
       <div data-id="cli-content-body" className="min-h-0 flex-1 relative">
-        <div
-          data-id="cli-content-history-host"
-          className="absolute inset-0 min-h-0"
-          style={{ display: cliContentTab === 'history' ? 'block' : 'none' }}
-        >
-          {cliContentOpen && cliContentTab === 'history' && (
-            <CurrentHistoryView
-              paneId={activeCliPaneId}
-              open
-              inspectorVersion={chatWsInspectorVersion}
-              fullWidth
-              leftAlignQuestions
-              agentType={String(
-                paneDetails[activeCliPaneId]?.agent_type
-                || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.agent_type
-                || ''
-              )}
-            />
-          )}
-        </div>
         <div
           data-id="cli-content-files-host"
           className="absolute inset-0"
@@ -2344,7 +2322,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   setCreateAgentOpen(true);
                 }}
                 onOpenGuidance={openAgentGuidanceDetail}
-                onOpenHistory={(targetPaneId) => openPaneContent(targetPaneId, 'history')}
               />
               {cliFixedContent}
               </>
