@@ -833,9 +833,9 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(inactiveTabs).not.toHaveAttribute('aria-hidden', 'true');
     expect(inactiveFooterSlot).toBeInTheDocument();
     expect(inactiveFooterSlot).not.toHaveClass('invisible');
-    expect(inactiveFooterSlot).toHaveClass('pointer-events-none', '[&>footer]:invisible');
+    expect(inactiveFooterSlot).not.toHaveClass('pointer-events-none', '[&>footer]:invisible');
     expect(inactiveFooterSlot).toHaveClass('bg-[#15161b]');
-    expect(inactiveFooterSlot).toHaveAttribute('aria-hidden', 'true');
+    expect(inactiveFooterSlot).not.toHaveAttribute('aria-hidden');
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).not.toBeInTheDocument();
     const canvasNode = card.closest('[data-id="project-canvas-node-w-101"]') as HTMLElement;
@@ -1172,7 +1172,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(routed.defaultPrevented).toBe(true);
     expect(toast).toHaveBeenCalled();
     expect(document.querySelector('[data-id="project-agent-prompt-input-w-101"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-footer-slot-w-101"]')).toHaveClass('invisible', 'pointer-events-none');
+    expect(document.querySelector('[data-id="project-agent-card-footer-slot-w-101"]')).not.toHaveClass('invisible', 'pointer-events-none', '[&>footer]:invisible');
   });
 
   it('queues multiple prompts while thinking and sends them together when idle', async () => {

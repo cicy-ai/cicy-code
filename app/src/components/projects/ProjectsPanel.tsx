@@ -236,11 +236,10 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onDelete, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onDelete, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   terminalOpen?: boolean;
-  working: boolean;
   teamId?: string;
   selected: boolean;
   removable: boolean;
@@ -531,8 +530,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selec
       {activeBodyTab !== 'role' ? (
         <div
           data-id={`project-agent-card-footer-slot-${shortPaneId(agent.paneId)}`}
-          aria-hidden={!(selected || working) || activeBodyTab === 'role'}
-          className={cn('shrink-0 overflow-hidden rounded-b-2xl bg-[#15161b]', (!(selected || working) || activeBodyTab === 'role') && 'pointer-events-none [&>footer]:invisible')}
+          className="shrink-0 overflow-hidden rounded-b-2xl bg-[#15161b]"
         >
           {footer}
         </div>
@@ -1867,7 +1865,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     agent={agent}
                     metrics={cardMetrics}
                     terminalOpen={terminalAgentIds.has(cardShortId)}
-                    working={cardBusy}
                     teamId={teamId}
                 selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
                 removable={Boolean(selectedProject.api_id)}
