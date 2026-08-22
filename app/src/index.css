@@ -1021,6 +1021,10 @@ html[data-theme="light"] [data-id="current-history-list"] .chat-markdown .hljs {
   box-shadow: none;
 }
 
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown :is(.hljs-string, .hljs-variable, .hljs-template-variable) {
+  color: #116329;
+}
+
 html[data-theme="light"] [data-id="current-history-list"] .chat-markdown blockquote {
   color: #52525b;
   border-left-color: #7dd3fc;
