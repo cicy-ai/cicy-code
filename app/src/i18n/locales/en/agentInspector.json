@@ -40,8 +40,6 @@
   "fieldTitlePlaceholder": "Pane title",
   "fieldRoleTemplate": "Role template",
   "fieldRoleTemplatePlaceholder": "Select a role template",
-  "roleTemplateOverwriteHint": "Changing this regenerates the agent guidance file; future forks inherit the new template.",
-  "roleTemplateOverwriteConfirm": "Changing the role template overwrites the current AGENTS.md / CLAUDE.md guidance. Continue?",
   "fieldWorkspace": "Working directory",
   "fieldWorkspaceDesc": "worker workspace directory",
   "fieldAgentType": "Agent type",

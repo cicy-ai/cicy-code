@@ -40,8 +40,6 @@
   "fieldTitlePlaceholder": "窗格标题",
   "fieldRoleTemplate": "角色模板",
   "fieldRoleTemplatePlaceholder": "选择角色模板",
-  "roleTemplateOverwriteHint": "更改后会按新模板覆盖当前 Agent 的指导文件，之后 Fork 会继承新模板。",
-  "roleTemplateOverwriteConfirm": "更改角色模板将覆盖当前 AGENTS.md / CLAUDE.md 的指导内容。是否继续？",
   "fieldWorkspace": "工作目录",
   "fieldWorkspaceDesc": "worker 工作区目录",
   "fieldAgentType": "智能体类型",

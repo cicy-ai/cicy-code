@@ -851,12 +851,10 @@ export default function AgentInspector({
                         }}
                         onChange={(value) => {
                           if (value === settingsData?.role_template) return;
-                          if (!window.confirm(t('roleTemplateOverwriteConfirm'))) return;
                           patchSettingsData({ role_template: value });
                           void saveSettings({ role_template: value });
                         }}
                       />
-                      <p className="mt-1 text-[10px] leading-4 text-amber-400/80">{t('roleTemplateOverwriteHint')}</p>
                     </InspectorField>
                   </div>
 

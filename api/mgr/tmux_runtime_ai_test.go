@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestHandleUpdatePaneChangesRoleTemplateAndRewritesGuidance(t *testing.T) {
+func TestHandleUpdatePaneChangesRoleTemplateWithoutRewritingGuidance(t *testing.T) {
 	withTempCicyRoot(t)
 	withTestStore(t)
 	if err := os.MkdirAll(roleDir("assistant"), 0755); err != nil {
@@ -44,8 +44,8 @@ func TestHandleUpdatePaneChangesRoleTemplateAndRewritesGuidance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read rewritten guidance: %v", err)
 	}
-	if string(content) == "custom guidance" || !strings.Contains(string(content), "assistant") {
-		t.Fatalf("guidance was not regenerated from assistant template: %s", content)
+	if string(content) != "custom guidance" {
+		t.Fatalf("guidance changed while updating role template: %s", content)
 	}
 }
 
