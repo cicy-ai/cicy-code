@@ -1247,6 +1247,42 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(await screen.findByText(/第一条/)).toBeInTheDocument();
   });
 
+  it('immediately sends a queued prompt while the agent is still busy', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+    const thinkingAgent = { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'thinking' };
+    render(<ProjectsPanel agents={[thinkingAgent]} statuses={{ 'w-101:main.0': { status: 'thinking', updated_at: '1' } }} onOpenAgent={vi.fn()} />);
+
+    fireEvent.click(await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('project agent card did not render');
+      return node as HTMLElement;
+    }));
+    const input = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
+      if (!node) throw new Error('project agent prompt did not render');
+      return node as HTMLTextAreaElement;
+    });
+    fireEvent.change(input, { target: { value: '立即执行这条' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    const immediate = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-message-queue-send-now-w-101"]');
+      if (!node) throw new Error('send-now action did not render');
+      return node as HTMLButtonElement;
+    });
+
+    fireEvent.click(immediate);
+
+    await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledWith(
+      'w-101:main.0',
+      '立即执行这条',
+      { submit: true, agentType: 'codex', fromComposer: true },
+    ));
+    expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).not.toBeInTheDocument();
+  });
+
   it('restores a queued prompt after the project panel reloads', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },

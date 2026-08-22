@@ -1479,6 +1479,27 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setQueuedAgentMessages((current) => ({ ...current, [id]: [] }));
   };
 
+  const sendQueuedAgentMessageNow = async (agent: ProjectAgent) => {
+    const id = shortPaneId(agent.paneId);
+    const queued = queuedAgentMessages[id] || [];
+    if (!queued.length || agent.remote || sendingAgentIds.has(id)) return;
+    const payload = queued.map((item) => item.payload).join('\n\n');
+    setSendingAgentIds((current) => new Set(current).add(id));
+    try {
+      await sendToAgent(agent.paneId, payload, { submit: true, agentType: agent.agentType, fromComposer: true });
+      queued.flatMap((item) => item.attachments).forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
+      setQueuedAgentMessages((current) => ({ ...current, [id]: [] }));
+    } catch (cause: any) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.message || t('projectMessageFailed') }));
+    } finally {
+      setSendingAgentIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
   useEffect(() => {
     for (const agent of allAgents) {
       const id = shortPaneId(agent.paneId);
@@ -1885,8 +1906,21 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                   >
                     {(queuedAgentMessages[cardShortId] || []).length ? (
                       <div data-id={`project-agent-message-queue-${cardShortId}`} className="max-h-28 overflow-y-auto border-b border-white/[0.06] px-3 py-2">
-                        <div data-id="project-agent-message-queue-item" className="relative whitespace-pre-wrap break-words rounded-lg bg-amber-500/[0.07] px-2.5 py-1.5 pr-16 text-[12px] leading-5 text-zinc-300">
+                        <div data-id="project-agent-message-queue-item" className="relative whitespace-pre-wrap break-words rounded-lg bg-amber-500/[0.07] px-2.5 py-1.5 pr-24 text-[12px] leading-5 text-zinc-300">
                           <div data-id="project-agent-message-queue-actions" className="absolute right-1.5 top-1.5 flex items-center gap-0.5">
+                            {!agent.remote ? (
+                              <button
+                                type="button"
+                                data-id={`project-agent-message-queue-send-now-${cardShortId}`}
+                                aria-label="立即发送"
+                                title="立即发送"
+                                onClick={() => { void sendQueuedAgentMessageNow(agent); }}
+                                disabled={sendingAgentIds.has(cardShortId)}
+                                className="grid h-6 w-6 place-items-center rounded-md text-amber-400 transition hover:bg-amber-500/10 hover:text-amber-300 disabled:opacity-50"
+                              >
+                                {sendingAgentIds.has(cardShortId) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               data-id={`project-agent-message-queue-edit-${cardShortId}`}
