@@ -1096,7 +1096,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       return node as HTMLElement;
     });
     expect(first.className).toContain('border-blue-500');
-    expect(first.className).toContain('overflow-hidden');
+    expect(first.className).not.toContain('overflow-hidden');
+    expect(first.querySelector('[data-id="project-agent-card-footer-slot-w-101"]')).toHaveClass('overflow-hidden', 'rounded-b-2xl');
     expect(first.className).not.toContain('ring-blue-500');
     fireEvent.click(second);
     expect(onActiveAgentChange).toHaveBeenCalledWith('w-102');

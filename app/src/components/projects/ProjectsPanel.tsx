@@ -322,7 +322,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selec
       onClick={onSelect}
       style={{ width, height }}
       className={cn(
-        'relative flex min-h-[240px] min-w-[260px] cursor-pointer flex-col overflow-hidden rounded-2xl border bg-[#111216] shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
+        'relative flex min-h-[240px] min-w-[260px] cursor-pointer flex-col rounded-2xl border bg-[#111216] shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-[border-color,box-shadow] hover:border-white/20',
         selected ? 'border-blue-500' : 'border-white/[0.08]',
       )}
     >
@@ -514,7 +514,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selec
           )}
         </div>
       ) : activeBodyTab === 'role' ? (
-        <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()} onTouchStart={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()} className="-mx-5 flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0b0b0d] overscroll-contain">
+        <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()} onTouchStart={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()} className="-mx-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-2xl bg-[#0b0b0d] overscroll-contain">
           <Suspense fallback={<div data-id="project-agent-card-role-loading" className="flex h-full items-center justify-center text-[11px] text-zinc-600">Loading…</div>}>
             {agent.remote ? (
               <RemoteAgentRoleEditor
@@ -532,7 +532,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, working, teamId, selec
         <div
           data-id={`project-agent-card-footer-slot-${shortPaneId(agent.paneId)}`}
           aria-hidden={!(selected || working) || activeBodyTab === 'role'}
-          className={cn('shrink-0 bg-[#15161b]', (!(selected || working) || activeBodyTab === 'role') && 'pointer-events-none [&>footer]:invisible')}
+          className={cn('shrink-0 overflow-hidden rounded-b-2xl bg-[#15161b]', (!(selected || working) || activeBodyTab === 'role') && 'pointer-events-none [&>footer]:invisible')}
         >
           {footer}
         </div>
