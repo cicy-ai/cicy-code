@@ -95,4 +95,11 @@ describe('global theme', () => {
     expect(css).toContain('.hljs-template-variable');
     expect(css).toContain('rgba(63,63,70,0.14)');
   });
+
+  it('gives the light chat user avatar a layered background', () => {
+    const css = readFileSync('src/index.css', 'utf8');
+
+    expect(css).toContain('linear-gradient(145deg, #ffffff 0%, #eef2ff 100%)');
+    expect(css).toContain('0 3px 10px rgba(37, 99, 235, 0.12)');
+  });
 });
