@@ -59,7 +59,7 @@ func assignPaneToProjectTemplate(paneID, projectTemplate string) error {
 			return err
 		}
 	}
-	_, err := store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), groupID, paneID, "agent_ttyd", paneID)
+	_, err := store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id", "width"}), groupID, paneID, "agent_ttyd", paneID, defaultProjectAgentWidth)
 	return err
 }
 

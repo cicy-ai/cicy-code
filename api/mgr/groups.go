@@ -354,14 +354,14 @@ func addWindowToGroup(w http.ResponseWriter, groupID, winID, winType, refID, res
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if _, err = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), groupID, winID, winType, refID); err != nil {
+		if _, err = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id", "width"}), groupID, winID, winType, refID, defaultProjectAgentWidth); err != nil {
 			for _, id := range existingGroupIDs {
-				_, _ = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), id, winID, winType, refID)
+				_, _ = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id", "width"}), id, winID, winType, refID, defaultProjectAgentWidth)
 			}
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	} else if _, err = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), groupID, winID, winType, refID); err != nil {
+	} else if _, err = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id", "width"}), groupID, winID, winType, refID, defaultProjectAgentWidth); err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -369,7 +369,7 @@ func addWindowToGroup(w http.ResponseWriter, groupID, winID, winType, refID, res
 		if moved {
 			_, _ = store.Exec("DELETE FROM group_windows WHERE win_id=?", winID)
 			for _, id := range existingGroupIDs {
-				_, _ = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), id, winID, winType, refID)
+				_, _ = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id", "width"}), id, winID, winType, refID, defaultProjectAgentWidth)
 			}
 		} else {
 			_, _ = store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)

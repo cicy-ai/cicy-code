@@ -6423,8 +6423,8 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 
 func addForkToProject(projectID int64, paneID string) error {
 	_, err := store.Exec(
-		store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}),
-		projectID, paneID, "agent_ttyd", paneID,
+		store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id", "width"}),
+		projectID, paneID, "agent_ttyd", paneID, defaultProjectAgentWidth,
 	)
 	return err
 }

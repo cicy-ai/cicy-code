@@ -22,6 +22,8 @@ type DB struct {
 
 var store *DB
 
+const defaultProjectAgentWidth = 600
+
 func defaultSQLitePath() string {
 	return filepath.Join(cicyRootDir, "db", "data.db")
 }
@@ -182,7 +184,7 @@ func (d *DB) Migrate() {
 			win_type TEXT NOT NULL DEFAULT 'agent_ttyd',
 			ref_id TEXT,
 			pos_x REAL NOT NULL DEFAULT 20, pos_y REAL NOT NULL DEFAULT 20,
-			width REAL NOT NULL DEFAULT 480, height REAL NOT NULL DEFAULT 320,
+			width REAL NOT NULL DEFAULT 600, height REAL NOT NULL DEFAULT 320,
 			z_index INTEGER NOT NULL DEFAULT 1,
 			created_at TEXT DEFAULT (datetime('now')),
 			UNIQUE(group_id, win_id),
@@ -302,7 +304,7 @@ func (d *DB) Migrate() {
 		var defaultGroupID int64
 		if err := d.QueryRow("SELECT id FROM agent_groups WHERE is_default=1").Scan(&defaultGroupID); err == nil {
 			for _, paneID := range []string{"w-101:main.0", "w-102:main.0"} {
-				_, _ = d.Exec(d.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), defaultGroupID, paneID, "agent_ttyd", paneID)
+				_, _ = d.Exec(d.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id", "width"}), defaultGroupID, paneID, "agent_ttyd", paneID, defaultProjectAgentWidth)
 			}
 		}
 	}

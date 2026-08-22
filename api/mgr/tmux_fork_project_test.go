@@ -31,6 +31,16 @@ func TestAddForkToProjectAddsTheNewAgentToOnlyTheRequestedProject(t *testing.T) 
 	if count != 1 {
 		t.Fatalf("fork project membership count = %d, want 1", count)
 	}
+	var width float64
+	if err := store.QueryRow(
+		"SELECT width FROM group_windows WHERE group_id=? AND win_id=?",
+		projectID, "w-999:main.0",
+	).Scan(&width); err != nil {
+		t.Fatalf("query fork width: %v", err)
+	}
+	if width != defaultProjectAgentWidth {
+		t.Fatalf("fork width = %v, want %d", width, defaultProjectAgentWidth)
+	}
 
 	var otherCount int
 	if err := store.QueryRow(
