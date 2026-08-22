@@ -1021,7 +1021,35 @@ html[data-theme="light"] [data-id="current-history-list"] .chat-markdown .hljs {
   box-shadow: none;
 }
 
-html[data-theme="light"] [data-id="current-history-list"] .chat-markdown :is(.hljs-string, .hljs-variable, .hljs-template-variable) {
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown :is(.hljs-comment, .hljs-quote) {
+  color: #6e7781;
+}
+
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown :is(.hljs-keyword, .hljs-selector-tag, .hljs-type) {
+  color: #cf222e;
+}
+
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown :is(.hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute) {
+  color: #116329;
+}
+
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown :is(.hljs-title, .hljs-section, .hljs-function) {
+  color: #8250df;
+}
+
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown :is(.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet) {
+  color: #0550ae;
+}
+
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown :is(.hljs-variable, .hljs-template-variable, .hljs-built_in) {
+  color: #953800;
+}
+
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown :is(.hljs-meta, .hljs-deletion) {
+  color: #82071e;
+}
+
+html[data-theme="light"] [data-id="current-history-list"] .chat-markdown :is(.hljs-attr, .hljs-property, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id) {
   color: #116329;
 }
 
