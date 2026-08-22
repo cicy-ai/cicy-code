@@ -73,13 +73,16 @@ export function roleTemplateSelectOptions(roles: string[]): SelectOption[] {
   return roles.map((role) => ({ value: role, label: role }));
 }
 
+export function roleTemplateUpdatePayload(roleTemplate: string) {
+  return { role_template: roleTemplate.trim() };
+}
+
 export function buildGeneralSettingsPayload(merged: EditPaneData) {
   const proxy = merged.proxy && (String(merged.proxy.password || '').trim() || String(merged.proxy.rule || '').trim())
     ? { password: String(merged.proxy.password || '').trim(), rule: String(merged.proxy.rule || '').trim() }
     : null;
   return {
     title: String(merged.title || '').trim(),
-    role_template: String(merged.role_template || '').trim(),
     active: merged.active !== false,
     allow_all_actions: !!merged.allow_all_actions,
     desktop_notify: !!merged.desktop_notify,
@@ -596,6 +599,18 @@ export default function AgentInspector({
     }
   };
 
+  const saveRoleTemplate = async (value: string) => {
+    const payload = roleTemplateUpdatePayload(value);
+    patchSettingsData(payload);
+    onPanePatch?.(paneId, payload);
+    setGeneralSettingsBaseline(serializeGeneralSettings({ ...(settingsData || {}), ...payload } as EditPaneData));
+    try {
+      await runPaneSaveSerially(paneId, () => apiService.updatePane(paneId, payload));
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastSettingsSaveFailed', { paneId }) }));
+    }
+  };
+
   const saveModelSettings = async (overrides?: Partial<{ default_model: string; use_custom_gateway: boolean; runtime_ai: any }>) => {
     if (!settingsData) return;
     if (!overrides && !dirtyModelSettings) return;
@@ -851,8 +866,7 @@ export default function AgentInspector({
                         }}
                         onChange={(value) => {
                           if (value === settingsData?.role_template) return;
-                          patchSettingsData({ role_template: value });
-                          void saveSettings({ role_template: value });
+                          void saveRoleTemplate(value);
                         }}
                       />
                     </InspectorField>
