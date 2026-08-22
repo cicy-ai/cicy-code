@@ -172,6 +172,25 @@ describe('<ProjectsPanel /> floating action button', () => {
     await waitFor(() => expect(api.updateGroupPaneLayout).toHaveBeenCalledWith(1, 'mac_local.w-200', expect.objectContaining({ width: 600 })));
   });
 
+  it('only excludes Agents already added to the current Project', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [
+      { ...defaultGroups[0], pane_ids: ['w-101'], pane_count: 1 },
+      { ...defaultGroups[1], pane_ids: ['w-102'], pane_count: 1 },
+    ] } });
+    render(<ProjectsPanel agents={[
+      { paneId: 'w-101:main.0', title: 'Current member', agentType: 'codex' },
+      { paneId: 'w-102:main.0', title: 'Other Project member', agentType: 'claude' },
+      { paneId: 'w-103:main.0', title: 'Unassigned Agent', agentType: 'codex' },
+    ]} onOpenAgent={vi.fn()} />);
+
+    fireEvent.click(await waitFor(() => document.querySelector('[data-id="project-add-agent"]') as HTMLElement));
+    fireEvent.click(document.querySelector('[data-id="project-fab-add-existing"]') as HTMLElement);
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-add-agent-w-102"]')).toBeInTheDocument());
+    expect(document.querySelector('[data-id="project-add-agent-w-103"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-add-agent-w-101"]')).not.toBeInTheDocument();
+  });
+
   it('shows dot-only Instance status and prevents adding Agents from an offline Instance', async () => {
     api.getCiCyCloudInstances.mockResolvedValue({ data: { instances: [{ instanceId: 'code-offline', teamId: 'old_mac', status: 'offline', lastSeenAt: '2026-01-01 00:00:00' }] } });
     api.getCiCyCloudAgents.mockResolvedValue({ data: { agents: [{ instanceId: 'code-offline', teamId: 'old_mac', agentId: 'w-201', title: 'Offline Builder', agentType: 'codex' }] } });
@@ -837,6 +856,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(inactiveFooterSlot).toHaveClass('bg-[#15161b]');
     expect(inactiveFooterSlot).not.toHaveAttribute('aria-hidden');
     expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-prompt-attach-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-prompt-send-w-101"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-question-fixed"]')).not.toBeInTheDocument();
     const canvasNode = card.closest('[data-id="project-canvas-node-w-101"]') as HTMLElement;
     fireEvent.pointerDown(canvasNode, { button: 0, pointerId: 1, clientX: 120, clientY: 120 });
@@ -849,6 +870,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       return node as HTMLTextAreaElement;
     });
     expect(input.tagName).toBe('TEXTAREA');
+    expect(document.querySelector('[data-id="project-agent-prompt-attach-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-prompt-send-w-101"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-tabs-w-101"]')).not.toHaveClass('invisible');
     expect(document.querySelector('[data-id="project-agent-card-footer-slot-w-101"]')).not.toHaveClass('invisible');
     expect(document.querySelector('[data-id="project-agent-card-history-w-101"]')).not.toBeInTheDocument();
@@ -908,6 +931,8 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
     await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-footer-w-101"]')).toBeInTheDocument());
     expect(document.querySelector('[data-id="project-agent-prompt-cancel-w-101"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-prompt-attach-w-101"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-prompt-send-w-101"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-inactive-loading-w-101"]')).not.toBeInTheDocument();
   });
 

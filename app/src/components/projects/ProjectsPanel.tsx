@@ -805,8 +805,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   }, [agents, cloudProjectAgents]);
   const memberIds = useMemo(() => new Set(selectedProject.pane_ids.map(shortPaneId)), [selectedProject.pane_ids]);
   const visibleAgents = allAgents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
-  const assignedAgentIds = useMemo(() => new Set(groups.flatMap((group) => group.pane_ids.map(shortPaneId))), [groups]);
-  const availableAgents = allAgents.filter((agent) => !assignedAgentIds.has(shortPaneId(agent.paneId)));
+  const availableAgents = allAgents.filter((agent) => !memberIds.has(shortPaneId(agent.paneId)));
   const availableAgentsForInstance = availableAgents.filter((agent) => addInstanceId === 'local' ? !agent.remote : agent.instanceId === addInstanceId);
   const availableAgentTypesForInstance = [...new Set(availableAgentsForInstance.map((agent) => String(agent.agentType || '').trim().toLowerCase()).filter(Boolean))].sort();
   const normalizedAddSearch = addSearch.trim().toLowerCase();
@@ -1840,6 +1839,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               const layout = layoutForAgent(agent, index);
               const cardMetrics = liveMetrics[shortPaneId(agent.paneId)] || (agentReplies[shortPaneId(agent.paneId)] ? metricsFromCurrentReply(agentReplies[shortPaneId(agent.paneId)]) : undefined);
               const cardShortId = shortPaneId(agent.paneId);
+              const cardSelected = selectedAgentIds.has(cardShortId);
               const cardLatest = statuses[agent.paneId] || statuses[`${cardShortId}:main.0`] || statuses[cardShortId] || {};
               // Keep the loading sentinel continuous across the send handoff:
               // sendToAgent resolves once input reaches the terminal, before the
@@ -1855,7 +1855,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 key={agent.paneId}
                 data-id={`project-canvas-node-${shortPaneId(agent.paneId)}`}
                 className="pointer-events-auto absolute touch-none cursor-move"
-                style={{ left: layout.x, top: layout.y, zIndex: selectedAgentIds.has(shortPaneId(agent.paneId)) ? 1000 : layout.z }}
+                style={{ left: layout.x, top: layout.y, zIndex: cardSelected ? 1000 : layout.z }}
                 onPointerDown={(event) => beginAgentDrag(event, agent, index)}
                 onPointerMove={moveAgent}
                 onPointerUp={(event) => endAgentDrag(event, agent)}
@@ -1866,7 +1866,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     metrics={cardMetrics}
                     terminalOpen={terminalAgentIds.has(cardShortId)}
                     teamId={teamId}
-                selected={selectedAgentIds.has(shortPaneId(agent.paneId))}
+                selected={cardSelected}
                 removable={Boolean(selectedProject.api_id)}
                 projectOptions={projects.filter((project) => String(project.id) !== String(selectedProject.id)).map((project) => ({
                   id: project.id,
@@ -1983,13 +1983,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                           }
                           return;
                         }
-                        if (event.key === 'Enter' && !event.shiftKey) {
+                        if (cardSelected && event.key === 'Enter' && !event.shiftKey) {
                           event.preventDefault();
                           void sendAgentMessage(agent);
                         }
                       }}
                       placeholder={t('projectMessagePlaceholder')}
-                      autoFocus={selectedAgentIds.has(cardShortId)}
+                      autoFocus={cardSelected}
                       className="min-h-5 max-h-24 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent text-[14px] leading-5 text-zinc-200 outline-none [field-sizing:content] placeholder:text-zinc-500/40"
                     />
                     </div>
@@ -2001,7 +2001,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       className="hidden"
                       onChange={(event) => { if (event.target.files?.length) addAgentFiles(agent, event.target.files); event.target.value = ''; }}
                     />
-                    <button
+                    {cardSelected ? <button
                       type="button"
                       data-id={`project-agent-prompt-attach-${cardShortId}`}
                       onClick={() => document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-file-input-${cardShortId}"]`)?.click()}
@@ -2009,9 +2009,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-white/[0.08] hover:text-zinc-100"
                     >
                       <Paperclip className="h-4 w-4" strokeWidth={2.25} />
-                    </button>
+                    </button> : <span />}
                     <div className="flex items-center">
-                    {cardBusy && !(agentMessages[cardShortId] || '').trim() && !(agentAttachments[cardShortId] || []).length ? (
+                    {cardBusy && (!cardSelected || (!(agentMessages[cardShortId] || '').trim() && !(agentAttachments[cardShortId] || []).length)) ? (
                       <button
                         type="button"
                         data-id={`project-agent-prompt-cancel-${shortPaneId(agent.paneId)}`}
@@ -2027,7 +2027,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                           </span>
                         )}
                       </button>
-                    ) : (
+                    ) : cardSelected ? (
                       <button
                       type="button"
                       data-id={`project-agent-prompt-send-${shortPaneId(agent.paneId)}`}
@@ -2039,7 +2039,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     >
                       <SendHorizontal className="h-4 w-4" />
                     </button>
-                    )}
+                    ) : null}
                     </div>
                     </div>
                   </footer>
