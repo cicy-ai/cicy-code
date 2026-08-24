@@ -2461,7 +2461,49 @@ func mustAtoi(s string) int {
 	return n
 }
 
-// ensureBuiltinAgents restores tmux sessions and ttyd for all active agents.
+type startupAgentConfig struct {
+	paneID           string
+	workspace        string
+	initScript       string
+	configJSON       string
+	agentType        string
+	allowAllActions  bool
+	replyInChinese   bool
+	useCustomGateway bool
+	useMitm          bool
+}
+
+func listStartupAgentConfigs() ([]startupAgentConfig, error) {
+	rows, err := store.Query(`
+		SELECT pane_id, workspace, COALESCE(init_script,''), COALESCE(config,'{}'),
+		       COALESCE(agent_type,''), COALESCE(allow_all_actions,0),
+		       COALESCE(reply_in_chinese,0), COALESCE(use_custom_gateway,0),
+		       COALESCE(use_mitm,1)
+		FROM agent_config
+		WHERE COALESCE(agent_type,'') NOT IN ('cicy','dispatcher','secretary')
+		  AND COALESCE(active,0)=1
+		  AND COALESCE(machine_id,0)=0
+		ORDER BY pane_id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var configs []startupAgentConfig
+	for rows.Next() {
+		var config startupAgentConfig
+		if err := rows.Scan(&config.paneID, &config.workspace, &config.initScript, &config.configJSON,
+			&config.agentType, &config.allowAllActions, &config.replyInChinese,
+			&config.useCustomGateway, &config.useMitm); err != nil {
+			return nil, err
+		}
+		configs = append(configs, config)
+	}
+	return configs, rows.Err()
+}
+
+// ensureBuiltinAgents restores tmux sessions for all active local non-cicy agents.
 // The selected builtin list is only used to sync builtin title/agent_type.
 func ensureBuiltinAgents(selected []string) {
 	workers := selectedBuiltinWorkers(selected)
@@ -2471,53 +2513,30 @@ func ensureBuiltinAgents(selected []string) {
 		desiredByPaneID[pid] = w
 	}
 
-	// Launch only NON-CICY agents bound under w-1001. cicy agents (master + any
-	// team member) run headless and are warmed server-side (warmCicySessions), so
-	// they never need a tmux pane here. The `active` column is no longer a launch
-	// gate — membership (bound under w-1001) + type (non-cicy) decides. This is
-	// what keeps a fresh runtime from booting/installing CLIs for agents the user
-	// hasn't pulled onto the team yet.
-	rows, err := store.Query(`
-		SELECT pane_id, workspace, COALESCE(init_script,''), COALESCE(config,'{}'),
-		       COALESCE(agent_type,''), COALESCE(allow_all_actions,0),
-		       COALESCE(reply_in_chinese,0), COALESCE(use_custom_gateway,0),
-		       COALESCE(use_mitm,1)
-		FROM agent_config
-		WHERE COALESCE(agent_type,'') NOT IN ('cicy','dispatcher','secretary')
-		  AND pane_id IN (
-		    SELECT agent_name || ':main.0'
-		    FROM pane_agents
-		    WHERE pane_id = 'w-1001' AND status='active'
-		  )
-		ORDER BY pane_id ASC
-	`)
+	configs, err := listStartupAgentConfigs()
 	if err != nil {
+		log.Printf("[startup] failed to list non-cicy agents: %v", err)
 		return
 	}
-	defer rows.Close()
 
 	token := getFirstToken()
-	for rows.Next() {
-		var paneID, workspace, initScript, configJSON, agentType string
-		var allowAllActions bool
-		var replyInChinese bool
-		var useCustomGateway bool
-		var useMitm bool
-		rows.Scan(&paneID, &workspace, &initScript, &configJSON, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm)
-		if paneID == "" {
+	for _, config := range configs {
+		if config.paneID == "" {
 			continue
 		}
 
 		// Sync agent_type and title if changed — but never clobber a
 		// deliberate dispatcher (PM) conversion; it is not expressible via
 		// the --agents flag and must survive restarts.
-		if desired, ok := desiredByPaneID[paneID]; ok && normalizeAgentType(agentType) != desired.AgentType && normalizeAgentType(agentType) != "cicy" {
+		if desired, ok := desiredByPaneID[config.paneID]; ok && normalizeAgentType(config.agentType) != desired.AgentType && normalizeAgentType(config.agentType) != "cicy" {
 			store.Exec(fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, updated_at=%s WHERE pane_id=?", store.Now()),
-				desired.AgentType, desired.Title, paneID)
-			agentType = desired.AgentType
+				desired.AgentType, desired.Title, config.paneID)
+			config.agentType = desired.AgentType
 		}
 
-		startAgentFromConfig(paneID, workspace, initScript, configJSON, agentType, allowAllActions, replyInChinese, useCustomGateway, useMitm, token)
+		startAgentFromConfig(config.paneID, config.workspace, config.initScript, config.configJSON,
+			config.agentType, config.allowAllActions, config.replyInChinese,
+			config.useCustomGateway, config.useMitm, token)
 	}
 }
 
