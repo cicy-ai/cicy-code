@@ -1292,6 +1292,11 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     const liveThinking = { 'w-101:main.0': { status: 'thinking', updated_at: '1' } };
     const first = render(<ProjectsPanel agents={[thinkingAgent]} statuses={liveThinking} onOpenAgent={vi.fn()} />);
 
+    fireEvent.click(await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('project agent card did not render');
+      return node as HTMLElement;
+    }));
     const input = await waitFor(() => {
       const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
       if (!node) throw new Error('project agent prompt did not render');

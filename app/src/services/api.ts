@@ -273,6 +273,7 @@ const api = {
   saveEmailConfig: (cfg: any) => http.post('/api/settings/email', cfg),
   getApiToken: () => http.get('/api/settings/token'),
   refreshApiToken: (body?: { to?: string }) => http.post('/api/settings/token/refresh', body || {}),
+  importCodexAuth: (base64: string) => http.post('/api/settings/codex-auth', { base64 }),
 
   getProviders: () => http.get('/api/providers'),
   createProvider: (data: any) => http.post('/api/providers', data),
@@ -429,6 +430,8 @@ const api = {
   getProxyBindMode: () => http.get('/api/proxy/bind-mode'),
   setProxyBindMode: (allowLan: boolean) => http.patch('/api/proxy/bind-mode', { allow_lan: allowLan }),
   getProxyExport: (params?: { ip?: 'local' | 'lan' | 'public' | string; user?: string }) => http.get('/api/proxy/export', { params }),
+  getProxyShellGlobal: () => http.get('/api/proxy/shell-global'),
+  setProxyShellGlobal: (enabled: boolean) => http.patch('/api/proxy/shell-global', { enabled }),
   // 🌍 global-proxy panel: exit-IP comparison (direct vs via mihomo) + the switch
   getProxyExitInfo: () => http.get('/api/proxy/exit-info'),
   selectProxy: (member: string, group?: string) => http.post('/api/proxy/select', { member, group }),
