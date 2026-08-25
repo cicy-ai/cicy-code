@@ -387,6 +387,16 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
       const isCopy = event.key.toLowerCase() === 'c' && !event.altKey &&
         (isMac() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)
       if (isCopy && term.hasSelection()) return false // let the browser copy
+      // Windows 的 Ctrl+V 必须走浏览器的 paste 事件,不能落到 pane 里。xterm.js 默认
+      // 把 Ctrl+V 变成 \x16 并 preventDefault,于是:①隐藏 textarea 收不到 paste 事件,
+      // 下面那个「上传附件再打链接」的 onPaste 永远不触发;②\x16 直达 CLI agent,
+      // codex 收到 ^V 会去读容器里的系统剪贴板 —— 容器里没有 X11,只能报
+      // 「clipboard unavailable: X11 server connection timed out」。返回 false 跳过
+      // xterm 的处理,两个问题一起消失。与 gotty 页(api/js/src/xterm.ts)同一条规则。
+      // Mac 的 Cmd+V 本来就不被拦截;Linux 保持原样(Ctrl+Shift+V / 中键仍是粘贴路径)。
+      const isPaste = event.key.toLowerCase() === 'v' &&
+        event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
+      if (isWindows && isPaste) return false
       return true
     })
 
