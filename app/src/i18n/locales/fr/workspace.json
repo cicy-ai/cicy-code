@@ -245,6 +245,16 @@
   "settingsCodexAuthConfirm": "Remplacer",
   "settingsCodexAuthSuccess": "Remplacé. Les prochains processus Codex utiliseront les nouveaux identifiants.",
   "settingsCodexAuthFailed": "Échec du remplacement. Vérifiez que la valeur est un Codex Auth Base64 valide.",
+  "settingsClaudeAuthTitle": "Claude Auth",
+  "settingsClaudeAuthHint": "Collez le Base64 de Claude Auth ; il est décodé, validé puis écrit dans ~/.claude/.credentials.json.",
+  "settingsClaudeAuthPlaceholder": "Coller le contenu Base64",
+  "settingsClaudeAuthRestore": "Restaurer et écraser",
+  "settingsClaudeAuthRestoring": "Écrasement…",
+  "settingsClaudeAuthConfirmTitle": "Écraser Claude Auth ?",
+  "settingsClaudeAuthConfirmBody": "Cela écrase ~/.claude/.credentials.json avec la valeur collée. Les processus Claude en cours ne sont pas affectés ; ceux lancés ensuite utiliseront le nouvel identifiant.",
+  "settingsClaudeAuthConfirm": "Confirmer l'écrasement",
+  "settingsClaudeAuthSuccess": "Écrasé. Les processus Claude lancés désormais utiliseront le nouvel identifiant.",
+  "settingsClaudeAuthFailed": "Échec de l'écrasement. Vérifiez qu'il s'agit d'un Base64 Claude Auth valide.",
   "settingsSave": "Enregistrer",
   "settingsSaving": "Enregistrement…",
   "settingsSaved": "Enregistré",
@@ -459,6 +469,6 @@
   "marketplaceUpdateAll": "Tout mettre à jour",
   "marketplaceUpdateAllCount": "Tout mettre à jour ({{count}})",
   "marketplaceUpdatingAll": "Mise à jour en cours…",
-  "marketplaceUpdateAllResult": "Mise à jour terminée : {{succeeded}} réussies, {{failed}} échouées"
-  ,"agentTitleFeishuSyncFailed": "Le titre de l’Agent a été mis à jour, mais certains noms de groupes Feishu n’ont pas pu être synchronisés. Vérifiez l’autorisation im:chat:update de l’application."
+  "marketplaceUpdateAllResult": "Mise à jour terminée : {{succeeded}} réussies, {{failed}} échouées",
+  "agentTitleFeishuSyncFailed": "Le titre de l’Agent a été mis à jour, mais certains noms de groupes Feishu n’ont pas pu être synchronisés. Vérifiez l’autorisation im:chat:update de l’application."
 }

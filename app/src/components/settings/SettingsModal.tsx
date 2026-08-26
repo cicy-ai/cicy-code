@@ -14,6 +14,7 @@ import { TokenManager } from '../../services/tokenManager';
 import { useDialogs } from '../ui/Modal';
 import { getCicyTheme, setCicyTheme, type CicyTheme } from '../../lib/theme';
 import CodexAuthImportCard from './CodexAuthImportCard';
+import ClaudeAuthImportCard from './ClaudeAuthImportCard';
 
 // Unified, productized Settings surface. One fullscreen modal with a left nav
 // (Language / IM / Agent Routing / LLM Providers) and a large content area on
@@ -563,6 +564,7 @@ export default function SettingsModal({
                   </section>
 
                   <CodexAuthImportCard />
+                  <ClaudeAuthImportCard />
 
                   {/* Card: Email (SMTP) — same ~/cicy-ai/db/email.json the email skill uses */}
                   <section data-id="settings-email-block" className={card}>

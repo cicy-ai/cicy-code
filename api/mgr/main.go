@@ -614,6 +614,7 @@ Options:
 	http.HandleFunc("/api/settings/token", wa(handleTokenShow))
 	http.HandleFunc("/api/settings/token/refresh", wa(handleTokenRefresh))
 	http.HandleFunc("/api/settings/codex-auth", wa(handleCodexAuthImport))
+	http.HandleFunc("/api/settings/claude-auth", wa(handleClaudeAuthImport))
 
 	// AI providers (global.json)
 	http.HandleFunc("/api/providers", wa(handleProviders))

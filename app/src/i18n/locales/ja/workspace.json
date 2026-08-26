@@ -245,6 +245,16 @@
   "settingsCodexAuthConfirm": "上書き",
   "settingsCodexAuthSuccess": "上書きしました。次に起動する Codex から新しい認証情報を使用します。",
   "settingsCodexAuthFailed": "上書きに失敗しました。有効な Codex Auth Base64 か確認してください。",
+  "settingsClaudeAuthTitle": "Claude Auth",
+  "settingsClaudeAuthHint": "Claude Auth の Base64 を貼り付けます。デコード検証後に ~/.claude/.credentials.json を上書きします。",
+  "settingsClaudeAuthPlaceholder": "Base64 を貼り付け",
+  "settingsClaudeAuthRestore": "復元して上書き",
+  "settingsClaudeAuthRestoring": "上書き中…",
+  "settingsClaudeAuthConfirmTitle": "Claude Auth を上書きしますか？",
+  "settingsClaudeAuthConfirmBody": "入力内容で ~/.claude/.credentials.json を上書きします。実行中の Claude には影響せず、以降に起動する Claude が新しい認証情報を使います。",
+  "settingsClaudeAuthConfirm": "上書きを確認",
+  "settingsClaudeAuthSuccess": "上書きしました。以降に起動する Claude が新しい認証情報を使います。",
+  "settingsClaudeAuthFailed": "上書きに失敗しました。有効な Claude Auth Base64 か確認してください。",
   "settingsSave": "保存",
   "settingsSaving": "保存中…",
   "settingsSaved": "保存しました",
@@ -459,6 +469,6 @@
   "marketplaceUpdateAll": "すべての Skill を更新",
   "marketplaceUpdateAllCount": "すべて更新 ({{count}})",
   "marketplaceUpdatingAll": "すべて更新中…",
-  "marketplaceUpdateAllResult": "更新完了：成功 {{succeeded}}、失敗 {{failed}}"
-  ,"agentTitleFeishuSyncFailed": "Agentのタイトルは更新されましたが、一部のFeishuグループ名を同期できませんでした。アプリのim:chat:update権限を確認してください。"
+  "marketplaceUpdateAllResult": "更新完了：成功 {{succeeded}}、失敗 {{failed}}",
+  "agentTitleFeishuSyncFailed": "Agentのタイトルは更新されましたが、一部のFeishuグループ名を同期できませんでした。アプリのim:chat:update権限を確認してください。"
 }

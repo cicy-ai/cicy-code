@@ -274,6 +274,7 @@ const api = {
   getApiToken: () => http.get('/api/settings/token'),
   refreshApiToken: (body?: { to?: string }) => http.post('/api/settings/token/refresh', body || {}),
   importCodexAuth: (base64: string) => http.post('/api/settings/codex-auth', { base64 }),
+  importClaudeAuth: (base64: string) => http.post('/api/settings/claude-auth', { base64 }),
 
   getProviders: () => http.get('/api/providers'),
   createProvider: (data: any) => http.post('/api/providers', data),
