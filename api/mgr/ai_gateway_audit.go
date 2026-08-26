@@ -423,6 +423,9 @@ var (
 	// (aiGatewayBuildCurrentPrompts) doesn't surface them as questions.
 	localCommandBlockRe  = regexp.MustCompile(`(?s)<local-command-caveat>.*?</local-command-caveat>|<command-name>.*?</command-name>|<command-message>.*?</command-message>|<command-args>.*?</command-args>|<local-command-stdout>.*?</local-command-stdout>|<local-command-stderr>.*?</local-command-stderr>`)
 	compactionPreambleRe = regexp.MustCompile(`(?s)^\s*This session is being continued from a previous conversation.*`)
+	// Claude Code 标题请求的 user 消息尾缀:"Write the title in the predominant
+	// language of the session…" / "Write the title in the preferred language."
+	titleInstructionTailRe = regexp.MustCompile(`(?is)\bwrite the title\b[^\n]*\blanguage\b[^\n]*$`)
 	// The /loop wakeup "recap" prompt is harness-injected as a role=user message
 	// ("The user stepped away and is coming back. Recap in under N words…"), not a
 	// human question — drop it from the prompts list.
@@ -5105,6 +5108,14 @@ func aiGatewayIsSidechainRequest(agentID, conversationID string, requestHeaders 
 	if strings.TrimSpace(disk.ConversationID) != strings.TrimSpace(conversationID) {
 		return false
 	}
+	// Self-heal: if the snapshot on disk is itself an auxiliary request (a title
+	// / suggestion / probe call that slipped past detection in an older build),
+	// it is not "the main thread" — comparing against it would tag EVERY real
+	// mainline request as sidechain and freeze current/reply.json forever.
+	// Let the mainline reclaim the snapshot instead.
+	if aiGatewayAuxiliaryKind("", aiGatewayMap(disk.Body)) != "" {
+		return false
+	}
 	diskFirst := aiGatewayFirstUserText(aiGatewayExtractMessages(aiGatewayMap(disk.Body)))
 	diskCore := strings.TrimSpace(systemReminderBlockRe.ReplaceAllString(diskFirst, ""))
 	if diskCore == "" {
@@ -5274,8 +5285,23 @@ func aiGatewayLooksLikeTitleRequest(body map[string]interface{}) bool {
 	for _, block := range aiGatewaySystemInstructionBlocks(body) {
 		b := strings.ToLower(block)
 		if strings.HasPrefix(b, "you are a title generator") ||
-			strings.HasPrefix(b, "generate a concise, sentence-case title") {
+			strings.HasPrefix(b, "generate a concise, sentence-case title") ||
+			// Claude Code 2.1.24x: "You are naming a coding session so the user
+			// can pick it out of a long list of sessions..."
+			strings.HasPrefix(b, "you are naming a coding session") {
 			return true
+		}
+	}
+	// 兜底(措辞再变也能兜住):标题请求永远是"无 tools + 单条 user 消息 + 消息体是
+	// <session>…</session> 包裹 + 以 Write the title… 指令收尾"。三个条件同时满足才算,
+	// 正常对话不可能长这样(主线一定带 tools,且 <session> 包裹 + 指令尾缀不会同时出现)。
+	if _, hasTools := body["tools"]; !hasTools {
+		messages := aiGatewayExtractMessages(body)
+		if len(messages) == 1 {
+			text := strings.TrimSpace(aiGatewayContentText(messages[0]["content"]))
+			if strings.HasPrefix(text, "<session>") && strings.Contains(text, "</session>") && titleInstructionTailRe.MatchString(text) {
+				return true
+			}
 		}
 	}
 	return false

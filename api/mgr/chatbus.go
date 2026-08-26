@@ -759,7 +759,36 @@ func pollAgentStatuses(paneID string, agents []M) M {
 	for _, a := range agents {
 		add(aiGatewayString(a["name"]))
 	}
+	// The Projects canvas shows ANY local agent that was added to a project, not
+	// just the ones bound to the viewing pane — and it reads status/model/cost
+	// from this same poll_data. Without the project members here, an unbound
+	// agent's card shows a grey dot and no model forever (w-1005 on the
+	// cicy-code project). Members are a cheap DISTINCT over group_windows.
+	for _, id := range projectMemberPaneIDs() {
+		add(id)
+	}
 	return statuses
+}
+
+// projectMemberPaneIDs lists every local agent pane that belongs to at least
+// one project (group_windows agent_ttyd rows). Errors degrade to an empty list.
+func projectMemberPaneIDs() []string {
+	if store == nil {
+		return nil
+	}
+	rows, err := store.Query(`SELECT DISTINCT win_id FROM group_windows WHERE win_type='agent_ttyd'`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil && strings.TrimSpace(id) != "" {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // buildPollData 构造 poll 响应数据，与 handlePoll 返回格式一致
