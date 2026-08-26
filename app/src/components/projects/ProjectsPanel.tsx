@@ -390,8 +390,8 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
         selected ? 'border-blue-500' : 'border-white/[0.08]',
       )}
     >
-      <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-visible px-5 pb-4 pt-3">
-      <div data-id="project-agent-card-header" className="flex items-start gap-3">
+      <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-visible px-5 pb-4 pt-2.5">
+      <div data-id="project-agent-card-header" className="flex items-center gap-3">
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <h3
@@ -442,7 +442,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
             type="button"
             data-id={`project-agent-card-menu-${shortPaneId(agent.paneId)}`}
             onClick={toggleMenu}
-            className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
+            className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
             title={t('projectMore')}
           >
             <MoreHorizontal className="h-4 w-4" />
@@ -523,7 +523,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
         </div>
       </div>
 
-      <div data-id="project-agent-card-metrics" className="mt-0.5 flex h-6 min-w-0 items-center gap-2 pb-0.5 font-mono text-[12px] text-zinc-500">
+      <div data-id="project-agent-card-metrics" className="flex h-5 min-w-0 items-center gap-2 font-mono text-[12px] text-zinc-500">
         <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
         <button
           type="button"
@@ -562,7 +562,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
       <div
         data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`}
         role="tablist"
-        className="mt-0.5 flex h-8 shrink-0 items-end gap-5 border-b border-white/[0.08]"
+        className="flex h-7 shrink-0 items-end gap-5 border-b border-white/[0.08]"
       >
         {([
           ['history', '会话'],
@@ -579,7 +579,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
               disabled={unavailable}
               data-id={`project-agent-card-tab-${tab}-${shortPaneId(agent.paneId)}`}
               onClick={(event) => { event.stopPropagation(); selectBodyTab(tab); }}
-              className={cn('relative h-8 text-[12px] font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full', activeBodyTab === tab ? 'text-zinc-100 after:bg-blue-500' : 'text-zinc-500 after:bg-transparent hover:text-zinc-300', unavailable && 'cursor-not-allowed opacity-30 hover:text-zinc-500')}
+              className={cn('relative h-7 text-[12px] font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full', activeBodyTab === tab ? 'text-zinc-100 after:bg-blue-500' : 'text-zinc-500 after:bg-transparent hover:text-zinc-300', unavailable && 'cursor-not-allowed opacity-30 hover:text-zinc-500')}
             >
               {label}
             </button>
