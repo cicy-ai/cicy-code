@@ -396,6 +396,24 @@ Options:
 	http.HandleFunc("/api/github/accounts/test", authM(handleGithubAccountTest))
 	http.HandleFunc("/api/github/accounts/totp", authM(handleGithubAccountTOTP))
 	http.HandleFunc("/api/github/accounts/usage", authM(handleGithubAccountUsage))
+	http.HandleFunc("/api/npm/accounts", authM(handleNpmAccounts))
+	http.HandleFunc("/api/npm/accounts/test", authM(handleNpmAccountTest))
+	http.HandleFunc("/api/npm/accounts/totp", authM(handleNpmAccountTOTP))
+	http.HandleFunc("/api/npm/accounts/usage", authM(handleNpmAccountUsage))
+	http.HandleFunc("/api/npm/accounts/bind", authM(handleNpmAccountBind))       // write ~/.npmrc auth for this account
+	http.HandleFunc("/api/npm/accounts/inspect", authM(handleNpmAccountInspect)) // fill the matrix from one pasted token
+	http.HandleFunc("/api/docker/accounts", authM(handleDockerAccounts))
+	http.HandleFunc("/api/docker/accounts/test", authM(handleDockerAccountTest))
+	http.HandleFunc("/api/docker/accounts/totp", authM(handleDockerAccountTOTP))
+	http.HandleFunc("/api/docker/accounts/usage", authM(handleDockerAccountUsage))
+	http.HandleFunc("/api/docker/accounts/bind", authM(handleDockerAccountBind))       // write ~/.docker/config.json auth
+	http.HandleFunc("/api/docker/accounts/inspect", authM(handleDockerAccountInspect)) // fill the matrix from one pasted token
+	http.HandleFunc("/api/aliyun/accounts", authM(handleAliyunAccounts))
+	http.HandleFunc("/api/aliyun/accounts/test", authM(handleAliyunAccountTest))
+	http.HandleFunc("/api/aliyun/accounts/totp", authM(handleAliyunAccountTOTP))
+	http.HandleFunc("/api/aliyun/accounts/usage", authM(handleAliyunAccountUsage))
+	http.HandleFunc("/api/aliyun/accounts/bind", authM(handleAliyunAccountBind))       // write ~/.aliyun/config.json profile
+	http.HandleFunc("/api/aliyun/accounts/inspect", authM(handleAliyunAccountInspect)) // fill the matrix from one pasted AccessKey
 	http.HandleFunc("/api/google/accounts", authM(handleGoogleAccounts))
 	http.HandleFunc("/api/google/accounts/totp", authM(handleGoogleAccountTOTP))
 	http.HandleFunc("/api/chatgpt/accounts", authM(handleChatGPTAccounts))

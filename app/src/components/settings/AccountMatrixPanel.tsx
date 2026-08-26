@@ -21,11 +21,14 @@ import { sendToAgent } from "../../services/agentSend";
 import GithubAccountsPanel from "./GithubAccountsPanel";
 import GoogleAccountsPanel, { GoogleIcon, openChromeProfile } from "./GoogleAccountsPanel";
 import ChatGPTAccountsPanel, { ChatGPTIcon } from "./ChatGPTAccountsPanel";
+import NpmAccountsPanel, { NpmIcon } from "./NpmAccountsPanel";
+import DockerAccountsPanel, { DockerIcon } from "./DockerAccountsPanel";
+import AliyunAccountsPanel, { AliyunIcon } from "./AliyunAccountsPanel";
 import { AppModal, useDialogs } from "../ui/Modal";
 import BrowserWindowsPanel, { BrowserWindowsColumn, type Profile as BrowserProfile } from "../layout/BrowserWindowsPanel";
 import { MobileDeviceColumn, type MobileSel } from "../layout/MobileDevicesPanel";
 
-type Platform = "github" | "cloudflare" | "google" | "chatgpt";
+type Platform = "github" | "cloudflare" | "google" | "chatgpt" | "npm" | "docker" | "aliyun";
 type MatrixSection = "accounts" | "devices";
 type CFAccount = {
   name: string;
@@ -256,6 +259,33 @@ export default function AccountMatrixPanel({
           >
             <Cloud className="h-4 w-4" />
           </button>
+          <button
+            data-id="account-matrix-platform-npm"
+            title="npm"
+            aria-label="npm"
+            onClick={() => setPlatform("npm")}
+            className={`grid h-9 w-9 place-items-center rounded-lg border ${platform === "npm" ? "border-rose-400/30 bg-rose-400/10 text-rose-300" : "border-transparent text-zinc-500 hover:bg-white/[0.04]"}`}
+          >
+            <NpmIcon className="h-4 w-4" />
+          </button>
+          <button
+            data-id="account-matrix-platform-docker"
+            title="Docker"
+            aria-label="Docker"
+            onClick={() => setPlatform("docker")}
+            className={`grid h-9 w-9 place-items-center rounded-lg border ${platform === "docker" ? "border-sky-400/30 bg-sky-400/10 text-sky-300" : "border-transparent text-zinc-500 hover:bg-white/[0.04]"}`}
+          >
+            <DockerIcon className="h-4 w-4" />
+          </button>
+          <button
+            data-id="account-matrix-platform-aliyun"
+            title={t("aliyunAccountsTitle", { defaultValue: "阿里云" })}
+            aria-label="Aliyun"
+            onClick={() => setPlatform("aliyun")}
+            className={`grid h-9 w-9 place-items-center rounded-lg border ${platform === "aliyun" ? "border-orange-400/30 bg-orange-400/10 text-orange-300" : "border-transparent text-zinc-500 hover:bg-white/[0.04]"}`}
+          >
+            <AliyunIcon className="h-4 w-4" />
+          </button>
         </aside>
         <main
           data-id="account-matrix-content"
@@ -276,6 +306,15 @@ export default function AccountMatrixPanel({
           </div>
           <div data-id="account-matrix-chatgpt" className="h-full" style={{ display: platform === "chatgpt" ? "block" : "none" }}>
             <ChatGPTAccountsPanel active={active && platform === "chatgpt"} />
+          </div>
+          <div data-id="account-matrix-npm" className="h-full" style={{ display: platform === "npm" ? "block" : "none" }}>
+            <NpmAccountsPanel active={active && platform === "npm"} paneId={paneId} />
+          </div>
+          <div data-id="account-matrix-docker" className="h-full" style={{ display: platform === "docker" ? "block" : "none" }}>
+            <DockerAccountsPanel active={active && platform === "docker"} paneId={paneId} />
+          </div>
+          <div data-id="account-matrix-aliyun" className="h-full" style={{ display: platform === "aliyun" ? "block" : "none" }}>
+            <AliyunAccountsPanel active={active && platform === "aliyun"} paneId={paneId} />
           </div>
           {platform === "cloudflare" && (
             <div data-id="account-matrix-cloudflare" className="p-4">
