@@ -16,7 +16,8 @@ import { MarkdownBlock, LinkConfirmModal } from './shared/Markdown';
 import { CollapsibleQ, UserTurnAvatar } from './shared/CollapsibleQ';
 import { buildToolRunGroupId, collectToolRuns, ToolRunGroup } from './shared/ToolRunGroup';
 import { LiveStreamStep } from './shared/LiveStreamStep';
-import { SystemNoticeCard, OutcomeNoticeCard, PendingThinkingPlaceholder, CompactionMarker } from './shared/notices';
+import { SystemNoticeGroup, OutcomeNoticeCard, PendingThinkingPlaceholder, CompactionMarker } from './shared/notices';
+import { prepareRenderTurns } from './lib/renderTurns';
 import { cicyCompactSummaryOf } from './lib/normalizeItem';
 import { AssistantTurnView } from './shared/AssistantTurnView';
 import { PromptRow } from './shared/PromptRow';
@@ -31,29 +32,6 @@ type HistoryListProps = ReturnType<typeof useCurrentHistory> & {
   leftAlignQuestions: boolean;
   greeting: string;
 };
-
-function isToolOnlyAssistantTurn(turn: HistoryTurn) {
-  if (turn?.role !== 'assistant' || turn?.outcome) return false;
-  const steps = getVisibleHistorySteps(turn, false) || [];
-  return steps.length > 0 && steps.every((step: any) => step?.type === 'tool');
-}
-
-function mergeAdjacentToolOnlyAssistantTurns(turns: HistoryTurn[]) {
-  const merged: HistoryTurn[] = [];
-  for (const turn of turns) {
-    const previous = merged[merged.length - 1];
-    if (!previous || !isToolOnlyAssistantTurn(previous) || !isToolOnlyAssistantTurn(turn)) {
-      merged.push(turn);
-      continue;
-    }
-    merged[merged.length - 1] = {
-      ...previous,
-      status: turn.status || previous.status,
-      steps: [...(previous.steps || []), ...(turn.steps || [])],
-    };
-  }
-  return merged;
-}
 
 function nextUserTurnIndex(turns: HistoryTurn[], from: number) {
   for (let index = from + 1; index < turns.length; index += 1) {
@@ -188,7 +166,7 @@ export function HistoryList(props: HistoryListProps) {
   // are one visual run until user/system/text/thinking content interrupts them.
   // Merge only the render copy: pagination, committed ids and live de-duping
   // continue to use the untouched `displayItems`.
-  const renderDisplayItems = useMemo(() => mergeAdjacentToolOnlyAssistantTurns(displayItems), [displayItems]);
+  const renderDisplayItems = useMemo(() => prepareRenderTurns(displayItems), [displayItems]);
 
   // Memoized on `renderDisplayItems`: while a turn streams (only `liveTurn` changes),
   // these element refs stay identical, so React skips re-rendering every
@@ -224,9 +202,11 @@ export function HistoryList(props: HistoryListProps) {
       );
     }
     if (turn?.role === 'system') {
+      const notices = turn.notices || [];
+      if (!notices.length) return null;
       return (
-        <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey} className="my-1">
-          <SystemNoticeCard text={turn.text || ''} />
+        <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey}>
+          <SystemNoticeGroup notices={notices} />
         </div>
       );
     }
@@ -287,14 +267,14 @@ export function HistoryList(props: HistoryListProps) {
         return promptRow;
       }
       return (
-        <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey} className="mb-5">
+        <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} data-steer={turn.steer ? 'true' : undefined} key={turnKey} className="mb-5">
           {leftAlignQuestions ? (
             <div data-id={`current-history-turn-user-${turnKey}`} className="flex items-start gap-2.5">
               <UserTurnAvatar />
-              <div className="min-w-0 flex-1"><CollapsibleQ text={turn.text || turn.q} /></div>
+              <div className="min-w-0 flex-1"><CollapsibleQ text={turn.text || turn.q} steer={turn.steer} /></div>
             </div>
           ) : (
-            <CollapsibleQ text={turn.text || turn.q} />
+            <CollapsibleQ text={turn.text || turn.q} steer={turn.steer} />
           )}
         </div>
       );

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, AlertTriangle, Square, RotateCcw, Ban, Sparkles, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, AlertTriangle, Square, RotateCcw, Ban, Sparkles, Loader2, Info, BookOpen, ListChecks } from 'lucide-react';
+import { noticePreview, type SystemNotice } from '../lib/systemNotice';
 import { useTranslation } from 'react-i18next';
 import type { EnvironmentContextData } from '../types';
 
@@ -167,6 +168,53 @@ export function OutcomeNoticeCard({
           <RotateCcw className={`h-3 w-3 ${retrying ? 'animate-spin' : ''}`} />
           {retrying ? t('retrying', { defaultValue: '重试中…' }) : t('retry', { defaultValue: '重试' })}
         </button>
+      ) : null}
+    </div>
+  );
+}
+
+// SystemNoticeGroup renders one or more harness notices as a single quiet
+// timeline line: an icon, a one-line preview of the first notice and a ×N
+// count. Click to unfold every notice in full. Task-completion notices get a
+// distinct icon so "a background job finished" is scannable without opening.
+export function SystemNoticeGroup({ notices }: { notices: SystemNotice[] }) {
+  const { t } = useTranslation('chat');
+  const [open, setOpen] = useState(false);
+  if (!notices.length) return null;
+  const first = notices[0];
+  const allTasks = notices.every((n) => n.kind === 'task');
+  const allContext = notices.every((n) => n.kind === 'context');
+  const Icon = allTasks ? ListChecks : allContext ? BookOpen : Info;
+  const label = allTasks
+    ? t('noticeTask', { defaultValue: '后台任务' })
+    : allContext
+      ? t('noticeContext', { defaultValue: '注入上下文' })
+      : t('noticeSystem', { defaultValue: '系统提示' });
+  const preview = allTasks ? (first.text || first.title || '') : noticePreview(first);
+  return (
+    <div data-id="current-history-system-notice" data-notice-kind={allTasks ? 'task' : allContext ? 'context' : 'notice'} data-notice-count={notices.length} className="my-1.5 pl-[38px]">
+      <button
+        type="button"
+        data-id="current-history-system-notice-toggle"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="group flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11px] text-zinc-600 transition-colors hover:bg-white/[0.035] hover:text-zinc-400"
+      >
+        <Icon className={`h-3 w-3 shrink-0 ${allTasks ? 'text-emerald-500/70' : ''}`} />
+        <span data-id="current-history-system-notice-label" className="shrink-0 font-medium">{label}</span>
+        {notices.length > 1 ? <span data-id="current-history-system-notice-count" className="shrink-0 rounded-full bg-white/[0.05] px-1.5 text-[10px] tabular-nums">×{notices.length}</span> : null}
+        {preview ? <span data-id="current-history-system-notice-preview" className="min-w-0 flex-1 truncate text-zinc-600/90">{preview}</span> : <span className="flex-1" />}
+        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />}
+      </button>
+      {open ? (
+        <div data-id="current-history-system-notice-body" className="mt-1 space-y-1.5">
+          {notices.map((notice, index) => (
+            <div key={index} data-id={`current-history-system-notice-item-${index}`} data-notice-kind={notice.kind} className="rounded-md border border-white/[0.05] bg-white/[0.02] px-2.5 py-1.5 text-[11px] leading-relaxed text-zinc-500">
+              {notice.kind === 'task' && notice.title ? <div className="mb-0.5 font-mono text-[10px] text-zinc-600">{notice.title}</div> : null}
+              <div className="whitespace-pre-wrap break-words">{notice.kind === 'task' ? notice.raw : notice.text}</div>
+            </div>
+          ))}
+        </div>
       ) : null}
     </div>
   );

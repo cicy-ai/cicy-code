@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useContext, useState } from 'react';
-import { User, Copy, Check, ChevronUp } from 'lucide-react';
+import { User, Copy, Check, ChevronUp, CornerDownRight } from 'lucide-react';
 import { QAlignContext } from '../contexts';
 import { cn } from '../../../../lib/utils';
 import { splitLeadingHarnessBlocks, parseEnvironmentContext } from '../lib/normalizeItem';
 import { MarkdownBlock } from './Markdown';
-import { SystemNoticeCard, EnvironmentContextCard } from './notices';
+import { SystemNoticeGroup, EnvironmentContextCard } from './notices';
+import { classifySystemNotice } from '../lib/systemNotice';
 
 // 用户轮的左侧头像(居左布局时用):一个用户 icon 的圆形头像,与 assistant 头像同尺寸/
 // 顶对齐,使问答两列头像对齐成一条线。
@@ -19,7 +20,7 @@ export function UserTurnAvatar({ className }: { className?: string } = {}) {
   );
 }
 
-export function CollapsibleQ({ text, bare = false, open = false, onSetOpen }: { text: string; bare?: boolean; open?: boolean; onSetOpen?: (v: boolean) => void }) {
+export function CollapsibleQ({ text, bare = false, open = false, onSetOpen, steer = false }: { text: string; bare?: boolean; open?: boolean; onSetOpen?: (v: boolean) => void; steer?: boolean }) {
   const qAlign = useContext(QAlignContext);
   const qJustify = qAlign === 'left' ? 'justify-start' : 'justify-end';
   const qTail = qAlign === 'left' ? 'rounded-bl-sm' : 'rounded-br-sm';
@@ -47,10 +48,20 @@ export function CollapsibleQ({ text, bare = false, open = false, onSetOpen }: { 
     if (bare) {
       return afterHarness ? <CollapsibleQ text={afterHarness} bare /> : null;
     }
+    // Classify the peeled blocks the same way role:system items are: noise is
+    // dropped, a mid-turn user message becomes its own bubble, the rest folds
+    // into one quiet notice line above the real question.
+    const notices = harnessBlocks.map((block) => classifySystemNotice(block)).filter(Boolean) as ReturnType<typeof classifySystemNotice>[];
+    const steers = notices.filter((n) => n && n.kind === 'steer');
+    const folded = notices.filter((n) => n && n.kind !== 'steer');
+    if (!folded.length && !steers.length) {
+      return afterHarness ? <CollapsibleQ text={afterHarness} steer={steer} /> : null;
+    }
     return (
       <div data-id="current-history-view-q-harness" className="mb-2.5 flex flex-col gap-1.5">
-        <SystemNoticeCard text={harnessBlocks.join('\n\n')} />
-        {afterHarness ? <CollapsibleQ text={afterHarness} /> : null}
+        {folded.length ? <div className="-ml-[38px]"><SystemNoticeGroup notices={folded as any} /></div> : null}
+        {steers.map((n, i) => <CollapsibleQ key={i} text={n!.text} steer />)}
+        {afterHarness ? <CollapsibleQ text={afterHarness} steer={steer} /> : null}
       </div>
     );
   }
@@ -107,11 +118,20 @@ export function CollapsibleQ({ text, bare = false, open = false, onSetOpen }: { 
               bubble never bubbles up to a parent handler (which was toggling history). */}
           <div
             data-id="current-history-view-q-body"
+            data-steer={steer ? 'true' : undefined}
             onClick={(e) => { e.stopPropagation(); if (!open && onSetOpen) onSetOpen(true); }}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
             className={`max-w-[95%] select-text overflow-hidden rounded-2xl ${qTail} border border-[var(--chat-question-border)] bg-[var(--chat-question-bg)] px-3.5 py-2 text-base leading-relaxed text-zinc-200 shadow-[0_8px_24px_rgba(0,0,0,0.10)]`}
           >
+            {steer ? (
+              // A message the user sent while the agent was still working —
+              // tag it so the reader knows it landed mid-turn, not as a new Q.
+              <div data-id="current-history-view-q-steer-tag" className="mb-1 inline-flex items-center gap-1 rounded-full bg-amber-400/10 px-1.5 py-px text-[10px] font-medium text-amber-300/90">
+                <CornerDownRight className="h-3 w-3" />
+                插话
+              </div>
+            ) : null}
             <MarkdownBlock text={String(text || '').replace(/^\-\n/, '')} />
           </div>
           {qAlign === 'left' && qControls}

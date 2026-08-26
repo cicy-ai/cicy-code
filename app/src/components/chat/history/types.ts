@@ -1,6 +1,8 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
+import type { SystemNotice } from './lib/systemNotice';
+
 export type HistoryTurn = {
   history_id?: number;
   conversation_id?: string;
@@ -25,6 +27,12 @@ export type HistoryTurn = {
   outcomeDetail?: string;
   // Client-only optimistic-send placeholder (never comes from the backend).
   _optimistic?: boolean;
+  // Render-only (prepareRenderTurns): parsed harness notices carried by a
+  // role:system turn — several source items may coalesce into one.
+  notices?: SystemNotice[];
+  // Render-only: a user message that arrived mid-turn (steer), extracted from a
+  // harness notice. Rendered as a user bubble with a small "插话" tag.
+  steer?: boolean;
 };
 
 export type RawHistoryItem = Record<string, any>;
