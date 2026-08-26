@@ -49,7 +49,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.561"
+const version = "2.3.564"
 
 // resolvePort returns the effective API port: --port flag > PORT env > 8008.
 // Single source of truth so the value pinned into PORT (before worker boot) and
@@ -326,6 +326,7 @@ Options:
 	http.HandleFunc("/api/proxy/lifecycle", authM(handleProxyLifecycle))
 	http.HandleFunc("/api/proxy/bind-mode", authM(handleProxyBindMode))
 	http.HandleFunc("/api/proxy/export", authM(handleProxyExport))
+	http.HandleFunc("/api/proxy/shell-global", authM(handleProxyShellGlobal))
 	http.HandleFunc("/api/proxy/exit-info", authM(handleProxyExitInfo))
 	http.HandleFunc("/api/proxy/select", authM(handleProxySelect))
 	http.HandleFunc("/api/proxy/node-config", authM(handleProxyNodeConfig))
@@ -612,6 +613,7 @@ Options:
 	http.HandleFunc("/api/settings/email", wa(handleEmailConfig))
 	http.HandleFunc("/api/settings/token", wa(handleTokenShow))
 	http.HandleFunc("/api/settings/token/refresh", wa(handleTokenRefresh))
+	http.HandleFunc("/api/settings/codex-auth", wa(handleCodexAuthImport))
 
 	// AI providers (global.json)
 	http.HandleFunc("/api/providers", wa(handleProviders))

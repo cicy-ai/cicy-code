@@ -1354,7 +1354,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
     const card = await waitFor(() => {
       const node = document.querySelector('[data-id="project-agent-card-w-101"]');
-      if (!node) throw new Error('agent card did not render');
+      if (!node) throw new Error('project agent card did not render');
       return node as HTMLElement;
     });
     fireEvent.click(card);

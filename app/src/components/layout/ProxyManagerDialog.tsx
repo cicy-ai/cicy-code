@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useState } from 'react';
-import { X, RefreshCw, Play, Square, RotateCw, RefreshCcw, Sparkles, Globe, Copy, Check, AlertTriangle, ChevronDown } from 'lucide-react';
+import { X, RefreshCw, Play, Square, RotateCw, RefreshCcw, Sparkles, Globe, Copy, Check, AlertTriangle, ChevronDown, Terminal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import Select from '../ui/Select';
@@ -107,6 +107,10 @@ export function ProxyManagerDialog({
   const [exportHost, setExportHost] = useState<string>('');
   const [exportWarning, setExportWarning] = useState<string>('');
   const [exportCopied, setExportCopied] = useState(false);
+  const [shellGlobalEnabled, setShellGlobalEnabled] = useState<boolean | null>(null);
+  const [shellGlobalPending, setShellGlobalPending] = useState(false);
+  const [shellGlobalResult, setShellGlobalResult] = useState<'' | 'enabled' | 'disabled' | 'failed'>('');
+  const [shellGlobalError, setShellGlobalError] = useState('');
 
   const loadStatus = useCallback(async () => {
     try {
@@ -159,6 +163,16 @@ export function ProxyManagerDialog({
     }
   }, []);
 
+  const loadShellGlobal = useCallback(async () => {
+    try {
+      const resp = await apiService.getProxyShellGlobal();
+      const data = (resp?.data || {}) as { enabled?: boolean };
+      setShellGlobalEnabled(!!data.enabled);
+    } catch {
+      setShellGlobalEnabled(null);
+    }
+  }, []);
+
   const loadExport = useCallback(async (mode: 'local' | 'lan' | 'public') => {
     setExportLoading(true);
     setExportCopied(false);
@@ -189,10 +203,13 @@ export function ProxyManagerDialog({
     loadStatus();
     loadList();
     loadBindMode();
+    loadShellGlobal();
     setResults({});
     setLifecycleOutput('');
     setExportOpen(false);
-  }, [open, loadList, loadStatus, loadBindMode]);
+    setShellGlobalResult('');
+    setShellGlobalError('');
+  }, [open, loadList, loadStatus, loadBindMode, loadShellGlobal]);
 
   useEffect(() => {
     if (!open || !exportOpen) return;
@@ -222,6 +239,26 @@ export function ProxyManagerDialog({
       // ignore — older browsers without clipboard permission
     }
   }, [exportScript]);
+
+  const toggleShellGlobal = useCallback(async () => {
+    if (shellGlobalEnabled === null || shellGlobalPending) return;
+    const next = !shellGlobalEnabled;
+    setShellGlobalPending(true);
+    setShellGlobalResult('');
+    setShellGlobalError('');
+    try {
+      const resp = await apiService.setProxyShellGlobal(next);
+      const data = (resp?.data || {}) as { enabled?: boolean };
+      const enabled = typeof data.enabled === 'boolean' ? data.enabled : next;
+      setShellGlobalEnabled(enabled);
+      setShellGlobalResult(enabled ? 'enabled' : 'disabled');
+    } catch (e: any) {
+      setShellGlobalResult('failed');
+      setShellGlobalError(String(e?.response?.data?.detail || e?.message || e));
+    } finally {
+      setShellGlobalPending(false);
+    }
+  }, [shellGlobalEnabled, shellGlobalPending]);
 
   const runLifecycle = useCallback(async (action: LifecycleAction) => {
     setPendingAction(action);
@@ -549,11 +586,43 @@ export function ProxyManagerDialog({
               </span>
               {allowLanPending && <RefreshCw size={10} className="animate-spin text-zinc-500" />}
             </label>
+            {shellGlobalResult && (
+              <span
+                data-id="proxy-manager-drawer-shell-global-result"
+                className={shellGlobalResult === 'failed' ? 'text-red-400' : 'text-emerald-400'}
+                title={shellGlobalError}
+              >
+                {shellGlobalResult === 'enabled'
+                  ? t('proxyManagerShellGlobalEnabled')
+                  : shellGlobalResult === 'disabled'
+                    ? t('proxyManagerShellGlobalDisabled')
+                    : t('proxyManagerShellGlobalFailed')}
+              </span>
+            )}
+            <button
+              type="button"
+              data-id="proxy-manager-drawer-shell-global"
+              onClick={toggleShellGlobal}
+              disabled={shellGlobalEnabled === null || shellGlobalPending}
+              className={`ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 transition-colors disabled:opacity-40 ${
+                shellGlobalEnabled
+                  ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20'
+                  : 'border-white/[0.08] bg-white/[0.03] text-zinc-200 hover:bg-white/[0.07]'
+              }`}
+              title={t('proxyManagerShellGlobalHint')}
+            >
+              {shellGlobalPending ? <RefreshCw size={11} className="animate-spin" /> : <Terminal size={11} />}
+              {shellGlobalPending
+                ? t('proxyManagerShellGlobalApplying')
+                : shellGlobalEnabled
+                  ? t('proxyManagerShellGlobalDisable')
+                  : t('proxyManagerShellGlobalEnable')}
+            </button>
             <button
               type="button"
               data-id="proxy-manager-drawer-show-export"
               onClick={() => setExportOpen((v) => !v)}
-              className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-zinc-200 transition-colors hover:bg-white/[0.07]"
+              className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-zinc-200 transition-colors hover:bg-white/[0.07]"
             >
               <Globe size={11} />
               {exportOpen ? t('proxyManagerExportHide') : t('proxyManagerExportShow')}
