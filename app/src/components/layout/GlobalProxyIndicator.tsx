@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { setBottomOverlayTop } from '../../lib/bottomOverlay';
 import { Globe, Loader2, RefreshCw, Zap, SlidersHorizontal } from 'lucide-react';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
@@ -100,11 +101,31 @@ function ExitRow({ group, highlight }: { group: ExitGroup; highlight?: boolean }
 
 export default function GlobalProxyIndicator({ placement = 'below', onManageNodes }: { placement?: 'below' | 'right' | 'up'; onManageNodes?: () => void }) {
   const [open, setOpen] = useState(false);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
   const [exitLoading, setExitLoading] = useState(false);
   const [exitInfo, setExitInfo] = useState<ExitInfo | null>(null);
   const [exitError, setExitError] = useState('');
   const [group, setGroup] = useState<ProxyGroup | null>(null);
   const [switching, setSwitching] = useState('');
+
+  // 浮层是向上展开的,会伸进画布右下角压住 ProjectsPanel 的 FAB。把顶边坐标广播
+  // 出去,让 FAB 上移让位(见 lib/bottomOverlay.ts —— 要的是让位,不是互相盖)。
+  // 内容异步填充(出口 IP、节点列表)会改变高度,所以用 ResizeObserver 跟着更新。
+  useEffect(() => {
+    if (!open) { setBottomOverlayTop('global-proxy', null); return; }
+    const el = popoverRef.current;
+    if (!el) return;
+    const publish = () => setBottomOverlayTop('global-proxy', el.getBoundingClientRect().top);
+    publish();
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    window.addEventListener('resize', publish);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', publish);
+      setBottomOverlayTop('global-proxy', null);
+    };
+  }, [open]);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const loadExit = useCallback(async () => {
@@ -224,6 +245,7 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
       {open ? (
         <div
           data-id="global-proxy-popover"
+          ref={popoverRef}
           className={`absolute z-[180] min-w-[280px] max-w-[320px] overflow-hidden rounded-xl border border-white/[0.08] bg-[#111113]/98 p-1.5 shadow-2xl backdrop-blur-xl ${
             placement === 'right'
               ? 'bottom-0 left-[calc(100%+10px)]'

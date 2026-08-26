@@ -432,6 +432,66 @@ describe('<ProjectsPanel /> project view cache', () => {
     expect(document.querySelector('[data-id="project-canvas-node-w-101"]')).toHaveStyle({ left: '40px', top: '40px' });
     expect(document.querySelector('[data-id="project-agent-card-w-101"]')).toHaveStyle({ width: '300px', height: '320px' });
   });
+
+  // A fork joins the project through the backend with the seed position
+  // (20,20) and the server may still hold the seed position for EVERY card
+  // (positions were only ever resolved into the local cache). The new card
+  // must be placed against the cards as painted from the cache — not against
+  // the server's stale coordinates, which put it on top of an existing card.
+  it('places a card without a cached layout beside the painted cards instead of on top of them', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0'], pane_count: 2 }] },
+    });
+    api.getGroup.mockResolvedValue({ data: { panes: [
+      { pane_id: 'w-101:main.0', pos_x: 20, pos_y: 20, width: 600, height: 320, z_index: 1 },
+      { pane_id: 'w-102:main.0', pos_x: 20, pos_y: 20, width: 600, height: 320, z_index: 2 },
+    ] } });
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({
+      zoom: 1,
+      pan: { x: 60, y: 60 },
+      layouts: { 'w-101': { x: 40, y: 40, z: 1, width: 600, height: 320 } },
+    }));
+
+    render(<ProjectsPanel agents={[
+      { paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' },
+      { paneId: 'w-102:main.0', title: 'Fork of 架构师', agentType: 'claude' },
+    ]} onOpenAgent={vi.fn()} />);
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-node-w-102"]')).toHaveStyle({ left: '680px', top: '40px' }));
+    expect(document.querySelector('[data-id="project-canvas-node-w-101"]')).toHaveStyle({ left: '40px', top: '40px' });
+    // The resolved slot is written back so the server converges on what is shown.
+    await waitFor(() => expect(api.updateGroupPaneLayout).toHaveBeenCalledWith(1, 'w-102:main.0', expect.objectContaining({ pos_x: 680, pos_y: 40 })));
+    const cached = JSON.parse(localStorage.getItem('cicy_project_view:default') || '{}');
+    expect(cached.layouts['w-102']).toMatchObject({ x: 680, y: 40 });
+  });
+
+  it('never stacks cards that have no stored layout on top of each other', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0', 'w-103:main.0'], pane_count: 3 }] },
+    });
+    api.getGroup.mockReturnValue(new Promise(() => {}));
+
+    render(<ProjectsPanel agents={[
+      { paneId: 'w-101:main.0', title: 'A', agentType: 'claude' },
+      { paneId: 'w-102:main.0', title: 'B', agentType: 'codex' },
+      { paneId: 'w-103:main.0', title: 'C', agentType: 'claude' },
+    ]} onOpenAgent={vi.fn()} />);
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-node-w-103"]')).toBeInTheDocument());
+    const rects = ['w-101', 'w-102', 'w-103'].map((id) => {
+      const node = document.querySelector(`[data-id="project-canvas-node-${id}"]`) as HTMLElement;
+      const card = document.querySelector(`[data-id="project-agent-card-${id}"]`) as HTMLElement;
+      return { x: parseFloat(node.style.left), y: parseFloat(node.style.top), width: parseFloat(card.style.width), height: parseFloat(card.style.height) };
+    });
+    for (let i = 0; i < rects.length; i += 1) {
+      for (let j = i + 1; j < rects.length; j += 1) {
+        const a = rects[i];
+        const b = rects[j];
+        const overlap = a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+        expect(overlap, `${i} overlaps ${j}`).toBe(false);
+      }
+    }
+  });
 });
 
 async function openCreateModal() {
@@ -1292,6 +1352,12 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     const liveThinking = { 'w-101:main.0': { status: 'thinking', updated_at: '1' } };
     const first = render(<ProjectsPanel agents={[thinkingAgent]} statuses={liveThinking} onOpenAgent={vi.fn()} />);
 
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(card);
     const input = await waitFor(() => {
       const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
       if (!node) throw new Error('project agent prompt did not render');
@@ -1314,6 +1380,37 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
       { submit: true, agentType: 'codex', fromComposer: true },
     ));
   });
+
+  // poll_data carries no entry for an agent that has never produced a reply.
+  // "No status" used to mean "hold the queue forever"; after the mount grace
+  // period it must fall back to the agent's own (idle) status and send.
+  it('releases a restored queue for an agent that has no live status entry', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+    localStorage.setItem('cicy_project_agent_queue:v1', JSON.stringify({
+      'w-101': [{ id: 'queued-1', display: '重启后发送', payload: '重启后发送', attachments: [] }],
+    }));
+    const realNow = Date.now;
+    const mountedAt = realNow();
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => realNow());
+    try {
+      render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'idle' }]} statuses={{}} onOpenAgent={vi.fn()} />);
+      await waitFor(() => expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).toHaveTextContent('重启后发送'));
+      // Inside the grace window nothing is sent (reload gap protection).
+      expect(agentSend.sendToAgent).not.toHaveBeenCalled();
+      nowSpy.mockImplementation(() => mountedAt + 10_000);
+      await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledWith(
+        'w-101:main.0',
+        '重启后发送',
+        { submit: true, agentType: 'codex', fromComposer: true },
+      ), { timeout: 6000 });
+      expect(JSON.parse(localStorage.getItem('cicy_project_agent_queue:v1') || '{}')['w-101']).toEqual([]);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  }, 10_000);
 
   it('keeps a queued image visible when another text message is queued', async () => {
     api.listGroups.mockResolvedValue({

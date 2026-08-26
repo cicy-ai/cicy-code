@@ -10,6 +10,7 @@ import { sendToAgent } from '../../services/agentSend';
 import { clearAgentSendTarget, getAgentSendTarget, setAgentSendTarget } from '../../services/agentSendTarget';
 import { cn, copyToClipboard } from '../../lib/utils';
 import { normalizeAgentType } from '../../lib/agentType';
+import { getBottomOverlayTop, subscribeBottomOverlay } from '../../lib/bottomOverlay';
 import type { AgentLiveMetrics } from '../../lib/agentMetrics';
 import { metricsFromCurrentReply } from '../../lib/agentMetrics';
 import { ModelTag } from '../../lib/modelTag';
@@ -100,7 +101,32 @@ const PROJECT_LIST_COLLAPSED_KEY = 'cicy_projects_list_collapsed';
 type ProjectAgentBodyTab = 'history' | 'terminal' | 'role';
 const DEFAULT_PROJECT_AGENT_WIDTH = 600;
 const DEFAULT_PROJECT_AGENT_HEIGHT = 320;
-const PROJECT_AGENT_COLUMN_STEP = DEFAULT_PROJECT_AGENT_WIDTH + 40;
+const QUEUE_STATUS_GRACE_MS = 3000;
+const PROJECT_AGENT_GAP = 40;
+const PROJECT_AGENT_ORIGIN = 40;
+const projectLayoutsOverlap = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) =>
+  a.x < b.x + b.width + 20 && a.x + a.width + 20 > b.x && a.y < b.y + b.height + 20 && a.y + a.height + 20 > b.y;
+// First free slot for a new card, computed against the cards as they are
+// ACTUALLY rendered. Candidates are the origin plus "right of" / "below" every
+// occupied card; the topmost-then-leftmost non-overlapping one wins. Every code
+// path that places a card (server hydration, add-existing, fork, render
+// fallback) must go through this so a new card can never land on top of one
+// whose position only lives in the local cache.
+const placeProjectAgentLayout = (occupied: ProjectAgentLayout[], width = DEFAULT_PROJECT_AGENT_WIDTH, height = DEFAULT_PROJECT_AGENT_HEIGHT): { x: number; y: number } => {
+  const candidates: Array<{ x: number; y: number }> = [{ x: PROJECT_AGENT_ORIGIN, y: PROJECT_AGENT_ORIGIN }];
+  for (const item of occupied) {
+    candidates.push({ x: item.x + item.width + PROJECT_AGENT_GAP, y: item.y });
+    candidates.push({ x: item.x, y: item.y + item.height + PROJECT_AGENT_GAP });
+    candidates.push({ x: PROJECT_AGENT_ORIGIN, y: item.y + item.height + PROJECT_AGENT_GAP });
+  }
+  candidates.sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const candidate of candidates) {
+    const probe = { ...candidate, width, height };
+    if (!occupied.some((item) => projectLayoutsOverlap(probe, item))) return candidate;
+  }
+  const bottom = Math.max(PROJECT_AGENT_ORIGIN, ...occupied.map((item) => item.y + item.height + PROJECT_AGENT_GAP));
+  return { x: PROJECT_AGENT_ORIGIN, y: bottom };
+};
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
 const projectAgentIdentity = (agent: ProjectAgent) => agent.remote
   ? `remote:${String(agent.instanceId || agent.instanceTeam || '')}:${String(agent.remoteAgentId || shortPaneId(agent.paneId))}`
@@ -236,7 +262,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onDelete, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRenameTitle, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onDelete, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   terminalOpen?: boolean;
@@ -248,6 +274,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
   width: number;
   height: number;
   onSelect: () => void;
+  onRenameTitle?: (title: string) => Promise<void> | void;
   onRemove: () => void;
   onMoveProject: (projectId: number | string) => void;
   onAddProject: (projectId: number | string) => void;
@@ -268,10 +295,48 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
   const [projectSubmenu, setProjectSubmenu] = useState<'move' | 'add' | null>(null);
   const [activeBodyTab, setActiveBodyTab] = useState<ProjectAgentBodyTab>(() => readProjectAgentBodyTab(agent));
   const [identityCopied, setIdentityCopied] = useState(false);
+  const [titleEditing, setTitleEditing] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const status = String(agent.remote && agent.instanceOnline === false ? 'offline' : agent.status || 'idle').toLowerCase();
   const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
+  // 标题就地编辑。用 contentEditable 而不是换成 <input>:这一行是 `items-baseline`
+  // 的 flex,input 的基线算法和 h3 不同,一进编辑态整行(agentType + model 槽)就会
+  // 错位。contentEditable 让盒子、字号、行高、基线全部原样不动。
+  // 编辑期间不改 React 侧的 title,渲染出来的字符串没变 → React 不会重写这个文本
+  // 节点,轮询触发的父级重渲染也不会把光标顶掉。
+  const titleText = agent.title || agent.paneId;
+  const titleEditable = !agent.remote && !!onRenameTitle;
+  const startTitleEdit = () => {
+    if (!titleEditable || titleEditing) return;
+    setTitleEditing(true);
+    window.requestAnimationFrame(() => {
+      const el = titleRef.current;
+      if (!el) return;
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+  };
+  const resetTitleText = () => {
+    if (titleRef.current) titleRef.current.textContent = titleText;
+  };
+  const commitTitleEdit = async () => {
+    if (!titleEditing) return;
+    setTitleEditing(false);
+    const next = String(titleRef.current?.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!next || next === titleText) { resetTitleText(); return; }
+    try {
+      await onRenameTitle?.(next);
+    } catch {
+      resetTitleText(); // 保存失败就退回原标题,不留一个假的新名字
+    }
+  };
+
   const identity = agent.remote ? agent.paneId : (teamId ? `${teamId}.${shortPaneId(agent.paneId)}` : shortPaneId(agent.paneId));
   const hasAgentActions = Boolean(onRestart || onUpdate || onBindWechat || onBindFeishu || onFork);
 
@@ -325,11 +390,42 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
         selected ? 'border-blue-500' : 'border-white/[0.08]',
       )}
     >
-      <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-visible px-5 pb-4 pt-5">
+      <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-visible px-5 pb-4 pt-3">
       <div data-id="project-agent-card-header" className="flex items-start gap-3">
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
-            <h3 data-id="project-agent-card-title" className="truncate text-[18px] font-semibold tracking-[-0.01em] text-zinc-100">{agent.title || agent.paneId}</h3>
+            <h3
+              data-id="project-agent-card-title"
+              ref={titleRef}
+              contentEditable={titleEditing}
+              suppressContentEditableWarning
+              spellCheck={false}
+              title={titleEditable && !titleEditing ? t('projectAgentRenameHint', { defaultValue: '双击重命名' }) : undefined}
+              onDoubleClick={(event) => { if (!titleEditable) return; event.stopPropagation(); startTitleEdit(); }}
+              onMouseDown={(event) => { if (titleEditable) event.stopPropagation(); }}
+              onClick={(event) => { if (titleEditable) event.stopPropagation(); }}
+              onBlur={() => { void commitTitleEdit(); }}
+              onKeyDown={(event) => {
+                if (!titleEditing) return;
+                event.stopPropagation(); // 别让卡片/画布的快捷键接管
+                if (event.key === 'Enter') { event.preventDefault(); titleRef.current?.blur(); }
+                if (event.key === 'Escape') { event.preventDefault(); resetTitleText(); setTitleEditing(false); }
+              }}
+              onPaste={(event) => {
+                if (!titleEditing) return;
+                event.preventDefault(); // 标题只要纯文本,别把富文本/换行贴进来
+                const text = event.clipboardData.getData('text/plain').replace(/\s+/g, ' ');
+                document.execCommand('insertText', false, text);
+              }}
+              className={cn(
+                'text-[18px] font-semibold tracking-[-0.01em] text-zinc-100',
+                // 编辑态只动 overflow 和一圈 ring(box-shadow,不占布局),
+                // 字号/字重/行高/内外边距一律不变 —— 否则同一行的元素会错位。
+                titleEditing
+                  ? 'cursor-text overflow-x-auto whitespace-nowrap rounded-[3px] outline-none ring-1 ring-inset ring-blue-500/60'
+                  : cn('truncate', titleEditable && 'cursor-text'),
+              )}
+            >{titleText}</h3>
             {agent.agentType ? <span data-id="project-agent-card-agent-type" className="shrink-0 font-mono text-[12px] text-zinc-500">{agent.agentType}</span> : null}
             <span
               data-id="project-agent-card-model-slot"
@@ -427,7 +523,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
         </div>
       </div>
 
-      <div data-id="project-agent-card-metrics" className="mt-2.5 flex h-8 min-w-0 items-center gap-2 pb-2.5 font-mono text-[13px] text-zinc-500">
+      <div data-id="project-agent-card-metrics" className="mt-0.5 flex h-6 min-w-0 items-center gap-2 pb-0.5 font-mono text-[12px] text-zinc-500">
         <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
         <button
           type="button"
@@ -466,7 +562,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
       <div
         data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`}
         role="tablist"
-        className="flex h-9 shrink-0 items-end gap-5 border-b border-white/[0.08]"
+        className="mt-0.5 flex h-8 shrink-0 items-end gap-5 border-b border-white/[0.08]"
       >
         {([
           ['history', '会话'],
@@ -483,7 +579,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
               disabled={unavailable}
               data-id={`project-agent-card-tab-${tab}-${shortPaneId(agent.paneId)}`}
               onClick={(event) => { event.stopPropagation(); selectBodyTab(tab); }}
-              className={cn('relative h-9 text-[12px] font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full', activeBodyTab === tab ? 'text-zinc-100 after:bg-blue-500' : 'text-zinc-500 after:bg-transparent hover:text-zinc-300', unavailable && 'cursor-not-allowed opacity-30 hover:text-zinc-500')}
+              className={cn('relative h-8 text-[12px] font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full', activeBodyTab === tab ? 'text-zinc-100 after:bg-blue-500' : 'text-zinc-500 after:bg-transparent hover:text-zinc-300', unavailable && 'cursor-not-allowed opacity-30 hover:text-zinc-500')}
             >
               {label}
             </button>
@@ -507,7 +603,20 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
           />
         </div>
       ) : activeBodyTab === 'terminal' ? (
-        <div data-id={`project-agent-card-terminal-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} className="-mx-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-lg bg-black">
+        <div
+          data-id={`project-agent-card-terminal-body-${shortPaneId(agent.paneId)}`}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            // Clicking into the terminal must take the keyboard away from the
+            // prompt footer, or its ↑/↓ history navigation eats the keys meant
+            // for the CLI (e.g. picking an entry in `/model`). xterm focuses its
+            // own textarea on click; blur the prompt first so there is no window
+            // where both think they own the keys.
+            const active = document.activeElement as HTMLElement | null;
+            if (active && /^project-agent-prompt-input-/.test(active.getAttribute('data-id') || '')) active.blur();
+          }}
+          className="-mx-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-lg bg-black"
+        >
           {terminalOpen && agent.ttydSrc ? <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" /> : (
             <div data-id={`project-agent-card-terminal-loading-${shortPaneId(agent.paneId)}`} className="grid h-full place-items-center text-[11px] text-zinc-600"><Loader2 className="h-4 w-4 animate-spin" /></div>
           )}
@@ -546,6 +655,10 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
     </article>
   );
 }
+
+// FAB 的原始位置(Tailwind `bottom-16` = 4rem)和让位时与浮层之间留的间距。
+const FAB_BASE_BOTTOM = 64;
+const FAB_OVERLAY_GAP = 12;
 
 export default function ProjectsPanel({ agents, statuses = {}, topRightControls, footerControls, shellPanel, dockOpen = false, activeAgentId = '', masterPaneId = 'w-1001', onActiveAgentChange = () => {}, onOpenAgent, onCreateAgent = () => {}, onOpenGuidance: _onOpenGuidance = () => {}, onOpenHistory: _onOpenHistory = () => {}, onActiveProjectChange = () => {}, onAgentsRefresh = () => {}, onOpenAgentFile = () => {} }: {
   agents: ProjectAgent[];
@@ -598,6 +711,26 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   };
   const [addOpen, setAddOpen] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
+  // 状态栏的浮层向上展开时会盖到 FAB 上。订阅它的顶边坐标,把 FAB 顶上去让位。
+  // 用视口坐标比较,不假设 FAB 和浮层的定位父级有任何关系(见 lib/bottomOverlay.ts)。
+  const fabRef = useRef<HTMLDivElement | null>(null);
+  const fabLiftRef = useRef(0);
+  const [fabLift, setFabLift] = useState(0);
+  const [overlayTop, setOverlayTop] = useState<number | null>(null);
+  useEffect(() => subscribeBottomOverlay(() => setOverlayTop(getBottomOverlayTop())), []);
+  useLayoutEffect(() => {
+    const el = fabRef.current;
+    if (!el) return;
+    if (overlayTop == null) { fabLiftRef.current = 0; setFabLift(0); return; }
+    // 原位底边从定位父级算(父级底边 - bottom-16),不要读 FAB 自己的 rect:bottom 带
+    // 200ms 过渡,浮层内容变高时会连发多次 overlayTop,读到过渡中的 rect 再加回旧 lift
+    // 会越算越高(首次打开代理浮层 FAB 直接飞到画布中间)。
+    const parent = el.offsetParent as HTMLElement | null;
+    const naturalBottom = (parent ? parent.getBoundingClientRect().bottom : el.getBoundingClientRect().bottom + fabLiftRef.current) - FAB_BASE_BOTTOM;
+    const lift = Math.max(0, Math.round(naturalBottom - (overlayTop - FAB_OVERLAY_GAP)));
+    fabLiftRef.current = lift;
+    setFabLift(lift);
+  }, [overlayTop, fabOpen]);
   const [addSearch, setAddSearch] = useState('');
   const [addAgentType, setAddAgentType] = useState('all');
   const [addInstanceId, setAddInstanceId] = useState('local');
@@ -638,6 +771,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const promptHistoryIndexRef = useRef<Record<string, number | null>>({});
   const promptHistoryDraftRef = useRef<Record<string, string>>({});
   const cancelReleaseTimersRef = useRef<Record<string, number>>({});
+  const mountedAtRef = useRef(Date.now());
+  const queueGraceTimerRef = useRef<number | undefined>(undefined);
+  const [queueFlushTick, setQueueFlushTick] = useState(0);
 
   useEffect(() => {
     if (addResultsRef.current) addResultsRef.current.scrollTop = 0;
@@ -657,6 +793,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
   useEffect(() => () => {
     Object.values(cancelReleaseTimersRef.current).forEach((timer) => window.clearTimeout(timer));
+    window.clearTimeout(queueGraceTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -832,6 +969,29 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   });
   const paneMembershipKey = selectedProject.pane_ids.map(shortPaneId).sort().join('|');
   const visibleAgentKey = visibleAgents.map((agent) => shortPaneId(agent.paneId)).sort().join('|');
+  // Layout for every visible card. Cards without a stored layout (a fork that
+  // just joined, an agent whose server row hasn't hydrated yet) get a free slot
+  // next to the cards that are already on screen — never an index-based grid,
+  // which ignored existing positions and used a row step shorter than the card.
+  const resolvedLayouts = useMemo(() => {
+    const resolved: Record<string, ProjectAgentLayout> = {};
+    const occupied: ProjectAgentLayout[] = [];
+    for (const agent of visibleAgents) {
+      const id = shortPaneId(agent.paneId);
+      if (agentLayouts[id]) {
+        resolved[id] = agentLayouts[id];
+        occupied.push(agentLayouts[id]);
+      }
+    }
+    visibleAgents.forEach((agent, index) => {
+      const id = shortPaneId(agent.paneId);
+      if (resolved[id]) return;
+      const layout = { ...placeProjectAgentLayout(occupied), z: index + 1, width: DEFAULT_PROJECT_AGENT_WIDTH, height: DEFAULT_PROJECT_AGENT_HEIGHT };
+      resolved[id] = layout;
+      occupied.push(layout);
+    });
+    return resolved;
+  }, [agentLayouts, visibleAgentKey]);
   useEffect(() => {
     const receiveCloudReply = (event: Event) => {
       const detail = (event as CustomEvent)?.detail || {};
@@ -890,13 +1050,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       const canvas = canvasRef.current;
       if (!canvas) return;
       visibilityCheckedKeyRef.current = checkKey;
-      const layouts = visibleAgents.map((agent, index) => agentLayouts[shortPaneId(agent.paneId)] || {
-        x: 40 + (index % 4) * PROJECT_AGENT_COLUMN_STEP,
-        y: 40 + Math.floor(index / 4) * 260,
-        z: index + 1,
-        width: DEFAULT_PROJECT_AGENT_WIDTH,
-        height: DEFAULT_PROJECT_AGENT_HEIGHT,
-      });
+      const layouts = visibleAgents.map((agent) => resolvedLayouts[shortPaneId(agent.paneId)]);
       const viewportWidth = canvas.clientWidth;
       const viewportHeight = Math.max(1, canvas.clientHeight - 48);
       const anyVisible = layouts.some((layout) => {
@@ -953,49 +1107,45 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       try {
         const response = await apiService.getGroup(selectedProject.api_id);
         const rows = Array.isArray(response?.data?.panes) ? response.data.panes : [];
-        const next: Record<string, ProjectAgentLayout> = {};
-        const placed: ProjectAgentLayout[] = [];
+        if (cancelled) return;
+        // Cards already painted from the local cache (or dragged while this
+        // request was in flight) keep their cached position — a late server
+        // response must never move them. Only rows missing from the cache are
+        // placed, and they are placed against the CACHED cards, i.e. against
+        // what is actually on screen. (Placing against the server's own
+        // coordinates — which may still be the seed default for every card —
+        // is how a fresh fork ended up painted on top of an existing card.)
+        const latestCached = readProjectViewCache(selectedProject.id);
+        const next: Record<string, ProjectAgentLayout> = { ...(latestCached?.layouts || {}) };
+        const placed: ProjectAgentLayout[] = Object.values(next);
+        const pendingServerFixes: Array<{ paneId: string; layout: ProjectAgentLayout }> = [];
         rows.forEach((row: any, index: number) => {
           const id = shortPaneId(String(row?.pane_id || ''));
-          if (!id) return;
-          const storedWidth = Number(row?.width || 300);
-          const storedHeight = Number(row?.height || 180);
-          const legacyDefaultSize = storedWidth === 480 && storedHeight === 320;
-          const width = legacyDefaultSize ? 300 : Math.max(260, storedWidth);
-          const height = legacyDefaultSize ? 320 : Math.max(240, storedHeight);
-          const originalX = Number.isFinite(Number(row?.pos_x)) ? Number(row.pos_x) : 40 + (index % 4) * 340;
-          const originalY = Number.isFinite(Number(row?.pos_y)) ? Number(row.pos_y) : 40 + Math.floor(index / 4) * 360;
-          let x = originalX;
-          let y = originalY;
-          const sameRow = placed.filter((item) => y < item.y + item.height && y + height > item.y);
-          if (sameRow.length) {
-            const rowRight = Math.max(...sameRow.map((item) => item.x + item.width));
-            if (x - rowRight > 120) x = rowRight + 24;
-          }
-          const overlaps = () => placed.some((item) => x < item.x + item.width + 20 && x + width + 20 > item.x && y < item.y + item.height + 20 && y + height + 20 > item.y);
-          while (overlaps()) {
-            x += 340;
-            if (x > 1400) { x = 40; y += 360; }
-          }
-          const layout = {
-            x, y,
-            z: Number(row?.z_index || index + 1),
-            width, height,
-          };
+          if (!id || next[id]) return;
+          const storedWidth = Number(row?.width || DEFAULT_PROJECT_AGENT_WIDTH);
+          const storedHeight = Number(row?.height || DEFAULT_PROJECT_AGENT_HEIGHT);
+          const width = Math.max(260, storedWidth);
+          const height = Math.max(240, storedHeight);
+          const serverX = Number.isFinite(Number(row?.pos_x)) ? Number(row.pos_x) : NaN;
+          const serverY = Number.isFinite(Number(row?.pos_y)) ? Number(row.pos_y) : NaN;
+          const probe = { x: serverX, y: serverY, width, height };
+          const serverPositionUsable = Number.isFinite(serverX) && Number.isFinite(serverY) && !placed.some((item) => projectLayoutsOverlap(probe, item));
+          const position = serverPositionUsable ? { x: serverX, y: serverY } : placeProjectAgentLayout(placed, width, height);
+          const layout = { ...position, z: Number(row?.z_index || index + 1), width, height };
           next[id] = layout;
           placed.push(layout);
+          if (!serverPositionUsable) pendingServerFixes.push({ paneId: String(row?.pane_id || id), layout });
         });
-        if (!cancelled) {
-          // Never let a late server response move cards that were already
-          // painted from the local cache (or dragged while this request was in
-          // flight). Server coordinates only fill agents missing from the
-          // latest cache, so hydration cannot cause a second layout pass.
-          const latestCached = readProjectViewCache(selectedProject.id);
-          const stableNext = latestCached ? { ...next, ...latestCached.layouts } : next;
-          setAgentLayouts(stableNext);
-          setLayoutReadyProjectId(String(selectedProject.id));
-          setLayoutVisibilityRevision((value) => value + 1);
-          writeProjectViewCache(selectedProject.id, { layouts: stableNext });
+        setAgentLayouts(next);
+        setLayoutReadyProjectId(String(selectedProject.id));
+        setLayoutVisibilityRevision((value) => value + 1);
+        writeProjectViewCache(selectedProject.id, { layouts: next });
+        // Persist the resolved slot so the server converges on what is shown
+        // and every other browser hydrates the same picture.
+        for (const fix of pendingServerFixes) {
+          void apiService.updateGroupPaneLayout(selectedProject.api_id, fix.paneId, {
+            pos_x: fix.layout.x, pos_y: fix.layout.y, width: fix.layout.width, height: fix.layout.height, z_index: fix.layout.z,
+          }).catch(() => {});
         }
       } catch {
         if (!cancelled) {
@@ -1055,6 +1205,14 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     } finally {
       setCreating(false);
     }
+  };
+
+  // 卡片标题就地改名。和 Workspace 的重命名同一条链路(PATCH /api/tmux/panes/<id>),
+  // 远程 agent 不走这里(改的是本机 tmux pane 的 title)。
+  const renameAgentTitle = async (agent: ProjectAgent, title: string) => {
+    if (agent.remote) return;
+    await apiService.updatePane(shortPaneId(agent.paneId), { title });
+    await onAgentsRefresh();
   };
 
   const renameProject = async (project: AgentProject) => {
@@ -1138,19 +1296,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setBusy(true);
     try {
       const paneIds = [...selectedToAdd];
-      const occupied = Object.values(agentLayouts);
+      const occupied = Object.values(resolvedLayouts);
       for (const [offset, paneId] of paneIds.entries()) {
         await apiService.addGroupPane(selectedProject.api_id, paneId);
         const index = visibleAgents.length + offset;
         const width = DEFAULT_PROJECT_AGENT_WIDTH;
         const height = DEFAULT_PROJECT_AGENT_HEIGHT;
-        let x = 40;
-        let y = 40;
-        const overlaps = () => occupied.some((item) => x < item.x + item.width + 20 && x + width + 20 > item.x && y < item.y + item.height + 20 && y + height + 20 > item.y);
-        while (overlaps()) {
-          x += PROJECT_AGENT_COLUMN_STEP;
-          if (x > 1400) { x = 40; y += 360; }
-        }
+        const { x, y } = placeProjectAgentLayout(occupied, width, height);
         const layout = { x, y, width, height, z: index + 1 };
         await apiService.updateGroupPaneLayout(selectedProject.api_id, paneId, {
           pos_x: x, pos_y: y, width, height, z_index: layout.z,
@@ -1265,9 +1417,40 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     }
   };
 
+  // Focus the selected card's prompt. NEVER via autoFocus / plain focus(): the
+  // canvas is overflow-hidden but still scrollable programmatically, and a
+  // scroll-into-view focus shifts its scrollTop — which drags every absolute
+  // child (footer toolbar, FAB) up by that amount and leaves them floating in
+  // the middle of the canvas.
+  useEffect(() => {
+    const id = Array.from(selectedAgentIds)[0] || '';
+    if (!id) return;
+    const frame = window.requestAnimationFrame(() => {
+      // 标题正在就地编辑时绝不抢焦点:抢走会立刻触发 h3 的 onBlur → 提交并退出编辑,
+      // 表现就是「双击后编辑态一闪就没」。注意 setSelectedAgentIds(new Set([id])) 每次
+      // 都是新对象,所以点同一张卡片这个 effect 也会重跑,不能只靠 id 没变来兜底。
+      if (document.activeElement?.getAttribute('data-id') === 'project-agent-card-title') return;
+      const input = document.querySelector<HTMLTextAreaElement>(`[data-id="project-agent-prompt-input-${id}"]`);
+      if (!input || document.activeElement === input) return;
+      // Only claim focus when nothing else meaningful has it. Clicking into the
+      // card's Terminal (xterm's hidden textarea) or the role editor also selects
+      // the card; stealing focus back to the prompt would hijack the keys the
+      // user is typing there (↑/↓ inside `/model`, etc.).
+      const active = document.activeElement;
+      const card = input.closest('article');
+      const activeIsNeutral = !active || active === document.body || active === card;
+      const activeInFooter = !!(active && card && card.contains(active) && active.closest('[data-id^="project-agent-card-footer-slot-"]'));
+      if (activeIsNeutral || activeInFooter) input.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedAgentIds]);
+
   const toggleAgentSelection = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
-    setSelectedAgentIds(new Set([id]));
+    // Re-selecting the already-selected card must not produce a new Set: every
+    // click inside the card (e.g. in its Terminal) lands here, and a new Set
+    // re-runs the focus effect → the prompt would steal focus from the terminal.
+    setSelectedAgentIds((current) => (current.size === 1 && current.has(id) ? current : new Set([id])));
     setAgentSendTarget({ source: 'project', paneId: agent.paneId });
     if (!agent.remote) onActiveAgentChange(id);
   };
@@ -1504,12 +1687,24 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     for (const agent of allAgents) {
       const id = shortPaneId(agent.paneId);
       const queued = queuedAgentMessages[id] || [];
+      if (!queued.length) continue;
       const liveStatus = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id];
-      // Never release a queue during the reload gap before the first live
-      // status arrives. Treating that unknown state as idle clears and sends a
-      // restored queue as soon as the panel mounts.
-      if (!liveStatus) continue;
-      if (!queued.length || agentIsThinking(agent)) continue;
+      // Don't release a queue during the reload gap before the first poll
+      // arrives — treating that unknown state as idle would fire a restored
+      // queue the instant the panel mounts. But an agent that has never
+      // produced a reply has NO live status at all (poll_data omits it), so
+      // "no status" must not mean "never send": after a short grace period fall
+      // back to the agent's own status (idle by default) instead of holding the
+      // queue forever.
+      if (!liveStatus) {
+        const elapsed = Date.now() - mountedAtRef.current;
+        if (elapsed < QUEUE_STATUS_GRACE_MS) {
+          window.clearTimeout(queueGraceTimerRef.current);
+          queueGraceTimerRef.current = window.setTimeout(() => setQueueFlushTick((value) => value + 1), QUEUE_STATUS_GRACE_MS - elapsed + 50);
+          continue;
+        }
+      }
+      if (agentIsThinking(agent)) continue;
       const payload = queued.map((item) => item.payload).join('\n\n');
       const displayQuestion = payload;
       const previousReply = agentReplies[id];
@@ -1517,7 +1712,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       setQueuedAgentMessages((current) => ({ ...current, [id]: [] }));
       void deliverAgentMessage(agent, payload, displayQuestion, previousReply);
     }
-  }, [allAgents, agentReplies, queuedAgentMessages, sendingAgentIds, canceledAgentIds, statuses]);
+  }, [allAgents, agentReplies, queuedAgentMessages, sendingAgentIds, canceledAgentIds, statuses, queueFlushTick]);
 
   const cancelAgentMessage = async (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
@@ -1560,20 +1755,23 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         next.delete(id);
         return next;
       });
-      window.setTimeout(() => document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-input-${id}"]`)?.focus(), 0);
+      window.setTimeout(() => document.querySelector<HTMLInputElement>(`[data-id="project-agent-prompt-input-${id}"]`)?.focus({ preventScroll: true }), 0);
     }
   };
 
-  const layoutForAgent = (agent: ProjectAgent, index: number): ProjectAgentLayout => agentLayouts[shortPaneId(agent.paneId)] || {
-    x: 40 + (index % 4) * PROJECT_AGENT_COLUMN_STEP,
-    y: 40 + Math.floor(index / 4) * 260,
-    z: index + 1,
+  const layoutForAgent = (agent: ProjectAgent, _index?: number): ProjectAgentLayout => resolvedLayouts[shortPaneId(agent.paneId)] || {
+    ...placeProjectAgentLayout(Object.values(resolvedLayouts)),
+    z: 1,
     width: DEFAULT_PROJECT_AGENT_WIDTH,
     height: DEFAULT_PROJECT_AGENT_HEIGHT,
   };
 
   const beginAgentDrag = (event: ReactPointerEvent<HTMLDivElement>, agent: ProjectAgent, index: number) => {
-    if (event.button !== 0 || (event.target as HTMLElement).closest('button, input, textarea')) return;
+    // Never start a drag (and never setPointerCapture) from the title: with the
+    // pointer captured by this wrapper, Chrome retargets the follow-up click /
+    // dblclick to the wrapper too, so the title's onDoubleClick never fires and
+    // inline rename can't start. Same for anything already contenteditable.
+    if (event.button !== 0 || (event.target as HTMLElement).closest('button, input, textarea, [contenteditable="true"], [data-id="project-agent-card-title"]')) return;
     event.stopPropagation();
     const id = shortPaneId(agent.paneId);
     const layout = layoutForAgent(agent, index);
@@ -1768,44 +1966,73 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
 
   return (
     <section data-id="projects-panel" className="relative flex h-full min-w-0 flex-1 bg-[#090a0d] text-zinc-300">
-      <aside data-id="projects-list" className={cn('shrink-0 flex-col border-r border-white/[0.07] bg-[#0d0e12]', projectListCollapsed ? 'hidden' : 'flex w-[280px] max-[700px]:w-[180px]')}>
-        <header data-id="projects-list-header" className="flex h-12 shrink-0 items-center border-b border-white/[0.07] px-4">
-          <h2 data-id="projects-list-title" className="flex-1 text-[15px] font-semibold text-zinc-100">{t('projectsTitle')}</h2>
-          <button type="button" data-id="projects-list-collapse" onClick={() => setProjectListVisibility(true)} className="mr-1 grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-white/[0.06] hover:text-white" title={t('collapse', { ns: 'common', defaultValue: '折叠' })} aria-label={t('collapse', { ns: 'common', defaultValue: '折叠' })}><PanelLeftClose className="h-4 w-4" /></button>
+      <aside data-id="projects-list" className={cn('shrink-0 flex-col border-r border-white/[0.07] bg-[#0d0e12]', projectListCollapsed ? 'hidden' : 'flex w-[248px] max-[700px]:w-[180px]')}>
+        <header data-id="projects-list-header" className="flex h-12 shrink-0 items-center gap-1 pl-4 pr-2">
+          <h2 data-id="projects-list-title" className="min-w-0 flex-1 truncate text-[13px] font-semibold text-zinc-100">
+            {t('projectsTitle')}
+            <span data-id="projects-list-count" className="ml-1.5 font-normal tabular-nums text-zinc-600">{projects.length}</span>
+          </h2>
           <button
             type="button"
             data-id="projects-create"
             onClick={openCreateProject}
             disabled={busy || creating}
-            className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-white/[0.06] hover:text-white disabled:opacity-40"
+            className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 transition-colors hover:bg-white/[0.08] hover:text-white disabled:opacity-40"
             title={t('projectCreate')}
             aria-label={t('projectCreate')}
           >
-            <Plus className="h-5 w-5" />
+            <Plus className="h-4 w-4" />
           </button>
+          <button type="button" data-id="projects-list-collapse" onClick={() => setProjectListVisibility(true)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.08] hover:text-white" title={t('collapse', { ns: 'common', defaultValue: '折叠' })} aria-label={t('collapse', { ns: 'common', defaultValue: '折叠' })}><PanelLeftClose className="h-4 w-4" /></button>
         </header>
-        <div data-id="projects-list-body" className="min-h-0 flex-1 overflow-y-auto p-2">
+        <div data-id="projects-list-body" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           {loading ? (
             <div data-id="projects-loading" className="flex items-center justify-center py-8 text-xs text-zinc-600"><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t('projectLoading')}</div>
           ) : null}
           {error ? <div data-id="projects-error" className="m-2 rounded-lg bg-red-500/10 p-3 text-xs text-red-300">{error}</div> : null}
           {projects.map((project) => {
             const active = String(project.id) === String(selectedProject.id);
+            const subtitle = project.pane_count > 0 ? t('projectAgentCount', { count: project.pane_count }) : t('projectNoAgents', { defaultValue: '还没有 Agent' });
             return (
               <div
                 key={String(project.id)}
                 data-id={`project-list-item-${project.id}`}
                 role="button"
                 tabIndex={0}
+                aria-pressed={active}
+                title={project.description || project.name}
                 onClick={() => setSelectedId(project.id)}
                 onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedId(project.id); }}
-                className={cn('group relative mb-1 flex h-12 cursor-pointer items-center gap-2 px-3 transition-colors', active ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200')}
+                className={cn(
+                  'group relative mb-0.5 flex cursor-pointer items-center gap-2.5 rounded-lg py-1.5 pl-2.5 pr-1.5 transition-colors',
+                  active ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]',
+                )}
               >
-                {project.pinned ? <Pin data-id="project-list-item-pinned" className="h-3 w-3 shrink-0 text-amber-400" /> : null}
-                <span data-id="project-list-item-name" className="min-w-0 flex-1 truncate text-[13px] font-medium">{project.name}</span>
-                <div data-id="project-list-item-actions" className="relative w-7 shrink-0">
-                  <span data-id="project-list-item-agent-count" className="grid h-7 w-7 place-items-center text-[11px] font-medium tabular-nums text-zinc-600 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">{project.pane_count}</span>
-                  <button type="button" data-id="project-more" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setProjectMenuId(String(project.id)); setProjectMenuAnchor(String(project.id)); }} className="absolute inset-0 grid h-7 w-7 place-items-center rounded-lg text-zinc-500 opacity-0 transition-opacity hover:bg-white/[0.08] hover:text-zinc-200 group-hover:opacity-100 group-focus-within:opacity-100" title={t('projectMore')}><MoreHorizontal className="h-4 w-4" /></button>
+                {active ? <span data-id="project-list-item-active-bar" className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-full bg-blue-500" aria-hidden /> : null}
+                <span
+                  data-id="project-list-item-icon"
+                  className={cn('grid h-7 w-7 shrink-0 place-items-center rounded-md', active ? 'bg-blue-500/15 text-blue-400' : 'bg-white/[0.05] text-zinc-500 group-hover:text-zinc-300')}
+                >
+                  <FolderKanban className="h-3.5 w-3.5" />
+                </span>
+                <div data-id="project-list-item-text" className="min-w-0 flex-1 leading-tight">
+                  <div className="flex min-w-0 items-center gap-1">
+                    <span data-id="project-list-item-name" className={cn('min-w-0 truncate text-[13px] font-medium', active ? 'text-zinc-100' : 'text-zinc-300 group-hover:text-zinc-100')}>{project.name}</span>
+                    {project.pinned ? <Pin data-id="project-list-item-pinned" className="h-3 w-3 shrink-0 text-amber-400" /> : null}
+                  </div>
+                  <div data-id="project-list-item-subtitle" className="mt-0.5 truncate text-[11px] text-zinc-500">{subtitle}</div>
+                </div>
+                <div data-id="project-list-item-actions" className="relative h-7 w-7 shrink-0">
+                  <span
+                    data-id="project-list-item-agent-count"
+                    className={cn(
+                      'absolute inset-0 grid place-items-center rounded-full text-[11px] font-medium tabular-nums transition-opacity group-hover:opacity-0 group-focus-within:opacity-0',
+                      project.pane_count > 0 ? (active ? 'text-blue-300' : 'text-zinc-400') : 'text-zinc-700',
+                    )}
+                  >
+                    {project.pane_count}
+                  </span>
+                  <button type="button" data-id="project-more" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setProjectMenuId(String(project.id)); setProjectMenuAnchor(String(project.id)); }} className="absolute inset-0 grid h-7 w-7 place-items-center rounded-md text-zinc-500 opacity-0 transition-opacity hover:bg-white/[0.08] hover:text-zinc-200 group-hover:opacity-100 group-focus-within:opacity-100" title={t('projectMore')}><MoreHorizontal className="h-4 w-4" /></button>
                   {projectMenuId === String(project.id) && projectMenuAnchor === String(project.id) ? (
                     <div data-id="project-more-menu" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} className="absolute right-0 top-8 z-50 min-w-[150px] rounded-xl border border-white/10 bg-[#18191e] p-1 shadow-2xl">
                       <button type="button" data-id="project-pin" onClick={() => { setProjectMenuId(''); void toggleProjectPinned(project); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/[0.06]">{project.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}{project.pinned ? t('projectUnpin') : t('projectPin')}</button>
@@ -1817,6 +2044,20 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               </div>
             );
           })}
+          {!loading && !error && projects.length <= 1 ? (
+            <button
+              type="button"
+              data-id="projects-list-empty-hint"
+              onClick={openCreateProject}
+              className="mt-2 flex w-full items-start gap-2.5 rounded-lg border border-dashed border-white/[0.10] px-3 py-2.5 text-left transition-colors hover:border-blue-400/40 hover:bg-white/[0.03]"
+            >
+              <Plus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-400" />
+              <span className="min-w-0">
+                <span className="block text-[12px] font-medium text-zinc-300">{t('projectCreate')}</span>
+                <span className="mt-0.5 block text-[11px] leading-snug text-zinc-500">{t('projectEmptyHint', { defaultValue: '按任务把 Agent 分组，每个项目一块画布。' })}</span>
+              </span>
+            </button>
+          ) : null}
         </div>
       </aside>
 
@@ -1834,6 +2075,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         <div
           ref={canvasRef}
           data-id="project-infinite-canvas"
+          // Pin the overflow-hidden canvas at (0,0): any programmatic scroll
+          // (focus, scrollIntoView from a child) would otherwise offset the
+          // absolutely positioned footer / FAB / dock.
+          onScroll={(event) => { const node = event.currentTarget; if (node.scrollTop || node.scrollLeft) { node.scrollTop = 0; node.scrollLeft = 0; } }}
           onPointerDown={beginCanvasPan}
           onPointerMove={moveCanvas}
           onPointerUp={endCanvasPan}
@@ -1897,6 +2142,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 width={layout.width}
                 height={layout.height}
                 onSelect={() => toggleAgentSelection(agent)}
+                onRenameTitle={(title) => renameAgentTitle(agent, title)}
                 footer={(
                   <footer
                     data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`}
@@ -2023,7 +2269,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                         }
                       }}
                       placeholder={t('projectMessagePlaceholder')}
-                      autoFocus={cardSelected}
                       className="min-h-5 max-h-24 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent text-[14px] leading-5 text-zinc-200 outline-none [field-sizing:content] placeholder:text-zinc-500/40"
                     />
                     </div>
@@ -2137,7 +2382,16 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           </div>
         ) : null}
         </div>
-        {!dockOpen ? <div data-id="project-fab-wrap" className="absolute bottom-16 right-5 z-[80] flex flex-col items-end gap-2">
+        {!dockOpen ? <div
+          data-id="project-fab-wrap"
+          // 整个 wrap 常驻 184×130(收起的菜单只是 opacity-0,仍占布局),但真正可交互的
+          // 只有右下角那颗 40×40 的按钮。wrap 自身默认 pointer-events:auto,于是那圈空白
+          // 变成一块看不见的命中区,压住下面画布里 agent 卡片的 hover / 点击。
+          // → wrap 整体穿透,交互显式还给菜单(展开时)和按钮。
+          ref={fabRef}
+          className="pointer-events-none absolute bottom-16 right-5 z-[80] flex flex-col items-end gap-2 transition-[bottom] duration-200"
+          style={fabLift ? { bottom: `${FAB_BASE_BOTTOM + fabLift}px` } : undefined}
+        >
           <div
             data-id="project-fab-menu"
             className={cn(
@@ -2178,7 +2432,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             type="button"
             data-id="project-add-agent"
             onClick={() => setFabOpen((open) => !open)}
-            className="grid h-10 w-10 place-items-center rounded-full bg-blue-600 text-white shadow-[0_8px_20px_rgba(37,99,235,0.3)] transition-transform hover:scale-105 hover:bg-blue-500 active:scale-95"
+            className="pointer-events-auto grid h-10 w-10 place-items-center rounded-full bg-blue-600 text-white shadow-[0_8px_20px_rgba(37,99,235,0.3)] transition-transform hover:scale-105 hover:bg-blue-500 active:scale-95"
             title={t('projectAddAgent')}
             aria-label={t('projectAddAgent')}
             aria-expanded={fabOpen}
