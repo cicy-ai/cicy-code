@@ -388,6 +388,45 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
       selTimer = window.setTimeout(endSelecting, 10_000)
     }
     host.addEventListener('mousedown', onHostMouseDown)
+
+    // CSS-transform scale compensation. The project canvas scales cards with
+    // `transform: scale(z)`; xterm maps clientX/Y to cells by subtracting the
+    // screen's bounding rect and dividing by its UNscaled cell size, so at any
+    // zoom != 100% the selection lands on the wrong column/row (error grows
+    // with distance from the top-left). Rewrite mouse events in the capture
+    // phase into the terminal's own coordinate space and replay them.
+    const SCALED = '__cicyScaled'
+    const rescaleMouse = (event: MouseEvent) => {
+      if ((event as any)[SCALED]) return
+      const screen = host.querySelector<HTMLElement>('.xterm-screen')
+      if (!screen || !screen.offsetWidth) return
+      const rect = screen.getBoundingClientRect()
+      const scale = rect.width / screen.offsetWidth
+      if (!Number.isFinite(scale) || scale <= 0 || Math.abs(scale - 1) < 0.001) return
+      const clone = new MouseEvent(event.type, {
+        bubbles: event.bubbles, cancelable: event.cancelable, composed: event.composed,
+        view: event.view, detail: event.detail, button: event.button, buttons: event.buttons,
+        ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
+        relatedTarget: event.relatedTarget,
+        clientX: rect.left + (event.clientX - rect.left) / scale,
+        clientY: rect.top + (event.clientY - rect.top) / scale,
+        screenX: event.screenX, screenY: event.screenY,
+      })
+      ;(clone as any)[SCALED] = true
+      event.stopImmediatePropagation()
+      ;(event.target as EventTarget).dispatchEvent(clone)
+      if (clone.defaultPrevented) event.preventDefault()
+    }
+    // mousedown/dblclick originate inside the host; xterm listens for the
+    // drag's mousemove/mouseup on document, so those are rescaled there but
+    // only while a selection drag that started in this terminal is running.
+    const onDocMouseScaled = (event: MouseEvent) => { if (isSelecting) rescaleMouse(event) }
+    host.addEventListener('mousedown', rescaleMouse, true)
+    host.addEventListener('dblclick', rescaleMouse, true)
+    document.addEventListener('mousemove', onDocMouseScaled, true)
+    document.addEventListener('mouseup', onDocMouseScaled, true)
+    // Registered AFTER the rescaler: it must still see isSelecting=true on the
+    // original mouseup so the replayed (rescaled) mouseup is what ends the drag.
     document.addEventListener('mouseup', endSelecting, true)
 
     // Cmd/Ctrl+C must COPY when there's a selection (and fall through to the
@@ -556,6 +595,10 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
       window.clearTimeout(selTimer)
       host.removeEventListener('mousedown', onClickRetry)
       host.removeEventListener('mousedown', onHostMouseDown)
+      host.removeEventListener('mousedown', rescaleMouse, true)
+      host.removeEventListener('dblclick', rescaleMouse, true)
+      document.removeEventListener('mousemove', onDocMouseScaled, true)
+      document.removeEventListener('mouseup', onDocMouseScaled, true)
       host.removeEventListener('paste', onPaste, true)
       window.removeEventListener('cicy-theme-change', onThemeChange)
       document.removeEventListener('mouseup', endSelecting, true)
