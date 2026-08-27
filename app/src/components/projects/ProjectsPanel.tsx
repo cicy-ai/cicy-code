@@ -969,12 +969,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     }
     return result;
   }, [allAgents, projects, statuses, liveMetrics]);
+  // One fact per place: the total lives in the count on the right / the header,
+  // so the subtitle only says what's happening — "N 工作中" or a plain "空闲".
   const activityLabel = (activity?: { working: number; idle: number; total: number }) => {
     if (!activity || !activity.total) return '';
-    return [
-      activity.working ? t('projectWorkingCount', { count: activity.working, defaultValue: '{{count}} 工作中' }) : '',
-      activity.idle ? t('projectIdleCount', { count: activity.idle, defaultValue: '{{count}} 空闲' }) : '',
-    ].filter(Boolean).join(' · ');
+    return activity.working
+      ? t('projectWorkingCount', { count: activity.working, defaultValue: '{{count}} 工作中' })
+      : t('projectAllIdle', { defaultValue: '空闲' });
   };
   const visibleAgents = allAgents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
   const availableAgents = allAgents.filter((agent) => !memberIds.has(shortPaneId(agent.paneId)));
@@ -2050,7 +2051,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             const active = String(project.id) === String(selectedProject.id);
             const activity = projectActivity[String(project.id)];
             const subtitle = project.pane_count > 0
-              ? [t('projectAgentCount', { count: project.pane_count }), activityLabel(activity)].filter(Boolean).join(' · ')
+              ? activityLabel(activity) || t('projectAgentCount', { count: project.pane_count })
               : t('projectNoAgents', { defaultValue: '还没有 Agent' });
             return (
               <div
