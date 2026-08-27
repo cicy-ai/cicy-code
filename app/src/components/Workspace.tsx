@@ -18,8 +18,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, Folder, X, Settings, Brain, Search,
   LayoutList, Users, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Bot, BookOpen, Store, Timer, Grid3X3, Globe2, Smartphone, FolderKanban,
-} from 'lucide-react';
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Bot, BookOpen, Store, Timer, Grid3X3, Globe2, Smartphone, FolderKanban, UserCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag, isChatModel } from '../lib/modelTag';
 import AgentAvatar from './AgentAvatar';
@@ -53,6 +52,7 @@ import type { AgentCanvasItem } from './layout/AgentStack';
 import AgentStack, { AgentCardMoreMenu } from './layout/AgentStack';
 import { ShellPanel } from './terminal/ShellPanel';
 import WeChatBindModal from './im/WeChatBindModal';
+import { fetchCloudAccount, type CloudAccountInfo } from './settings/CloudAccountPanel';
 import SettingsModal, { type SettingsSection } from './settings/SettingsModal';
 import { useDialogs } from './ui/Modal';
 import TipBelow from './ui/TipBelow';
@@ -463,6 +463,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // Red badge (version row + activity-bar trigger) when a newer cicy-code is
   // published on npm. Backend caches the registry lookup; we re-check on focus.
   const [versionUpdate, setVersionUpdate] = useState(false);
+  // CiCy Hub/Cloud identity for the gear menu badge (Settings → CiCy 账号 owns the full view).
+  const [cloudAccount, setCloudAccount] = useState<CloudAccountInfo | null>(null);
+  const refreshCloudAccount = useCallback(() => { fetchCloudAccount().then(setCloudAccount).catch(() => {}); }, []);
+  useEffect(() => {
+    refreshCloudAccount();
+    const timer = window.setInterval(refreshCloudAccount, 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [refreshCloudAccount]);
   const checkVersionUpdate = useCallback(async () => {
     try {
       const res: any = await apiService.getCicyUpdateStatus();
@@ -741,6 +749,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
 
   const membershipCard = useMemo(() => normalizeMembershipCard(globalVar?.membership), [globalVar]);
   const [membershipMenuOpen, setMembershipMenuOpen] = useState(false);
+  useEffect(() => { if (membershipMenuOpen) refreshCloudAccount(); }, [membershipMenuOpen, refreshCloudAccount]);
   const [membershipPopoverPos, setMembershipPopoverPos] = useState<{ x: number; y: number } | null>(null);
   const membershipMenuRef = useRef<HTMLDivElement>(null);
   const membershipTriggerRef = useRef<HTMLButtonElement>(null);
@@ -2592,6 +2601,28 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 {emailNeedsSetup && <span data-id="membership-settings-general-badge" className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title={t('emailNeedsSetup', { defaultValue: '未配置令牌投递邮箱 / SMTP' })} />}
               </span>
               <SlidersHorizontal className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              data-id="membership-settings-account"
+              onClick={() => openSettings('account')}
+              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+            >
+              <span data-id="membership-settings-account-label" className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0">{t('settingsNavAccount', { defaultValue: 'CiCy 账号' })}</span>
+                {cloudAccount?.state === 'connected' ? (
+                  <span data-id="membership-settings-account-email" className="inline-flex min-w-0 items-center gap-1 font-normal text-zinc-500">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+                    <span className="max-w-[120px] truncate">{String(cloudAccount.config?.email || cloudAccount.name || '')}</span>
+                  </span>
+                ) : (
+                  <span data-id="membership-settings-account-off" className="inline-flex items-center gap-1 font-normal text-zinc-500">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-600" />
+                    {cloudAccount ? (cloudAccount.state_detail || t('cloudNotAuthed', { defaultValue: '未认证' })) : t('cloudNotLoggedIn', { defaultValue: '未登录' })}
+                  </span>
+                )}
+              </span>
+              <UserCircle className="h-3.5 w-3.5" />
             </button>
             <button
               type="button"

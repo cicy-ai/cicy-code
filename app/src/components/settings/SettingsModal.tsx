@@ -4,10 +4,11 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { SlidersHorizontal, Globe, MessageCircle, Route, Boxes, Timer, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle, Paperclip, Sun, Moon, ShieldCheck } from 'lucide-react';
+import { SlidersHorizontal, Globe, MessageCircle, Route, Boxes, Timer, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle, Paperclip, Sun, Moon, ShieldCheck, UserCircle } from 'lucide-react';
 import { useApp } from '../../contexts/AppContext';
 import ProviderDashboard from '../providers/ProviderDashboard';
 import IMDashboard from '../im/IMDashboard';
+import CloudAccountPanel from './CloudAccountPanel';
 import CrontabPanel from '../CrontabPanel';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
@@ -21,7 +22,7 @@ import ClaudeAuthImportCard from './ClaudeAuthImportCard';
 // the right — replaces the scattered activity-bar left-panels (providers/im)
 // and the membership-popover language submenu. Opened from the bottom-left
 // settings popover (entries above the version line).
-export type SettingsSection = 'general' | 'language' | 'im' | 'timer' | 'routing' | 'providers';
+export type SettingsSection = 'general' | 'language' | 'account' | 'im' | 'timer' | 'routing' | 'providers';
 
 // Common email providers → their SMTP/IMAP/POP3 servers. Typing an account whose
 // domain matches one of these auto-fills the servers, so the user only enters the
@@ -320,6 +321,7 @@ export default function SettingsModal({
   const nav: NavItem[] = [
     { id: 'general', label: t('settingsNavGeneral', { defaultValue: '通用' }), icon: <SlidersHorizontal className="h-4 w-4" /> },
     { id: 'language', label: t('settingsNavLanguage', { defaultValue: '语言' }), icon: <Globe className="h-4 w-4" /> },
+    { id: 'account', label: t('settingsNavAccount', { defaultValue: 'CiCy 账号' }), icon: <UserCircle className="h-4 w-4" /> },
     { id: 'im', label: t('settingsNavIM', { defaultValue: 'IM 通知' }), icon: <MessageCircle className="h-4 w-4" /> },
     { id: 'timer', label: t('timer', { ns: 'common', defaultValue: '定时器' }), icon: <Timer className="h-4 w-4" /> },
     { id: 'routing', label: t('settingsNavRouting', { defaultValue: 'Agent 路由' }), icon: <Route className="h-4 w-4" /> },
@@ -673,6 +675,10 @@ export default function SettingsModal({
                 </div>
               </div>
             )}
+
+            <div data-id="settings-section-account" className={`h-full ${section === 'account' ? '' : 'hidden'}`}>
+              <CloudAccountPanel active={open && section === 'account'} />
+            </div>
 
             {/* IM — split pane hosts the existing IMDashboard via mount nodes */}
             <div data-id="settings-section-im" className={`flex h-full ${section === 'im' ? '' : 'hidden'}`}>

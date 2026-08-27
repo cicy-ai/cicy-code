@@ -404,7 +404,8 @@ export default function IMDashboard({ leftMount, rightMount }: {
     setLoading(true);
     try {
       const [accRes, plRes] = await Promise.all([apiService.getIMAccounts(), apiService.getIMPlatforms()]);
-      const accs: IMAccount[] = (accRes?.data?.accounts || []) as IMAccount[];
+      // The CiCy Cloud/Hub identity is managed in Settings → CiCy 账号, not as an IM channel.
+      const accs: IMAccount[] = ((accRes?.data?.accounts || []) as IMAccount[]).filter((a) => a.platform !== 'cicy_cloud');
       const pls: IMPlatform[] = (plRes?.data?.platforms || []) as IMPlatform[];
       setAccounts(accs);
       setPlatforms(pls);
@@ -931,8 +932,8 @@ export default function IMDashboard({ leftMount, rightMount }: {
             <div data-id="im-add-dropdown" className="absolute right-0 top-[calc(100%+4px)] min-w-[160px] z-50 rounded-xl border border-white/[0.09] bg-[#141416] p-1 shadow-2xl shadow-black/60">
               {platforms.length === 0 && <div className="px-2.5 py-2 text-[11px] text-zinc-600">{t('loadingText')}</div>}
               {platforms.map((p) => {
-                const cloudAlreadyAdded = p.kind === 'cicy_cloud' && accounts.some((account) => account.platform === 'cicy_cloud');
-                const addable = !cloudAlreadyAdded && (p.kind === 'telegram' || p.kind === 'wechat' || p.kind === 'feishu' || p.kind === 'cicy_cloud');
+                if (p.kind === 'cicy_cloud') return null;
+                const addable = p.kind === 'telegram' || p.kind === 'wechat' || p.kind === 'feishu';
                 return (
                   <button
                     key={p.kind}
@@ -945,7 +946,6 @@ export default function IMDashboard({ leftMount, rightMount }: {
                   >
                     <PlatformIcon platform={p.kind} size={14} />
                     <span className="flex-1">{p.label}</span>
-                    {cloudAlreadyAdded && <span className="text-[10px] text-zinc-600">已添加</span>}
                     {p.needs_qr && <QrCode size={12} className="text-zinc-500" />}
                   </button>
                 );
