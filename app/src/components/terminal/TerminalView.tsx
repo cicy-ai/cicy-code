@@ -78,9 +78,18 @@ function buildLogicalLine(term: Terminal, anchorY: number): LogicalLine | null {
 // fallbacks.
 const EMOJI_FALLBACK = '"Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", "EmojiOne Color"'
 const isWindows = /windows/i.test(navigator.userAgent)
+// CJK glyphs are not in any Latin mono font; without an explicit fallback the
+// DOM renderer picks the platform default mono CJK (SimSun on Windows — the
+// bitmap-looking "ugly" Chinese). Prefer real mono CJK faces when installed,
+// then the platform's UI CJK sans, which xterm still lays out on 2 cells.
+const CJK_FALLBACK = isWindows
+  ? '"Sarasa Mono SC", "Sarasa Term SC", "Maple Mono NF CN", "Noto Sans Mono CJK SC", "Microsoft YaHei", "微软雅黑"'
+  : '"Sarasa Mono SC", "Noto Sans Mono CJK SC", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "WenQuanYi Micro Hei"'
+// "JetBrains Mono Variable" is bundled with the app (@fontsource-variable), so
+// the Latin part of the terminal looks the same on every platform.
 const MONO_FONT = isWindows
-  ? `"Cascadia Mono", "Cascadia Code", "Sarasa Mono SC", "Sarasa Term SC", Consolas, ${EMOJI_FALLBACK}, monospace`
-  : `"SF Mono", Menlo, Consolas, ${EMOJI_FALLBACK}, monospace`
+  ? `"JetBrains Mono Variable", "Cascadia Mono", "Cascadia Code", Consolas, ${CJK_FALLBACK}, ${EMOJI_FALLBACK}, monospace`
+  : `"JetBrains Mono Variable", "SF Mono", Menlo, Consolas, ${CJK_FALLBACK}, ${EMOJI_FALLBACK}, monospace`
 const TERM_THEMES = {
   dark: { background: '#000000', foreground: '#d4d4d8', cursor: '#e4e4e7', selectionBackground: '#3b82f640' },
   light: {

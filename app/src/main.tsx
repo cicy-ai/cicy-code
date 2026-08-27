@@ -5,6 +5,7 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './i18n';
+import '@fontsource-variable/jetbrains-mono';
 import './index.css';
 import {applyCicyTheme, getCicyTheme} from './lib/theme';
 

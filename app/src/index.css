@@ -640,7 +640,7 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
 
 @theme {
   --font-sans: ui-sans-serif, system-ui, "Segoe UI", "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
-  --font-mono: "SFMono-Regular", "JetBrains Mono", "Cascadia Mono", "Cascadia Code", "Source Code Pro", "Consolas", "Liberation Mono", ui-monospace, monospace;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "SFMono-Regular", "Cascadia Mono", "Cascadia Code", "Source Code Pro", "Consolas", "Liberation Mono", "Sarasa Mono SC", "Noto Sans Mono CJK SC", "PingFang SC", "Microsoft YaHei", ui-monospace, monospace;
 }
 
 /* Global affordance: every clickable surface gets pointer cursor + no text

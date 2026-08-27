@@ -34,9 +34,9 @@ const EMOJI_FALLBACK = '"Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"
 
 export function monoFontStack(): string {
     if (isWindowsPlatform()) {
-        return `"Cascadia Mono", "Cascadia Code", "Sarasa Mono SC", "Sarasa Term SC", Consolas, ${EMOJI_FALLBACK}, monospace`;
+        return `"JetBrains Mono Variable", "Cascadia Mono", "Cascadia Code", Consolas, "Sarasa Mono SC", "Sarasa Term SC", "Maple Mono NF CN", "Noto Sans Mono CJK SC", "Microsoft YaHei", ${EMOJI_FALLBACK}, monospace`;
     }
-    return `"SF Mono", Menlo, Consolas, ${EMOJI_FALLBACK}, monospace`;
+    return `"JetBrains Mono Variable", "SF Mono", Menlo, Consolas, "Sarasa Mono SC", "Noto Sans Mono CJK SC", "PingFang SC", "Noto Sans CJK SC", ${EMOJI_FALLBACK}, monospace`;
 }
 
 export function applyMonoFontVar(doc: Document): string {
