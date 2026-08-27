@@ -1145,6 +1145,14 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	if deadStream {
 		failed = true
 	}
+	// The user pressed stop (Ctrl+C via the UI) and the CLI hung up: that is a
+	// clean cancellation, not a failure. Seal it completed and leave an
+	// 已停止生成 marker item instead of the failure detail below.
+	userStopped := failed && !s.auxiliary && aiGatewayConsumeUserInterrupt(s.agentID)
+	if userStopped {
+		failed = false
+		deadStream = false
+	}
 	status := "completed"
 	if failed {
 		status = "failed"
@@ -1377,6 +1385,19 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	} else {
 		s.current.Status = ""
 		s.reply.Status = ""
+		if userStopped {
+			marker := cicyOutcomeMarkerText("cancelled")
+			s.reply.Items = append(s.reply.Items, map[string]interface{}{
+				"id":           len(s.reply.Items) + 1,
+				"type":         "text",
+				"text":         marker,
+				"cicy_outcome": "cancelled",
+			})
+			if strings.TrimSpace(s.reply.Answer) == "" {
+				s.reply.Answer = marker
+				requestSpan.AnswerPreview = aiGatewayPreviewText(marker, 220)
+			}
+		}
 	}
 	statusMap := aiGatewayBuildStatusMap(s.current, s.reply)
 	s.current.Status = statusMap.Primary

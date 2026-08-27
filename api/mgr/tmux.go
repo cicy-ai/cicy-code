@@ -5424,6 +5424,11 @@ func handleSendKeys(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "keys required")
 		return
 	}
+	// A Ctrl+C from the UI is a user stop: remember it so the gateway seals the
+	// aborted round as 已停止生成, not 生成失败 (see ai_gateway_interrupt.go).
+	if keysLookLikeInterrupt(keys) {
+		aiGatewayMarkUserInterrupt(winID)
+	}
 	if _, err := runTmux("send-keys", "-t", winID, keys); err != nil {
 		httpErr(w, http.StatusInternalServerError, "failed to send keys: "+err.Error())
 		return

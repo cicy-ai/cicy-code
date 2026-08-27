@@ -42,3 +42,14 @@ describe('prepareRenderTurns', () => {
     expect(out[0]).toBe(outcome);
   });
 });
+
+describe('prepareRenderTurns interrupt echo', () => {
+  it("renders Claude's interrupt echo as a cancelled outcome instead of a question", () => {
+    const out = prepareRenderTurns([
+      { history_id: 1, role: 'user', q: '跑测试', text: '跑测试', a: '', steps: [] },
+      { history_id: 2, role: 'user', q: '[Request interrupted by user]', text: '[Request interrupted by user]', a: '', steps: [] },
+    ]);
+    expect(out[1].role).toBe('assistant');
+    expect(out[1].outcome).toBe('cancelled');
+  });
+});

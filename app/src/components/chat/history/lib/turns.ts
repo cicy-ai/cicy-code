@@ -256,6 +256,7 @@ export function replyItemsToSteps(items: any, thinking?: string, answer?: string
   const steps: NonNullable<HistoryTurn['steps']> = [];
   for (const it of Array.isArray(items) ? items : []) {
     const ty = String(it?.type || '').trim();
+    if (String(it?.cicy_outcome || '').trim()) continue; // outcome marker, rendered as a notice
     if (ty === 'thinking') {
       const tx = String(it?.thinking || '');
       if (tx) steps.push({ type: 'thinking', text: tx });

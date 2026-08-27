@@ -349,7 +349,27 @@ export function HistoryList(props: HistoryListProps) {
     }
     return true;
   })();
-  const renderedLiveTurn = liveVisible && liveTurn ? (
+  const renderedLiveTurn = liveVisible && liveTurn && liveTurn.outcome ? (
+    <div data-id="current-history-live-turn" data-outcome={liveTurn.outcome} className="mb-5">
+      <div data-id="current-history-live-turn-assistant" className="flex items-start gap-2.5">
+        {liveShowAvatar
+          ? <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-live-turn-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
+          : <div aria-hidden="true" className="h-7 w-7 shrink-0" />}
+        <div data-id="current-history-live-turn-body" className="min-w-0 flex-1">
+          {normalizedLiveTurnSteps.map((step: any, i: number) => {
+            if (step?.type === 'thinking') return <div key={i}><LiveStreamStep kind="thinking" text={step.text} smooth={false} /></div>;
+            if (step?.type === 'text') return <div key={i}><LiveStreamStep kind="text" text={step.text} smooth={false} /></div>;
+            if (step?.type === 'tool' && !hideTools && Array.isArray(step?.tools) && step.tools.length > 0) {
+              const toolRun = liveToolRunsByStep.get(i);
+              return toolRun ? <ToolRunGroup key={`live-tool-run-${liveToolTurnKey}-${toolRun.groupIndex}`} entries={toolRun.entries} groupId={buildToolRunGroupId(liveToolTurnKey, toolRun.groupIndex)} className="my-2" /> : null;
+            }
+            return null;
+          })}
+          <OutcomeNoticeCard text={liveTurn.text || ''} outcome={liveTurn.outcome} detail={liveTurn.outcomeDetail} canRetry={false} retrying={false} onRetry={() => {}} />
+        </div>
+      </div>
+    </div>
+  ) : liveVisible && liveTurn ? (
     <div data-id="current-history-live-turn" className="mb-5">
       <div data-id="current-history-live-turn-assistant" className="flex items-start gap-2.5">
         {liveShowAvatar

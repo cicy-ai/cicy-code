@@ -31,9 +31,19 @@ function systemTurnNotices(turn: HistoryTurn): SystemNotice[] {
   return notice ? [notice] : [];
 }
 
+// Claude Code echoes a user interrupt into the transcript as a user message
+// "[Request interrupted by user]" / "[Request interrupted by user for tool use]".
+// That is not a question — render it as the same 已停止生成 notice a user stop
+// produces on the live tail.
+const INTERRUPT_ECHO_RE = /^\s*\[Request interrupted by user(?: for tool use)?\]\s*$/i;
+
 function classifyTurns(turns: HistoryTurn[]): HistoryTurn[] {
   const out: HistoryTurn[] = [];
   for (const turn of turns) {
+    if (turn?.role === 'user' && INTERRUPT_ECHO_RE.test(String(turn.text || turn.q || ''))) {
+      out.push({ ...turn, role: 'assistant', q: '', text: '已停止生成', a: '已停止生成', steps: [], outcome: 'cancelled' });
+      continue;
+    }
     // cicy outcome records and /compact summaries are handled by the list itself.
     if (turn?.role !== 'system' || turn?.outcome) { out.push(turn); continue; }
     const notices = systemTurnNotices(turn);

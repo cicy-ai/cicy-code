@@ -303,7 +303,7 @@ const api = {
   startWeChatLogin: () => http.post('/api/im/wechat/login'),
   getWeChatLoginStatus: (sessionId: string) => http.get(`/api/im/wechat/login/${encodeURIComponent(sessionId)}`),
   cancelWeChatLogin: (sessionId: string) => http.post(`/api/im/wechat/login/${encodeURIComponent(sessionId)}/cancel`),
-  startCiCyCloudLogin: (email: string, team: string) => http.post('/api/im/cicy-cloud/login', { email, team }),
+  startCiCyCloudLogin: (email: string, team: string, hubOrigin?: string) => http.post('/api/im/cicy-cloud/login', hubOrigin ? { email, team, hub_origin: hubOrigin } : { email, team }),
   getCiCyCloudLoginStatus: (state: string) => http.get(`/api/im/cicy-cloud/login/${encodeURIComponent(state)}`),
   getCiCyCloudInstances: () => coalesceRead('/api/im/cicy-cloud/instances', () => http.get('/api/im/cicy-cloud/instances')),
   enableCiCyCloudTunnel: () => http.post('/api/im/cicy-cloud/tunnel'),

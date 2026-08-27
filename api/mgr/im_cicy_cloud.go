@@ -34,7 +34,15 @@ const defaultCiCyCloudOrigin = "https://cicy-ai.com"
 var cicyCloudEmailRE = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 var cicyCloudTeamRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 var cicyCloudMessageRE = regexp.MustCompile(`^msg-[A-Za-z0-9_-]{8,96}$`)
-var cicyCloudPendingLogins sync.Map // state -> requested team ID
+var cicyCloudPendingLogins sync.Map // state -> cicyCloudPendingLogin
+
+var hubLoginStates sync.Map // local state -> hub login state
+
+type cicyCloudPendingLogin struct {
+	Team       string
+	HubOrigin  string // non-empty → login was started against a cicy-ws-hub
+	InstanceID string
+}
 
 func cicyCloudTraceID(value string) string {
 	value = strings.TrimSpace(value)
@@ -51,7 +59,44 @@ type cicyCloudCredential struct {
 	TeamID     string `json:"team_id"`
 	Token      string `json:"token"`
 	Origin     string `json:"cloud_origin"`
-	UpdatedAt  string `json:"updated_at"`
+	// Mode "hub" means Origin is a cicy-ws-hub and the instance talks to it
+	// directly (email login, tickets, directory) with no cicy-cloud worker.
+	Mode      string `json:"mode,omitempty"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+const cicyCloudModeHub = "hub"
+const defaultCiCyHubOrigin = "https://ws.cicy-ai.com"
+
+func cicyHubOrigin() string {
+	origin := strings.TrimRight(strings.TrimSpace(os.Getenv("CICY_HUB_ORIGIN")), "/")
+	if origin == "" {
+		origin = defaultCiCyHubOrigin
+	}
+	return origin
+}
+
+func loadCiCyCloudCredential() (cicyCloudCredential, bool) {
+	var cred cicyCloudCredential
+	data, err := os.ReadFile(cicyCloudCredentialPath())
+	if err != nil || json.Unmarshal(data, &cred) != nil {
+		return cicyCloudCredential{}, false
+	}
+	return cred, true
+}
+
+// hubOriginForToken reports the hub origin when the given instance token was
+// issued by a cicy-ws-hub (credential mode "hub"); "" means cicy-cloud.
+func hubOriginForToken(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+	cred, ok := loadCiCyCloudCredential()
+	if !ok || cred.Mode != cicyCloudModeHub || strings.TrimSpace(cred.Token) != token {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(cred.Origin), "/")
 }
 
 func cicyCloudOrigin() string {
@@ -80,7 +125,152 @@ func randomLoginState() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// cloudJSON talks to the control plane the token belongs to: the cicy-cloud
+// worker, or — for a hub-issued token — the cicy-ws-hub with the worker
+// routes mapped onto the hub API (see hubJSON).
 func cloudJSON(method, route, token string, requestBody any, responseBody any) error {
+	if hub := hubOriginForToken(token); hub != "" {
+		return hubJSON(hub, method, route, token, requestBody, responseBody)
+	}
+	return cloudJSONAt(cicyCloudOrigin(), method, route, token, requestBody, responseBody)
+}
+
+var errHubWebSocketOnly = fmt.Errorf("hub mode: websocket not connected")
+
+// hubJSON maps the worker routes used by the transport onto cicy-ws-hub.
+// Anything the hub has no equivalent for (D1-backed HTTP message fallback,
+// agent-config push, heartbeat telemetry) is a no-op: messages ride the
+// websocket only, and the hub learns liveness from /api/register.
+func hubJSON(origin, method, route, token string, requestBody any, responseBody any) error {
+	path := route
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		path = path[:i]
+	}
+	switch {
+	case method == http.MethodPost && path == "/api/code/ws-ticket":
+		return cloudJSONAt(origin, http.MethodPost, "/api/register", token, nil, responseBody)
+	case method == http.MethodGet && path == "/api/code/instances":
+		instances, err := hubInstances(origin, token)
+		if err != nil {
+			return err
+		}
+		return hubAssign(responseBody, M{"success": true, "instances": hubInstancesToCloud(instances)})
+	case method == http.MethodGet && path == "/api/code/agents":
+		instances, err := hubInstances(origin, token)
+		if err != nil {
+			return err
+		}
+		return hubAssign(responseBody, M{"success": true, "agents": hubAgentsToCloud(instances)})
+	case path == "/api/code/messages" && method == http.MethodPost:
+		return errHubWebSocketOnly
+	case path == "/api/code/messages/poll":
+		return hubAssign(responseBody, M{"success": true, "messages": []any{}})
+	case path == "/api/code/agent-configs" && method == http.MethodGet:
+		return hubAssign(responseBody, M{"success": true, "configs": []any{}})
+	case path == "/api/code/agent-configs", path == "/api/code/agents", path == "/api/code/instances/heartbeat":
+		return nil
+	}
+	return cloudJSONAt(origin, method, route, token, requestBody, responseBody)
+}
+
+func hubAssign(out any, value M) error {
+	if out == nil {
+		return nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, out)
+}
+
+type hubInstance struct {
+	InstanceID  string          `json:"instanceId"`
+	Name        string          `json:"name"`
+	Platform    string          `json:"platform"`
+	CreatedAt   string          `json:"createdAt"`
+	LastLoginAt string          `json:"lastLoginAt"`
+	LastSeenAt  string          `json:"lastSeenAt"`
+	Online      bool            `json:"online"`
+	Self        bool            `json:"self"`
+	Agents      json.RawMessage `json:"agents"`
+}
+
+func hubInstances(origin, token string) ([]hubInstance, error) {
+	var out struct {
+		Owner     string        `json:"owner"`
+		Instances []hubInstance `json:"instances"`
+	}
+	if err := cloudJSONAt(origin, http.MethodGet, "/api/instances", token, nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Instances, nil
+}
+
+// hubTeamID gives an instance the team-like label the workspace UI shows:
+// the name chosen at login, else a short form of the instance id.
+func hubTeamID(inst hubInstance) string {
+	if name := strings.TrimSpace(inst.Name); name != "" {
+		return name
+	}
+	id := strings.TrimPrefix(inst.InstanceID, "code-")
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	return "code-" + id
+}
+
+func hubInstancesToCloud(instances []hubInstance) []M {
+	out := make([]M, 0, len(instances))
+	for _, inst := range instances {
+		status := "offline"
+		if inst.Online {
+			status = "online"
+		}
+		out = append(out, M{"instanceId": inst.InstanceID, "teamId": hubTeamID(inst), "status": status,
+			"platform": inst.Platform, "runtime": "native", "createdAt": inst.CreatedAt,
+			"lastSeenAt": inst.LastSeenAt, "proxyHost": "", "proxyAvailable": 0, "hub": true, "self": inst.Self})
+	}
+	return out
+}
+
+func hubAgentsToCloud(instances []hubInstance) []M {
+	out := []M{}
+	for _, inst := range instances {
+		if len(inst.Agents) == 0 {
+			continue
+		}
+		var agents []M
+		if json.Unmarshal(inst.Agents, &agents) != nil {
+			continue
+		}
+		team := hubTeamID(inst)
+		for _, a := range agents {
+			agentID := strings.TrimSpace(fmt.Sprint(a["agentId"]))
+			if agentID == "" || agentID == "<nil>" {
+				agentID = strings.TrimSpace(fmt.Sprint(a["id"]))
+			}
+			if agentID == "" || agentID == "<nil>" {
+				continue
+			}
+			row := M{}
+			for k, v := range a {
+				row[k] = v
+			}
+			row["instanceId"] = inst.InstanceID
+			row["agentId"] = agentID
+			row["teamId"] = team
+			if _, ok := row["agentType"]; !ok {
+				row["agentType"] = a["agent_type"]
+			}
+			row["instanceOnline"] = inst.Online
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func cloudJSONAt(origin, method, route, token string, requestBody any, responseBody any) error {
 	var body io.Reader
 	if requestBody != nil {
 		data, err := json.Marshal(requestBody)
@@ -89,7 +279,7 @@ func cloudJSON(method, route, token string, requestBody any, responseBody any) e
 		}
 		body = bytes.NewReader(data)
 	}
-	req, err := http.NewRequest(method, cicyCloudOrigin()+route, body)
+	req, err := http.NewRequest(method, origin+route, body)
 	if err != nil {
 		return err
 	}
@@ -156,7 +346,7 @@ func saveCiCyCloudCredential(cred cicyCloudCredential) error {
 }
 
 func upsertCiCyCloudIMAccount(cred cicyCloudCredential) (*imAccount, error) {
-	cfg, _ := json.Marshal(M{"email": cred.Email, "instance_id": cred.InstanceID, "team_id": cred.TeamID, "cloud_origin": cred.Origin})
+	cfg, _ := json.Marshal(M{"email": cred.Email, "instance_id": cred.InstanceID, "team_id": cred.TeamID, "cloud_origin": cred.Origin, "mode": cred.Mode})
 	var id int64
 	err := store.QueryRow("SELECT id FROM im_accounts WHERE platform=? ORDER BY id LIMIT 1", imPlatformCiCyCloud).Scan(&id)
 	if err == nil {
@@ -206,6 +396,7 @@ func ensureCiCyCloudAccountFromEnvironment() error {
 			if saved.Origin != "" {
 				cred.Origin = saved.Origin
 			}
+			cred.Mode = saved.Mode
 		}
 	}
 	if cred.Email == "" || cred.InstanceID == "" || cred.Token == "" {
@@ -746,6 +937,11 @@ func (t *cicyCloudTransport) Poll(cursor string) ([]botMsg, string, error) {
 			return nil, "", nil
 		}
 	}
+	if hubOriginForToken(t.token) != "" {
+		// Hub mode has no HTTP inbox: wait for the websocket to (re)connect.
+		t.waitForNextPoll(t.nextIdlePollDelay())
+		return nil, "", nil
+	}
 	route := "/api/code/messages/poll"
 	if strings.TrimSpace(cursor) != "" {
 		route += "?ack=" + strings.TrimSpace(cursor)
@@ -856,9 +1052,9 @@ func (t *cicyCloudTransport) recordCloudReply(reply cicyCloudStreamMessage) {
 	hub.broadcastAll(ChatEvent{Type: "cicy_cloud_reply", Data: M{
 		"id": reply.ID, "kind": reply.Kind, "replyTo": replyTo,
 		"senderInstanceId": reply.SenderInstanceID,
-		"senderAgentId": reply.SenderAgentID,
-		"targetAgentId": reply.TargetAgentID,
-		"text": reply.Text, "enqueuedAtMs": reply.EnqueuedAtMS,
+		"senderAgentId":    reply.SenderAgentID,
+		"targetAgentId":    reply.TargetAgentID,
+		"text":             reply.Text, "enqueuedAtMs": reply.EnqueuedAtMS,
 		"receivedAtMs": state.ReceivedMS,
 	}})
 }
@@ -1662,8 +1858,10 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 	}
 	if r.Method == http.MethodPost && len(parts) == 2 {
 		var in struct {
-			Email string `json:"email"`
-			Team  string `json:"team"`
+			Email     string `json:"email"`
+			Team      string `json:"team"`
+			HubOrigin string `json:"hub_origin"`
+			Hub       bool   `json:"hub"`
 		}
 		if readBody(r, &in) != nil {
 			httpErr(w, 400, "invalid request body")
@@ -1690,6 +1888,37 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 		if data, readErr := os.ReadFile(cicyCloudCredentialPath()); readErr == nil {
 			_ = json.Unmarshal(data, &existing)
 		}
+		if in.Hub || strings.TrimSpace(in.HubOrigin) != "" {
+			hub := strings.TrimRight(strings.TrimSpace(in.HubOrigin), "/")
+			if hub == "" {
+				hub = cicyHubOrigin()
+			}
+			if u, parseErr := url.Parse(hub); parseErr != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" {
+				httpErr(w, 400, "invalid hub origin")
+				return
+			}
+			instanceID := strings.TrimSpace(existing.InstanceID)
+			if instanceID == "" {
+				instanceID, _ = randomCodeInstanceID()
+			}
+			var started struct {
+				State string `json:"state"`
+			}
+			if err := cloudJSONAt(hub, http.MethodPost, "/api/login/start", "", M{
+				"email": email, "instanceId": instanceID, "name": team, "platform": runtime.GOOS + "/" + telemetry.Runtime,
+			}, &started); err != nil {
+				httpErr(w, 502, err.Error())
+				return
+			}
+			if strings.TrimSpace(started.State) == "" {
+				httpErr(w, 502, "hub returned no login state")
+				return
+			}
+			cicyCloudPendingLogins.Store(state, cicyCloudPendingLogin{Team: team, HubOrigin: hub, InstanceID: instanceID})
+			hubLoginStates.Store(state, started.State)
+			J(w, M{"state": state, "status": "pending", "email": email, "team": team, "hub_origin": hub})
+			return
+		}
 		err = cloudJSON(http.MethodPost, "/api/auth/email/request", "", M{
 			"email": email, "state": state, "flow": "desktop_poll", "lang": "zh",
 			"platform": "cicy-code", "system": runtime.GOOS, "arch": runtime.GOARCH,
@@ -1702,7 +1931,7 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			httpErr(w, 502, err.Error())
 			return
 		}
-		cicyCloudPendingLogins.Store(state, team)
+		cicyCloudPendingLogins.Store(state, cicyCloudPendingLogin{Team: team})
 		J(w, M{"state": state, "status": "pending", "email": email, "team": team})
 		return
 	}
@@ -1710,6 +1939,44 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 		state := strings.TrimSpace(parts[2])
 		if len(state) < 32 {
 			httpErr(w, 400, "invalid state")
+			return
+		}
+		pendingValue, hasPending := cicyCloudPendingLogins.Load(state)
+		pending, _ := pendingValue.(cicyCloudPendingLogin)
+		if hasPending && pending.HubOrigin != "" {
+			hubStateValue, _ := hubLoginStates.Load(state)
+			hubState, _ := hubStateValue.(string)
+			var poll struct {
+				Status     string `json:"status"`
+				Token      string `json:"token"`
+				Owner      string `json:"owner"`
+				InstanceID string `json:"instanceId"`
+			}
+			if err := cloudJSONAt(pending.HubOrigin, http.MethodGet, "/api/login/poll?state="+url.QueryEscape(hubState), "", nil, &poll); err != nil {
+				httpErr(w, 502, err.Error())
+				return
+			}
+			if poll.Status != "ready" {
+				J(w, M{"status": poll.Status})
+				return
+			}
+			cred := cicyCloudCredential{Email: poll.Owner, InstanceID: pending.InstanceID, TeamID: pending.Team, Token: poll.Token,
+				Origin: pending.HubOrigin, Mode: cicyCloudModeHub, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+			if poll.InstanceID != "" {
+				cred.InstanceID = poll.InstanceID
+			}
+			if err := saveCiCyCloudCredential(cred); err != nil {
+				httpErr(w, 500, err.Error())
+				return
+			}
+			cicyCloudPendingLogins.Delete(state)
+			hubLoginStates.Delete(state)
+			acc, err := upsertCiCyCloudIMAccount(cred)
+			if err != nil {
+				httpErr(w, 500, err.Error())
+				return
+			}
+			J(w, M{"status": "ready", "account": imAccountToMap(acc)})
 			return
 		}
 		var poll struct {
@@ -1737,9 +2004,8 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			httpErr(w, 500, "instance id failed")
 			return
 		}
-		pendingTeam, ok := cicyCloudPendingLogins.Load(state)
-		teamID := strings.TrimSpace(fmt.Sprint(pendingTeam))
-		if !ok || teamID == "" {
+		teamID := strings.TrimSpace(pending.Team)
+		if !hasPending || teamID == "" {
 			httpErr(w, 400, "login team missing")
 			return
 		}
@@ -1750,6 +2016,7 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			return
 		}
 		cred := cicyCloudCredential{Email: poll.Email, InstanceID: instanceID, TeamID: teamID, Token: poll.Token, Origin: cicyCloudOrigin(), UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+		// A previous hub-mode credential must not survive a cloud login.
 		if err := saveCiCyCloudCredential(cred); err != nil {
 			httpErr(w, 500, err.Error())
 			return

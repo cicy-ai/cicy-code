@@ -528,8 +528,13 @@ export function useCurrentHistory(opts: {
           if (sig !== lastSig) {
             lastSig = sig;
             const steps: NonNullable<HistoryTurn['steps']> = [];
+            // A user stop (Ctrl+C from the UI) seals the round with a cancelled
+            // outcome marker item; render it as the 已停止生成 notice, never as text.
+            let liveOutcome = '';
             for (const it of liveItems) {
               const ty = String(it?.type || '').trim();
+              const outcomeKind = String(it?.cicy_outcome || '').trim();
+              if (outcomeKind) { liveOutcome = outcomeKind; continue; }
               if (ty === 'thinking') {
                 const tx = String(it?.thinking || '');
                 if (tx) steps.push({ type: 'thinking', text: tx });
@@ -593,11 +598,12 @@ export function useCurrentHistory(opts: {
                 turn_id: turnId,
                 role: 'assistant',
                 q: '',
-                text: '',
-                a: answer,
+                a: liveOutcome ? '' : answer,
                 steps,
                 status,
                 model: evModel || model,
+                outcome: liveOutcome || undefined,
+                text: liveOutcome ? (liveOutcome === 'cancelled' ? '已停止生成' : liveOutcome === 'blocked' ? '已拦截' : '生成失败') : '',
               };
               setLiveTurn(liveTurnRef.current);
             }

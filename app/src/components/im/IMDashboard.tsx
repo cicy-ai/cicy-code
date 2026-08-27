@@ -309,6 +309,9 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const [cloudModalOpen, setCloudModalOpen] = useState(false);
   const [cloudEmail, setCloudEmail] = useState('');
   const [cloudTeam, setCloudTeam] = useState('');
+  // 'cloud' = cicy-cloud worker (team + fixed proxy domain); 'hub' = direct cicy-ws-hub (email tenant, no worker quota)
+  const [cloudMode, setCloudMode] = useState<'cloud' | 'hub'>('hub');
+  const [cloudHubOrigin, setCloudHubOrigin] = useState('https://ws.cicy-ai.com');
   const [cloudState, setCloudState] = useState('');
   const [cloudSubmitting, setCloudSubmitting] = useState(false);
   const [cloudError, setCloudError] = useState('');
@@ -493,7 +496,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const submitCloudEmail = async () => {
     setCloudSubmitting(true); setCloudError('');
     try {
-      const res = await apiService.startCiCyCloudLogin(cloudEmail.trim(), cloudTeam.trim());
+      const res = await apiService.startCiCyCloudLogin(cloudEmail.trim(), cloudTeam.trim(), cloudMode === 'hub' ? cloudHubOrigin.trim() : undefined);
       setCloudState(String(res?.data?.state || ''));
     } catch (e) { setCloudError(errText(e)); }
     finally { setCloudSubmitting(false); }
@@ -503,6 +506,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
     if (!selected || selected.platform !== 'cicy_cloud') return;
     setCloudEmail(String(selected.config?.email || selected.name || ''));
     setCloudTeam(String(selected.config?.team_id || cloudInstance?.teamId || ''));
+    if (selected.config?.mode === 'hub') { setCloudMode('hub'); setCloudHubOrigin(String(selected.config?.cloud_origin || 'https://ws.cicy-ai.com')); } else { setCloudMode('cloud'); }
     setCloudState(''); setCloudError(''); setCloudModalOpen(true);
   };
 
@@ -1098,14 +1102,24 @@ export default function IMDashboard({ leftMount, rightMount }: {
                   <div className="grid gap-3 border-t border-white/[0.06] pt-3 sm:grid-cols-2">
                     <div><div className="text-[11px] text-zinc-600">Email</div><div className="mt-1 font-mono text-[12px] text-zinc-300">{selected.config?.email || selected.name || '—'}</div></div>
                     <div><div className="text-[11px] text-zinc-600">Team</div><div className="mt-1 font-mono text-[12px] text-zinc-300">{cloudInstance?.teamId || selected.config?.team_id || '—'}</div></div>
+                    {selected.config?.mode === 'hub' ? (
+                      <div className="sm:col-span-2">
+                        <div className="text-[11px] text-zinc-600">接入方式</div>
+                        <div className="mt-1 font-mono text-[12px] text-zinc-300">CiCy Hub 直连 · {String(selected.config?.cloud_origin || '')}</div>
+                        <div className="mt-1 text-[11px] text-zinc-600">同一 Email 登录的 cicy-code 实例互相可见、可互发消息。</div>
+                        {cloudError && <div className="mt-2 text-[11px] text-red-300">{cloudError}</div>}
+                      </div>
+                    ) : (
                     <div className="sm:col-span-2">
                       <div className="text-[11px] text-zinc-600">固定代理域名</div>
                       <div className="mt-1 flex items-center gap-3">
                         <div className="break-all font-mono text-[12px] text-zinc-300">{cloudInstance?.proxyHost ? `https://${cloudInstance.proxyHost}` : (cloudTunnelStarting ? '正在等待临时 CFT…' : '临时 CFT 未连接')}</div>
+                        {cloudInstance?.proxyHost && !cloudInstance?.proxyAvailable && <span data-id="im-detail-cloud-proxy-offline" className="text-[11px] text-amber-300">隧道未上报，域名暂不可用</span>}
                         {!cloudInstance?.proxyHost && <Btn data-id="im-detail-cloud-enable-tunnel" variant="secondary" size="sm" busy={cloudTunnelStarting} disabled={cloudTunnelStarting} onClick={() => void enableCloudTunnel()}>启动临时 CFT</Btn>}
                       </div>
                       {cloudError && <div className="mt-2 text-[11px] text-red-300">{cloudError}</div>}
                     </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1352,12 +1366,25 @@ export default function IMDashboard({ leftMount, rightMount }: {
           <div className="space-y-4 px-5 py-5">
             {!waiting ? (
               <>
+                <div data-id="im-cloud-mode" className="grid grid-cols-2 gap-1 rounded-lg bg-white/[0.04] p-1 text-[12px]">
+                  {([['hub', 'CiCy Hub 直连'], ['cloud', 'CiCy Cloud']] as const).map(([mode, label]) => (
+                    <button key={mode} type="button" data-id={`im-cloud-mode-${mode}`} onClick={() => setCloudMode(mode)}
+                      className={cn('rounded-md px-2 py-1.5 transition-colors', cloudMode === mode ? 'bg-white/[0.1] text-white' : 'text-zinc-500 hover:text-zinc-300')}>{label}</button>
+                  ))}
+                </div>
+                {cloudMode === 'hub' && (
+                  <Field label="Hub 地址" help="同一 Email 登录的实例归同一租户，可互相看到并发消息；不经过 Cloud Worker。">
+                    <input data-id="im-cloud-hub-origin" value={cloudHubOrigin}
+                      onChange={(e) => { setCloudHubOrigin(e.target.value); setCloudError(''); }}
+                      placeholder="https://ws.cicy-ai.com" className={cn(INPUT, 'h-10 font-mono')} disabled={cloudSubmitting} />
+                  </Field>
+                )}
                 <Field label="Email" help="点击邮件中的登录链接后，账号会自动注册或登录当前 cicy-code 实例。">
                   <input data-id="im-cloud-email" autoFocus type="email" value={cloudEmail}
                     onChange={(e) => { setCloudEmail(e.target.value); setCloudError(''); }}
                     placeholder="you@example.com" className={cn(INPUT, 'h-10')} disabled={cloudSubmitting} />
                 </Field>
-                <Field label="Team" help="Team 是这个 Instance 的固定标识。">
+                <Field label={cloudMode === 'hub' ? '实例名称' : 'Team'} help={cloudMode === 'hub' ? '这台 cicy-code 在同租户目录里显示的名字。' : 'Team 是这个 Instance 的固定标识。'}>
                   <input data-id="im-cloud-team" value={cloudTeam}
                     onChange={(e) => { setCloudTeam(e.target.value); setCloudError(''); }}
                     onKeyDown={(e) => {

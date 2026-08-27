@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowRight, ArrowUpCircle, BookOpen, Check, FileText, FolderKanban, GitBranch, Hand, History, LayoutGrid, Loader2, MessageCircle, Minus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, Pin, PinOff, Plus, RefreshCw, Search, SendHorizontal, Square, Trash2, UserPlus, Users, X, Zap } from 'lucide-react';
 import { Trans, useTranslation } from 'react-i18next';
@@ -15,6 +15,7 @@ import type { AgentLiveMetrics } from '../../lib/agentMetrics';
 import { metricsFromCurrentReply } from '../../lib/agentMetrics';
 import { ModelTag } from '../../lib/modelTag';
 import { chatAttachmentMarkdown, replAttachmentMarkdown } from '../../lib/attachmentMarkdown';
+import ProjectAttachmentChip from './ProjectAttachmentChip';
 import { appendPromptHistory, canNavigatePromptHistory, readPromptHistory } from '../../lib/promptHistory';
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
@@ -84,6 +85,8 @@ interface ProjectAttachment {
   fileRef?: string;
   status: 'uploading' | 'done' | 'error';
   progress: number;
+  // Kept until the upload succeeds so an errored chip can retry in place.
+  file?: File;
 }
 
 interface QueuedAgentMessage {
@@ -205,7 +208,7 @@ const readProjectAgentQueue = (): Record<string, QueuedAgentMessage[]> => {
 const persistProjectAgentQueue = (queue: Record<string, QueuedAgentMessage[]>) => {
   const persisted = Object.fromEntries(Object.entries(queue).map(([paneId, messages]) => [paneId, messages.map((message) => ({
     ...message,
-    attachments: message.attachments.map(({ previewURL: _previewURL, ...attachment }) => attachment),
+    attachments: message.attachments.map(({ previewURL: _previewURL, file: _file, ...attachment }) => attachment),
   }))]));
   try { localStorage.setItem(PROJECT_AGENT_QUEUE_KEY, JSON.stringify(persisted)); } catch {}
 };
@@ -1515,23 +1518,44 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     return () => window.removeEventListener('cicy:fill-project-composer', fillTargetPrompt as EventListener);
   }, [visibleAgentKey]);
 
+  const uploadAgentAttachment = (agent: ProjectAgent, id: string, file: File) => {
+    const agentId = shortPaneId(agent.paneId);
+    const patch = (fn: (item: ProjectAttachment) => ProjectAttachment) => setAgentAttachments((current) => ({ ...current, [agentId]: (current[agentId] || []).map((item) => item.id === id ? fn(item) : item) }));
+    patch((item) => ({ ...item, status: 'uploading', progress: 0 }));
+    void apiService.uploadAssetFile(agent.paneId, file, (loaded, total) => {
+      patch((item) => ({ ...item, progress: Math.max(1, Math.round((loaded / total) * 100)) }));
+    }).then((response: any) => {
+      const uploaded = response?.data?.file || {};
+      patch((item) => ({ ...item, status: 'done', progress: 100, fileRef: String(uploaded.file_ref || uploaded.fileRef || ''), file: undefined }));
+    }).catch(() => {
+      patch((item) => ({ ...item, status: 'error' }));
+    });
+  };
+
   const addAgentFiles = (agent: ProjectAgent, files: FileList | File[]) => {
     const agentId = shortPaneId(agent.paneId);
     Array.from(files).forEach((file) => {
       const id = `project-att-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const mediaType = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : undefined;
-      const attachment: ProjectAttachment = { id, name: file.name, size: file.size, isImage: mediaType === 'image', mediaType, previewURL: mediaType ? URL.createObjectURL(file) : undefined, status: 'uploading', progress: 0 };
+      // Pasted screenshots arrive as "image.png" — give them a name that
+      // stays distinguishable in the strip and in the agent's asset folder.
+      const name = file.name && file.name !== 'image.png' ? file.name : `screenshot-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}.${(file.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`;
+      const attachment: ProjectAttachment = { id, name, size: file.size, isImage: mediaType === 'image', mediaType, previewURL: mediaType ? URL.createObjectURL(file) : undefined, status: 'uploading', progress: 0, file };
       setAgentAttachments((current) => ({ ...current, [agentId]: [...(current[agentId] || []), attachment] }));
-      void apiService.uploadAssetFile(agent.paneId, file, (loaded, total) => {
-        setAgentAttachments((current) => ({ ...current, [agentId]: (current[agentId] || []).map((item) => item.id === id ? { ...item, progress: Math.max(1, Math.round((loaded / total) * 100)) } : item) }));
-      }).then((response: any) => {
-        const uploaded = response?.data?.file || {};
-        setAgentAttachments((current) => ({ ...current, [agentId]: (current[agentId] || []).map((item) => item.id === id ? { ...item, status: 'done', progress: 100, fileRef: String(uploaded.file_ref || uploaded.fileRef || '') } : item) }));
-      }).catch(() => {
-        setAgentAttachments((current) => ({ ...current, [agentId]: (current[agentId] || []).map((item) => item.id === id ? { ...item, status: 'error' } : item) }));
-      });
+      uploadAgentAttachment(agent, id, file);
     });
   };
+
+  const retryAgentAttachment = (agent: ProjectAgent, attachmentId: string) => {
+    const file = (agentAttachments[shortPaneId(agent.paneId)] || []).find((item) => item.id === attachmentId)?.file;
+    if (file) uploadAgentAttachment(agent, attachmentId, file);
+  };
+
+  // Drag-and-drop onto a card footer. Counter instead of boolean: dragenter /
+  // dragleave fire for every child element crossed.
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const dropDepthRef = useRef<Record<string, number>>({});
+  const hasDraggedFiles = (event: ReactDragEvent) => Array.from(event.dataTransfer?.types || []).includes('Files');
 
   const removeAgentAttachment = (agentId: string, attachmentId: string) => {
     setAgentAttachments((current) => {
@@ -2148,8 +2172,33 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
-                    className="flex shrink-0 flex-col rounded-b-2xl border-t border-white/[0.08] bg-[#15161b]"
+                    onDragEnter={(event) => {
+                      if (!hasDraggedFiles(event)) return;
+                      event.preventDefault();
+                      dropDepthRef.current[cardShortId] = (dropDepthRef.current[cardShortId] || 0) + 1;
+                      setDropTargetId(cardShortId);
+                    }}
+                    onDragOver={(event) => { if (hasDraggedFiles(event)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }}
+                    onDragLeave={(event) => {
+                      if (!hasDraggedFiles(event)) return;
+                      dropDepthRef.current[cardShortId] = Math.max(0, (dropDepthRef.current[cardShortId] || 0) - 1);
+                      if (!dropDepthRef.current[cardShortId]) setDropTargetId((current) => (current === cardShortId ? null : current));
+                    }}
+                    onDrop={(event) => {
+                      if (!hasDraggedFiles(event)) return;
+                      event.preventDefault();
+                      dropDepthRef.current[cardShortId] = 0;
+                      setDropTargetId(null);
+                      const files = Array.from(event.dataTransfer.files || []);
+                      if (files.length) { toggleAgentSelection(agent); addAgentFiles(agent, files); }
+                    }}
+                    className={cn('relative flex shrink-0 flex-col rounded-b-2xl border-t bg-[#15161b] transition-colors', dropTargetId === cardShortId ? 'border-amber-400/40' : 'border-white/[0.08]')}
                   >
+                    {dropTargetId === cardShortId ? (
+                      <div data-id={`project-agent-card-drop-hint-${cardShortId}`} className="pointer-events-none absolute inset-1 z-[2] grid place-items-center rounded-xl border-2 border-dashed border-amber-400/60 bg-[#15161b]/85 text-[12px] font-medium text-amber-300">
+                        <span className="flex items-center gap-1.5"><Paperclip className="h-4 w-4" />松开即添加为附件</span>
+                      </div>
+                    ) : null}
                     {(queuedAgentMessages[cardShortId] || []).length ? (
                       <div data-id={`project-agent-message-queue-${cardShortId}`} className="max-h-28 overflow-y-auto border-b border-white/[0.06] px-3 py-2">
                         <div data-id="project-agent-message-queue-item" className="relative whitespace-pre-wrap break-words rounded-lg bg-amber-500/[0.07] px-2.5 py-1.5 pr-24 text-[12px] leading-5 text-zinc-300">
@@ -2189,17 +2238,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                             </button>
                           </div>
                           {(queuedAgentMessages[cardShortId] || []).flatMap((queued) => queued.attachments).length ? (
-                            <div data-id="project-agent-message-queue-attachments" className="mb-1.5 flex gap-2 overflow-x-auto">
+                            <div data-id="project-agent-message-queue-attachments" className="mb-1.5 flex gap-2 overflow-x-auto pt-0.5">
                               {(queuedAgentMessages[cardShortId] || []).flatMap((queued) => queued.attachments).map((attachment) => (
-                                <div key={attachment.id} data-id={`project-agent-message-queue-attachment-${attachment.id}`} className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
-                                  {attachment.mediaType === 'image' && (attachment.previewURL || attachment.fileRef) ? (
-                                    <span data-id="project-agent-message-queue-attachment-media" className="block h-full w-full [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-full [&_[data-id=current-history-md-img]]:object-cover">
-                                      <MarkdownImg src={attachment.previewURL || attachment.fileRef || ''} alt={attachment.name} />
-                                    </span>
-                                  ) : (
-                                    <span data-id="project-agent-message-queue-attachment-file" className="grid h-full w-full place-items-center"><FileText className="h-5 w-5 text-zinc-500" /></span>
-                                  )}
-                                </div>
+                                <ProjectAttachmentChip key={attachment.id} attachment={attachment} compact />
                               ))}
                             </div>
                           ) : null}
@@ -2215,20 +2256,18 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       </div>
                     ) : null}
                     {(agentAttachments[cardShortId] || []).length ? (
-                      <div data-id="project-agent-card-attachments" className="flex w-full gap-2 overflow-x-auto border-b border-white/[0.06] px-3 py-2">
+                      <div data-id="project-agent-card-attachments" className="flex w-full items-center gap-2 overflow-x-auto border-b border-white/[0.06] px-3 pb-2 pt-2.5">
                         {(agentAttachments[cardShortId] || []).map((attachment) => (
-                          <div key={attachment.id} data-id={`project-agent-card-attachment-${attachment.id}`} className="group relative h-16 w-16 shrink-0 overflow-visible rounded-lg border border-white/10 bg-white/[0.04]">
-                            {attachment.mediaType === 'image' && attachment.previewURL ? (
-                              <span data-id="project-agent-card-attachment-media" className="block h-full w-full overflow-hidden rounded-lg [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-full [&_[data-id=current-history-md-img]]:!rounded-lg [&_[data-id=current-history-md-img]]:object-cover">
-                                <MarkdownImg src={attachment.previewURL} alt={attachment.name} />
-                              </span>
-                            ) : (
-                              <span className="grid h-full w-full place-items-center"><FileText className="h-5 w-5 text-zinc-500" /></span>
-                            )}
-                            {attachment.status === 'uploading' ? <span className="absolute inset-x-1 bottom-1 rounded bg-black/70 text-center text-[9px] text-white">{attachment.progress}%</span> : null}
-                            <button type="button" data-id="project-agent-card-attachment-remove" aria-label="Remove attachment" onClick={(event) => { event.stopPropagation(); removeAgentAttachment(cardShortId, attachment.id); }} className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-zinc-800 text-zinc-200 shadow-md"><X className="h-3 w-3" /></button>
-                          </div>
+                          <ProjectAttachmentChip
+                            key={attachment.id}
+                            attachment={attachment}
+                            onRemove={() => removeAgentAttachment(cardShortId, attachment.id)}
+                            onRetry={attachment.file ? () => retryAgentAttachment(agent, attachment.id) : undefined}
+                          />
                         ))}
+                        {(agentAttachments[cardShortId] || []).length > 1 ? (
+                          <span data-id="project-agent-card-attachments-count" className="ml-auto shrink-0 self-start text-[10px] tabular-nums text-zinc-500">{(agentAttachments[cardShortId] || []).length} 个附件</span>
+                        ) : null}
                       </div>
                     ) : null}
                     <div data-id={`project-agent-card-prompt-row-${cardShortId}`} className="flex min-h-10 w-full items-center px-3 py-2">
