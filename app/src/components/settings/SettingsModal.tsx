@@ -319,9 +319,9 @@ export default function SettingsModal({
   if (!open) return null;
 
   const nav: NavItem[] = [
+    { id: 'account', label: t('settingsNavAccount', { defaultValue: 'CiCy 账号' }), icon: <UserCircle className="h-4 w-4" /> },
     { id: 'general', label: t('settingsNavGeneral', { defaultValue: '通用' }), icon: <SlidersHorizontal className="h-4 w-4" /> },
     { id: 'language', label: t('settingsNavLanguage', { defaultValue: '语言' }), icon: <Globe className="h-4 w-4" /> },
-    { id: 'account', label: t('settingsNavAccount', { defaultValue: 'CiCy 账号' }), icon: <UserCircle className="h-4 w-4" /> },
     { id: 'im', label: t('settingsNavIM', { defaultValue: 'IM 通知' }), icon: <MessageCircle className="h-4 w-4" /> },
     { id: 'timer', label: t('timer', { ns: 'common', defaultValue: '定时器' }), icon: <Timer className="h-4 w-4" /> },
     { id: 'routing', label: t('settingsNavRouting', { defaultValue: 'Agent 路由' }), icon: <Route className="h-4 w-4" /> },

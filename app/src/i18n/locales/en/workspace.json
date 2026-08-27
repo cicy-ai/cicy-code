@@ -388,7 +388,6 @@
   "cloudLoginMailHint": "Open {{email}} and click the sign-in link; this page completes the binding automatically.",
   "cloudLoginSend": "Send sign-in email",
   "cloudLoginResend": "Send again",
-  "cloudProxyHint": "In Cloud mode the fixed proxy domain is assigned by Cloud.",
   "settingsNavIM": "IM Notifications",
   "settingsNavRouting": "Agent Routing",
   "settingsNavProviders": "LLM Providers",

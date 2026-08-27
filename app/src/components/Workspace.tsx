@@ -2467,6 +2467,29 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           className="fixed z-[220] min-w-[220px] rounded-xl border border-white/10 bg-[#101014]/95 p-2 shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur"
           style={{ left: membershipPopoverPos.x, bottom: 12 }}
         >
+          <button
+            type="button"
+            data-id="membership-settings-account"
+            onClick={() => openSettings('account')}
+            className="mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+          >
+            <span data-id="membership-settings-account-label" className="inline-flex min-w-0 items-center gap-1.5">
+              <span className="shrink-0">{t('settingsNavAccount', { defaultValue: 'CiCy 账号' })}</span>
+              {cloudAccount?.state === 'connected' ? (
+                <span data-id="membership-settings-account-email" className="inline-flex min-w-0 items-center gap-1 font-normal text-zinc-500">
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+                  <span className="max-w-[120px] truncate">{String(cloudAccount.config?.email || cloudAccount.name || '')}</span>
+                </span>
+              ) : (
+                <span data-id="membership-settings-account-off" className="inline-flex items-center gap-1 font-normal text-zinc-500">
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-600" />
+                  {cloudAccount ? (cloudAccount.state_detail || t('cloudNotAuthed', { defaultValue: '未认证' })) : t('cloudNotLoggedIn', { defaultValue: '未登录' })}
+                </span>
+              )}
+            </span>
+            <UserCircle className="h-3.5 w-3.5" />
+          </button>
+          <div className="mb-1 border-t border-white/[0.06]" />
           {membershipCard.renewUrl ? (
             <button
               type="button"
@@ -2601,28 +2624,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 {emailNeedsSetup && <span data-id="membership-settings-general-badge" className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title={t('emailNeedsSetup', { defaultValue: '未配置令牌投递邮箱 / SMTP' })} />}
               </span>
               <SlidersHorizontal className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              data-id="membership-settings-account"
-              onClick={() => openSettings('account')}
-              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
-            >
-              <span data-id="membership-settings-account-label" className="inline-flex min-w-0 items-center gap-1.5">
-                <span className="shrink-0">{t('settingsNavAccount', { defaultValue: 'CiCy 账号' })}</span>
-                {cloudAccount?.state === 'connected' ? (
-                  <span data-id="membership-settings-account-email" className="inline-flex min-w-0 items-center gap-1 font-normal text-zinc-500">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
-                    <span className="max-w-[120px] truncate">{String(cloudAccount.config?.email || cloudAccount.name || '')}</span>
-                  </span>
-                ) : (
-                  <span data-id="membership-settings-account-off" className="inline-flex items-center gap-1 font-normal text-zinc-500">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-600" />
-                    {cloudAccount ? (cloudAccount.state_detail || t('cloudNotAuthed', { defaultValue: '未认证' })) : t('cloudNotLoggedIn', { defaultValue: '未登录' })}
-                  </span>
-                )}
-              </span>
-              <UserCircle className="h-3.5 w-3.5" />
             </button>
             <button
               type="button"

@@ -388,7 +388,6 @@
   "cloudLoginMailHint": "请打开 {{email}} 并点击登录链接，本页面会自动完成绑定。",
   "cloudLoginSend": "发送登录邮件",
   "cloudLoginResend": "重新发送",
-  "cloudProxyHint": "Cloud 模式下的固定代理域名由 Cloud 分配。",
   "settingsNavIM": "IM 通知",
   "settingsNavRouting": "Agent 路由",
   "settingsNavProviders": "LLM 供应商",

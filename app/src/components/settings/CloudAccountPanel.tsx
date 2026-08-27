@@ -53,7 +53,6 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
   const [instances, setInstances] = useState<CloudInstanceInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
-  const [mode, setMode] = useState<'hub' | 'cloud'>('hub');
   const [hubOrigin, setHubOrigin] = useState(DEFAULT_HUB);
   const [email, setEmail] = useState('');
   const [team, setTeam] = useState('');
@@ -89,15 +88,14 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
   const openLogin = () => {
     setEmail(String(account?.config?.email || account?.name || ''));
     setTeam(String(account?.config?.team_id || ''));
-    if (account?.config?.mode === 'hub') { setMode('hub'); setHubOrigin(String(account?.config?.cloud_origin || DEFAULT_HUB)); }
-    else if (account) setMode('cloud');
+    if (account?.config?.mode === 'hub') setHubOrigin(String(account?.config?.cloud_origin || DEFAULT_HUB));
     setState(''); setError(''); setModalOpen(true);
   };
 
   const submit = async () => {
     setSubmitting(true); setError('');
     try {
-      const res = await apiService.startCiCyCloudLogin(email.trim(), team.trim(), mode === 'hub' ? hubOrigin.trim() : undefined);
+      const res = await apiService.startCiCyCloudLogin(email.trim(), team.trim(), hubOrigin.trim() || DEFAULT_HUB);
       setState(String(res?.data?.state || ''));
     } catch (e) { setError(errText(e)); }
     finally { setSubmitting(false); }
@@ -188,9 +186,6 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
                   <button type="button" data-id="cloud-account-signout" onClick={() => void signOut()} className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3 py-2 text-[12px] text-red-300 transition-colors hover:bg-red-500/[0.12]"><LogOut size={12} />{t('cloudSignOut', { defaultValue: '退出登录' })}</button>
                 </div>
               </div>
-              {!isHub && account.config?.team_id && (
-                <div className="border-t border-white/[0.06] pt-3 text-[11px] text-zinc-500">{t('cloudProxyHint', { defaultValue: '固定代理域名与隧道状态见「IM 通知」旧入口已移除；Cloud 模式下的域名由 Cloud 分配。' })}</div>
-              )}
             </div>
           )}
         </section>
@@ -231,28 +226,20 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
             <div className="space-y-4 px-5 py-5">
               {!state ? (
                 <>
-                  <div data-id="cloud-login-mode" className="grid grid-cols-2 gap-1 rounded-lg bg-white/[0.04] p-1 text-[12px]">
-                    {([['hub', 'CiCy Hub 直连'], ['cloud', 'CiCy Cloud']] as const).map(([m, label]) => (
-                      <button key={m} type="button" data-id={`cloud-login-mode-${m}`} onClick={() => setMode(m)}
-                        className={`rounded-md px-2 py-1.5 transition-colors ${mode === m ? 'bg-white/[0.1] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>{label}</button>
-                    ))}
-                  </div>
-                  {mode === 'hub' && (
-                    <label className="block">
-                      <span className="mb-1 block text-[11px] font-medium text-zinc-400">Hub 地址</span>
-                      <input data-id="cloud-login-hub-origin" value={hubOrigin} onChange={(e) => { setHubOrigin(e.target.value); setError(''); }} placeholder={DEFAULT_HUB} className={`${INPUT} font-mono`} disabled={submitting} />
-                    </label>
-                  )}
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] font-medium text-zinc-400">Hub 地址</span>
+                    <input data-id="cloud-login-hub-origin" value={hubOrigin} onChange={(e) => { setHubOrigin(e.target.value); setError(''); }} placeholder={DEFAULT_HUB} className={`${INPUT} font-mono`} disabled={submitting} />
+                  </label>
                   <label className="block">
                     <span className="mb-1 block text-[11px] font-medium text-zinc-400">Email</span>
                     <input data-id="cloud-login-email" autoFocus type="email" value={email} onChange={(e) => { setEmail(e.target.value); setError(''); }} placeholder="you@example.com" className={INPUT} disabled={submitting} />
                     <span className="mt-1 block text-[11px] text-zinc-600">{t('cloudLoginEmailHelp', { defaultValue: '点击邮件里的链接后，这台 cicy-code 自动完成登录。' })}</span>
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-[11px] font-medium text-zinc-400">{mode === 'hub' ? t('cloudInstanceName', { defaultValue: '实例名称' }) : 'Team'}</span>
+                    <span className="mb-1 block text-[11px] font-medium text-zinc-400">{t('cloudInstanceName', { defaultValue: '实例名称' })}</span>
                     <input data-id="cloud-login-team" value={team} onChange={(e) => { setTeam(e.target.value); setError(''); }}
                       onKeyDown={(e) => { const composing = e.nativeEvent.isComposing || e.keyCode === 229; if (!composing && e.key === 'Enter' && email.trim() && team.trim()) void submit(); }}
-                      placeholder={mode === 'hub' ? 'my-laptop' : 'mac_local'} className={`${INPUT} font-mono`} disabled={submitting} />
+                      placeholder="my-laptop" className={`${INPUT} font-mono`} disabled={submitting} />
                   </label>
                 </>
               ) : (
