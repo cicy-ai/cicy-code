@@ -638,6 +638,8 @@
   "projectDeleteTitle": "删除 {{name}}？",
   "projectDeleteBody": "将删除该项目及其中的 Agent 关联，不会删除 Agent 本身。",
   "projectAgentCount": "{{count}} 个 Agent",
+  "projectWorkingCount": "{{count}} 工作中",
+  "projectIdleCount": "{{count}} 空闲",
   "projectEmptyHint": "按任务把 Agent 分组，每个项目一块画布。",
   "projectAddAgent": "添加 Agent",
   "projectCreateAgent": "新建 Agent",

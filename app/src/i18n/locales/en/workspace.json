@@ -638,6 +638,8 @@
   "projectDeleteTitle": "Delete {{name}}?",
   "projectDeleteBody": "The project and its agent assignments will be deleted. Agents themselves are not deleted.",
   "projectAgentCount": "{{count}} agents",
+  "projectWorkingCount": "{{count}} working",
+  "projectIdleCount": "{{count}} idle",
   "projectEmptyHint": "Group agents by task — each project gets its own canvas.",
   "projectAddAgent": "Add agents",
   "projectCreateAgent": "Create new agent",

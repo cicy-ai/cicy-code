@@ -168,6 +168,14 @@ const persistProjectAgentBodyTab = (agent: ProjectAgent, tab: ProjectAgentBodyTa
     }));
   } catch {}
 };
+const PROJECT_AGENT_BUSY_RE = /running|working|thinking|streaming|pending|tool_use|tool_call|in_progress/;
+const projectAgentIsBusy = (agent: ProjectAgent, statuses: Record<string, any>, liveMetrics: Record<string, AgentLiveMetrics>) => {
+  const id = shortPaneId(agent.paneId);
+  if (agent.remote) return agent.instanceOnline !== false && PROJECT_AGENT_BUSY_RE.test(String(agent.status || '').toLowerCase());
+  const live = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id];
+  if (liveMetrics[id]) return liveMetrics[id].working;
+  return PROJECT_AGENT_BUSY_RE.test(String(live?.status || agent.status || '').toLowerCase());
+};
 const projectAgentCompleteness = (agent: ProjectAgent) => [
   agent.title,
   agent.agentType,
@@ -944,6 +952,30 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     return [...unique.values()];
   }, [agents, cloudProjectAgents]);
   const memberIds = useMemo(() => new Set(selectedProject.pane_ids.map(shortPaneId)), [selectedProject.pane_ids]);
+  // working / idle split per project, from the same live data the cards use.
+  const projectActivity = useMemo(() => {
+    const byId = new Map(allAgents.map((agent) => [shortPaneId(agent.paneId), agent]));
+    const result: Record<string, { working: number; idle: number; total: number }> = {};
+    for (const project of projects) {
+      let working = 0;
+      let total = 0;
+      for (const paneId of project.pane_ids) {
+        const agent = byId.get(shortPaneId(paneId));
+        if (!agent) continue;
+        total += 1;
+        if (projectAgentIsBusy(agent, statuses, liveMetrics)) working += 1;
+      }
+      result[String(project.id)] = { working, idle: total - working, total };
+    }
+    return result;
+  }, [allAgents, projects, statuses, liveMetrics]);
+  const activityLabel = (activity?: { working: number; idle: number; total: number }) => {
+    if (!activity || !activity.total) return '';
+    return [
+      activity.working ? t('projectWorkingCount', { count: activity.working, defaultValue: '{{count}} 工作中' }) : '',
+      activity.idle ? t('projectIdleCount', { count: activity.idle, defaultValue: '{{count}} 空闲' }) : '',
+    ].filter(Boolean).join(' · ');
+  };
   const visibleAgents = allAgents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
   const availableAgents = allAgents.filter((agent) => !memberIds.has(shortPaneId(agent.paneId)));
   const availableAgentsForInstance = availableAgents.filter((agent) => addInstanceId === 'local' ? !agent.remote : agent.instanceId === addInstanceId);
@@ -2016,7 +2048,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           {error ? <div data-id="projects-error" className="m-2 rounded-lg bg-red-500/10 p-3 text-xs text-red-300">{error}</div> : null}
           {projects.map((project) => {
             const active = String(project.id) === String(selectedProject.id);
-            const subtitle = project.pane_count > 0 ? t('projectAgentCount', { count: project.pane_count }) : t('projectNoAgents', { defaultValue: '还没有 Agent' });
+            const activity = projectActivity[String(project.id)];
+            const subtitle = project.pane_count > 0
+              ? [t('projectAgentCount', { count: project.pane_count }), activityLabel(activity)].filter(Boolean).join(' · ')
+              : t('projectNoAgents', { defaultValue: '还没有 Agent' });
             return (
               <div
                 key={String(project.id)}
@@ -2044,7 +2079,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                     <span data-id="project-list-item-name" className={cn('min-w-0 truncate text-[13px] font-medium', active ? 'text-zinc-100' : 'text-zinc-300 group-hover:text-zinc-100')}>{project.name}</span>
                     {project.pinned ? <Pin data-id="project-list-item-pinned" className="h-3 w-3 shrink-0 text-amber-400" /> : null}
                   </div>
-                  <div data-id="project-list-item-subtitle" className="mt-0.5 truncate text-[11px] text-zinc-500">{subtitle}</div>
+                  <div data-id="project-list-item-subtitle" className="mt-0.5 flex min-w-0 items-center gap-1 truncate text-[11px] text-zinc-500">
+                    {activity?.working ? <span data-id="project-list-item-working-dot" className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden /> : null}
+                    <span className="min-w-0 truncate">{subtitle}</span>
+                  </div>
                 </div>
                 <div data-id="project-list-item-actions" className="relative h-7 w-7 shrink-0">
                   <span
@@ -2090,7 +2128,16 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           {projectListCollapsed ? <button type="button" data-id="projects-list-expand" onClick={() => setProjectListVisibility(false)} className="mr-3 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100" title={t('expand', { ns: 'common', defaultValue: '展开' })} aria-label={t('expand', { ns: 'common', defaultValue: '展开' })}><PanelLeftOpen className="h-4 w-4" /></button> : null}
           <div data-id="projects-agent-heading" className="min-w-0 flex-1">
             <h2 data-id="projects-agent-title" className="truncate text-[15px] font-semibold text-zinc-100">{selectedProject.name}</h2>
-            <p data-id="projects-agent-count" className="text-[11px] text-zinc-600">{t('projectAgentCount', { count: visibleAgents.length })}</p>
+            <p data-id="projects-agent-count" className="flex items-center gap-1 text-[11px] text-zinc-600">
+              <span>{t('projectAgentCount', { count: visibleAgents.length })}</span>
+              {activityLabel(projectActivity[String(selectedProject.id)]) ? (
+                <>
+                  <span aria-hidden>·</span>
+                  {projectActivity[String(selectedProject.id)]?.working ? <span data-id="projects-agent-working-dot" className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden /> : null}
+                  <span data-id="projects-agent-activity">{activityLabel(projectActivity[String(selectedProject.id)])}</span>
+                </>
+              ) : null}
+            </p>
           </div>
           <button type="button" data-id={`project-definition-edit-${selectedProject.api_id}`} onClick={(event) => { event.stopPropagation(); openProjectDefinition(selectedProject); }} className="mr-1 grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100" title={t('projectDefinitionEdit')} aria-label={t('projectDefinitionEdit')}><BookOpen className="h-4 w-4" /></button>
           {topRightControls}
@@ -2240,7 +2287,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                           {(queuedAgentMessages[cardShortId] || []).flatMap((queued) => queued.attachments).length ? (
                             <div data-id="project-agent-message-queue-attachments" className="mb-1.5 flex gap-2 overflow-x-auto pt-0.5">
                               {(queuedAgentMessages[cardShortId] || []).flatMap((queued) => queued.attachments).map((attachment) => (
-                                <ProjectAttachmentChip key={attachment.id} attachment={attachment} compact />
+                                <ProjectAttachmentChip key={attachment.id} attachment={attachment} compact idPrefix="project-agent-message-queue-attachment" />
                               ))}
                             </div>
                           ) : null}
