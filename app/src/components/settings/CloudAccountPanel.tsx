@@ -39,6 +39,35 @@ export interface CloudInstanceInfo {
   publicIp?: string;
   version?: string;
   createdAt?: string;
+  ports?: Array<{ port: number; name?: string; visibility?: string }>;
+  resources?: {
+    cpu_usage_pct?: number; cpu_cores?: number;
+    mem_usage_pct?: number; mem_total_bytes?: number; mem_used_bytes?: number;
+    disk_usage_pct?: number; disk_total_bytes?: number; disk_used_bytes?: number;
+    load_1?: number; load_5?: number; load_15?: number; updated_at?: string;
+  };
+}
+
+function fmtBytes(value?: number): string {
+  if (value == null || !Number.isFinite(value) || value <= 0) return '--';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let next = value; let unit = units[0];
+  for (let i = 0; i < units.length; i += 1) { unit = units[i]; if (next < 1024 || i === units.length - 1) break; next /= 1024; }
+  return `${next >= 100 ? next.toFixed(0) : next.toFixed(1)} ${unit}`;
+}
+
+function ResourceBar({ label, used, total, pct, extra }: { label: string; used?: number; total?: number; pct?: number; extra?: string }) {
+  const value = pct != null && Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : (used != null && total ? Math.max(0, Math.min(100, (used / total) * 100)) : null);
+  const tone = value == null ? 'bg-zinc-600' : value >= 90 ? 'bg-red-400' : value >= 70 ? 'bg-amber-400' : 'bg-emerald-400';
+  return (
+    <div className="min-w-0">
+      <div className="flex items-baseline justify-between gap-2 text-[11px]">
+        <span className="text-zinc-500">{label}</span>
+        <span className="truncate font-mono text-zinc-400">{extra ?? (used != null && total ? `${fmtBytes(used)} / ${fmtBytes(total)}` : '')}{value != null ? <span className={`ml-1.5 ${value >= 90 ? 'text-red-300' : value >= 70 ? 'text-amber-300' : 'text-zinc-300'}`}>{value.toFixed(0)}%</span> : <span className="ml-1.5 text-zinc-600">--</span>}</span>
+      </div>
+      <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-white/[0.06]"><div className={`h-full rounded-full ${tone}`} style={{ width: `${value ?? 0}%` }} /></div>
+    </div>
+  );
 }
 
 function fmtTime(raw?: string): string {
@@ -229,6 +258,30 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
                         <div className="truncate"><span className="text-zinc-600">{t('cloudSysSeen', { defaultValue: '最近在线' })} </span>{fmtTime(inst.lastSeenAt)}</div>
                         {inst.version ? <div className="truncate font-mono"><span className="font-sans text-zinc-600">cicy-code </span>{inst.version}</div> : null}
                       </div>
+                      {inst.resources ? (
+                        <div data-id={`cloud-instance-res-${inst.instanceId}`} className="mt-2 grid grid-cols-1 gap-x-5 gap-y-1.5 sm:grid-cols-3">
+                          <ResourceBar label="CPU" pct={inst.resources.cpu_usage_pct} extra={inst.resources.cpu_cores ? `${inst.resources.cpu_cores} cores` : ''} />
+                          <ResourceBar label={t('cloudSysMem', { defaultValue: '内存' })} used={inst.resources.mem_used_bytes} total={inst.resources.mem_total_bytes} pct={inst.resources.mem_usage_pct} />
+                          <ResourceBar label={t('cloudSysDisk', { defaultValue: '磁盘' })} used={inst.resources.disk_used_bytes} total={inst.resources.disk_total_bytes} pct={inst.resources.disk_usage_pct} />
+                          {inst.resources.load_1 != null && (
+                            <div className="text-[11px] text-zinc-500 sm:col-span-3"><span className="text-zinc-600">{t('cloudSysLoad', { defaultValue: '负载' })} </span><span className="font-mono text-zinc-400">{[inst.resources.load_1, inst.resources.load_5, inst.resources.load_15].map((v) => (v ?? 0).toFixed(2)).join(' · ')}</span><span className="ml-1 text-zinc-600">1m / 5m / 15m</span></div>
+                          )}
+                        </div>
+                      ) : null}
+                      {inst.ports && inst.ports.length > 0 && inst.proxyHost ? (
+                        <div data-id={`cloud-instance-ports-${inst.instanceId}`} className="mt-1.5 flex flex-wrap gap-1.5">
+                          {inst.ports.filter((p) => p.visibility !== 'closed').map((p) => {
+                            const base = inst.proxyHost!.replace(/^([^.]+)\./, `$1-${p.port}.`);
+                            return (
+                              <a key={p.port} href={`https://${base}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400 hover:border-blue-500/40 hover:text-blue-300"
+                                title={`https://${base}`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${p.visibility === 'public' ? 'bg-emerald-400' : 'bg-zinc-500'}`} />:{p.port}{p.name ? ` ${p.name}` : ''}
+                              </a>
+                            );
+                          })}
+                        </div>
+                      ) : null}
                       {inst.proxyHost ? (
                         <a data-id={`cloud-instance-domain-${inst.instanceId}`} href={`https://${inst.proxyHost}`} target="_blank" rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}

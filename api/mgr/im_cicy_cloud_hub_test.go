@@ -41,9 +41,16 @@ func TestHubModeMapsWorkerRoutesOntoHub(t *testing.T) {
 				t.Errorf("register must carry telemetry, got %#v (err %v)", tele, err)
 			}
 			_ = json.NewEncoder(w).Encode(M{"success": true, "ticket": "p.s", "wsUrl": "wss://hub.test/ws", "exp": 1})
+		case "POST /api/heartbeat":
+			var body M
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["tunnelUrl"] != "https://t.trycloudflare.com" || body["cpuCores"] == nil {
+				t.Errorf("heartbeat must forward tunnel + telemetry, got %#v", body)
+			}
+			_ = json.NewEncoder(w).Encode(M{"success": true})
 		case "GET /api/instances":
 			_ = json.NewEncoder(w).Encode(M{"success": true, "owner": "alice@example.com", "instances": []M{
 				{"instanceId": "code-aaaaaaaaaaaaaaaa", "name": "box", "online": true, "self": true, "cpuModel": "i5", "cpuCores": 12, "memoryTotalMB": 15891, "arch": "amd64",
+					"proxyHost": "box.hub.test", "proxyAvailable": true, "resources": M{"cpu_usage_pct": 6.5},
 					"agents": []M{{"agentId": "w-1001", "title": "Master", "agentType": "claude", "online": true, "model": "opus"}}},
 				{"instanceId": "code-bbbbbbbbbbbbbbbb", "name": "", "online": false},
 			}})
@@ -82,6 +89,9 @@ func TestHubModeMapsWorkerRoutesOntoHub(t *testing.T) {
 	if instances.Instances[0]["cpuModel"] != "i5" || instances.Instances[0]["cpuCores"] != float64(12) || instances.Instances[0]["arch"] != "amd64" {
 		t.Fatalf("telemetry not mapped: %#v", instances.Instances[0])
 	}
+	if instances.Instances[0]["proxyHost"] != "box.hub.test" || instances.Instances[0]["proxyAvailable"] != float64(1) || instances.Instances[0]["resources"].(map[string]any)["cpu_usage_pct"] != 6.5 {
+		t.Fatalf("gateway fields not mapped: %#v", instances.Instances[0])
+	}
 	if len(instances.Instances) != 2 || instances.Instances[0]["teamId"] != "box" || instances.Instances[0]["status"] != "online" ||
 		instances.Instances[1]["teamId"] != "code-bbbbbbbb" || instances.Instances[1]["status"] != "offline" {
 		t.Fatalf("instances = %#v", instances.Instances)
@@ -101,9 +111,9 @@ func TestHubModeMapsWorkerRoutesOntoHub(t *testing.T) {
 		t.Fatalf("agent row = %#v", a)
 	}
 
-	// Worker-only routes are no-ops or explicit websocket-only errors.
-	if err := cloudJSON(http.MethodPost, "/api/code/instances/heartbeat", "cwh_token", M{}, nil); err != nil {
-		t.Fatalf("heartbeat should be a no-op: %v", err)
+	// Heartbeat forwards to the hub; worker-only routes are no-ops or explicit websocket-only errors.
+	if err := cloudJSON(http.MethodPost, "/api/code/instances/heartbeat", "cwh_token", M{"tunnelUrl": "https://t.trycloudflare.com", "tunnelToken": "tok"}, nil); err != nil {
+		t.Fatalf("heartbeat: %v", err)
 	}
 	if err := cloudJSON(http.MethodPost, "/api/code/agents", "cwh_token", M{"agents": []M{}}, nil); err != nil {
 		t.Fatalf("agent directory should be a no-op: %v", err)
@@ -117,8 +127,8 @@ func TestHubModeMapsWorkerRoutesOntoHub(t *testing.T) {
 	if err := cloudJSON(http.MethodPost, "/api/code/messages", "cwh_token", M{}, nil); err == nil || !strings.Contains(err.Error(), "websocket") {
 		t.Fatalf("http send must be refused in hub mode, got %v", err)
 	}
-	if hits.Load() != 3 {
-		t.Fatalf("hub hits = %d, want 3 (register, instances ×2)", hits.Load())
+	if hits.Load() != 4 {
+		t.Fatalf("hub hits = %d, want 4 (register, instances ×2, heartbeat)", hits.Load())
 	}
 }
 

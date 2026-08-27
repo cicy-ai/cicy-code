@@ -392,6 +392,8 @@
   "cloudSysOS": "系统",
   "cloudSysMem": "内存",
   "cloudSysSeen": "最近在线",
+  "cloudSysDisk": "磁盘",
+  "cloudSysLoad": "负载",
   "settingsNavIM": "IM 通知",
   "settingsNavRouting": "Agent 路由",
   "settingsNavProviders": "LLM 供应商",

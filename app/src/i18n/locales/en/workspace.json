@@ -392,6 +392,8 @@
   "cloudSysOS": "OS",
   "cloudSysMem": "Memory",
   "cloudSysSeen": "Last seen",
+  "cloudSysDisk": "Disk",
+  "cloudSysLoad": "Load",
   "settingsNavIM": "IM Notifications",
   "settingsNavRouting": "Agent Routing",
   "settingsNavProviders": "LLM Providers",
