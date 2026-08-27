@@ -36,10 +36,14 @@ func TestHubModeMapsWorkerRoutesOntoHub(t *testing.T) {
 		}
 		switch r.Method + " " + r.URL.Path {
 		case "POST /api/register":
+			var tele M
+			if err := json.NewDecoder(r.Body).Decode(&tele); err != nil || tele["platform"] == nil || tele["cpuCores"] == nil {
+				t.Errorf("register must carry telemetry, got %#v (err %v)", tele, err)
+			}
 			_ = json.NewEncoder(w).Encode(M{"success": true, "ticket": "p.s", "wsUrl": "wss://hub.test/ws", "exp": 1})
 		case "GET /api/instances":
 			_ = json.NewEncoder(w).Encode(M{"success": true, "owner": "alice@example.com", "instances": []M{
-				{"instanceId": "code-aaaaaaaaaaaaaaaa", "name": "box", "online": true, "self": true,
+				{"instanceId": "code-aaaaaaaaaaaaaaaa", "name": "box", "online": true, "self": true, "cpuModel": "i5", "cpuCores": 12, "memoryTotalMB": 15891, "arch": "amd64",
 					"agents": []M{{"agentId": "w-1001", "title": "Master", "agentType": "claude", "online": true, "model": "opus"}}},
 				{"instanceId": "code-bbbbbbbbbbbbbbbb", "name": "", "online": false},
 			}})
@@ -74,6 +78,9 @@ func TestHubModeMapsWorkerRoutesOntoHub(t *testing.T) {
 	}
 	if err := cloudJSON(http.MethodGet, "/api/code/instances", "cwh_token", nil, &instances); err != nil {
 		t.Fatalf("instances: %v", err)
+	}
+	if instances.Instances[0]["cpuModel"] != "i5" || instances.Instances[0]["cpuCores"] != float64(12) || instances.Instances[0]["arch"] != "amd64" {
+		t.Fatalf("telemetry not mapped: %#v", instances.Instances[0])
 	}
 	if len(instances.Instances) != 2 || instances.Instances[0]["teamId"] != "box" || instances.Instances[0]["status"] != "online" ||
 		instances.Instances[1]["teamId"] != "code-bbbbbbbb" || instances.Instances[1]["status"] != "offline" {

@@ -30,6 +30,21 @@ export interface CloudInstanceInfo {
   hub?: boolean;
   proxyHost?: string;
   proxyAvailable?: number | boolean;
+  arch?: string;
+  runtime?: string;
+  cpuModel?: string;
+  cpuCores?: number;
+  memoryTotalMB?: number;
+  gpu?: string;
+  publicIp?: string;
+  version?: string;
+  createdAt?: string;
+}
+
+function fmtTime(raw?: string): string {
+  if (!raw) return '—';
+  const ms = Date.parse(raw.includes('T') ? raw : raw.replace(' ', 'T') + 'Z');
+  return Number.isFinite(ms) ? new Date(ms).toLocaleString() : raw;
 }
 
 const INPUT = 'h-10 w-full rounded-lg border border-white/[0.09] bg-white/[0.025] px-3 text-[13px] text-zinc-100 placeholder:text-zinc-600 outline-none transition-colors hover:border-white/[0.14] focus:border-blue-500/55 focus:bg-white/[0.045] focus:ring-1 focus:ring-blue-500/15 disabled:opacity-50';
@@ -205,6 +220,15 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[13px] text-zinc-200">{inst.teamId || inst.instanceId}{inst.self ? <span className="ml-2 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-zinc-400">{t('cloudInstanceSelf', { defaultValue: '本机' })}</span> : null}</div>
                       <div className="truncate font-mono text-[11px] text-zinc-600">{inst.instanceId}{inst.platform ? ` · ${inst.platform}` : ''}</div>
+                      <div data-id={`cloud-instance-sys-${inst.instanceId}`} className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] text-zinc-500 sm:grid-cols-3">
+                        <div className="truncate" title={[inst.platform, inst.arch, inst.runtime].filter(Boolean).join(' · ')}><span className="text-zinc-600">{t('cloudSysOS', { defaultValue: '系统' })} </span>{[inst.platform, inst.arch, inst.runtime].filter(Boolean).join(' · ') || '—'}</div>
+                        <div className="truncate" title={inst.cpuModel}><span className="text-zinc-600">CPU </span>{inst.cpuModel ? `${inst.cpuModel}${inst.cpuCores ? ` · ${inst.cpuCores}C` : ''}` : '—'}</div>
+                        <div className="truncate"><span className="text-zinc-600">{t('cloudSysMem', { defaultValue: '内存' })} </span>{inst.memoryTotalMB ? `${(inst.memoryTotalMB / 1024).toFixed(1)} GB` : '—'}</div>
+                        <div className="truncate" title={inst.gpu}><span className="text-zinc-600">GPU </span>{inst.gpu || '—'}</div>
+                        <div className="truncate font-mono"><span className="font-sans text-zinc-600">IP </span>{inst.publicIp || '—'}</div>
+                        <div className="truncate"><span className="text-zinc-600">{t('cloudSysSeen', { defaultValue: '最近在线' })} </span>{fmtTime(inst.lastSeenAt)}</div>
+                        {inst.version ? <div className="truncate font-mono"><span className="font-sans text-zinc-600">cicy-code </span>{inst.version}</div> : null}
+                      </div>
                       {inst.proxyHost ? (
                         <a data-id={`cloud-instance-domain-${inst.instanceId}`} href={`https://${inst.proxyHost}`} target="_blank" rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}

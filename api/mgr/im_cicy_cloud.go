@@ -148,7 +148,13 @@ func hubJSON(origin, method, route, token string, requestBody any, responseBody 
 	}
 	switch {
 	case method == http.MethodPost && path == "/api/code/ws-ticket":
-		return cloudJSONAt(origin, http.MethodPost, "/api/register", token, nil, responseBody)
+		// Registering doubles as the heartbeat: send host telemetry so the
+		// tenant directory can show what each instance runs on.
+		tele := collectCiCyCodeTelemetry()
+		return cloudJSONAt(origin, http.MethodPost, "/api/register", token, M{
+			"platform": tele.Platform, "arch": tele.Arch, "runtime": tele.Runtime, "cpuModel": tele.CPUModel,
+			"cpuCores": tele.CPUCores, "memoryTotalMB": tele.MemoryTotalMB, "gpu": tele.GPU, "version": version,
+		}, responseBody)
 	case method == http.MethodGet && path == "/api/code/instances":
 		instances, err := hubInstances(origin, token)
 		if err != nil {
@@ -185,15 +191,23 @@ func hubAssign(out any, value M) error {
 }
 
 type hubInstance struct {
-	InstanceID  string          `json:"instanceId"`
-	Name        string          `json:"name"`
-	Platform    string          `json:"platform"`
-	CreatedAt   string          `json:"createdAt"`
-	LastLoginAt string          `json:"lastLoginAt"`
-	LastSeenAt  string          `json:"lastSeenAt"`
-	Online      bool            `json:"online"`
-	Self        bool            `json:"self"`
-	Agents      json.RawMessage `json:"agents"`
+	InstanceID    string          `json:"instanceId"`
+	Name          string          `json:"name"`
+	Platform      string          `json:"platform"`
+	CreatedAt     string          `json:"createdAt"`
+	LastLoginAt   string          `json:"lastLoginAt"`
+	LastSeenAt    string          `json:"lastSeenAt"`
+	Online        bool            `json:"online"`
+	Self          bool            `json:"self"`
+	Agents        json.RawMessage `json:"agents"`
+	Arch          string          `json:"arch"`
+	Runtime       string          `json:"runtime"`
+	CPUModel      string          `json:"cpuModel"`
+	CPUCores      int             `json:"cpuCores"`
+	MemoryTotalMB int             `json:"memoryTotalMB"`
+	GPU           string          `json:"gpu"`
+	PublicIP      string          `json:"publicIp"`
+	Version       string          `json:"version"`
 }
 
 func hubInstances(origin, token string) ([]hubInstance, error) {
@@ -227,9 +241,15 @@ func hubInstancesToCloud(instances []hubInstance) []M {
 		if inst.Online {
 			status = "online"
 		}
+		rt := inst.Runtime
+		if rt == "" {
+			rt = "native"
+		}
 		out = append(out, M{"instanceId": inst.InstanceID, "teamId": hubTeamID(inst), "status": status,
-			"platform": inst.Platform, "runtime": "native", "createdAt": inst.CreatedAt,
-			"lastSeenAt": inst.LastSeenAt, "proxyHost": "", "proxyAvailable": 0, "hub": true, "self": inst.Self})
+			"platform": inst.Platform, "arch": inst.Arch, "runtime": rt, "createdAt": inst.CreatedAt,
+			"lastSeenAt": inst.LastSeenAt, "cpuModel": inst.CPUModel, "cpuCores": inst.CPUCores,
+			"memoryTotalMB": inst.MemoryTotalMB, "gpu": inst.GPU, "publicIp": inst.PublicIP, "version": inst.Version,
+			"proxyHost": "", "proxyAvailable": 0, "hub": true, "self": inst.Self})
 	}
 	return out
 }
