@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, LogOut, Mail, RefreshCw, X } from 'lucide-react';
+import { ExternalLink, Loader2, LogOut, Mail, RefreshCw, X } from 'lucide-react';
 import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
 
@@ -205,6 +205,15 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[13px] text-zinc-200">{inst.teamId || inst.instanceId}{inst.self ? <span className="ml-2 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-zinc-400">{t('cloudInstanceSelf', { defaultValue: '本机' })}</span> : null}</div>
                       <div className="truncate font-mono text-[11px] text-zinc-600">{inst.instanceId}{inst.platform ? ` · ${inst.platform}` : ''}</div>
+                      {inst.proxyHost ? (
+                        <a data-id={`cloud-instance-domain-${inst.instanceId}`} href={`https://${inst.proxyHost}`} target="_blank" rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className={`mt-0.5 inline-flex max-w-full items-center gap-1 truncate font-mono text-[11px] underline-offset-2 hover:underline ${inst.proxyAvailable ? 'text-blue-400 hover:text-blue-300' : 'text-zinc-500 hover:text-zinc-300'}`}
+                          title={inst.proxyAvailable ? undefined : t('cloudProxyOffline', { defaultValue: '隧道未上报，域名暂时不可用' })}>
+                          <ExternalLink size={10} className="shrink-0" />
+                          <span className="truncate">{inst.proxyHost}</span>
+                        </a>
+                      ) : null}
                     </div>
                     <div className="text-[11px] text-zinc-500">{online ? t('cloudOnline', { defaultValue: '在线' }) : t('cloudOffline', { defaultValue: '离线' })}</div>
                   </div>
