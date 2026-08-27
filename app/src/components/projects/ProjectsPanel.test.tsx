@@ -1412,6 +1412,51 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     }
   }, 10_000);
 
+  it('adds files dropped onto the card footer as attachments', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'idle' }]} statuses={{}} onOpenAgent={vi.fn()} />);
+    const footer = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-footer-w-101"]');
+      if (!node) throw new Error('footer did not render');
+      return node as HTMLElement;
+    });
+    const file = new File(['doc'], 'spec.pdf', { type: 'application/pdf' });
+    const dataTransfer = { types: ['Files'], files: [file], dropEffect: 'none' };
+    fireEvent.dragEnter(footer, { dataTransfer });
+    expect(document.querySelector('[data-id="project-agent-card-drop-hint-w-101"]')).toBeInTheDocument();
+    fireEvent.drop(footer, { dataTransfer });
+    expect(document.querySelector('[data-id="project-agent-card-drop-hint-w-101"]')).not.toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector('[data-id="project-attachment-name"]')).toHaveTextContent('spec.pdf'));
+    expect(document.querySelector('[data-id^="project-agent-card-attachment-"][data-kind="file"]')).toBeInTheDocument();
+  });
+
+  it('shows a retry action for a failed upload and re-uploads the same file', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    api.uploadAssetFile.mockRejectedValueOnce(new Error('network'));
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'idle' }]} statuses={{}} onOpenAgent={vi.fn()} />);
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(card);
+    const fileInput = document.querySelector('[data-id="project-agent-prompt-file-input-w-101"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [new File(['png'], 'shot.png', { type: 'image/png' })] } });
+    const retry = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-attachment-retry"]');
+      if (!node) throw new Error('retry did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(retry);
+    await waitFor(() => expect(api.uploadAssetFile).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(document.querySelector('[data-id="project-attachment-retry"]')).not.toBeInTheDocument());
+    expect(api.uploadAssetFile.mock.calls[1][1]).toBe(api.uploadAssetFile.mock.calls[0][1]);
+  });
+
   it('keeps a queued image visible when another text message is queued', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },

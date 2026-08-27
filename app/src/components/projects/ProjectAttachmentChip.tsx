@@ -45,13 +45,15 @@ function extLabel(name: string): string {
   return ext && ext !== name.toUpperCase() ? ext.slice(0, 5) : 'FILE';
 }
 
-export default function ProjectAttachmentChip({ attachment, onRemove, onRetry, compact = false }: {
+export default function ProjectAttachmentChip({ attachment, onRemove, onRetry, compact = false, idPrefix = 'project-agent-card-attachment' }: {
   attachment: ProjectAttachmentChipItem;
   onRemove?: () => void;
   onRetry?: () => void;
   // Queued strip: slightly smaller, no remove (the whole queued message is
   // edited / deleted as one unit).
   compact?: boolean;
+  // data-id prefix, so the composer strip and the queue strip stay addressable separately.
+  idPrefix?: string;
 }) {
   const uploading = attachment.status === 'uploading';
   const errored = attachment.status === 'error';
@@ -97,13 +99,13 @@ export default function ProjectAttachmentChip({ attachment, onRemove, onRetry, c
   if (isImage) {
     return (
       <div
-        data-id={`project-attachment-${attachment.id}`}
+        data-id={`${idPrefix}-${attachment.id}`}
         data-kind="image"
         title={[attachment.name, size].filter(Boolean).join(' · ')}
         onPointerDown={stop}
         className={`group relative ${height} w-auto max-w-[9rem] shrink-0 overflow-visible rounded-lg`}
       >
-        <span className={`block ${height} overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-[9rem] [&_[data-id=current-history-md-img]]:!rounded-lg [&_[data-id=current-history-md-img]]:object-cover`}>
+        <span data-id={`${idPrefix}-media`} className={`block ${height} overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] [&_[data-id=current-history-md-img]]:!m-0 [&_[data-id=current-history-md-img]]:!h-full [&_[data-id=current-history-md-img]]:!w-auto [&_[data-id=current-history-md-img]]:!max-w-[9rem] [&_[data-id=current-history-md-img]]:!rounded-lg [&_[data-id=current-history-md-img]]:object-cover`}>
           <MarkdownImg src={attachment.previewURL || attachment.fileRef || ''} alt={attachment.name} />
         </span>
         {/* File name pinned to the bottom edge, visible on hover — so the
@@ -119,7 +121,7 @@ export default function ProjectAttachmentChip({ attachment, onRemove, onRetry, c
 
   return (
     <div
-      data-id={`project-attachment-${attachment.id}`}
+      data-id={`${idPrefix}-${attachment.id}`}
       data-kind="file"
       title={[attachment.name, size].filter(Boolean).join(' · ')}
       onPointerDown={stop}
