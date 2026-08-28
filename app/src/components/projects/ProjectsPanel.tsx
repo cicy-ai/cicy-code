@@ -183,7 +183,7 @@ const projectAgentCompleteness = (agent: ProjectAgent) => [
   agent.workspace,
   agent.ttydSrc,
 ].filter(Boolean).length + (agent.status && agent.status !== 'offline' ? 2 : 0);
-const cloudInstanceOnline = (instance: any) => {
+export const cloudInstanceOnline = (instance: any) => {
   // Cloud reports "YYYY-MM-DD HH:MM:SS" (UTC, no zone); the hub reports RFC3339
   // with a trailing Z — appending a second Z made every hub node look offline.
   const raw = String(instance?.lastSeenAt || '').trim();
