@@ -306,6 +306,8 @@ const api = {
   startCiCyCloudLogin: (email: string, team: string, hubOrigin?: string) => http.post('/api/im/cicy-cloud/login', hubOrigin ? { email, team, hub_origin: hubOrigin } : { email, team }),
   openCiCyCloudInstance: (instanceId: string, port = 0, next = '/') => http.post('/api/im/cicy-cloud/open', { instance_id: instanceId, port, next }),
   submitCiCyCloudLoginCode: (state: string, code: string) => http.post(`/api/im/cicy-cloud/login/${encodeURIComponent(state)}/code`, { code }),
+  getCiCyCloudFrp: () => http.get('/api/im/cicy-cloud/frp'),
+  setCiCyCloudFrp: (enabled: boolean) => http.post('/api/im/cicy-cloud/frp', { enabled }),
   getCiCyCloudLoginStatus: (state: string) => http.get(`/api/im/cicy-cloud/login/${encodeURIComponent(state)}`),
   getCiCyCloudInstances: () => coalesceRead('/api/im/cicy-cloud/instances', () => http.get('/api/im/cicy-cloud/instances')),
   enableCiCyCloudTunnel: () => http.post('/api/im/cicy-cloud/tunnel'),

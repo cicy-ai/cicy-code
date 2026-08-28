@@ -61,7 +61,10 @@ type cicyCloudCredential struct {
 	Origin     string `json:"cloud_origin"`
 	// Mode "hub" means Origin is a cicy-ws-hub and the instance talks to it
 	// directly (email login, tickets, directory) with no cicy-cloud worker.
-	Mode      string `json:"mode,omitempty"`
+	Mode string `json:"mode,omitempty"`
+	// Frp: keep the built-in frp client (SSH + low-latency HTTP through the
+	// hub) running for this instance. Defaults to on after a hub login.
+	Frp       bool   `json:"frp,omitempty"`
 	UpdatedAt string `json:"updated_at"`
 }
 
@@ -1839,6 +1842,30 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 		J(w, out)
 		return
 	}
+	// GET  /api/im/cicy-cloud/frp          → built-in frp client status
+	// POST /api/im/cicy-cloud/frp {enabled} → turn it on/off (persisted)
+	if len(parts) >= 2 && parts[1] == "frp" {
+		if r.Method == http.MethodPost {
+			var in struct {
+				Enabled bool `json:"enabled"`
+			}
+			if readBody(r, &in) != nil {
+				httpErr(w, 400, "invalid request body")
+				return
+			}
+			if err := frpClientMgr.enable(in.Enabled); err != nil {
+				httpErr(w, 400, err.Error())
+				return
+			}
+			if in.Enabled {
+				time.Sleep(1500 * time.Millisecond) // let the first start settle so the status is meaningful
+			}
+		}
+		st := frpClientMgr.status()
+		st["success"] = true
+		J(w, st)
+		return
+	}
 	// POST /api/im/cicy-cloud/open {instance_id?, port?} → one-time URL that
 	// opens the instance's hub hostname already signed in (hub mode only).
 	if len(parts) >= 2 && parts[1] == "open" && r.Method == http.MethodPost {
@@ -2080,7 +2107,7 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 				return
 			}
 			cred := cicyCloudCredential{Email: poll.Owner, InstanceID: pending.InstanceID, TeamID: pending.Team, Token: poll.Token,
-				Origin: pending.HubOrigin, Mode: cicyCloudModeHub, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+				Origin: pending.HubOrigin, Mode: cicyCloudModeHub, Frp: runtime.GOOS != "windows", UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
 			if poll.InstanceID != "" {
 				cred.InstanceID = poll.InstanceID
 			}
@@ -2098,6 +2125,8 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			// The running worker still holds the previous transport (old token or
 			// cloud mode); restart it so the hub sees a register + heartbeat now.
 			imReconcileAccount(acc.ID)
+			frpClientMgr.stop() // credential changed; the supervisor re-reads it on start
+			go frpClientMgr.ensure()
 			J(w, M{"status": "ready", "account": imAccountToMap(acc)})
 			return
 		}

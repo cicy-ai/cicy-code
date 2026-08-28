@@ -1133,6 +1133,7 @@ func imManagerStart() {
 	if err := ensureCiCyCloudAccountFromEnvironment(); err != nil {
 		log.Printf("[im-cloud] restore account failed: %v", err)
 	}
+	go frpClientMgr.ensure()
 	imReconcile()
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)

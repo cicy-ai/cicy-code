@@ -125,6 +125,8 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
   const [state, setState] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [code, setCode] = useState('');
+  const [frp, setFrp] = useState<{ supported?: boolean; enabled?: boolean; running?: boolean; error?: string; ports?: Record<string, number>; host?: string } | null>(null);
+  const [frpBusy, setFrpBusy] = useState(false);
   const [codeSubmitting, setCodeSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -136,8 +138,12 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
       if (acc && acc.state === 'connected') {
         const res = await apiService.getCiCyCloudInstances().catch(() => null);
         setInstances(((res?.data?.instances || []) as CloudInstanceInfo[]));
+        if (acc.config?.mode === 'hub') {
+          const f = await apiService.getCiCyCloudFrp().catch(() => null);
+          setFrp(f?.data || null);
+        } else setFrp(null);
       } else {
-        setInstances([]);
+        setInstances([]); setFrp(null);
       }
     } catch (e) {
       toast(errText(e));
@@ -216,6 +222,17 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
     } catch (e) { toast(errText(e)); }
   };
 
+  const toggleFrp = async (enabled: boolean) => {
+    setFrpBusy(true);
+    try {
+      const res = await apiService.setCiCyCloudFrp(enabled);
+      setFrp(res?.data || null);
+      toast(enabled ? t('cloudFrpOn', { defaultValue: 'frp 隧道已开启' }) : t('cloudFrpOff', { defaultValue: 'frp 隧道已关闭' }));
+      void load();
+    } catch (e) { toast(errText(e)); }
+    finally { setFrpBusy(false); }
+  };
+
   const connected = !!account && account.state === 'connected';
   const isHub = account?.config?.mode === 'hub';
 
@@ -269,6 +286,28 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
           )}
         </section>
 
+        {connected && isHub && (
+          <section data-id="cloud-account-frp" className="flex items-center justify-between gap-4 rounded-xl border border-white/[0.08] bg-white/[0.025] px-5 py-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-[13px] font-medium text-zinc-200">
+                {t('cloudFrpTitle', { defaultValue: 'frp 隧道（SSH · 低延迟访问）' })}
+                {frp?.enabled ? <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${frp.running ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`}><span className={`h-1.5 w-1.5 rounded-full ${frp.running ? 'bg-emerald-400' : 'bg-amber-400'}`} />{frp.running ? t('cloudFrpRunning', { defaultValue: '运行中' }) : t('cloudFrpStarting', { defaultValue: '启动中…' })}</span> : null}
+              </div>
+              <div className="mt-0.5 text-[11px] text-zinc-500">
+                {frp?.supported === false ? t('cloudFrpUnsupported', { defaultValue: '当前系统暂不支持内置 frp 客户端。' })
+                  : frp?.running && frp.ports?.ssh ? <span>SSH <code className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-zinc-300">ssh -p {frp.ports.ssh} &lt;user&gt;@{frp.host}</code>{frp.ports.http ? <span> · HTTP 经 hub 本机 :{frp.ports.http}</span> : null}</span>
+                  : t('cloudFrpHint', { defaultValue: '开启后这台 cicy-code 自动接入 hub 的 frps：同账号的其他节点可以直接 SSH 过来，域名访问不再绕 Cloudflare。不用敲任何命令。' })}
+                {frp?.error ? <span className="ml-2 text-red-300">{frp.error}</span> : null}
+              </div>
+            </div>
+            <button type="button" data-id="cloud-frp-toggle" role="switch" aria-checked={!!frp?.enabled} disabled={frpBusy || frp?.supported === false}
+              onClick={() => void toggleFrp(!frp?.enabled)}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${frp?.enabled ? 'bg-emerald-500' : 'bg-zinc-700'}`}>
+              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${frp?.enabled ? 'left-[22px]' : 'left-0.5'}`} />
+            </button>
+          </section>
+        )}
+
         {connected && (
           <section data-id="cloud-account-instances" className="space-y-2">
             <div className="flex items-center justify-between">
@@ -311,9 +350,9 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
                           <button type="button" className="text-zinc-500 hover:text-zinc-200" onClick={(e) => { e.stopPropagation(); void navigator.clipboard?.writeText(`ssh -p ${inst.frp!.ports.ssh} ${inst.frp!.host}`); toast(t('copied', { ns: 'common', defaultValue: '已复制' })); }}>{t('copy', { ns: 'common', defaultValue: '复制' })}</button>
                           {inst.frp.ports.http ? <span className="text-zinc-600">· frp http {inst.frp.httpLive ? t('cloudOnline', { defaultValue: '在线' }) : t('cloudOffline', { defaultValue: '离线' })}</span> : null}
                         </div>
-                      ) : inst.hub ? (
+                      ) : inst.hub && !inst.self ? (
                         <div data-id={`cloud-instance-frp-join-${inst.instanceId}`} className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
-                          <span>{t('cloudFrpJoinHint', { defaultValue: '在该机器上执行一行命令接入 frp（SSH / 低延迟访问）:' })}</span>
+                          <span>{t('cloudFrpJoinHint', { defaultValue: '该节点未开启 frp：在它的「CiCy 账号」页打开 frp 隧道开关，或在它上面执行:' })}</span>
                           <code className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-zinc-300">curl -fsSL --retry 5 {hubOriginFor(account)}/frpc.sh | bash</code>
                           <button type="button" className="text-zinc-500 hover:text-zinc-200" onClick={(e) => { e.stopPropagation(); void navigator.clipboard?.writeText(`curl -fsSL --retry 5 ${hubOriginFor(account)}/frpc.sh | bash`); toast(t('copied', { ns: 'common', defaultValue: '已复制' })); }}>{t('copy', { ns: 'common', defaultValue: '复制' })}</button>
                         </div>
