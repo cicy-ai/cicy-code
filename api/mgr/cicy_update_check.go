@@ -197,6 +197,34 @@ var cicyUpdateVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 // Seams for handleContainerCicyUpdateApply (tests swap them).
 var cicyUpdateContainerUpdaterPath = legacyUpdaterPath
 var cicyUpdateCurrentVersion = func() string { return version }
+
+// Single-flight for the container updater: the web button and cicy-desktop
+// may both POST, and a user who sees no feedback clicks again. A second
+// `npm install` into the same version dir races the first one; report the
+// running update instead of launching another.
+var (
+	cicyUpdateContainerMu       sync.Mutex
+	cicyUpdateContainerTarget   string
+	cicyUpdateContainerStarted  time.Time
+	cicyUpdateContainerInFlight = 10 * time.Minute
+)
+
+func cicyUpdateContainerInProgress(now time.Time) (string, bool) {
+	cicyUpdateContainerMu.Lock()
+	defer cicyUpdateContainerMu.Unlock()
+	if cicyUpdateContainerTarget == "" || now.Sub(cicyUpdateContainerStarted) > cicyUpdateContainerInFlight {
+		return "", false
+	}
+	return cicyUpdateContainerTarget, true
+}
+
+func cicyUpdateContainerMarkStarted(target string, now time.Time) {
+	cicyUpdateContainerMu.Lock()
+	cicyUpdateContainerTarget = target
+	cicyUpdateContainerStarted = now
+	cicyUpdateContainerMu.Unlock()
+}
+
 var cicyUpdateLaunchContainerUpdater = func(target, registry string) error {
 	// Detach fully: `setsid` runs the updater in a NEW session, so supervisor's
 	// restart of cicy-code (which kills our process group) doesn't take the
@@ -256,11 +284,16 @@ func handleContainerCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
 	if registry != "" && !strings.HasPrefix(registry, "https://") {
 		registry = ""
 	}
+	if running, ok := cicyUpdateContainerInProgress(time.Now()); ok {
+		J(w, M{"started": true, "in_progress": true, "current": cicyUpdateCurrentVersion(), "target": running})
+		return
+	}
 	if err := cicyUpdateLaunchContainerUpdater(target, registry); err != nil {
 		log.Printf("[cicy-update] launch failed: %v", err)
 		J(w, M{"started": false, "error": "failed to launch updater: " + err.Error()})
 		return
 	}
+	cicyUpdateContainerMarkStarted(target, time.Now())
 	log.Printf("[cicy-update] launched update %s -> %s (detached, registry=%q); server will restart", cicyUpdateCurrentVersion(), target, registry)
 	J(w, M{"started": true, "current": cicyUpdateCurrentVersion(), "target": target})
 }

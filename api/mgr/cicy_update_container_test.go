@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func configureContainerCicyUpdateTest(t *testing.T) (calls *[]string) {
@@ -16,10 +17,12 @@ func configureContainerCicyUpdateTest(t *testing.T) (calls *[]string) {
 	origPath := cicyUpdateContainerUpdaterPath
 	origLaunch := cicyUpdateLaunchContainerUpdater
 	origVersion := cicyUpdateCurrentVersion
+	cicyUpdateContainerMarkStarted("", time.Time{})
 	t.Cleanup(func() {
 		cicyUpdateContainerUpdaterPath = origPath
 		cicyUpdateLaunchContainerUpdater = origLaunch
 		cicyUpdateCurrentVersion = origVersion
+		cicyUpdateContainerMarkStarted("", time.Time{})
 	})
 	updater := filepath.Join(t.TempDir(), "cicy-code-update.sh")
 	if err := os.WriteFile(updater, []byte("#!/bin/bash\nexit 0\n"), 0o755); err != nil {
@@ -69,5 +72,25 @@ func TestContainerCicyUpdateApplyRejectsBadTargetAndNoOpsWhenCurrent(t *testing.
 	}
 	if len(*calls) != 0 {
 		t.Fatalf("updater must not launch: %v", *calls)
+	}
+}
+
+// 网页按钮 / desktop 可能重复 POST(用户没看到反馈就再点):第二次不能再拉起一个
+// npm install 和第一个抢同一个目录,而是回报"正在进行中"。
+func TestContainerCicyUpdateApplyIsSingleFlight(t *testing.T) {
+	calls := configureContainerCicyUpdateTest(t)
+	for i := 0; i < 3; i++ {
+		rec := httptest.NewRecorder()
+		handleCicyUpdateApply(rec, httptest.NewRequest(http.MethodPost, "/api/cicy-update", strings.NewReader(`{"target":"2.3.580"}`)))
+		body := decodeCicyUpdateResponse(t, rec)
+		if body["started"] != true || body["target"] != "2.3.580" {
+			t.Fatalf("click %d: %#v", i, body)
+		}
+		if i > 0 && body["in_progress"] != true {
+			t.Fatalf("click %d should report in_progress: %#v", i, body)
+		}
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("updater launched %d times, want 1", len(*calls))
 	}
 }

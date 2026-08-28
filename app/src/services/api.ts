@@ -209,7 +209,7 @@ const api = {
   // {current, latest, has_update} — is a newer cicy-code published on npm (cached).
   getCicyUpdateStatus: () => http.get('/api/cicy-update'),
   // Trigger an in-place update to the latest version (server restarts itself).
-  applyCicyUpdate: () => http.post('/api/cicy-update', {}),
+  applyCicyUpdate: (body: { target?: string; registry?: string } = {}) => http.post('/api/cicy-update', body),
 
   getSkills: () => http.get('/api/skills'),
   // Locally installed cicy-skills only (name+version) — fast, no remote registry.

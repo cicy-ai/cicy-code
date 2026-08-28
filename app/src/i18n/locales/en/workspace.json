@@ -686,6 +686,7 @@
   "projectDeleteTitle": "Delete {{name}}?",
   "projectDeleteBody": "The project and its agent assignments will be deleted. Agents themselves are not deleted.",
   "projectAgentCount": "{{count}} agents",
+  "updateInProgress": "Updating to v{{version}} — the service restarts automatically once installed…",
   "projectWorkingCount": "{{count}} working",
   "projectIdleCount": "{{count}} idle",
   "projectAllIdle": "idle",

@@ -471,10 +471,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const timer = window.setInterval(refreshCloudAccount, 60 * 1000);
     return () => window.clearInterval(timer);
   }, [refreshCloudAccount]);
+  const latestVersionRef = useRef('');
   const checkVersionUpdate = useCallback(async () => {
     try {
       const res: any = await apiService.getCicyUpdateStatus();
       setVersionUpdate(!!res?.data?.has_update);
+      latestVersionRef.current = String(res?.data?.latest || '');
     } catch { /* leave the badge as-is on transient failures */ }
   }, []);
   useEffect(() => {
@@ -494,7 +496,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     if (updating) return;
     setUpdating(true);
     try {
-      const res: any = await apiService.applyCicyUpdate();
+      // Pin the version the badge was computed from, so the container updater
+      // skips its own (slow) npm view and installs exactly what the user saw.
+      const res: any = await apiService.applyCicyUpdate(latestVersionRef.current ? { target: latestVersionRef.current } : {});
       const outcome = interpretCicyUpdateResponse(
         res?.data,
         t('updateFailed', { defaultValue: '更新失败' }),
@@ -520,8 +524,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       }
       const targetVersion = outcome.target;
       const startedAt = Date.now();
+      // A container update = npm install (可达数分钟,取决于源) + supervisor 重启。
+      // Tell the user it is running instead of going silent, and give it real time.
+      window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: {
+          message: t('updateInProgress', { version: targetVersion, defaultValue: `正在更新到 v${targetVersion}，安装完成后服务会自动重启…` }),
+          variant: 'success',
+        },
+      }));
       const poll = async () => {
-        if (Date.now() - startedAt > 180000) {
+        if (Date.now() - startedAt > 10 * 60 * 1000) {
           setUpdating(false);
           window.dispatchEvent(new CustomEvent('show-toast', {
             detail: t('updateFailed', { defaultValue: '更新失败' }),

@@ -686,6 +686,7 @@
   "projectDeleteTitle": "删除 {{name}}？",
   "projectDeleteBody": "将删除该项目及其中的 Agent 关联，不会删除 Agent 本身。",
   "projectAgentCount": "{{count}} 个 Agent",
+  "updateInProgress": "正在更新到 v{{version}}，安装完成后服务会自动重启…",
   "projectWorkingCount": "{{count}} 工作中",
   "projectIdleCount": "{{count}} 空闲",
   "projectAllIdle": "空闲",
