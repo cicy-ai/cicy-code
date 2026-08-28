@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -41,6 +42,10 @@ func TestHubModeMapsWorkerRoutesOntoHub(t *testing.T) {
 				t.Errorf("register must carry telemetry, got %#v (err %v)", tele, err)
 			}
 			_ = json.NewEncoder(w).Encode(M{"success": true, "ticket": "p.s", "wsUrl": "wss://hub.test/ws", "exp": 1})
+		case "POST /api/gateway/grant":
+			var body M
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewEncoder(w).Encode(M{"success": true, "url": "https://box-" + fmt.Sprint(body["port"]) + ".hub.test/_hub/grant?g=x", "host": "box.hub.test"})
 		case "POST /api/heartbeat":
 			var body M
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["tunnelUrl"] != "https://t.trycloudflare.com" || body["cpuCores"] == nil {
@@ -127,8 +132,14 @@ func TestHubModeMapsWorkerRoutesOntoHub(t *testing.T) {
 	if err := cloudJSON(http.MethodPost, "/api/code/messages", "cwh_token", M{}, nil); err == nil || !strings.Contains(err.Error(), "websocket") {
 		t.Fatalf("http send must be refused in hub mode, got %v", err)
 	}
-	if hits.Load() != 4 {
-		t.Fatalf("hub hits = %d, want 4 (register, instances ×2, heartbeat)", hits.Load())
+	var grant struct {
+		URL string `json:"url"`
+	}
+	if err := cloudJSON(http.MethodPost, "/api/code/gateway-grant", "cwh_token", M{"port": 3000}, &grant); err != nil || grant.URL != "https://box-3000.hub.test/_hub/grant?g=x" {
+		t.Fatalf("grant: %v %#v", err, grant)
+	}
+	if hits.Load() != 5 {
+		t.Fatalf("hub hits = %d, want 5 (register, instances ×2, heartbeat, grant)", hits.Load())
 	}
 }
 

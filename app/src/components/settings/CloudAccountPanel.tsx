@@ -90,6 +90,22 @@ export async function fetchCloudAccount(): Promise<CloudAccountInfo | null> {
   return found ? (found as CloudAccountInfo) : null;
 }
 
+/** Open an instance host (or one of its ports) in a new tab. On Hub the tab
+ *  is pre-authenticated through a one-time grant; on Cloud it is a plain link. */
+async function openInstanceHost(inst: CloudInstanceInfo, port = 0) {
+  const fallback = port ? `https://${(inst.proxyHost || '').replace(/^([^.]+)\./, `$1-${port}.`)}` : `https://${inst.proxyHost}`;
+  // Open synchronously so popup blockers treat it as user-initiated, then steer it.
+  const tab = window.open('about:blank', '_blank', 'noopener');
+  try {
+    if (inst.hub) {
+      const res = await apiService.openCiCyCloudInstance(inst.instanceId, port);
+      const url = String(res?.data?.url || '');
+      if (url) { if (tab) tab.location.href = url; else window.open(url, '_blank', 'noopener'); return; }
+    }
+  } catch (e) { toast(errText(e)); }
+  if (tab) tab.location.href = fallback; else window.open(fallback, '_blank', 'noopener');
+}
+
 export default function CloudAccountPanel({ active, onAccountChange }: { active: boolean; onAccountChange?: (account: CloudAccountInfo | null) => void }) {
   const { t } = useTranslation('workspace');
   const { confirm } = useDialogs();
@@ -273,7 +289,7 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
                           {inst.ports.filter((p) => p.visibility !== 'closed').map((p) => {
                             const base = inst.proxyHost!.replace(/^([^.]+)\./, `$1-${p.port}.`);
                             return (
-                              <a key={p.port} href={`https://${base}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                              <a key={p.port} href={`https://${base}`} target="_blank" rel="noopener noreferrer" onClick={(e) => { e.preventDefault(); e.stopPropagation(); void openInstanceHost(inst, p.port); }}
                                 className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400 hover:border-blue-500/40 hover:text-blue-300"
                                 title={`https://${base}`}>
                                 <span className={`h-1.5 w-1.5 rounded-full ${p.visibility === 'public' ? 'bg-emerald-400' : 'bg-zinc-500'}`} />:{p.port}{p.name ? ` ${p.name}` : ''}
@@ -284,7 +300,7 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
                       ) : null}
                       {inst.proxyHost ? (
                         <a data-id={`cloud-instance-domain-${inst.instanceId}`} href={`https://${inst.proxyHost}`} target="_blank" rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); void openInstanceHost(inst); }}
                           className={`mt-0.5 inline-flex max-w-full items-center gap-1 truncate font-mono text-[11px] underline-offset-2 hover:underline ${inst.proxyAvailable ? 'text-blue-400 hover:text-blue-300' : 'text-zinc-500 hover:text-zinc-300'}`}
                           title={inst.proxyAvailable ? undefined : t('cloudProxyOffline', { defaultValue: '隧道未上报，域名暂时不可用' })}>
                           <ExternalLink size={10} className="shrink-0" />

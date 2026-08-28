@@ -151,6 +151,8 @@ func hubJSON(origin, method, route, token string, requestBody any, responseBody 
 		// Registering doubles as a heartbeat: telemetry, tunnel and live
 		// resources go along so the directory and gateway are current.
 		return cloudJSONAt(origin, http.MethodPost, "/api/register", token, hubHeartbeatBody(nil), responseBody)
+	case method == http.MethodPost && path == "/api/code/gateway-grant":
+		return cloudJSONAt(origin, http.MethodPost, "/api/gateway/grant", token, requestBody, responseBody)
 	case method == http.MethodPost && path == "/api/code/instances/heartbeat":
 		body, _ := requestBody.(M)
 		return cloudJSONAt(origin, http.MethodPost, "/api/heartbeat", token, hubHeartbeatBody(body), nil)
@@ -1831,6 +1833,36 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			return
 		}
 		J(w, out)
+		return
+	}
+	// POST /api/im/cicy-cloud/open {instance_id?, port?} → one-time URL that
+	// opens the instance's hub hostname already signed in (hub mode only).
+	if len(parts) >= 2 && parts[1] == "open" && r.Method == http.MethodPost {
+		var in struct {
+			InstanceID string `json:"instance_id"`
+			Port       int    `json:"port"`
+			Next       string `json:"next"`
+		}
+		_ = readBody(r, &in)
+		var token string
+		_ = store.QueryRow("SELECT secret FROM im_accounts WHERE platform=? ORDER BY id LIMIT 1", imPlatformCiCyCloud).Scan(&token)
+		if strings.TrimSpace(token) == "" {
+			httpErr(w, 401, "CiCy account not connected")
+			return
+		}
+		if hubOriginForToken(token) == "" {
+			httpErr(w, 400, "instance domains are issued by CiCy Hub; sign in with Hub first")
+			return
+		}
+		var out struct {
+			URL  string `json:"url"`
+			Host string `json:"host"`
+		}
+		if err := cloudJSON(http.MethodPost, "/api/code/gateway-grant", token, M{"instanceId": strings.TrimSpace(in.InstanceID), "port": in.Port, "next": in.Next}, &out); err != nil {
+			httpErr(w, 502, err.Error())
+			return
+		}
+		J(w, M{"success": true, "url": out.URL, "host": out.Host})
 		return
 	}
 	if len(parts) >= 2 && parts[1] == "status" && r.Method == http.MethodGet {
