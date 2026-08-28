@@ -57,19 +57,6 @@ function fmtBytes(value?: number): string {
   return `${next >= 100 ? next.toFixed(0) : next.toFixed(1)} ${unit}`;
 }
 
-function ResourceBar({ label, used, total, pct, extra }: { label: string; used?: number; total?: number; pct?: number; extra?: string }) {
-  const value = pct != null && Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : (used != null && total ? Math.max(0, Math.min(100, (used / total) * 100)) : null);
-  const tone = value == null ? 'bg-zinc-600' : value >= 90 ? 'bg-red-400' : value >= 70 ? 'bg-amber-400' : 'bg-emerald-400';
-  return (
-    <div className="min-w-0">
-      <div className="flex items-baseline justify-between gap-2 text-[11px]">
-        <span className="text-zinc-500">{label}</span>
-        <span className="truncate font-mono text-zinc-400">{extra ?? (used != null && total ? `${fmtBytes(used)} / ${fmtBytes(total)}` : '')}{value != null ? <span className={`ml-1.5 ${value >= 90 ? 'text-red-300' : value >= 70 ? 'text-amber-300' : 'text-zinc-300'}`}>{value.toFixed(0)}%</span> : <span className="ml-1.5 text-zinc-600">--</span>}</span>
-      </div>
-      <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-white/[0.06]"><div className={`h-full rounded-full ${tone}`} style={{ width: `${value ?? 0}%` }} /></div>
-    </div>
-  );
-}
 
 function fmtTime(raw?: string): string {
   if (!raw) return '—';
@@ -108,9 +95,6 @@ async function openInstanceHost(inst: CloudInstanceInfo, port = 0) {
   if (tab) tab.location.href = fallback; else window.open(fallback, '_blank', 'noopener');
 }
 
-function hubOriginFor(account: CloudAccountInfo | null): string {
-  return String(account?.config?.cloud_origin || DEFAULT_HUB).replace(/\/+$/, '');
-}
 
 export default function CloudAccountPanel({ active, onAccountChange }: { active: boolean; onAccountChange?: (account: CloudAccountInfo | null) => void }) {
   const { t } = useTranslation('workspace');
@@ -317,71 +301,78 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
               {instances.length === 0 && <div className="px-4 py-4 text-[12px] text-zinc-600">{t('cloudInstancesEmpty', { defaultValue: '还没有其他实例。用同一个 Email 在另一台机器上登录即可出现在这里。' })}</div>}
               {instances.map((inst) => {
                 const online = inst.status === 'online';
+                const r = inst.resources;
+                const frp = inst.frp;
+                const sysTitle = [
+                  [inst.platform, inst.arch, inst.runtime].filter(Boolean).join(' · '),
+                  inst.cpuModel ? `CPU ${inst.cpuModel}${inst.cpuCores ? ` · ${inst.cpuCores}C` : ''}` : '',
+                  inst.memoryTotalMB ? `${t('cloudSysMem', { defaultValue: '内存' })} ${(inst.memoryTotalMB / 1024).toFixed(1)} GB` : '',
+                  inst.gpu ? `GPU ${inst.gpu}` : '',
+                  inst.publicIp ? `IP ${inst.publicIp}` : '',
+                  `${t('cloudSysSeen', { defaultValue: '最近在线' })} ${fmtTime(inst.lastSeenAt)}`,
+                  inst.instanceId,
+                ].filter(Boolean).join('\n');
+                const pct = (v?: number) => (v != null && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : null);
+                const Meter = ({ label, value, text }: { label: string; value: number | null; text: string }) => (
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-2 text-[11px] leading-4">
+                      <span className="text-zinc-500">{label}</span>
+                      <span className="truncate font-mono text-zinc-400">{text}</span>
+                    </div>
+                    <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-white/[0.06]"><div className={`h-full rounded-full ${value == null ? 'bg-zinc-700' : value >= 90 ? 'bg-red-400' : value >= 70 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${value ?? 0}%` }} /></div>
+                  </div>
+                );
+                const sshCmd = frp?.ports?.ssh ? `ssh -p ${frp.ports.ssh} ${frp.host}` : '';
                 return (
-                  <div key={inst.instanceId} data-id={`cloud-instance-${inst.instanceId}`} className="flex items-center gap-3 border-b border-white/[0.05] px-4 py-2.5 last:border-b-0">
-                    <span className={`h-2 w-2 shrink-0 rounded-full ${online ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] text-zinc-200">{inst.teamId || inst.instanceId}{inst.self ? <span className="ml-2 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-zinc-400">{t('cloudInstanceSelf', { defaultValue: '本机' })}</span> : null}</div>
-                      <div className="truncate font-mono text-[11px] text-zinc-600"><span title={inst.instanceId}>{maskId(inst.instanceId)}</span>{inst.platform ? ` · ${inst.platform}` : ''}</div>
-                      <div data-id={`cloud-instance-sys-${inst.instanceId}`} className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] text-zinc-500 sm:grid-cols-3">
-                        <div className="truncate" title={[inst.platform, inst.arch, inst.runtime].filter(Boolean).join(' · ')}><span className="text-zinc-600">{t('cloudSysOS', { defaultValue: '系统' })} </span>{[inst.platform, inst.arch, inst.runtime].filter(Boolean).join(' · ') || '—'}</div>
-                        <div className="truncate" title={inst.cpuModel}><span className="text-zinc-600">CPU </span>{inst.cpuModel ? `${inst.cpuModel}${inst.cpuCores ? ` · ${inst.cpuCores}C` : ''}` : '—'}</div>
-                        <div className="truncate"><span className="text-zinc-600">{t('cloudSysMem', { defaultValue: '内存' })} </span>{inst.memoryTotalMB ? `${(inst.memoryTotalMB / 1024).toFixed(1)} GB` : '—'}</div>
-                        <div className="truncate" title={inst.gpu}><span className="text-zinc-600">GPU </span>{inst.gpu || '—'}</div>
-                        <div className="truncate font-mono"><span className="font-sans text-zinc-600">IP </span>{inst.publicIp || '—'}</div>
-                        <div className="truncate"><span className="text-zinc-600">{t('cloudSysSeen', { defaultValue: '最近在线' })} </span>{fmtTime(inst.lastSeenAt)}</div>
-                        {inst.version ? <div className="truncate font-mono"><span className="font-sans text-zinc-600">cicy-code </span>{inst.version}</div> : null}
-                      </div>
-                      {inst.resources ? (
-                        <div data-id={`cloud-instance-res-${inst.instanceId}`} className="mt-2 grid grid-cols-1 gap-x-5 gap-y-1.5 sm:grid-cols-3">
-                          <ResourceBar label="CPU" pct={inst.resources.cpu_usage_pct} extra={inst.resources.cpu_cores ? `${inst.resources.cpu_cores} cores` : ''} />
-                          <ResourceBar label={t('cloudSysMem', { defaultValue: '内存' })} used={inst.resources.mem_used_bytes} total={inst.resources.mem_total_bytes} pct={inst.resources.mem_usage_pct} />
-                          <ResourceBar label={t('cloudSysDisk', { defaultValue: '磁盘' })} used={inst.resources.disk_used_bytes} total={inst.resources.disk_total_bytes} pct={inst.resources.disk_usage_pct} />
-                          {inst.resources.load_1 != null && (
-                            <div className="text-[11px] text-zinc-500 sm:col-span-3"><span className="text-zinc-600">{t('cloudSysLoad', { defaultValue: '负载' })} </span><span className="font-mono text-zinc-400">{[inst.resources.load_1, inst.resources.load_5, inst.resources.load_15].map((v) => (v ?? 0).toFixed(2)).join(' · ')}</span><span className="ml-1 text-zinc-600">1m / 5m / 15m</span></div>
-                          )}
-                        </div>
-                      ) : null}
-                      {inst.frp?.ports?.ssh ? (
-                        <div data-id={`cloud-instance-ssh-${inst.instanceId}`} className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
-                          <span className={`h-1.5 w-1.5 rounded-full ${inst.frp.sshLive ? 'bg-emerald-400' : 'bg-zinc-600'}`} title={inst.frp.sshLive ? 'frp online' : 'frp offline'} />
-                          <span className="text-zinc-600">SSH</span>
-                          <code className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-zinc-300">ssh -p {inst.frp.ports.ssh} &lt;user&gt;@{inst.frp.host}</code>
-                          <button type="button" className="text-zinc-500 hover:text-zinc-200" onClick={(e) => { e.stopPropagation(); void navigator.clipboard?.writeText(`ssh -p ${inst.frp!.ports.ssh} ${inst.frp!.host}`); toast(t('copied', { ns: 'common', defaultValue: '已复制' })); }}>{t('copy', { ns: 'common', defaultValue: '复制' })}</button>
-                          {inst.frp.ports.http ? <span className="text-zinc-600">· frp http {inst.frp.httpLive ? t('cloudOnline', { defaultValue: '在线' }) : t('cloudOffline', { defaultValue: '离线' })}</span> : null}
-                        </div>
-                      ) : inst.hub && !inst.self ? (
-                        <div data-id={`cloud-instance-frp-join-${inst.instanceId}`} className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
-                          <span>{t('cloudFrpJoinHint', { defaultValue: '该节点未开启 frp：在它的「CiCy 账号」页打开 frp 隧道开关，或在它上面执行:' })}</span>
-                          <code className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-zinc-300">curl -fsSL --retry 5 {hubOriginFor(account)}/frpc.sh | bash</code>
-                          <button type="button" className="text-zinc-500 hover:text-zinc-200" onClick={(e) => { e.stopPropagation(); void navigator.clipboard?.writeText(`curl -fsSL --retry 5 ${hubOriginFor(account)}/frpc.sh | bash`); toast(t('copied', { ns: 'common', defaultValue: '已复制' })); }}>{t('copy', { ns: 'common', defaultValue: '复制' })}</button>
-                        </div>
-                      ) : null}
-                      {inst.ports && inst.ports.length > 0 && inst.proxyHost ? (
-                        <div data-id={`cloud-instance-ports-${inst.instanceId}`} className="mt-1.5 flex flex-wrap gap-1.5">
-                          {inst.ports.filter((p) => p.visibility !== 'closed').map((p) => {
-                            const base = inst.proxyHost!.replace(/^([^.]+)\./, `$1-${p.port}.`);
-                            return (
-                              <a key={p.port} href={`https://${base}`} target="_blank" rel="noopener noreferrer" onClick={(e) => { e.preventDefault(); e.stopPropagation(); void openInstanceHost(inst, p.port); }}
-                                className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400 hover:border-blue-500/40 hover:text-blue-300"
-                                title={`https://${base}`}>
-                                <span className={`h-1.5 w-1.5 rounded-full ${p.visibility === 'public' ? 'bg-emerald-400' : 'bg-zinc-500'}`} />:{p.port}{p.name ? ` ${p.name}` : ''}
-                              </a>
-                            );
-                          })}
-                        </div>
-                      ) : null}
+                  <div key={inst.instanceId} data-id={`cloud-instance-${inst.instanceId}`} className="border-b border-white/[0.05] px-4 py-3 last:border-b-0" title={sysTitle}>
+                    {/* line 1: name · state · domain · version */}
+                    <div className="flex items-center gap-2 text-[13px]">
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${online ? 'bg-emerald-400' : 'bg-zinc-600'}`} title={online ? t('cloudOnline', { defaultValue: '在线' }) : `${t('cloudOffline', { defaultValue: '离线' })} · ${fmtTime(inst.lastSeenAt)}`} />
+                      <span className="truncate font-medium text-zinc-200">{inst.teamId || inst.instanceId}</span>
+                      {inst.self ? <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-zinc-400">{t('cloudInstanceSelf', { defaultValue: '本机' })}</span> : null}
                       {inst.proxyHost ? (
                         <a data-id={`cloud-instance-domain-${inst.instanceId}`} href={`https://${inst.proxyHost}`} target="_blank" rel="noopener noreferrer"
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); void openInstanceHost(inst); }}
-                          className={`mt-0.5 inline-flex max-w-full items-center gap-1 truncate font-mono text-[11px] underline-offset-2 hover:underline ${inst.proxyAvailable ? 'text-blue-400 hover:text-blue-300' : 'text-zinc-500 hover:text-zinc-300'}`}
-                          title={inst.proxyAvailable ? undefined : t('cloudProxyOffline', { defaultValue: '隧道未上报，域名暂时不可用' })}>
-                          <ExternalLink size={10} className="shrink-0" />
-                          <span className="truncate">{inst.proxyHost}</span>
+                          className={`ml-1 inline-flex min-w-0 items-center gap-1 truncate font-mono text-[11px] underline-offset-2 hover:underline ${inst.proxyAvailable ? 'text-blue-400 hover:text-blue-300' : 'text-zinc-500 hover:text-zinc-300'}`}
+                          title={inst.proxyAvailable ? `https://${inst.proxyHost}` : t('cloudProxyOffline', { defaultValue: '隧道未上报，域名暂时不可用' })}>
+                          <ExternalLink size={10} className="shrink-0" /><span className="truncate">{inst.proxyHost}</span>
                         </a>
                       ) : null}
+                      <span className="ml-auto shrink-0 font-mono text-[11px] text-zinc-600">{[inst.platform, inst.arch].filter(Boolean).join('/')}{inst.version ? ` · v${inst.version}` : ''}</span>
                     </div>
-                    <div className="text-[11px] text-zinc-500">{online ? t('cloudOnline', { defaultValue: '在线' }) : t('cloudOffline', { defaultValue: '离线' })}</div>
+                    {/* line 2: cpu / mem / disk / load */}
+                    {r ? (
+                      <div data-id={`cloud-instance-res-${inst.instanceId}`} className="mt-2 flex items-end gap-4">
+                        <Meter label="CPU" value={pct(r.cpu_usage_pct)} text={`${r.cpu_cores ? `${r.cpu_cores}C · ` : ''}${r.cpu_usage_pct != null ? `${r.cpu_usage_pct.toFixed(0)}%` : '--'}`} />
+                        <Meter label={t('cloudSysMem', { defaultValue: '内存' })} value={pct(r.mem_usage_pct) ?? (r.mem_used_bytes && r.mem_total_bytes ? (r.mem_used_bytes / r.mem_total_bytes) * 100 : null)} text={`${fmtBytes(r.mem_used_bytes)} / ${fmtBytes(r.mem_total_bytes)}`} />
+                        <Meter label={t('cloudSysDisk', { defaultValue: '磁盘' })} value={pct(r.disk_usage_pct) ?? (r.disk_used_bytes && r.disk_total_bytes ? (r.disk_used_bytes / r.disk_total_bytes) * 100 : null)} text={`${fmtBytes(r.disk_used_bytes)} / ${fmtBytes(r.disk_total_bytes)}`} />
+                        {r.load_1 != null ? <div className="shrink-0 text-[11px] leading-4 text-zinc-500" title="load 1m / 5m / 15m"><span className="text-zinc-600">{t('cloudSysLoad', { defaultValue: '负载' })} </span><span className="font-mono text-zinc-400">{[r.load_1, r.load_5, r.load_15].map((v) => (v ?? 0).toFixed(2)).join(' · ')}</span></div> : null}
+                      </div>
+                    ) : (
+                      <div className="mt-1.5 text-[11px] text-zinc-600">{online ? t('cloudResPending', { defaultValue: '等待资源上报…' }) : `${t('cloudSysSeen', { defaultValue: '最近在线' })} ${fmtTime(inst.lastSeenAt)}`}</div>
+                    )}
+                    {/* line 3: ssh + ports */}
+                    {(sshCmd || (inst.ports && inst.ports.length > 0 && inst.proxyHost) || (inst.hub && !inst.self && !frp)) ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                        {sshCmd ? (
+                          <button type="button" data-id={`cloud-instance-ssh-${inst.instanceId}`} onClick={(e) => { e.stopPropagation(); void navigator.clipboard?.writeText(sshCmd); toast(t('copied', { ns: 'common', defaultValue: '已复制' })); }}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 font-mono text-zinc-300 hover:border-blue-500/40 hover:text-blue-300"
+                            title={frp?.sshLive ? t('cloudSshCopyHint', { defaultValue: '点击复制 SSH 命令' }) : t('cloudSshOffline', { defaultValue: 'frp 未连接，SSH 暂不可达' })}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${frp?.sshLive ? 'bg-emerald-400' : 'bg-zinc-600'}`} />{sshCmd}
+                          </button>
+                        ) : null}
+                        {inst.ports && inst.proxyHost ? inst.ports.filter((p) => p.visibility !== 'closed').map((p) => {
+                          const base = inst.proxyHost!.replace(/^([^.]+)\./, `$1-${p.port}.`);
+                          return (
+                            <a key={p.port} href={`https://${base}`} target="_blank" rel="noopener noreferrer" onClick={(e) => { e.preventDefault(); e.stopPropagation(); void openInstanceHost(inst, p.port); }}
+                              className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400 hover:border-blue-500/40 hover:text-blue-300" title={`https://${base}`}>
+                              <span className={`h-1.5 w-1.5 rounded-full ${p.visibility === 'public' ? 'bg-emerald-400' : 'bg-zinc-500'}`} />:{p.port}{p.name ? ` ${p.name}` : ''}
+                            </a>
+                          );
+                        }) : null}
+                        {inst.hub && !inst.self && !frp ? <span className="text-zinc-600">{t('cloudFrpPending', { defaultValue: '未接入 frp（升级到最新版并重启即可自动接入）' })}</span> : null}
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
