@@ -60,7 +60,10 @@ func frpClientBin() string {
 // frpClientWanted reports whether the hub credential asks for frp.
 func frpClientWanted() bool {
 	cred, ok := loadCiCyCloudCredential()
-	return ok && cred.Mode == cicyCloudModeHub && cred.Frp
+	if !ok || cred.Mode != cicyCloudModeHub || runtime.GOOS == "windows" {
+		return false
+	}
+	return cred.Frp == nil || *cred.Frp
 }
 
 func (c *frpClient) status() M {
@@ -93,7 +96,7 @@ func (c *frpClient) enable(on bool) error {
 	if on && runtime.GOOS == "windows" {
 		return fmt.Errorf("frp client is not supported on Windows yet")
 	}
-	cred.Frp = on
+	cred.Frp = &on
 	if err := saveCiCyCloudCredential(cred); err != nil {
 		return err
 	}

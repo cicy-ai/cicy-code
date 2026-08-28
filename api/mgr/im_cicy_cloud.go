@@ -64,7 +64,9 @@ type cicyCloudCredential struct {
 	Mode string `json:"mode,omitempty"`
 	// Frp: keep the built-in frp client (SSH + low-latency HTTP through the
 	// hub) running for this instance. Defaults to on after a hub login.
-	Frp       bool   `json:"frp,omitempty"`
+	// nil = never chosen → on (so nodes that signed in before the built-in
+	// client existed join automatically); false = switched off by the user.
+	Frp       *bool  `json:"frp,omitempty"`
 	UpdatedAt string `json:"updated_at"`
 }
 
@@ -2107,7 +2109,7 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 				return
 			}
 			cred := cicyCloudCredential{Email: poll.Owner, InstanceID: pending.InstanceID, TeamID: pending.Team, Token: poll.Token,
-				Origin: pending.HubOrigin, Mode: cicyCloudModeHub, Frp: runtime.GOOS != "windows", UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+				Origin: pending.HubOrigin, Mode: cicyCloudModeHub, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
 			if poll.InstanceID != "" {
 				cred.InstanceID = poll.InstanceID
 			}
