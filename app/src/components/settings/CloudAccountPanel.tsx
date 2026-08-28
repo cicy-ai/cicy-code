@@ -78,6 +78,7 @@ function fmtTime(raw?: string): string {
 }
 
 const INPUT = 'h-10 w-full rounded-lg border border-white/[0.09] bg-white/[0.025] px-3 text-[13px] text-zinc-100 placeholder:text-zinc-600 outline-none transition-colors hover:border-white/[0.14] focus:border-blue-500/55 focus:bg-white/[0.045] focus:ring-1 focus:ring-blue-500/15 disabled:opacity-50';
+const maskId = (id: string) => (id.length > 14 ? `${id.slice(0, 9)}…${id.slice(-4)}` : id);
 const DEFAULT_HUB = 'https://ws.cicy-ai.com';
 
 function errText(e: any): string { return String(e?.response?.data?.error || e?.response?.data?.detail || e?.message || e); }
@@ -255,7 +256,7 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
                     </div>
                     <div className="mt-0.5 font-mono text-[11px] text-zinc-500">
                       {isHub ? `Hub · ${String(account.config?.cloud_origin || '')}` : `Cloud · Team ${String(account.config?.team_id || '—')}`}
-                      {account.config?.instance_id ? ` · ${String(account.config.instance_id).slice(0, 16)}…` : ''}
+                      {account.config?.instance_id ? <> · <span title={String(account.config.instance_id)}>{maskId(String(account.config.instance_id))}</span></> : null}
                     </div>
                   </div>
                 </div>
@@ -282,7 +283,7 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
                     <span className={`h-2 w-2 shrink-0 rounded-full ${online ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[13px] text-zinc-200">{inst.teamId || inst.instanceId}{inst.self ? <span className="ml-2 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-zinc-400">{t('cloudInstanceSelf', { defaultValue: '本机' })}</span> : null}</div>
-                      <div className="truncate font-mono text-[11px] text-zinc-600">{inst.instanceId}{inst.platform ? ` · ${inst.platform}` : ''}</div>
+                      <div className="truncate font-mono text-[11px] text-zinc-600"><span title={inst.instanceId}>{maskId(inst.instanceId)}</span>{inst.platform ? ` · ${inst.platform}` : ''}</div>
                       <div data-id={`cloud-instance-sys-${inst.instanceId}`} className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] text-zinc-500 sm:grid-cols-3">
                         <div className="truncate" title={[inst.platform, inst.arch, inst.runtime].filter(Boolean).join(' · ')}><span className="text-zinc-600">{t('cloudSysOS', { defaultValue: '系统' })} </span>{[inst.platform, inst.arch, inst.runtime].filter(Boolean).join(' · ') || '—'}</div>
                         <div className="truncate" title={inst.cpuModel}><span className="text-zinc-600">CPU </span>{inst.cpuModel ? `${inst.cpuModel}${inst.cpuCores ? ` · ${inst.cpuCores}C` : ''}` : '—'}</div>
