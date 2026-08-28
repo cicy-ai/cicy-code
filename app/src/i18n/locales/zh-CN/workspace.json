@@ -409,6 +409,8 @@
   "cloudSshOffline": "frp 未连接，SSH 暂不可达",
   "cloudFrpPending": "未接入 frp（升级到最新版并重启即可自动接入）",
   "cloudSshTrustHint": "同账号节点的公钥已自动互相授权",
+  "cloudSshNeedsUpgrade": "该节点版本过旧（< 2.3.575），不会安装同账号公钥，SSH 会被拒绝；升级并重启后可用",
+  "cloudNeedsUpgrade": "需升级",
   "settingsNavIM": "IM 通知",
   "settingsNavRouting": "Agent 路由",
   "settingsNavProviders": "LLM 供应商",

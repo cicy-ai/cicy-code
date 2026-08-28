@@ -409,6 +409,8 @@
   "cloudSshOffline": "frp not connected; SSH unreachable for now",
   "cloudFrpPending": "frp not joined (update to the latest version and restart)",
   "cloudSshTrustHint": "Keys of nodes on this account are trusted automatically",
+  "cloudSshNeedsUpgrade": "This node is too old (< 2.3.575) to install sibling keys, so SSH is refused; update and restart it",
+  "cloudNeedsUpgrade": "update needed",
   "settingsNavIM": "IM Notifications",
   "settingsNavRouting": "Agent Routing",
   "settingsNavProviders": "LLM Providers",

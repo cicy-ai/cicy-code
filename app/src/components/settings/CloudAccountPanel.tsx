@@ -208,6 +208,9 @@ function NodeCard({ inst, latest, t }: { inst: CloudInstanceInfo; latest: string
   const diskPct = pct(r?.disk_usage_pct) ?? (r?.disk_used_bytes && r?.disk_total_bytes ? (r.disk_used_bytes / r.disk_total_bytes) * 100 : null);
   const sshUser = inst.sshUser || frp?.user || '';
   const sshCmd = frp?.ports?.ssh ? `ssh -p ${frp.ports.ssh} ${sshUser ? `${sshUser}@` : ''}${frp.host}` : '';
+  // Nodes older than 2.3.575 never install sibling keys: their SSH port answers
+  // but every login is refused. Say so instead of showing a green SSH button.
+  const needsUpgrade = !!inst.hub && !!inst.version && versionLt(inst.version, '2.3.575');
   const outdated = !!inst.version && !!latest && cmpVersion(inst.version, latest) < 0;
   const ports = (inst.ports || []).filter((p) => p.visibility !== 'closed');
   const load = r?.load_1 != null ? [r.load_1, r.load_5, r.load_15].map((v) => (v ?? 0).toFixed(2)).join(' / ') : '';
@@ -279,9 +282,10 @@ function NodeCard({ inst, latest, t }: { inst: CloudInstanceInfo; latest: string
           </button>
         ) : null}
         {sshCmd ? (
-          <CopyButton text={sshCmd} label="SSH" live={!!frp?.sshLive}
-            title={frp?.sshLive ? `${t('cloudSshCopyHint', { defaultValue: '点击复制 SSH 命令' })}\n${sshCmd}` : t('cloudSshOffline', { defaultValue: 'frp 未连接，SSH 暂不可达' })} />
+          <CopyButton text={sshCmd} label="SSH" live={!!frp?.sshLive && !needsUpgrade}
+            title={needsUpgrade ? t('cloudSshNeedsUpgrade', { defaultValue: '该节点版本过旧（< 2.3.575），不会安装同账号公钥，SSH 会被拒绝；升级并重启后可用' }) : frp?.sshLive ? `${t('cloudSshCopyHint', { defaultValue: '点击复制 SSH 命令' })}\n${sshCmd}` : t('cloudSshOffline', { defaultValue: 'frp 未连接，SSH 暂不可达' })} />
         ) : null}
+        {needsUpgrade ? <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300" title={t('cloudSshNeedsUpgrade', { defaultValue: '该节点版本过旧（< 2.3.575），不会安装同账号公钥，SSH 会被拒绝；升级并重启后可用' })}>{t('cloudNeedsUpgrade', { defaultValue: '需升级' })} v{inst.version}</span> : null}
         {ports.slice(0, 4).map((p) => (
           <button key={p.port} type="button" onClick={() => void openInstanceHost(inst, p.port)} title={`https://${inst.proxyHost!.replace(/^([^.]+)\./, `$1-${p.port}.`)}`}
             className="inline-flex h-7 items-center gap-1 rounded-md border border-white/[0.08] bg-transparent px-2 font-mono text-[11px] text-zinc-400 transition-colors hover:border-blue-500/40 hover:text-blue-200">
@@ -312,6 +316,16 @@ function NodeCard({ inst, latest, t }: { inst: CloudInstanceInfo; latest: string
 /* ───────────────────────── panel ───────────────────────── */
 
 type Filter = 'all' | 'online' | 'offline';
+
+function versionLt(a: string, b: string): boolean {
+  const pa = a.split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = b.split('.').map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const x = pa[i] || 0; const y = pb[i] || 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
 
 export default function CloudAccountPanel({ active, onAccountChange }: { active: boolean; onAccountChange?: (account: CloudAccountInfo | null) => void }) {
   const { t } = useTranslation('workspace');
