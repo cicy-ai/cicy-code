@@ -394,6 +394,8 @@
   "cloudSysSeen": "最近在线",
   "cloudSysDisk": "磁盘",
   "cloudSysLoad": "负载",
+  "cloudLoginCodeHint": "打开 {{email}}，点击链接或把邮件里的 6 位验证码填在下面。",
+  "cloudLoginCodeSubmit": "验证",
   "settingsNavIM": "IM 通知",
   "settingsNavRouting": "Agent 路由",
   "settingsNavProviders": "LLM 供应商",

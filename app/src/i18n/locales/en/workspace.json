@@ -394,6 +394,8 @@
   "cloudSysSeen": "Last seen",
   "cloudSysDisk": "Disk",
   "cloudSysLoad": "Load",
+  "cloudLoginCodeHint": "Open {{email}}: click the link, or type the 6-digit code from the mail below.",
+  "cloudLoginCodeSubmit": "Verify",
   "settingsNavIM": "IM Notifications",
   "settingsNavRouting": "Agent Routing",
   "settingsNavProviders": "LLM Providers",

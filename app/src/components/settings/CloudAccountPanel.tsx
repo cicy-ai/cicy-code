@@ -118,6 +118,8 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
   const [team, setTeam] = useState('');
   const [state, setState] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [code, setCode] = useState('');
+  const [codeSubmitting, setCodeSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -152,7 +154,18 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
     setState(''); setError(''); setModalOpen(true);
   };
 
+  const submitCode = async () => {
+    if (!state || code.trim().length !== 6) return;
+    setCodeSubmitting(true); setError('');
+    try {
+      await apiService.submitCiCyCloudLoginCode(state, code.trim());
+      // the running poll picks up the approved login on its next tick
+    } catch (e) { setError(errText(e)); }
+    finally { setCodeSubmitting(false); }
+  };
+
   const submit = async () => {
+    setCode('');
     setSubmitting(true); setError('');
     try {
       const res = await apiService.startCiCyCloudLogin(email.trim(), team.trim(), hubOrigin.trim() || DEFAULT_HUB);
@@ -348,7 +361,15 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
                 <div className="rounded-xl border border-blue-500/25 bg-blue-500/[0.06] px-4 py-4 text-center">
                   <Loader2 className="mx-auto h-5 w-5 animate-spin text-blue-300" />
                   <div className="mt-2 text-[13px] font-medium text-zinc-200">{t('cloudLoginMailSent', { defaultValue: '登录邮件已发送' })}</div>
-                  <div className="mt-1 text-[11px] text-zinc-500">{t('cloudLoginMailHint', { defaultValue: '请打开 {{email}} 并点击登录链接，本页面会自动完成绑定。', email })}</div>
+                  <div className="mt-1 text-[11px] text-zinc-500">{t('cloudLoginCodeHint', { defaultValue: '打开 {{email}}，点击链接或把邮件里的 6 位验证码填在下面。', email })}</div>
+                  <div className="mx-auto mt-3 flex max-w-[260px] items-center gap-2">
+                    <input data-id="cloud-login-code" value={code} inputMode="numeric" maxLength={6} autoFocus placeholder="123456"
+                      onChange={(e) => { setCode(e.target.value.replace(/\D/g, '')); setError(''); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && code.trim().length === 6) void submitCode(); }}
+                      className={`${INPUT} text-center font-mono text-[18px] tracking-[0.4em]`} disabled={codeSubmitting} />
+                    <button type="button" data-id="cloud-login-code-submit" onClick={() => void submitCode()} disabled={codeSubmitting || code.trim().length !== 6}
+                      className="shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-[12px] font-medium text-white transition-colors hover:bg-blue-500 disabled:opacity-50">{codeSubmitting ? '…' : t('cloudLoginCodeSubmit', { defaultValue: '验证' })}</button>
+                  </div>
                 </div>
               )}
               {error && <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[12px] text-red-300">{error}</div>}

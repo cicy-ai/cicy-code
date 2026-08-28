@@ -1941,9 +1941,34 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 		J(w, M{"success": true, "transport": messageTransport, "message": M{"id": messageID}})
 		return
 	}
-	// POST /api/im/cicy-cloud/login; GET /api/im/cicy-cloud/login/{state}
+	// POST /api/im/cicy-cloud/login; GET /api/im/cicy-cloud/login/{state};
+	// POST /api/im/cicy-cloud/login/{state}/code {code} (hub logins only)
 	if len(parts) < 2 || parts[1] != "login" {
 		httpErr(w, 404, "not found")
+		return
+	}
+	if r.Method == http.MethodPost && len(parts) == 4 && parts[3] == "code" {
+		state := strings.TrimSpace(parts[2])
+		pendingValue, hasPending := cicyCloudPendingLogins.Load(state)
+		pending, _ := pendingValue.(cicyCloudPendingLogin)
+		if !hasPending || pending.HubOrigin == "" {
+			httpErr(w, 404, "no pending hub login")
+			return
+		}
+		var in struct {
+			Code string `json:"code"`
+		}
+		if readBody(r, &in) != nil || len(strings.TrimSpace(in.Code)) != 6 {
+			httpErr(w, 400, "6-digit code required")
+			return
+		}
+		hubStateValue, _ := hubLoginStates.Load(state)
+		hubState, _ := hubStateValue.(string)
+		if err := cloudJSONAt(pending.HubOrigin, http.MethodPost, "/api/login/code", "", M{"state": hubState, "code": strings.TrimSpace(in.Code)}, nil); err != nil {
+			httpErr(w, 401, err.Error())
+			return
+		}
+		J(w, M{"status": "approved"})
 		return
 	}
 	if r.Method == http.MethodPost && len(parts) == 2 {
