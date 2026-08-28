@@ -12,5 +12,9 @@ echo "== bump $V"; python3 scripts/sync-version.py --set "$V"
 git add -A .cicy_tmux.conf api/mgr/main.go app/package-lock.json app/package.json npm/package.json app/src/config.ts 2>/dev/null || true
 git commit -q -m "chore(release): v$V"
 git tag -a "v$V" -m "v$V"
-echo "== push"; git push cicy-ai main "v$V"; git push cicy-dev-001 main "v$V" || true
+echo "== push"
+github configure --account cicy-ai . >/dev/null 2>&1 || true
+git push cicy-ai main "v$V"
+github configure --account cicy-dev-001 . >/dev/null 2>&1 || true
+git push cicy-dev-001 main "v$V" || echo "(fork push failed — retry: git push cicy-dev-001 main v$V)"
 echo "released v$V — CI publishes npm + GitHub release"
