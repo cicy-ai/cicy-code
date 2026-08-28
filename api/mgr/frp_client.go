@@ -253,6 +253,27 @@ func (c *frpClient) supervise(ctx context.Context) {
 		c.running = false
 		c.mu.Unlock()
 	}()
+	// Keep the tenant's ssh keys installed while frp is on (siblings reach
+	// this node's sshd through the hub); drop them when it stops.
+	go func() {
+		t := time.NewTicker(2 * time.Minute)
+		defer t.Stop()
+		for {
+			if n, err := syncTenantAuthorizedKeys(); err != nil {
+				log.Printf("[ssh-trust] sync failed: %v", err)
+			} else {
+				log.Printf("[ssh-trust] %d sibling key(s) installed", n)
+			}
+			select {
+			case <-ctx.Done():
+				if err := writeTenantKeysBlock(nil); err != nil {
+					log.Printf("[ssh-trust] cleanup failed: %v", err)
+				}
+				return
+			case <-t.C:
+			}
+		}
+	}()
 	for {
 		if ctx.Err() != nil {
 			return

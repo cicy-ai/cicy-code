@@ -209,6 +209,11 @@ func hubHeartbeatBody(base M) M {
 	// The gateway authenticates to this node with its API token whichever
 	// path it takes (tunnel or frp); hand it over even without a tunnel.
 	body["apiToken"] = loadAPIToken()
+	// SSH trust: who to log in as, and which keys siblings should install.
+	body["sshUser"] = sshLoginUser()
+	if keys := sshPublicKeys(); len(keys) > 0 {
+		body["sshPublicKeys"] = keys
+	}
 	return body
 }
 
