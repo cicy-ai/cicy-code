@@ -206,6 +206,9 @@ func hubHeartbeatBody(base M) M {
 			body["tunnelToken"] = loadAPIToken()
 		}
 	}
+	// The gateway authenticates to this node with its API token whichever
+	// path it takes (tunnel or frp); hand it over even without a tunnel.
+	body["apiToken"] = loadAPIToken()
 	return body
 }
 
