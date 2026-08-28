@@ -2095,6 +2095,9 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 				httpErr(w, 500, err.Error())
 				return
 			}
+			// The running worker still holds the previous transport (old token or
+			// cloud mode); restart it so the hub sees a register + heartbeat now.
+			imReconcileAccount(acc.ID)
 			J(w, M{"status": "ready", "account": imAccountToMap(acc)})
 			return
 		}
@@ -2146,6 +2149,7 @@ func handleCiCyCloudLoginRoute(w http.ResponseWriter, r *http.Request, parts []s
 			httpErr(w, 500, err.Error())
 			return
 		}
+		imReconcileAccount(acc.ID)
 		J(w, M{"status": "ready", "account": imAccountToMap(acc)})
 		return
 	}

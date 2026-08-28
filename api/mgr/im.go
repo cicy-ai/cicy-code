@@ -1215,6 +1215,14 @@ func (w *imWorker) sleep(d time.Duration) bool {
 }
 
 func (w *imWorker) loop() {
+	// A worker stopped mid-poll (reconcile after re-login) must not leave its
+	// transport's stream connection alive under the superseded credentials.
+	defer func() {
+		if closer, ok := w.getTransport().(botTransportCloser); ok {
+			_ = closer.Close()
+		}
+		w.setTransport(nil)
+	}()
 	backoff := 2 * time.Second
 	for {
 		if w.stopped() {
