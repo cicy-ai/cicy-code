@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -176,7 +177,7 @@ func installedLocalBinVersion() string {
 //     binary while preserving its command-line arguments and environment.
 func handleCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
 	if cicyUpdateIsContainerRuntime() {
-		handleContainerCicyUpdateApply(w)
+		handleContainerCicyUpdateApply(w, r)
 		return
 	}
 	if supportsLocalBinUpdate(cicyUpdateGOOS) {
@@ -190,35 +191,78 @@ func supportsLocalBinUpdate(goos string) bool {
 	return goos == "darwin" || goos == "linux"
 }
 
-func handleContainerCicyUpdateApply(w http.ResponseWriter) {
-	if _, err := os.Stat(legacyUpdaterPath); err != nil {
-		J(w, M{"started": false, "error": "updater not found: " + legacyUpdaterPath})
-		return
-	}
-	target := cicyUpdateLatestVersion()
-	if target == "" {
-		J(w, M{"started": false, "error": "could not resolve the latest version from npm"})
-		return
-	}
-	if !versionGreater(target, version) {
-		J(w, M{"started": false, "current": version, "latest": target, "error": "already up to date"})
-		return
-	}
+// cicyUpdateVersionRe: what a caller may pin as `target` — a plain semver.
+var cicyUpdateVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
+// Seams for handleContainerCicyUpdateApply (tests swap them).
+var cicyUpdateContainerUpdaterPath = legacyUpdaterPath
+var cicyUpdateCurrentVersion = func() string { return version }
+var cicyUpdateLaunchContainerUpdater = func(target, registry string) error {
 	// Detach fully: `setsid` runs the updater in a NEW session, so supervisor's
 	// restart of cicy-code (which kills our process group) doesn't take the
 	// updater down mid-install. (setsid alone suffices — no Windows-incompatible
 	// SysProcAttr needed; this path is container/Linux-only anyway.)
-	cmd := exec.Command("setsid", "bash", legacyUpdaterPath, target)
+	cmd := exec.Command("setsid", "bash", cicyUpdateContainerUpdaterPath, target)
 	cmd.Env = os.Environ()
+	if registry != "" {
+		cmd.Env = append(cmd.Env, "NPM_REGISTRY="+registry)
+	}
 	if err := cmd.Start(); err != nil {
+		return err
+	}
+	_ = cmd.Process.Release()
+	return nil
+}
+
+// POST /api/cicy-update in the container runtime. The body may carry
+//
+//	{"target": "2.3.573", "registry": "https://registry.npmmirror.com"}
+//
+// — cicy-desktop resolves the version on the HOST (fast, host network) and
+// pins it here, so the container never runs its own `npm view` (which is what
+// used to stall the update for minutes). Without a target the latest version
+// is resolved here as before. This is the ONLY supported update entry point
+// for a running container: it runs inside, needs no docker exec and no script
+// push, and survives the supervisor restart it triggers.
+func handleContainerCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
+	if _, err := os.Stat(cicyUpdateContainerUpdaterPath); err != nil {
+		J(w, M{"started": false, "error": "updater not found: " + cicyUpdateContainerUpdaterPath})
+		return
+	}
+	var body struct {
+		Target   string `json:"target"`
+		Registry string `json:"registry"`
+	}
+	if r != nil && r.Body != nil {
+		_ = readBody(r, &body)
+	}
+	target := strings.TrimSpace(body.Target)
+	if target != "" && !cicyUpdateVersionRe.MatchString(target) {
+		J(w, M{"started": false, "error": "invalid target version: " + target})
+		return
+	}
+	if target == "" {
+		target = cicyUpdateLatestVersion()
+	}
+	if target == "" {
+		J(w, M{"started": false, "error": "could not resolve the latest version from npm"})
+		return
+	}
+	if !versionGreater(target, cicyUpdateCurrentVersion()) {
+		J(w, M{"started": false, "current": cicyUpdateCurrentVersion(), "latest": target, "error": "already up to date"})
+		return
+	}
+	registry := strings.TrimSpace(body.Registry)
+	if registry != "" && !strings.HasPrefix(registry, "https://") {
+		registry = ""
+	}
+	if err := cicyUpdateLaunchContainerUpdater(target, registry); err != nil {
 		log.Printf("[cicy-update] launch failed: %v", err)
 		J(w, M{"started": false, "error": "failed to launch updater: " + err.Error()})
 		return
 	}
-	_ = cmd.Process.Release()
-	log.Printf("[cicy-update] launched update %s -> %s (detached); server will restart", version, target)
-	J(w, M{"started": true, "current": version, "target": target})
+	log.Printf("[cicy-update] launched update %s -> %s (detached, registry=%q); server will restart", cicyUpdateCurrentVersion(), target, registry)
+	J(w, M{"started": true, "current": cicyUpdateCurrentVersion(), "target": target})
 }
 
 func handleLocalBinCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
