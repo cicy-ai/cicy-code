@@ -81,7 +81,9 @@ try {
     throw new Error(`invalid global json root: ${file}`);
   }
   const currentToken = typeof config.api_token === 'string' ? config.api_token.trim() : '';
-  const nextToken = envToken || currentToken || `cicy_${crypto.randomBytes(16).toString('hex')}`;
+  // The file wins once it has a token: CICY_API_TOKEN only seeds a fresh
+  // volume, so rotating the token in global.json survives container restarts.
+  const nextToken = currentToken || envToken || `cicy_${crypto.randomBytes(16).toString('hex')}`;
   if (currentToken !== nextToken) {
     config.api_token = nextToken;
     fs.writeFileSync(tmpFile, `${JSON.stringify(config, null, 2)}\n`, 'utf8');

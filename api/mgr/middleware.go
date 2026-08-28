@@ -85,17 +85,18 @@ func getToken(r *http.Request) string {
 	return ""
 }
 
+// loadAPIToken: ~/cicy-ai/global.json is the source of truth so the token can
+// be rotated by editing the file (or via the settings UI) on any host. The
+// CICY_API_TOKEN environment variable only seeds a missing value — it is how
+// containers get their first token; it must not pin the token forever.
 func loadAPIToken() string {
-	if token := strings.TrimSpace(os.Getenv("CICY_API_TOKEN")); token != "" {
-		return token
-	}
 	data, _ := os.ReadFile(cicyGlobalJSONPath)
 	var cfg M
 	json.Unmarshal(data, &cfg)
-	if t, ok := cfg["api_token"].(string); ok {
-		return t
+	if t, ok := cfg["api_token"].(string); ok && strings.TrimSpace(t) != "" {
+		return strings.TrimSpace(t)
 	}
-	return ""
+	return strings.TrimSpace(os.Getenv("CICY_API_TOKEN"))
 }
 
 func httpNotSupportedInAPIOnlyRuntime(w http.ResponseWriter) {
