@@ -1,4 +1,9 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+// This file mounts the whole canvas (lazy role editors, 400ms cloud-RPC polls,
+// history views). Under the full-suite load the default 1s findBy/waitFor
+// window flakes; give the async utils real headroom instead of racing them.
+configure({ asyncUtilTimeout: 5000 });
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', async () => {
