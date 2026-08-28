@@ -237,6 +237,7 @@ type hubInstance struct {
 	ProxyAvailable bool            `json:"proxyAvailable"`
 	Ports          json.RawMessage `json:"ports"`
 	Resources      json.RawMessage `json:"resources"`
+	Frp            json.RawMessage `json:"frp"`
 }
 
 func hubInstances(origin, token string) ([]hubInstance, error) {
@@ -288,6 +289,9 @@ func hubInstancesToCloud(instances []hubInstance) []M {
 		}
 		if len(inst.Resources) > 0 {
 			row["resources"] = inst.Resources
+		}
+		if len(inst.Frp) > 0 {
+			row["frp"] = inst.Frp
 		}
 		out = append(out, row)
 	}

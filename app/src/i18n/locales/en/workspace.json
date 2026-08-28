@@ -396,6 +396,7 @@
   "cloudSysLoad": "Load",
   "cloudLoginCodeHint": "Open {{email}}: click the link, or type the 6-digit code from the mail below.",
   "cloudLoginCodeSubmit": "Verify",
+  "cloudFrpJoinHint": "Run one line on that machine to join frp (SSH / low-latency access):",
   "settingsNavIM": "IM Notifications",
   "settingsNavRouting": "Agent Routing",
   "settingsNavProviders": "LLM Providers",

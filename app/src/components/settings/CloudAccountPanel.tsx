@@ -40,6 +40,7 @@ export interface CloudInstanceInfo {
   version?: string;
   createdAt?: string;
   ports?: Array<{ port: number; name?: string; visibility?: string }>;
+  frp?: { host: string; ports: Record<string, number>; ssh?: string; sshLive?: boolean; httpLive?: boolean };
   resources?: {
     cpu_usage_pct?: number; cpu_cores?: number;
     mem_usage_pct?: number; mem_total_bytes?: number; mem_used_bytes?: number;
@@ -104,6 +105,10 @@ async function openInstanceHost(inst: CloudInstanceInfo, port = 0) {
     }
   } catch (e) { toast(errText(e)); }
   if (tab) tab.location.href = fallback; else window.open(fallback, '_blank', 'noopener');
+}
+
+function hubOriginFor(account: CloudAccountInfo | null): string {
+  return String(account?.config?.cloud_origin || DEFAULT_HUB).replace(/\/+$/, '');
 }
 
 export default function CloudAccountPanel({ active, onAccountChange }: { active: boolean; onAccountChange?: (account: CloudAccountInfo | null) => void }) {
@@ -295,6 +300,21 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
                           {inst.resources.load_1 != null && (
                             <div className="text-[11px] text-zinc-500 sm:col-span-3"><span className="text-zinc-600">{t('cloudSysLoad', { defaultValue: '负载' })} </span><span className="font-mono text-zinc-400">{[inst.resources.load_1, inst.resources.load_5, inst.resources.load_15].map((v) => (v ?? 0).toFixed(2)).join(' · ')}</span><span className="ml-1 text-zinc-600">1m / 5m / 15m</span></div>
                           )}
+                        </div>
+                      ) : null}
+                      {inst.frp?.ports?.ssh ? (
+                        <div data-id={`cloud-instance-ssh-${inst.instanceId}`} className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
+                          <span className={`h-1.5 w-1.5 rounded-full ${inst.frp.sshLive ? 'bg-emerald-400' : 'bg-zinc-600'}`} title={inst.frp.sshLive ? 'frp online' : 'frp offline'} />
+                          <span className="text-zinc-600">SSH</span>
+                          <code className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-zinc-300">ssh -p {inst.frp.ports.ssh} &lt;user&gt;@{inst.frp.host}</code>
+                          <button type="button" className="text-zinc-500 hover:text-zinc-200" onClick={(e) => { e.stopPropagation(); void navigator.clipboard?.writeText(`ssh -p ${inst.frp!.ports.ssh} ${inst.frp!.host}`); toast(t('copied', { ns: 'common', defaultValue: '已复制' })); }}>{t('copy', { ns: 'common', defaultValue: '复制' })}</button>
+                          {inst.frp.ports.http ? <span className="text-zinc-600">· frp http {inst.frp.httpLive ? t('cloudOnline', { defaultValue: '在线' }) : t('cloudOffline', { defaultValue: '离线' })}</span> : null}
+                        </div>
+                      ) : inst.hub ? (
+                        <div data-id={`cloud-instance-frp-join-${inst.instanceId}`} className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+                          <span>{t('cloudFrpJoinHint', { defaultValue: '在该机器上执行一行命令接入 frp（SSH / 低延迟访问）:' })}</span>
+                          <code className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-zinc-300">curl -fsSL --retry 5 {hubOriginFor(account)}/frpc.sh | bash</code>
+                          <button type="button" className="text-zinc-500 hover:text-zinc-200" onClick={(e) => { e.stopPropagation(); void navigator.clipboard?.writeText(`curl -fsSL --retry 5 ${hubOriginFor(account)}/frpc.sh | bash`); toast(t('copied', { ns: 'common', defaultValue: '已复制' })); }}>{t('copy', { ns: 'common', defaultValue: '复制' })}</button>
                         </div>
                       ) : null}
                       {inst.ports && inst.ports.length > 0 && inst.proxyHost ? (
