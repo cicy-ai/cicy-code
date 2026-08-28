@@ -110,7 +110,7 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
   const [state, setState] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [code, setCode] = useState('');
-  const [frp, setFrp] = useState<{ supported?: boolean; enabled?: boolean; running?: boolean; error?: string; ports?: Record<string, number>; host?: string } | null>(null);
+  const [frp, setFrp] = useState<{ supported?: boolean; enabled?: boolean; running?: boolean; error?: string; ports?: Record<string, number>; host?: string; user?: string } | null>(null);
   const [frpBusy, setFrpBusy] = useState(false);
   const [codeSubmitting, setCodeSubmitting] = useState(false);
   const [error, setError] = useState('');

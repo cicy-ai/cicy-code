@@ -70,7 +70,7 @@ func (c *frpClient) status() M {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := M{"supported": runtime.GOOS != "windows", "enabled": frpClientWanted(), "running": c.running,
-		"error": c.lastErr, "restarts": c.restarts, "host": c.host, "slug": c.slug, "ports": c.ports}
+		"error": c.lastErr, "restarts": c.restarts, "host": c.host, "slug": c.slug, "ports": c.ports, "user": sshLoginUser()}
 	if c.running {
 		out["uptime_sec"] = int(time.Since(c.startAt).Seconds())
 	}
