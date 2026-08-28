@@ -40,7 +40,8 @@ export interface CloudInstanceInfo {
   version?: string;
   createdAt?: string;
   ports?: Array<{ port: number; name?: string; visibility?: string }>;
-  frp?: { host: string; ports: Record<string, number>; ssh?: string; sshLive?: boolean; httpLive?: boolean };
+  frp?: { host: string; ports: Record<string, number>; ssh?: string; user?: string; sshLive?: boolean; httpLive?: boolean };
+  sshUser?: string;
   resources?: {
     cpu_usage_pct?: number; cpu_cores?: number;
     mem_usage_pct?: number; mem_total_bytes?: number; mem_used_bytes?: number;
@@ -279,7 +280,7 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
               </div>
               <div className="mt-0.5 text-[11px] text-zinc-500">
                 {frp?.supported === false ? t('cloudFrpUnsupported', { defaultValue: '当前系统暂不支持内置 frp 客户端。' })
-                  : frp?.running && frp.ports?.ssh ? <span>SSH <code className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-zinc-300">ssh -p {frp.ports.ssh} &lt;user&gt;@{frp.host}</code>{frp.ports.http ? <span> · HTTP 经 hub 本机 :{frp.ports.http}</span> : null}</span>
+                  : frp?.running && frp.ports?.ssh ? <span>SSH <code className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-zinc-300">ssh -p {frp.ports.ssh} {frp.user ? `${frp.user}@` : ''}{frp.host}</code> · {t('cloudSshTrustHint', { defaultValue: '同账号节点的公钥已自动互相授权' })}</span>
                   : t('cloudFrpHint', { defaultValue: '开启后这台 cicy-code 自动接入 hub 的 frps：同账号的其他节点可以直接 SSH 过来，域名访问不再绕 Cloudflare。不用敲任何命令。' })}
                 {frp?.error ? <span className="ml-2 text-red-300">{frp.error}</span> : null}
               </div>
@@ -322,7 +323,8 @@ export default function CloudAccountPanel({ active, onAccountChange }: { active:
                     <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-white/[0.06]"><div className={`h-full rounded-full ${value == null ? 'bg-zinc-700' : value >= 90 ? 'bg-red-400' : value >= 70 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${value ?? 0}%` }} /></div>
                   </div>
                 );
-                const sshCmd = frp?.ports?.ssh ? `ssh -p ${frp.ports.ssh} ${frp.host}` : '';
+                const sshUser = inst.sshUser || frp?.user || '';
+                const sshCmd = frp?.ports?.ssh ? `ssh -p ${frp.ports.ssh} ${sshUser ? `${sshUser}@` : ''}${frp.host}` : '';
                 return (
                   <div key={inst.instanceId} data-id={`cloud-instance-${inst.instanceId}`} className="border-b border-white/[0.05] px-4 py-3 last:border-b-0" title={sysTitle}>
                     {/* line 1: name · state · domain · version */}

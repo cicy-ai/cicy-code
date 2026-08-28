@@ -408,6 +408,7 @@
   "cloudSshCopyHint": "点击复制 SSH 命令",
   "cloudSshOffline": "frp 未连接，SSH 暂不可达",
   "cloudFrpPending": "未接入 frp（升级到最新版并重启即可自动接入）",
+  "cloudSshTrustHint": "同账号节点的公钥已自动互相授权",
   "settingsNavIM": "IM 通知",
   "settingsNavRouting": "Agent 路由",
   "settingsNavProviders": "LLM 供应商",

@@ -246,6 +246,7 @@ type hubInstance struct {
 	GPU            string          `json:"gpu"`
 	PublicIP       string          `json:"publicIp"`
 	Version        string          `json:"version"`
+	SSHUser        string          `json:"sshUser"`
 	ProxyHost      string          `json:"proxyHost"`
 	ProxyAvailable bool            `json:"proxyAvailable"`
 	Ports          json.RawMessage `json:"ports"`
@@ -305,6 +306,9 @@ func hubInstancesToCloud(instances []hubInstance) []M {
 		}
 		if len(inst.Frp) > 0 {
 			row["frp"] = inst.Frp
+		}
+		if inst.SSHUser != "" {
+			row["sshUser"] = inst.SSHUser
 		}
 		out = append(out, row)
 	}

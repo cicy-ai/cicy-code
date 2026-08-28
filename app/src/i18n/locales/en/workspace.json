@@ -408,6 +408,7 @@
   "cloudSshCopyHint": "Click to copy the SSH command",
   "cloudSshOffline": "frp not connected; SSH unreachable for now",
   "cloudFrpPending": "frp not joined (update to the latest version and restart)",
+  "cloudSshTrustHint": "Keys of nodes on this account are trusted automatically",
   "settingsNavIM": "IM Notifications",
   "settingsNavRouting": "Agent Routing",
   "settingsNavProviders": "LLM Providers",
