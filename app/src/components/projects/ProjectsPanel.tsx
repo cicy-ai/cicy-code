@@ -184,7 +184,11 @@ const projectAgentCompleteness = (agent: ProjectAgent) => [
   agent.ttydSrc,
 ].filter(Boolean).length + (agent.status && agent.status !== 'offline' ? 2 : 0);
 const cloudInstanceOnline = (instance: any) => {
-  const seen = Date.parse(String(instance?.lastSeenAt || '').replace(' ', 'T') + 'Z');
+  // Cloud reports "YYYY-MM-DD HH:MM:SS" (UTC, no zone); the hub reports RFC3339
+  // with a trailing Z — appending a second Z made every hub node look offline.
+  const raw = String(instance?.lastSeenAt || '').trim();
+  const iso = /[zZ]$|[+-]\d\d:?\d\d$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z';
+  const seen = Date.parse(iso);
   return instance?.status === 'online' && Number.isFinite(seen) && Date.now() - seen < 90_000;
 };
 

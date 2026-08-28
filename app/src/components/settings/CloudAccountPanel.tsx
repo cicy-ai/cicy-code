@@ -178,7 +178,7 @@ function CopyButton({ text, label, live, title }: { text: string; label: string;
   return (
     <button type="button" title={title}
       onClick={(e) => { e.stopPropagation(); void navigator.clipboard?.writeText(text); setDone(true); window.setTimeout(() => setDone(false), 1500); }}
-      className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-medium transition-colors ${live ? 'border-white/[0.1] bg-white/[0.04] text-zinc-200 hover:border-emerald-500/40 hover:bg-emerald-500/[0.08] hover:text-emerald-200' : 'border-white/[0.06] bg-transparent text-zinc-500 hover:text-zinc-300'}`}>
+      className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-medium transition-colors ${live ? 'border-white/[0.1] bg-white/[0.04] text-zinc-200 hover:border-emerald-500/40 hover:bg-emerald-500/[0.08] hover:text-emerald-200' : 'border-white/[0.06] bg-transparent text-zinc-500 hover:text-zinc-300'}`}>
       {done ? <Check size={13} className="text-emerald-300" /> : <Terminal size={13} />}{label}
     </button>
   );
@@ -274,7 +274,7 @@ function NodeCard({ inst, latest, t }: { inst: CloudInstanceInfo; latest: string
           <button type="button" data-id={`cloud-instance-domain-${inst.instanceId}`} onClick={() => void openInstanceHost(inst)}
             disabled={!inst.proxyAvailable}
             title={inst.proxyAvailable ? `https://${inst.proxyHost}` : t('cloudProxyOffline', { defaultValue: '隧道未上报，域名暂时不可用' })}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-[12px] font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-white/[0.05] disabled:text-zinc-500">
+            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-blue-500/30 bg-blue-500/10 px-2.5 text-[12px] font-medium text-blue-300 transition-colors hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:border-white/[0.06] disabled:bg-transparent disabled:text-zinc-600">
             <Globe size={13} />{t('cloudOpen', { defaultValue: '打开' })}
           </button>
         ) : null}
@@ -284,13 +284,13 @@ function NodeCard({ inst, latest, t }: { inst: CloudInstanceInfo; latest: string
         ) : null}
         {ports.slice(0, 4).map((p) => (
           <button key={p.port} type="button" onClick={() => void openInstanceHost(inst, p.port)} title={`https://${inst.proxyHost!.replace(/^([^.]+)\./, `$1-${p.port}.`)}`}
-            className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 font-mono text-[11px] text-zinc-300 hover:border-blue-500/40 hover:text-blue-200">
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-white/[0.08] bg-transparent px-2 font-mono text-[11px] text-zinc-400 transition-colors hover:border-blue-500/40 hover:text-blue-200">
             <span className={`h-1.5 w-1.5 rounded-full ${p.visibility === 'public' ? 'bg-emerald-400' : 'bg-zinc-500'}`} />:{p.port}{p.name ? ` ${p.name}` : ''}
           </button>
         ))}
         {inst.hub && !inst.self && !frp && online ? <span className="inline-flex items-center gap-1 text-[11px] text-amber-300/80" title={t('cloudFrpPending', { defaultValue: '未接入 frp（升级到最新版并重启即可自动接入）' })}><Zap size={12} />{t('cloudFrpPendingShort', { defaultValue: '未接入 frp' })}</span> : null}
         <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
-          className="ml-auto inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[11px] text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300">
+          className="ml-auto inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-zinc-500 transition-colors hover:bg-white/[0.04] hover:text-zinc-300">
           {t('cloudDetails', { defaultValue: '详情' })}<ChevronDown size={13} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
       </div>
