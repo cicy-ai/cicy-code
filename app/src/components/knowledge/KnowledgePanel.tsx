@@ -219,7 +219,7 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
   if (!open) return null;
 
   return createPortal(
-    <div data-id="knowledge-modal-overlay" className="fixed inset-y-0 right-0 left-14 z-[1000] bg-[#0b0b0d]">
+    <div data-id="knowledge-modal-overlay" className="fixed inset-y-0 right-0 left-14 z-[150] bg-[#0b0b0d]">
       <section data-id="knowledge-modal" className="absolute inset-0 flex min-h-0 flex-col overflow-hidden bg-[#0b0b0d]">
         <header data-id="knowledge-modal-header" className="flex h-12 shrink-0 items-center gap-2 border-b border-white/[0.07] px-4">
           <BookOpen className="h-4 w-4 text-zinc-400" />
