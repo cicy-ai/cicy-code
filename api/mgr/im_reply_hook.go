@@ -29,12 +29,14 @@ type imReplyPushHook struct {
 	peer      botPeer
 	canEdit   bool
 
-	mu         sync.Mutex
-	thinking   strings.Builder
-	answer     strings.Builder
-	lastPushAt time.Time
-	timer      *time.Timer
-	closed     bool
+	mu sync.Mutex
+	// last ⚠️ failure text pushed this turn — identical retries are not re-pushed.
+	lastFailureText string
+	thinking        strings.Builder
+	answer          strings.Builder
+	lastPushAt      time.Time
+	timer           *time.Timer
+	closed          bool
 }
 
 // imTypingSession drives one "typing" indicator for a single (account, pane)
@@ -211,6 +213,15 @@ func (h *imReplyPushHook) onItems(items []map[string]interface{}) {
 			continue
 		}
 		text = imClampMessage(text)
+		// A failed gateway round (⚠️ 生成失败 / 生成中断) that repeats verbatim is the
+		// same failure retried — push it ONCE per turn, not once per attempt (a
+		// 503 retried ten times used to land as ten identical WeChat messages).
+		if strings.HasPrefix(text, "⚠️") {
+			if text == h.lastFailureText {
+				continue
+			}
+			h.lastFailureText = text
+		}
 		// 回到发起这轮对话的会话(h.peer);兜底才用账号级 last peer。
 		peer := h.peer
 		if peer.empty() {

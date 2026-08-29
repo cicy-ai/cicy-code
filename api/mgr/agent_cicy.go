@@ -1754,7 +1754,10 @@ func cicyCallGateway(ctx context.Context, shortID, sessionID, auxKind, turnID st
 				}, false, nil
 			}
 			gwErr := fmt.Errorf("gateway %d: %s", resp.StatusCode, truncateForLog(string(respBody), 400))
-			if attempt < cicyMaxGatewayRetries && cicyStatusRetryable(resp.StatusCode, shouldRetryHeader) {
+			// A 503 whose body names a CONFIGURATION problem (model_pricing_not_configured,
+			// provider_not_configured, invalid_team_token, …) is deterministic: ten
+			// retries just produce ten identical failures — and ten IM pushes.
+			if attempt < cicyMaxGatewayRetries && cicyStatusRetryable(resp.StatusCode, shouldRetryHeader) && !cicyGatewayErrorIsTerminal(respBody) {
 				if !cicySleepBackoff(ctx, attempt, retryAfter) {
 					return nil, false, ctx.Err()
 				}
@@ -1809,6 +1812,25 @@ const cicyMaxGatewayRetries = 10
 // x-should-retry header wins; otherwise retry 408/409/429 and any 5xx (incl. 529
 // overloaded). Everything else (400/401/403/404/422 …) is a client error a retry
 // can't fix.
+// cicyGatewayErrorIsTerminal reports whether a gateway error body describes a
+// condition no retry can change (missing pricing / provider / key, bad token,
+// empty wallet). Matched on the cicy-cloud {"success":false,"error":"…"} shape.
+func cicyGatewayErrorIsTerminal(body []byte) bool {
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return false
+	}
+	code := strings.ToLower(strings.TrimSpace(payload.Error))
+	if code == "" {
+		return false
+	}
+	return strings.HasSuffix(code, "_not_configured") ||
+		code == "invalid_team_token" || code == "model_required" ||
+		strings.Contains(code, "insufficient_balance") || strings.Contains(code, "unauthorized")
+}
+
 func cicyStatusRetryable(status int, shouldRetryHeader string) bool {
 	switch shouldRetryHeader {
 	case "true":
