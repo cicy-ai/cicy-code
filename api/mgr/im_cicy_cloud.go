@@ -166,13 +166,13 @@ func hubJSON(origin, method, route, token string, requestBody any, responseBody 
 		if err != nil {
 			return err
 		}
-		return hubAssign(responseBody, M{"success": true, "instances": hubInstancesToCloud(instances)})
+		return hubAssign(responseBody, M{"success": true, "instances": hubInstancesToCloud(instances), "stale": hubDirectoryStale()})
 	case method == http.MethodGet && path == "/api/code/agents":
 		instances, err := hubInstances(origin, token)
 		if err != nil {
 			return err
 		}
-		return hubAssign(responseBody, M{"success": true, "agents": hubAgentsToCloud(instances)})
+		return hubAssign(responseBody, M{"success": true, "agents": hubAgentsToCloud(instances), "stale": hubDirectoryStale()})
 	case path == "/api/code/messages" && method == http.MethodPost:
 		return errHubWebSocketOnly
 	case path == "/api/code/messages/poll":
@@ -254,15 +254,60 @@ type hubInstance struct {
 	Frp            json.RawMessage `json:"frp"`
 }
 
+// hubDirectoryCache keeps the last directory the hub returned so a flaky
+// link to the hub (slow TLS, resets) degrades to slightly stale data
+// instead of a 502 on every panel refresh. Instances and agents share one
+// fetch: both UI calls fire together, so a fresh result is reused for a
+// few seconds.
+var hubDirectoryCache struct {
+	sync.Mutex
+	key       string
+	instances []hubInstance
+	fetchedAt time.Time
+	stale     bool
+}
+
+const (
+	hubDirectoryFresh  = 15 * time.Second
+	hubDirectoryMaxAge = 10 * time.Minute
+)
+
 func hubInstances(origin, token string) ([]hubInstance, error) {
+	key := origin + "\x00" + token
+	c := &hubDirectoryCache
+	c.Lock()
+	if c.key == key && c.instances != nil && !c.stale && time.Since(c.fetchedAt) < hubDirectoryFresh {
+		out := c.instances
+		c.Unlock()
+		return out, nil
+	}
+	c.Unlock()
+
 	var out struct {
 		Owner     string        `json:"owner"`
 		Instances []hubInstance `json:"instances"`
 	}
-	if err := cloudJSONAt(origin, http.MethodGet, "/api/instances", token, nil, &out); err != nil {
-		return nil, err
+	err := cloudJSONAt(origin, http.MethodGet, "/api/instances", token, nil, &out)
+	c.Lock()
+	defer c.Unlock()
+	if err == nil {
+		c.key, c.instances, c.fetchedAt, c.stale = key, out.Instances, time.Now(), false
+		return out.Instances, nil
 	}
-	return out.Instances, nil
+	if c.key == key && c.instances != nil && time.Since(c.fetchedAt) < hubDirectoryMaxAge {
+		log.Printf("[im-cloud] hub directory unreachable (%v); serving cached copy from %s ago", err, time.Since(c.fetchedAt).Round(time.Second))
+		c.stale = true
+		return c.instances, nil
+	}
+	return nil, err
+}
+
+// hubDirectoryStale reports whether the last directory served came from
+// cache because the hub could not be reached.
+func hubDirectoryStale() bool {
+	hubDirectoryCache.Lock()
+	defer hubDirectoryCache.Unlock()
+	return hubDirectoryCache.stale
 }
 
 // hubTeamID gives an instance the team-like label the workspace UI shows:

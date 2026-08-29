@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // useHubCredential points the transport at a hub-mode credential file.
@@ -29,6 +30,9 @@ func useHubCredential(t *testing.T, origin, token string) {
 }
 
 func TestHubModeMapsWorkerRoutesOntoHub(t *testing.T) {
+	hubDirectoryCache.Lock()
+	hubDirectoryCache.key, hubDirectoryCache.instances, hubDirectoryCache.stale = "", nil, false
+	hubDirectoryCache.Unlock()
 	var hits atomic.Int32
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
@@ -138,8 +142,8 @@ func TestHubModeMapsWorkerRoutesOntoHub(t *testing.T) {
 	if err := cloudJSON(http.MethodPost, "/api/code/gateway-grant", "cwh_token", M{"port": 3000}, &grant); err != nil || grant.URL != "https://box-3000.hub.test/_hub/grant?g=x" {
 		t.Fatalf("grant: %v %#v", err, grant)
 	}
-	if hits.Load() != 5 {
-		t.Fatalf("hub hits = %d, want 5 (register, instances ×2, heartbeat, grant)", hits.Load())
+	if hits.Load() != 4 {
+		t.Fatalf("hub hits = %d, want 4 (register, instances once for the paired instances+agents calls, heartbeat, grant)", hits.Load())
 	}
 }
 
@@ -161,5 +165,58 @@ func TestHubModeOnlyAppliesToTheHubToken(t *testing.T) {
 	}
 	if hubOriginForToken("") != "" || hubOriginForToken("cwh_token") != "https://hub.invalid" {
 		t.Fatal("hubOriginForToken mismatch")
+	}
+}
+
+// A flaky link to the hub must degrade to the last good directory (flagged
+// stale) rather than surface a 502 on every panel refresh.
+func TestHubDirectoryServesCachedCopyWhenHubUnreachable(t *testing.T) {
+	var fail atomic.Bool
+	var hits atomic.Int32
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if fail.Load() {
+			w.WriteHeader(502)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(M{"success": true, "instances": []M{{"instanceId": "code-cccccccccccccccc", "name": "box", "online": true}}})
+	}))
+	defer hub.Close()
+	hubDirectoryCache.Lock()
+	hubDirectoryCache.key, hubDirectoryCache.instances, hubDirectoryCache.stale = "", nil, false
+	hubDirectoryCache.Unlock()
+
+	var out M
+	if err := hubJSON(hub.URL, http.MethodGet, "/api/code/instances", "tok", nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["stale"] != false {
+		t.Fatalf("fresh fetch flagged stale: %#v", out)
+	}
+	// Second call within the fresh window reuses the fetch (instances+agents fire together).
+	if err := hubJSON(hub.URL, http.MethodGet, "/api/code/agents", "tok", nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected one hub fetch for the paired calls, got %d", hits.Load())
+	}
+	// Expire the fresh window, then make the hub fail: cached copy, stale=true.
+	hubDirectoryCache.Lock()
+	hubDirectoryCache.fetchedAt = time.Now().Add(-time.Minute)
+	hubDirectoryCache.Unlock()
+	fail.Store(true)
+	if err := hubJSON(hub.URL, http.MethodGet, "/api/code/instances", "tok", nil, &out); err != nil {
+		t.Fatalf("cached copy expected, got error %v", err)
+	}
+	insts, _ := out["instances"].([]any)
+	if out["stale"] != true || len(insts) != 1 {
+		t.Fatalf("expected stale cached directory, got %#v", out)
+	}
+	// Beyond max age the error surfaces.
+	hubDirectoryCache.Lock()
+	hubDirectoryCache.fetchedAt = time.Now().Add(-time.Hour)
+	hubDirectoryCache.Unlock()
+	if err := hubJSON(hub.URL, http.MethodGet, "/api/code/instances", "tok", nil, &out); err == nil {
+		t.Fatal("expected error once the cache is too old")
 	}
 }
