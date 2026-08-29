@@ -75,6 +75,15 @@ func (c *localBinUpdateCoordinator) cancel(target string) {
 // for updCheckTTL. npmjs is authoritative for the `latest` dist-tag (npmmirror's
 // tag lags minutes behind a release); fall back to the CN mirror if npmjs is
 // unreachable. Returns "" when neither registry answers.
+// cicyUpdateForgetLatest drops the cached `latest` so the next resolve hits
+// the registry. An explicit update request must not be answered from a
+// 30-minute-old cache ("already up to date" right after a release).
+func cicyUpdateForgetLatest() {
+	updCheckMu.Lock()
+	updCheckLatest, updCheckAt = "", time.Time{}
+	updCheckMu.Unlock()
+}
+
 func latestCicyCodeVersion() string {
 	updCheckMu.Lock()
 	if updCheckLatest != "" && time.Since(updCheckAt) < updCheckTTL {
@@ -270,6 +279,7 @@ func handleContainerCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if target == "" {
+		cicyUpdateForgetLatest()
 		target = cicyUpdateLatestVersion()
 	}
 	if target == "" {
@@ -299,7 +309,21 @@ func handleContainerCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleLocalBinCicyUpdateApply(w http.ResponseWriter, r *http.Request) {
-	target := cicyUpdateLatestVersion()
+	var body struct {
+		Target string `json:"target"`
+	}
+	if r != nil && r.Body != nil {
+		_ = readBody(r, &body)
+	}
+	target := strings.TrimSpace(body.Target)
+	if target != "" && !cicyUpdateVersionRe.MatchString(target) {
+		J(w, M{"started": false, "error": "invalid target version: " + target})
+		return
+	}
+	if target == "" {
+		cicyUpdateForgetLatest()
+		target = cicyUpdateLatestVersion()
+	}
 	if target == "" {
 		J(w, M{"started": false, "error": "could not resolve the latest version from npm"})
 		return
