@@ -114,16 +114,25 @@ export async function fetchCloudAccount(): Promise<CloudAccountInfo | null> {
  *  is pre-authenticated through a one-time grant; on Cloud it is a plain link. */
 async function openInstanceHost(inst: CloudInstanceInfo, port = 0) {
   const fallback = port ? `https://${(inst.proxyHost || '').replace(/^([^.]+)\./, `$1-${port}.`)}` : `https://${inst.proxyHost}`;
-  // Open synchronously so popup blockers treat it as user-initiated, then steer it.
-  const tab = window.open('about:blank', '_blank', 'noopener');
+  // Open synchronously so popup blockers treat it as user-initiated, then steer
+  // it. NOT with the 'noopener' feature: that makes window.open return null, so
+  // the blank tab could never be steered and a SECOND window.open followed —
+  // the desktop showed an empty 新标签页 next to the real one. Keep the handle
+  // and sever the opener link by hand instead.
+  const tab = window.open('about:blank', '_blank');
+  if (tab) { try { tab.opener = null; } catch { /* cross-origin later; fine */ } }
+  const steer = (url: string) => {
+    if (tab && !tab.closed) tab.location.href = url;
+    else window.open(url, '_blank', 'noopener');
+  };
   try {
     if (inst.hub) {
       const res = await apiService.openCiCyCloudInstance(inst.instanceId, port);
       const url = String(res?.data?.url || '');
-      if (url) { if (tab) tab.location.href = url; else window.open(url, '_blank', 'noopener'); return; }
+      if (url) { steer(url); return; }
     }
   } catch (e) { toast(errText(e)); }
-  if (tab) tab.location.href = fallback; else window.open(fallback, '_blank', 'noopener');
+  steer(fallback);
 }
 
 /* ───────────────────────── visual atoms ───────────────────────── */
