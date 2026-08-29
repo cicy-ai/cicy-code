@@ -534,11 +534,11 @@ func helperModeBuiltinWorker() builtinWorker {
 }
 
 type builtinWorker struct {
-	Port          int
-	AgentType     string
-	Title         string
-	TitleEn       string // official English title; empty for non-localized workers
-	RoleTemplate  string // role template slug (~/cicy-ai/memory/agents/<slug>.md); "" = none
+	Port         int
+	AgentType    string
+	Title        string
+	TitleEn      string // official English title; empty for non-localized workers
+	RoleTemplate string // role template slug (~/cicy-ai/memory/agents/<slug>.md); "" = none
 }
 
 // officialRoleRoster is the fixed set of agents an official release preinstalls.
@@ -611,9 +611,9 @@ func selectedBuiltinWorkers(selected []string) []builtinWorker {
 				continue
 			}
 			workers = append(workers, builtinWorker{
-				Port:          1001 + i,
-				AgentType:     agentType,
-				Title:         builtinAgentTitle(agentType),
+				Port:      1001 + i,
+				AgentType: agentType,
+				Title:     builtinAgentTitle(agentType),
 			})
 		}
 	}
@@ -1082,7 +1082,6 @@ func checkEnv() {
 	ensureDefaultProviders()
 	ensureTranslateRoute()
 	applyGatewayEnvToDefaultProviders()
-	ensureClientProviders()
 	ensureVisionProvider()
 	ensureVoiceProvider()
 	setupAIConfigs()
