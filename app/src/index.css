@@ -404,11 +404,15 @@ html[data-theme="light"] .cm-scroller,
 html[data-theme="light"] .cm-content { background-color: transparent !important; color: #27272a !important; color-scheme: light; }
 html[data-theme="light"] .cm-gutters { background-color: #f4f4f5 !important; border-right-color: #d4d4d8 !important; color: #a1a1aa !important; }
 html[data-theme="light"] .cm-lineNumbers .cm-gutterElement { color: #a1a1aa !important; }
+/* Translucent on purpose: CodeMirror paints .cm-selectionLayer BEHIND the
+   content, so an opaque active-line background hides any selection on the
+   cursor's line (double-clicked word, single-line drag → "nothing selected"). */
 html[data-theme="light"] .cm-activeLine,
-html[data-theme="light"] .cm-activeLineGutter { background-color: #e4e4e7 !important; }
+html[data-theme="light"] .cm-activeLineGutter { background-color: rgba(24,24,27,0.05) !important; }
 html[data-theme="light"] .cm-cursor { border-left-color: #18181b !important; }
 html[data-theme="light"] .cm-line span { color: #3f3f46 !important; }
-html[data-theme="light"] .cm-selectionBackground { background-color: rgba(59,130,246,0.22) !important; }
+html[data-theme="light"] .cm-selectionBackground,
+html[data-theme="light"] .cm-content ::selection { background-color: rgba(59,130,246,0.28) !important; }
 html[data-theme="light"] .xterm { color-scheme: light; }
 html[data-theme="light"] [data-id="knowledge-graph-toolbar"],
 html[data-theme="light"] [data-id="knowledge-graph-canvas"] { background-color: #fafafa !important; }
