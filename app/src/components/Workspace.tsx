@@ -39,6 +39,7 @@ import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
 import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
 import { ProxyManagerDialog } from './layout/ProxyManagerDialog';
+import { openOrActivateElectronProfileTab } from '../lib/speedup/rpc';
 import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
 import CustomAgentsPanel from './layout/CustomAgentsPanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
@@ -1542,8 +1543,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
 
   // "管理节点" opens the standalone proxy manager (#/proxy) in a new tab —
   // groups and nodes get a full page instead of a drawer over the workspace.
+  // Inside cicy-desktop the tab must live in profile 0 (the trusted, direct
+  // session) — a plain window.open from a proxied profile-1 tab would inherit
+  // that profile and its exit node.
   const handleOpenProxyManager = useCallback(() => {
-    window.open(`${window.location.pathname}${window.location.search}#/proxy`, '_blank', 'noopener');
+    const url = `${window.location.origin}${window.location.pathname}${window.location.search}#/proxy`;
+    void openOrActivateElectronProfileTab(url, 0)
+      .then((handled) => { if (!handled) window.open(url, '_blank', 'noopener'); })
+      .catch(() => window.open(url, '_blank', 'noopener'));
   }, []);
 
   const topBarPaneId = activeCliPaneId || paneId;
