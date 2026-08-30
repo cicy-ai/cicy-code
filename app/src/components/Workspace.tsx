@@ -1547,7 +1547,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // session) — a plain window.open from a proxied profile-1 tab would inherit
   // that profile and its exit node.
   const handleOpenProxyManager = useCallback(() => {
-    const url = `${window.location.origin}${window.location.pathname}${window.location.search}#/proxy`;
+    // Own pathname on purpose: the desktop tab browser dedupes tabs by
+    // origin+pathname, so `/#/proxy` would just re-activate the workspace tab.
+    // The server serves index.html for any non-asset path.
+    const url = `${window.location.origin}/proxy${window.location.search}#/proxy`;
     void openOrActivateElectronProfileTab(url, 0)
       .then((handled) => { if (!handled) window.open(url, '_blank', 'noopener'); })
       .catch(() => window.open(url, '_blank', 'noopener'));
