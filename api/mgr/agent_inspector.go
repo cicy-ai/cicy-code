@@ -2524,7 +2524,7 @@ func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
 		"items":                       displayItems,
 		"started_at":                  aiGatewayFirstNonEmpty(strings.TrimSpace(reply.StartedAt), strings.TrimSpace(current.StartedAt), strings.TrimSpace(current.Timestamp)),
 		"updated_at":                  strings.TrimSpace(reply.UpdatedAt),
-		"model":                       aiGatewayFirstNonEmpty(aiGatewayReplyPrimaryModel(reply), strings.TrimSpace(current.Model)),
+		"model":                       aiGatewayFirstNonEmpty(agentInspectorLiveModel(paneID, reply), strings.TrimSpace(current.Model)),
 		"input_tokens":                reply.InputTokens,
 		"output_tokens":               reply.OutputTokens,
 		"cache_read_input_tokens":     reply.CacheReadInputTokens,
@@ -2536,6 +2536,73 @@ func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
 		"context_used_pct":    ctxUsedPct,
 		"context_window_size": ctxWindowSize,
 	})
+}
+
+// agentNonGatewayCache memoises agent_config.use_custom_gateway. The poll fans
+// the lite metrics over a whole team on every tick, and the flag only changes
+// when someone flips it in the inspector, so a short TTL keeps the lite path
+// effectively sqlite-free while still picking the change up.
+var agentNonGatewayCache = struct {
+	sync.Mutex
+	m map[string]struct {
+		nonGateway bool
+		at         time.Time
+	}
+}{m: map[string]struct {
+	nonGateway bool
+	at         time.Time
+}{}}
+
+const agentNonGatewayTTL = 30 * time.Second
+
+// agentIsNonGateway reports whether the pane runs on official login rather than
+// the custom AI gateway. Unknown panes count as gateway so a missing row never
+// silently changes where the model comes from.
+func agentIsNonGateway(shortID string) bool {
+	if shortID == "" || store == nil {
+		return false
+	}
+	now := time.Now()
+	agentNonGatewayCache.Lock()
+	if hit, ok := agentNonGatewayCache.m[shortID]; ok && now.Sub(hit.at) < agentNonGatewayTTL {
+		agentNonGatewayCache.Unlock()
+		return hit.nonGateway
+	}
+	agentNonGatewayCache.Unlock()
+
+	var useCustomGateway int
+	err := store.QueryRow("SELECT COALESCE(use_custom_gateway, 1) FROM agent_config WHERE pane_id=?", normPaneID(shortID)).Scan(&useCustomGateway)
+	nonGateway := err == nil && useCustomGateway == 0
+
+	agentNonGatewayCache.Lock()
+	agentNonGatewayCache.m[shortID] = struct {
+		nonGateway bool
+		at         time.Time
+	}{nonGateway, now}
+	agentNonGatewayCache.Unlock()
+	return nonGateway
+}
+
+// agentInspectorLiveModel resolves the model to show for a pane.
+//
+// reply.json is written by the audit pipeline and can freeze: when a turn ends
+// in `failed` it stops being updated altogether, so the pane keeps reporting the
+// model that was in flight at the failure. On a non-gateway agent that snapshot
+// is the ONLY thing reply.json ever had, and w-101 sat on `deepseek-v4-pro` for
+// two hours while all 132 requests it served in the meantime ran on
+// `claude-opus-5`. usage.jsonl records one line per request either way, so for
+// non-gateway panes take the model from the newest record and keep reply.json
+// as the fallback for gateway panes (and for a pane that has yet to log a
+// request).
+func agentInspectorLiveModel(shortID string, reply aiGatewayReplySnapshot) string {
+	if agentIsNonGateway(shortID) {
+		if records := agentUsageLogRead(shortID, 1); len(records) > 0 {
+			if model := strings.TrimSpace(records[0].Model); model != "" {
+				return model
+			}
+		}
+	}
+	return aiGatewayReplyPrimaryModel(reply)
 }
 
 // agentInspectorLiteMetrics returns the lightweight header metrics for ONE
@@ -2561,7 +2628,7 @@ func agentInspectorLiteMetrics(paneID string) M {
 		"started_at":                  strings.TrimSpace(reply.StartedAt),
 		"updated_at":                  strings.TrimSpace(reply.UpdatedAt),
 		"complete":                    complete,
-		"model":                       aiGatewayReplyPrimaryModel(reply),
+		"model":                       agentInspectorLiveModel(paneID, reply),
 		"input_tokens":                reply.InputTokens,
 		"output_tokens":               reply.OutputTokens,
 		"cache_read_input_tokens":     reply.CacheReadInputTokens,
