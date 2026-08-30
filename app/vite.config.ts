@@ -72,6 +72,13 @@ export default defineConfig(({mode}) => {
       globals: true,
       setupFiles: ['./src/test/setup.ts'],
       include: ['src/**/*.{test,spec}.{ts,tsx}'],
+      // Files that mount a whole panel raise testing-library's asyncUtilTimeout
+      // to 5s to survive full-suite load. Vitest's own default is also 5s, so
+      // the two used to race: the test aborted at the exact moment its waitFor
+      // was still entitled to keep polling, which is why the heavy suites failed
+      // only in a full run and always passed alone. Keep the test budget well
+      // clear of the async-util budget.
+      testTimeout: 20000,
     },
   };
 });
