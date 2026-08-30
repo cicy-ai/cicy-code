@@ -10,18 +10,18 @@ description: 下载 cicy-code —— 桌面版 cicy-desktop(macOS / Windows)+ �
 
 ### macOS · 12 Monterey 或更新
 
-- [`.pkg` · Apple Silicon](https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases/cicy-desktop-mac-arm64-latest.pkg)
-- [`.pkg` · Intel](https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases/cicy-desktop-mac-x64-latest.pkg)
+- [`.pkg` · Apple Silicon](https://r2.deepfetch.de5.net/releases/cicy-desktop-mac-arm64-latest.pkg)
+- [`.pkg` · Intel](https://r2.deepfetch.de5.net/releases/cicy-desktop-mac-x64-latest.pkg)
 
 ### Windows · 10 / 11 · x64
 
-- [`.exe` Installer (64-bit)](https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases/cicy-desktop-latest.exe)
+- [`.exe` Installer (64-bit)](https://r2.deepfetch.de5.net/releases/cicy-desktop-latest.exe)
 
 ### 移动端 · iOS / Android
 
 - **Web App**(免安装,iPhone / iPad / Android):[m.cicy-ai.com](https://m.cicy-ai.com)
-- iOS · [IPA(Sideloadly 侧载)](https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/cicy-mobile/cicy-latest-ios.zip)
-- Android · [APK](https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/cicy-mobile/cicy-latest.zip)
+- iOS · [IPA(Sideloadly 侧载)](https://r2.deepfetch.de5.net/cicy-mobile/cicy-latest.ipa)
+- Android · [APK](https://r2.deepfetch.de5.net/cicy-mobile/cicy-latest.apk)
 
 ## Docker(服务器 / 自托管)
 
