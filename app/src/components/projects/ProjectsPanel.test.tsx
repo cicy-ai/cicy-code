@@ -1,9 +1,4 @@
-import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
-
-// This file mounts the whole canvas (lazy role editors, 400ms cloud-RPC polls,
-// history views). Under the full-suite load the default 1s findBy/waitFor
-// window flakes; give the async utils real headroom instead of racing them.
-configure({ asyncUtilTimeout: 5000 });
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', async () => {
@@ -1063,8 +1058,14 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(api.addGroupPane).toHaveBeenCalledWith(2, 'w-101:main.0', 'add'));
     await waitFor(() => expect(toast).toHaveBeenCalled());
     expect((toast.mock.calls[0][0] as CustomEvent).detail).toBe('已添加到「Existing」');
-    expect(document.querySelector('[data-id="project-list-item-default"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
-    expect(document.querySelector('[data-id="project-list-item-2"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
+    // The toast is dispatched synchronously from the same handler that calls
+    // setGroups, so it can be observed a render before the membership counts
+    // are committed. Asserting them synchronously passed on an idle machine and
+    // failed under load; wait for the render instead of racing it.
+    await waitFor(() => {
+      expect(document.querySelector('[data-id="project-list-item-default"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
+      expect(document.querySelector('[data-id="project-list-item-2"] [data-id="project-list-item-agent-count"]')).toHaveTextContent('1');
+    });
     window.removeEventListener('show-toast', toast);
   });
 

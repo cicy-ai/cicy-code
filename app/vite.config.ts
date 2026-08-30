@@ -78,7 +78,7 @@ export default defineConfig(({mode}) => {
       // was still entitled to keep polling, which is why the heavy suites failed
       // only in a full run and always passed alone. Keep the test budget well
       // clear of the async-util budget.
-      testTimeout: 20000,
+      testTimeout: 30000,
     },
   };
 });
