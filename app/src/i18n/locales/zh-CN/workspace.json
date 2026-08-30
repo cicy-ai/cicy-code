@@ -815,6 +815,10 @@
     "fastest": "最快",
     "useFastest": "切到最快",
     "retestFailed": "重测超时的",
-    "timedOutHint": "本次测速超时；点击仍可切换"
+    "timedOutHint": "本次测速超时；点击仍可切换",
+    "colStatus": "状态",
+    "untested": "未测",
+    "use": "切换",
+    "group": "组"
   }
 }

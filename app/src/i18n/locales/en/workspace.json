@@ -815,6 +815,10 @@
     "fastest": "fastest",
     "useFastest": "Use fastest",
     "retestFailed": "Re-test timed out",
-    "timedOutHint": "Timed out in this test; still selectable"
+    "timedOutHint": "Timed out in this test; still selectable",
+    "colStatus": "Status",
+    "untested": "untested",
+    "use": "Use",
+    "group": "group"
   }
 }

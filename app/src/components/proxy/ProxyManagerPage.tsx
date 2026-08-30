@@ -302,6 +302,7 @@ export default function ProxyManagerPage() {
   }, [fileNodes, query]);
   const memberOptions = useMemo(() => [...fileNodes.map((n) => n.name), ...chains.map((c) => c.name), ...fileGroups.map((g) => g.name), ...BUILTIN], [fileNodes, chains, fileGroups]);
   const chainOf = useMemo(() => Object.fromEntries(chains.map((c) => [c.name, c.hops])) as Record<string, string[]>, [chains]);
+  const nodeInfo = useMemo(() => Object.fromEntries(fileNodes.map((n) => [n.name, n])) as Record<string, FileNode>, [fileNodes]);
 
   return (
     <div data-id="proxy-page" className="flex h-screen flex-col bg-[#0b0b0d] text-zinc-200">
@@ -382,7 +383,7 @@ export default function ProxyManagerPage() {
         {loading && !fileNodes.length ? (
           <div className="flex h-40 items-center justify-center gap-2 text-[13px] text-zinc-500"><Loader2 size={16} className="animate-spin" />{tp('loading', '加载中…')}</div>
         ) : tab === 'groups' ? (
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid gap-4">
             {fileGroups.map((g) => (
               <GroupCard
                 key={g.name}
@@ -396,6 +397,7 @@ export default function ProxyManagerPage() {
                 testing={!!groupTesting[g.name]}
                 failed={groupFailed[g.name] || []}
                 chainOf={chainOf}
+                nodeInfo={nodeInfo}
                 t={tp}
               />
             ))}
@@ -624,6 +626,8 @@ const BTN = 'flex h-8 items-center gap-1.5 rounded-lg border border-white/[0.08]
 const BTN_ICON = 'flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.03] text-zinc-400 transition-colors hover:bg-white/[0.07] hover:text-zinc-100 disabled:opacity-40';
 const TH = 'border-b border-white/[0.07] bg-white/[0.02] px-3 py-2.5 font-medium';
 const TD = 'border-b border-white/[0.05] px-3 py-2 align-middle';
+const GTH = 'border-b border-white/[0.07] bg-[#141417] px-3 py-2 font-medium';
+const GTD = 'border-b border-white/[0.05] px-3 py-1.5 align-middle';
 
 function IconBtn({ children, onClick, title, dataId, disabled, danger }: { children: React.ReactNode; onClick: () => void; title: string; dataId: string; disabled?: boolean; danger?: boolean }) {
   return (
@@ -665,7 +669,7 @@ function Modal({ children, onClose, title, width }: { children: React.ReactNode;
   );
 }
 
-function GroupCard({ group, live, delays, options, onSelect, onSave, onTest, testing, failed, chainOf, t }: {
+function GroupCard({ group, live, delays, options, onSelect, onSave, onTest, testing, failed, chainOf, nodeInfo, t }: {
   group: FileGroup;
   live?: LiveEntry;
   delays: Record<string, LiveEntry>;
@@ -676,6 +680,7 @@ function GroupCard({ group, live, delays, options, onSelect, onSave, onTest, tes
   testing: boolean;
   failed: string[];
   chainOf: Record<string, string[]>;
+  nodeInfo: Record<string, FileNode>;
   t: (k: string, f: string, o?: Record<string, unknown>) => string;
 }) {
   const [editing, setEditing] = useState(false);
@@ -742,23 +747,54 @@ function GroupCard({ group, live, delays, options, onSelect, onSave, onTest, tes
                 {failedInGroup.length ? <span><span className="font-medium text-zinc-300">{failedInGroup.length}</span> {t('timedOut', '超时')}</span> : null}
                 {fastest ? <span>{t('fastest', '最快')} <span className="font-mono text-zinc-200">{fastest}</span> <span className={`font-mono ${delayTone(delays[fastest]?.last_delay_ms)}`}>{delays[fastest]?.last_delay_ms}ms</span></span> : null}
                 <span className="ml-auto flex items-center gap-2">
-                  {fastest && fastest !== now ? <button type="button" onClick={() => onSelect(fastest)} className="text-sky-300 hover:text-sky-200">{t('useFastest', '切到最快')}</button> : null}
                   {failedInGroup.length ? <button type="button" onClick={() => onTest(failedInGroup)} disabled={testing} className="text-zinc-400 hover:text-zinc-200 disabled:opacity-40">{t('retestFailed', '重测超时的')}</button> : null}
                 </span>
               </div>
             ) : null}
-            <div className="flex flex-wrap gap-1.5">
-              {ordered.map((m) => {
-                const active = m === now;
-                const d = delays[m]?.last_delay_ms;
-                const bad = failed.includes(m);
-                const hops = chainOf[m];
-                return (
-                  <button key={m} type="button" onClick={() => onSelect(m)} title={hops ? `${t('chain', '链')}: ${hops.join(' → ')}` : bad ? t('timedOutHint', '本次测速超时；点击仍可切换') : t('clickToSelect', '点击切换到此出口')} className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition-colors ${active ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200' : bad ? 'border-dashed border-white/[0.08] bg-transparent text-zinc-500 hover:text-zinc-300' : 'border-white/[0.07] bg-white/[0.02] text-zinc-300 hover:border-white/[0.16]'}`}>
-                    {active ? <Check size={11} /> : hops ? <Link2 size={11} className="text-violet-300" /> : null}{m}{d ? <span className={`font-mono ${delayTone(d)}`}>{d}</span> : bad ? <span className="text-[10px]">{t('timedOut', '超时')}</span> : null}
-                  </button>
-                );
-              })}
+            <div className="max-h-[440px] overflow-auto rounded-lg border border-white/[0.06]">
+              <table data-id={`proxy-group-table-${group.name}`} className="w-full table-fixed border-separate border-spacing-0 text-[12px]">
+                <thead className="sticky top-0 z-[1]">
+                  <tr className="text-left text-[11px] uppercase tracking-wide text-zinc-500">
+                    <th className={GTH + ' w-[28%]'}>{t('colName', '名称')}</th>
+                    <th className={GTH + ' w-[10%]'}>{t('colType', '类型')}</th>
+                    <th className={GTH}>{t('colServer', '服务器')}</th>
+                    <th className={GTH + ' w-[10%] text-right'}>{t('colDelay', '延迟')}</th>
+                    <th className={GTH + ' w-[12%]'}>{t('colStatus', '状态')}</th>
+                    <th className={GTH + ' w-[120px] text-right'} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {ordered.map((m) => {
+                    const active = m === now;
+                    const d = delays[m]?.last_delay_ms;
+                    const bad = failed.includes(m);
+                    const hops = chainOf[m];
+                    const info = nodeInfo[m];
+                    const kind = hops ? t('chain', '链') : info?.type || (BUILTIN.includes(m) ? 'built-in' : t('group', '组'));
+                    const where = hops ? hops.join(' → ') : info ? `${info.server}${info.port ? `:${info.port}` : ''}` : '';
+                    return (
+                      <tr key={m} data-id={`proxy-group-row-${group.name}-${m}`} className={`group/row transition-colors ${active ? 'bg-emerald-500/[0.07]' : 'hover:bg-white/[0.03]'}`}>
+                        <td className={GTD}>
+                          <span className={`flex items-center gap-1.5 truncate ${active ? 'font-medium text-emerald-200' : bad ? 'text-zinc-500' : 'text-zinc-100'}`} title={active ? t('currentExit', '当前出口') : m}>
+                            {active ? <Check size={12} className="shrink-0 text-emerald-400" /> : hops ? <Link2 size={11} className="shrink-0 text-violet-300" /> : null}{m}
+                          </span>
+                        </td>
+                        <td className={GTD}><span className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">{kind}</span></td>
+                        <td className={GTD}><span className="block truncate font-mono text-[11px] text-zinc-500" title={where}>{where}</span></td>
+                        <td className={GTD + ' text-right font-mono ' + delayTone(d)}>{d ? `${d}` : '—'}</td>
+                        <td className={GTD}>
+                          {d ? <span className="text-[11px] text-emerald-300">{t('reachable', '可用')}</span> : bad ? <span className="text-[11px] text-zinc-500">{t('timedOut', '超时')}</span> : <span className="text-[11px] text-zinc-600">{t('untested', '未测')}</span>}
+                        </td>
+                        <td className={GTD + ' text-right'}>
+                          <div className="flex justify-end gap-1 opacity-60 transition-opacity group-hover/row:opacity-100">
+                            <button type="button" onClick={() => onTest([m])} disabled={testing} className="h-6 rounded-md border border-white/[0.08] px-2 text-[11px] text-zinc-400 hover:text-zinc-100 disabled:opacity-40">{t('test', '测速')}</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         ) : (
