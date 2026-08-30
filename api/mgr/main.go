@@ -332,6 +332,8 @@ Options:
 	http.HandleFunc("/api/proxy/node-config", authM(handleProxyNodeConfig))
 	http.HandleFunc("/api/proxy/nodes", authM(handleProxyNodes))
 	http.HandleFunc("/api/proxy/groups/members", authM(handleProxyGroupMembers))
+	http.HandleFunc("/api/proxy/chains", authM(handleProxyChains))
+	http.HandleFunc("/api/proxy/group-test", authM(handleProxyGroupTest))
 	http.HandleFunc("/api/proxy/config/reset", authM(handleProxyConfigReset))
 	http.HandleFunc("/api/proxy-ssh/list", authM(handleProxySshList))
 	http.HandleFunc("/api/proxy-ssh/show", authM(handleProxySshShow))

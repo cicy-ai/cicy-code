@@ -96,6 +96,12 @@ func ensureMihomoProbePath() (int, error) {
 				}
 			}
 		}
+		for _, c := range d.chains() {
+			if n, _ := c["name"].(string); n != "" && !seqHas(members, n) {
+				members.Content = append(members.Content, scalar(n))
+				changed = true
+			}
+		}
 		if !changed {
 			return port, nil
 		}

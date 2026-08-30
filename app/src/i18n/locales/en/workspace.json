@@ -790,6 +790,25 @@
     "pickMember": "Pick exit",
     "editMembers": "Edit members",
     "clickToSelect": "Click to select this exit",
-    "editMembersHint": "Tick members; the order is the list order (url-test / fallback groups prefer earlier entries)."
+    "editMembersHint": "Tick members; the order is the list order (url-test / fallback groups prefer earlier entries).",
+    "tabChains": "Chains",
+    "addChain": "Add chain",
+    "editChain": "Edit chain",
+    "chainName": "Name",
+    "chainRoute": "Route (in order: entry → … → exit)",
+    "addHop": "+ Add a hop (node)",
+    "you": "this host",
+    "exit": "exit",
+    "noChains": "No chains yet. Use “Add chain” and pick the nodes to pass through in order (entry → … → exit).",
+    "deleteChainTitle": "Delete chain",
+    "deleteChainBody": "Delete {{name}}? It is removed from {{n}} proxy group(s) as well.",
+    "chainAdded": "Added chain {{name}} to {{n}} group(s)",
+    "chainSaved": "Saved chain {{name}}",
+    "chainDeleted": "Deleted chain {{name}} (removed from {{n}} group(s))",
+    "chain": "chain",
+    "testMembers": "Test members",
+    "testingMembers": "Testing…",
+    "testMembersTitle": "Measure every member of this group at once (does not change the selection)",
+    "groupTested": "{{group}}: {{ok}} reachable, {{bad}} failed"
   }
 }

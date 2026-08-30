@@ -790,6 +790,25 @@
     "pickMember": "选择出口",
     "editMembers": "编辑成员",
     "clickToSelect": "点击切换到此出口",
-    "editMembersHint": "勾选成员；顺序即列表顺序（url-test / fallback 组按顺序优先）。"
+    "editMembersHint": "勾选成员；顺序即列表顺序（url-test / fallback 组按顺序优先）。",
+    "tabChains": "链式代理",
+    "addChain": "添加链式代理",
+    "editChain": "编辑链式代理",
+    "chainName": "名称",
+    "chainRoute": "路由（按顺序：入口 → … → 出口）",
+    "addHop": "+ 添加一跳（节点）",
+    "you": "本机",
+    "exit": "出口",
+    "noChains": "还没有链式代理。点右上角「添加链式代理」，选择经过的节点顺序（入口 → … → 出口）。",
+    "deleteChainTitle": "删除链式代理",
+    "deleteChainBody": "删除 {{name}}？它会同时从 {{n}} 个代理组中移除。",
+    "chainAdded": "已添加链 {{name}}，加入 {{n}} 个组",
+    "chainSaved": "已保存链 {{name}}",
+    "chainDeleted": "已删除链 {{name}}（从 {{n}} 个组移除）",
+    "chain": "链",
+    "testMembers": "测速成员",
+    "testingMembers": "测速中…",
+    "testMembersTitle": "一次测完本组所有成员的延迟（不改变选中节点）",
+    "groupTested": "{{group}}：{{ok}} 个可用，{{bad}} 个失败"
   }
 }

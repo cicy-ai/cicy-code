@@ -43,7 +43,7 @@ func proxyNodesEnv(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("CICY_MIHOMO_BIN", "/nonexistent/cicy-mihomo") // no validation binary, no reload
+	t.Setenv("CICY_MIHOMO_BIN", "/nonexistent/cicy-mihomo")  // no validation binary, no reload
 	t.Setenv("CICY_MIHOMO_CONTROLLER", "http://127.0.0.1:1") // controller "not running" → no reload attempted
 	dir := filepath.Join(home, "cicy-ai", "db")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -213,4 +213,66 @@ func mustRead(t *testing.T, p string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func TestChainsAreRelayGroupsThatFollowNodesAndGroups(t *testing.T) {
+	p := proxyNodesEnv(t)
+	call := func(method, path string, body any) (int, M) {
+		t.Helper()
+		var buf bytes.Buffer
+		if body != nil {
+			_ = json.NewEncoder(&buf).Encode(body)
+		}
+		rec := httptest.NewRecorder()
+		handleProxyChains(rec, httptest.NewRequest(method, path, &buf))
+		var out M
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	// needs ≥2 hops, hops must be nodes
+	if code, _ := call(http.MethodPost, "/api/proxy/chains", M{"name": "us-via-a", "hops": []string{"a"}}); code != 400 {
+		t.Fatalf("1 hop: %d", code)
+	}
+	if code, out := call(http.MethodPost, "/api/proxy/chains", M{"name": "us-via-a", "hops": []string{"a", "g1"}}); code != 400 {
+		t.Fatalf("group hop: %d %#v", code, out)
+	}
+	code, out := call(http.MethodPost, "/api/proxy/chains", M{"name": "us-via-a", "hops": []string{"a", "b"}})
+	if code != 200 {
+		t.Fatalf("create: %d %#v", code, out)
+	}
+	s := string(mustRead(t, p))
+	if !strings.Contains(s, "type: relay") || !strings.Contains(s, "proxies: [a, b]") {
+		t.Fatalf("relay missing:\n%s", s)
+	}
+	if !strings.Contains(s, "proxies: [a, b, DIRECT, us-via-a]") {
+		t.Fatalf("chain must join select groups:\n%s", s)
+	}
+	// listed as a chain, not as a group
+	code, out = proxyNodesCall(t, http.MethodGet, "/api/proxy/nodes", nil)
+	if code != 200 || len(out["chains"].([]any)) != 1 || len(out["groups"].([]any)) != 2 {
+		t.Fatalf("list: %d %#v", code, out)
+	}
+	// a new node is not pushed into the relay
+	if code, out = proxyNodesCall(t, http.MethodPost, "/api/proxy/nodes", M{"yaml": "name: c\ntype: ss\nserver: c.example\nport: 3\ncipher: aes-128-gcm\npassword: z\n"}); code != 200 {
+		t.Fatalf("node create: %d %#v", code, out)
+	}
+	if strings.Contains(string(mustRead(t, p)), "proxies: [a, b, c]") {
+		t.Fatal("node joined the relay chain")
+	}
+	// rename + new route
+	code, out = call(http.MethodPut, "/api/proxy/chains", M{"name": "us-via-a", "newName": "us-via-c", "hops": []string{"c", "b"}})
+	if code != 200 || out["renamed"] != true {
+		t.Fatalf("update: %d %#v", code, out)
+	}
+	s = string(mustRead(t, p))
+	if !strings.Contains(s, "proxies: [c, b]") || !strings.Contains(s, "DIRECT, us-via-c, c]") || strings.Contains(s, "us-via-a") {
+		t.Fatalf("rename not applied:\n%s", s)
+	}
+	// delete removes it everywhere
+	if code, _ = call(http.MethodDelete, "/api/proxy/chains?name=us-via-c", nil); code != 200 {
+		t.Fatal(code)
+	}
+	if strings.Contains(string(mustRead(t, p)), "us-via-c") {
+		t.Fatal("chain left traces")
+	}
 }

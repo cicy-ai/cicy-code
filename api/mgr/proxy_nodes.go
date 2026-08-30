@@ -318,7 +318,7 @@ func handleProxyNodesList(w http.ResponseWriter) {
 	groups := []M{}
 	if s := d.seq("proxy-groups", false); s != nil {
 		for _, it := range s.Content {
-			if it.Kind != yaml.MappingNode || isMihomoProbeName(mappingGet(it, "name")) {
+			if it.Kind != yaml.MappingNode || isMihomoProbeName(mappingGet(it, "name")) || isRelayGroup(it) {
 				continue
 			}
 			groups = append(groups, M{
@@ -329,7 +329,7 @@ func handleProxyNodesList(w http.ResponseWriter) {
 			})
 		}
 	}
-	J(w, M{"success": true, "path": d.path, "nodes": nodes, "groups": groups})
+	J(w, M{"success": true, "path": d.path, "nodes": nodes, "groups": groups, "chains": d.chains()})
 }
 
 func handleProxyNodeCreate(w http.ResponseWriter, r *http.Request) {
@@ -361,26 +361,11 @@ func handleProxyNodeCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.seq("proxies", true).Content = append(d.seq("proxies", true).Content, node)
-	joined := []string{}
 	want := map[string]bool{}
 	for _, g := range req.Groups {
 		want[strings.TrimSpace(g)] = true
 	}
-	if s := d.seq("proxy-groups", false); s != nil {
-		for _, g := range s.Content {
-			gname := mappingGet(g, "name")
-			if gname == "" || (len(want) > 0 && !want[gname]) {
-				continue
-			}
-			members := mappingSeq(g, "proxies", true)
-			if !seqHas(members, name) {
-				members.Content = append(members.Content, scalar(name))
-				if !isMihomoProbeName(gname) {
-					joined = append(joined, gname)
-				}
-			}
-		}
-	}
+	joined := d.joinSelectGroups(name, want)
 	if err := d.save(); err != nil {
 		httpErr(w, 400, err.Error())
 		return
