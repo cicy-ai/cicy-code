@@ -476,7 +476,7 @@ const api = {
   createProxyChain: (name: string, hops: string[], groups?: string[]) => http.post('/api/proxy/chains', { name, hops, groups }),
   updateProxyChain: (name: string, hops: string[], newName?: string) => http.put('/api/proxy/chains', { name, hops, newName }),
   deleteProxyChain: (name: string) => http.delete('/api/proxy/chains', { params: { name } }),
-  testProxyGroup: (group: string) => http.post('/api/proxy/group-test', { group }),
+  testProxyGroup: (group: string, members?: string[]) => http.post('/api/proxy/group-test', { group, members }),
   // Provider balance / per-model availability for the model picker. Cached server-side.
   getProviderBalance: (provider: string) => http.get('/api/ai-gateway/provider-balance', { params: { provider } }),
   resetProxyConfig: () => http.post('/api/proxy/config/reset'),

@@ -175,10 +175,10 @@ export default function ProxyManagerPage() {
     }
   };
 
-  const testGroup = async (group: string) => {
+  const testGroup = async (group: string, members?: string[]) => {
     setGroupTesting((m) => ({ ...m, [group]: true }));
     try {
-      const res = await apiService.testProxyGroup(group);
+      const res = await apiService.testProxyGroup(group, members);
       const results = (res?.data?.results || {}) as Record<string, number>;
       const failed = (res?.data?.failed || []) as string[];
       setLive((prev) => {
@@ -187,8 +187,8 @@ export default function ProxyManagerPage() {
         for (const name of failed) next[name] = { ...(next[name] || { name, type: 'node' }), last_delay_ms: 0 };
         return next;
       });
-      setGroupFailed((m) => ({ ...m, [group]: failed }));
-      flash(tp('groupTested', '{{group}}：{{ok}} 个可用，{{bad}} 个失败', { group, ok: Object.keys(results).length, bad: failed.length }));
+      setGroupFailed((m) => ({ ...m, [group]: members ? [...(m[group] || []).filter((x) => !members.includes(x)), ...failed] : failed }));
+      flash(tp('groupTested', '{{group}}：{{ok}} 个可用，{{bad}} 个超时', { group, ok: Object.keys(results).length, bad: failed.length }));
     } catch (e: any) {
       setError(errMessage(e));
     } finally {
@@ -392,7 +392,7 @@ export default function ProxyManagerPage() {
                 options={memberOptions.filter((m) => m !== g.name)}
                 onSelect={(m) => void selectMember(g.name, m)}
                 onSave={(p) => void saveMembers(g.name, p)}
-                onTest={() => void testGroup(g.name)}
+                onTest={(members) => void testGroup(g.name, members)}
                 testing={!!groupTesting[g.name]}
                 failed={groupFailed[g.name] || []}
                 chainOf={chainOf}
@@ -561,7 +561,7 @@ export default function ProxyManagerPage() {
                 searchable
                 value=""
                 onChange={(v) => { if (v && !chainEditor.hops.includes(v)) setChainEditor({ ...chainEditor, hops: [...chainEditor.hops, v] }); }}
-                options={fileNodes.filter((n) => !chainEditor.hops.includes(n.name)).map((n) => ({ value: n.name, label: `${n.name}  ${n.type}${live[n.name]?.last_delay_ms ? `  ${live[n.name].last_delay_ms}ms` : ''}` }))}
+                options={[...fileNodes].filter((n) => !chainEditor.hops.includes(n.name)).sort((a, b) => { const da = live[a.name]?.last_delay_ms || 0; const db = live[b.name]?.last_delay_ms || 0; if ((da > 0) !== (db > 0)) return da > 0 ? -1 : 1; return da - db; }).map((n) => ({ value: n.name, label: `${n.name}  ·  ${n.type}${n.server ? `  ${n.server}` : ''}${live[n.name]?.last_delay_ms ? `  ·  ${live[n.name].last_delay_ms}ms` : ''}` }))}
                 placeholder={tp('addHop', '+ 添加一跳（节点）')}
               />
             </div>
@@ -672,7 +672,7 @@ function GroupCard({ group, live, delays, options, onSelect, onSave, onTest, tes
   options: string[];
   onSelect: (member: string) => void;
   onSave: (proxies: string[]) => void;
-  onTest: () => void;
+  onTest: (members?: string[]) => void;
   testing: boolean;
   failed: string[];
   chainOf: Record<string, string[]>;
@@ -682,6 +682,19 @@ function GroupCard({ group, live, delays, options, onSelect, onSave, onTest, tes
   const [draft, setDraft] = useState<string[]>(group.proxies);
   useEffect(() => { if (!editing) setDraft(group.proxies); }, [group.proxies, editing]);
   const now = live?.now || '';
+  const tested = group.proxies.filter((m) => (delays[m]?.last_delay_ms || 0) > 0 || failed.includes(m));
+  const failedInGroup = group.proxies.filter((m) => failed.includes(m));
+  const okCount = group.proxies.filter((m) => (delays[m]?.last_delay_ms || 0) > 0).length;
+  // Display order: measured members fastest → slowest, then untested (config order), then timed-out.
+  const ordered = [...group.proxies].sort((a, b) => {
+    const da = delays[a]?.last_delay_ms || 0; const db = delays[b]?.last_delay_ms || 0;
+    const fa = failed.includes(a); const fb = failed.includes(b);
+    if (fa !== fb) return fa ? 1 : -1;
+    if ((da > 0) !== (db > 0)) return da > 0 ? -1 : 1;
+    if (da > 0 && db > 0) return da - db;
+    return group.proxies.indexOf(a) - group.proxies.indexOf(b);
+  });
+  const fastest = ordered.find((m) => (delays[m]?.last_delay_ms || 0) > 0 && !failed.includes(m)) || '';
   const dirty = editing && (draft.length !== group.proxies.length || draft.some((p, i) => p !== group.proxies[i]));
   const toggle = (m: string) => setDraft((d) => (d.includes(m) ? d.filter((x) => x !== m) : [...d, m]));
   const move = (m: string, dir: -1 | 1) => setDraft((d) => {
@@ -712,7 +725,7 @@ function GroupCard({ group, live, delays, options, onSelect, onSave, onTest, tes
               placeholder={t('pickMember', '选择出口')}
             />
           </div>
-          <button type="button" data-id={`proxy-group-test-${group.name}`} onClick={onTest} disabled={testing} className={BTN} title={t('testMembersTitle', '一次测完本组所有成员的延迟（不改变选中节点）')}>
+          <button type="button" data-id={`proxy-group-test-${group.name}`} onClick={() => onTest()} disabled={testing} className={BTN} title={t('testMembersTitle', '一次测完本组所有成员的延迟（不改变选中节点）')}>
             {testing ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />}{testing ? t('testingMembers', '测速中…') : t('testMembers', '测速成员')}
           </button>
           <button type="button" data-id={`proxy-group-edit-${group.name}`} onClick={() => { setEditing((e) => !e); setDraft(group.proxies); }} className={BTN}>
@@ -722,18 +735,31 @@ function GroupCard({ group, live, delays, options, onSelect, onSave, onTest, tes
       </header>
       <div className="px-4 py-3">
         {!editing ? (
-          <div className="flex flex-wrap gap-1.5">
-            {group.proxies.map((m) => {
-              const active = m === now;
-              const d = delays[m]?.last_delay_ms;
-              const bad = failed.includes(m);
-              const hops = chainOf[m];
-              return (
-                <button key={m} type="button" onClick={() => onSelect(m)} title={hops ? `${t('chain', '链')}: ${hops.join(' → ')}` : t('clickToSelect', '点击切换到此出口')} className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition-colors ${active ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200' : bad ? 'border-red-500/30 bg-red-500/[0.06] text-red-300/80' : 'border-white/[0.07] bg-white/[0.02] text-zinc-300 hover:border-white/[0.16]'}`}>
-                  {active ? <Check size={11} /> : hops ? <Link2 size={11} className="text-violet-300" /> : null}{m}{d ? <span className={`font-mono ${delayTone(d)}`}>{d}</span> : bad ? <span className="font-mono">✕</span> : null}
-                </button>
-              );
-            })}
+          <div>
+            {tested.length ? (
+              <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+                <span><span className="font-medium text-emerald-300">{okCount}</span> {t('reachable', '可用')}</span>
+                {failedInGroup.length ? <span><span className="font-medium text-zinc-300">{failedInGroup.length}</span> {t('timedOut', '超时')}</span> : null}
+                {fastest ? <span>{t('fastest', '最快')} <span className="font-mono text-zinc-200">{fastest}</span> <span className={`font-mono ${delayTone(delays[fastest]?.last_delay_ms)}`}>{delays[fastest]?.last_delay_ms}ms</span></span> : null}
+                <span className="ml-auto flex items-center gap-2">
+                  {fastest && fastest !== now ? <button type="button" onClick={() => onSelect(fastest)} className="text-sky-300 hover:text-sky-200">{t('useFastest', '切到最快')}</button> : null}
+                  {failedInGroup.length ? <button type="button" onClick={() => onTest(failedInGroup)} disabled={testing} className="text-zinc-400 hover:text-zinc-200 disabled:opacity-40">{t('retestFailed', '重测超时的')}</button> : null}
+                </span>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-1.5">
+              {ordered.map((m) => {
+                const active = m === now;
+                const d = delays[m]?.last_delay_ms;
+                const bad = failed.includes(m);
+                const hops = chainOf[m];
+                return (
+                  <button key={m} type="button" onClick={() => onSelect(m)} title={hops ? `${t('chain', '链')}: ${hops.join(' → ')}` : bad ? t('timedOutHint', '本次测速超时；点击仍可切换') : t('clickToSelect', '点击切换到此出口')} className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition-colors ${active ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200' : bad ? 'border-dashed border-white/[0.08] bg-transparent text-zinc-500 hover:text-zinc-300' : 'border-white/[0.07] bg-white/[0.02] text-zinc-300 hover:border-white/[0.16]'}`}>
+                    {active ? <Check size={11} /> : hops ? <Link2 size={11} className="text-violet-300" /> : null}{m}{d ? <span className={`font-mono ${delayTone(d)}`}>{d}</span> : bad ? <span className="text-[10px]">{t('timedOut', '超时')}</span> : null}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         ) : (
           <div>

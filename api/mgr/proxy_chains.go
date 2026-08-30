@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -288,8 +289,9 @@ func handleProxyGroupTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Group string `json:"group"`
-		URL   string `json:"url"`
+		Group   string   `json:"group"`
+		URL     string   `json:"url"`
+		Members []string `json:"members"` // optional subset: re-test just these
 	}
 	if err := readBody(r, &req); err != nil {
 		httpErr(w, 400, "bad body: "+err.Error())
@@ -302,11 +304,46 @@ func handleProxyGroupTest(w http.ResponseWriter, r *http.Request) {
 	}
 	target := strings.TrimSpace(req.URL)
 	if target == "" {
-		target = "https://www.gstatic.com/generate_204"
+		// Plain-HTTP 204 endpoint: one round trip, no TLS — measures the
+		// proxy hop itself rather than a TLS handshake through it.
+		target = "http://www.gstatic.com/generate_204"
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	q := url.Values{"url": {target}, "timeout": {"6000"}}
+	if len(req.Members) > 0 {
+		// Subset re-test: per-proxy delay calls, a few at a time.
+		results := map[string]int{}
+		failed := []string{}
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 4)
+		for _, m := range req.Members {
+			m = strings.TrimSpace(m)
+			if m == "" {
+				continue
+			}
+			wg.Add(1)
+			go func(name string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				res := mihomoDelayProbe(ctx, name, target)
+				mu.Lock()
+				defer mu.Unlock()
+				if ok, _ := res["ok"].(bool); ok {
+					if ms, ok := res["delay_ms"].(int); ok {
+						results[name] = ms
+						return
+					}
+				}
+				failed = append(failed, name)
+			}(m)
+		}
+		wg.Wait()
+		J(w, M{"success": true, "group": group, "url": target, "results": results, "failed": failed})
+		return
+	}
+	q := url.Values{"url": {target}, "timeout": {"8000"}}
 	reqURL := mihomoController() + "/group/" + url.PathEscape(group) + "/delay?" + q.Encode()
 	hreq, _ := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if secret := readMihomoControllerSecret(); secret != "" {

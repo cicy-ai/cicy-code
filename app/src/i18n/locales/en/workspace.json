@@ -809,6 +809,12 @@
     "testMembers": "Test members",
     "testingMembers": "Testing…",
     "testMembersTitle": "Measure every member of this group at once (does not change the selection)",
-    "groupTested": "{{group}}: {{ok}} reachable, {{bad}} failed"
+    "groupTested": "{{group}}: {{ok}} reachable, {{bad}} timed out",
+    "reachable": "reachable",
+    "timedOut": "timed out",
+    "fastest": "fastest",
+    "useFastest": "Use fastest",
+    "retestFailed": "Re-test timed out",
+    "timedOutHint": "Timed out in this test; still selectable"
   }
 }

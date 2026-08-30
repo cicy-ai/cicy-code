@@ -809,6 +809,12 @@
     "testMembers": "测速成员",
     "testingMembers": "测速中…",
     "testMembersTitle": "一次测完本组所有成员的延迟（不改变选中节点）",
-    "groupTested": "{{group}}：{{ok}} 个可用，{{bad}} 个失败"
+    "groupTested": "{{group}}：{{ok}} 个可用，{{bad}} 个超时",
+    "reachable": "可用",
+    "timedOut": "超时",
+    "fastest": "最快",
+    "useFastest": "切到最快",
+    "retestFailed": "重测超时的",
+    "timedOutHint": "本次测速超时；点击仍可切换"
   }
 }
