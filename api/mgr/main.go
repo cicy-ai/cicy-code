@@ -330,6 +330,8 @@ Options:
 	http.HandleFunc("/api/proxy/exit-info", authM(handleProxyExitInfo))
 	http.HandleFunc("/api/proxy/select", authM(handleProxySelect))
 	http.HandleFunc("/api/proxy/node-config", authM(handleProxyNodeConfig))
+	http.HandleFunc("/api/proxy/nodes", authM(handleProxyNodes))
+	http.HandleFunc("/api/proxy/groups/members", authM(handleProxyGroupMembers))
 	http.HandleFunc("/api/proxy/config/reset", authM(handleProxyConfigReset))
 	http.HandleFunc("/api/proxy-ssh/list", authM(handleProxySshList))
 	http.HandleFunc("/api/proxy-ssh/show", authM(handleProxySshShow))

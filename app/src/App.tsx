@@ -8,6 +8,7 @@ import Workspace from './components/Workspace';
 import Login from './components/Login';
 import ProvisionScreen from './components/ProvisionScreen';
 import AuditDashboard from './components/audit/AuditDashboard';
+import ProxyManagerPage from './components/proxy/ProxyManagerPage';
 import { TokenManager } from './services/tokenManager';
 import DevPanel from './components/dev/DevPanel';
 import apiService from './services/api';
@@ -143,6 +144,9 @@ function Main() {
 
   // Not authenticated
   if (!token) return <Login />;
+
+  // #/proxy → standalone proxy / node management (opened in its own tab)
+  if (route.view === 'proxy') return <ProxyManagerPage />;
 
   // #/audit → Audit Dashboard
   if (route.view === 'audit') {

@@ -1540,10 +1540,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }
   }, [activeCliPaneId, chatWsClientId, pageClientId, paneId]);
 
-  // "管理节点" opens the same ProxyManagerDialog drawer the skill-detail page
-  // uses (data-id="skill-detail-manage-proxy") — direct UI management, no
-  // agent round-trip.
-  const handleOpenProxyManager = useCallback(() => setProxyManagerOpen(true), []);
+  // "管理节点" opens the standalone proxy manager (#/proxy) in a new tab —
+  // groups and nodes get a full page instead of a drawer over the workspace.
+  const handleOpenProxyManager = useCallback(() => {
+    window.open(`${window.location.pathname}${window.location.search}#/proxy`, '_blank', 'noopener');
+  }, []);
 
   const topBarPaneId = activeCliPaneId || paneId;
   const topBarDetail = paneDetails[topBarPaneId] || (topBarPaneId === paneId ? agentDetail : null);

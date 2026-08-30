@@ -2,6 +2,9 @@
 # Gate + release: refuses to tag unless type-check, frontend tests and Go
 # vet/tests all pass. Usage: scripts/release.sh <version>
 set -euo pipefail
+# A NODE_ENV=production shell makes `npm ci` drop dev deps (tsc/vitest vanish
+# mid-release); the gate needs them.
+export NODE_ENV=
 V="${1:?usage: release.sh <version>}"
 cd "$(dirname "$0")/.."
 [ -z "$(git status --short | grep -v '^??')" ] || { echo "working tree not clean" >&2; exit 1; }

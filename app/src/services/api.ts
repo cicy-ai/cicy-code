@@ -468,6 +468,11 @@ const api = {
   getProxyExitInfo: () => http.get('/api/proxy/exit-info'),
   selectProxy: (member: string, group?: string) => http.post('/api/proxy/select', { member, group }),
   getProxyNodeConfig: (name: string) => http.get('/api/proxy/node-config', { params: { name } }),
+  getProxyNodes: () => http.get('/api/proxy/nodes'),
+  createProxyNode: (yaml: string, groups?: string[]) => http.post('/api/proxy/nodes', { yaml, groups }),
+  updateProxyNode: (name: string, yaml: string) => http.put('/api/proxy/nodes', { name, yaml }),
+  deleteProxyNode: (name: string) => http.delete('/api/proxy/nodes', { params: { name } }),
+  setProxyGroupMembers: (group: string, proxies: string[]) => http.put('/api/proxy/groups/members', { group, proxies }),
   // Provider balance / per-model availability for the model picker. Cached server-side.
   getProviderBalance: (provider: string) => http.get('/api/ai-gateway/provider-balance', { params: { provider } }),
   resetProxyConfig: () => http.post('/api/proxy/config/reset'),

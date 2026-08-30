@@ -10,6 +10,11 @@ describe('parseAppHash', () => {
     });
   });
 
+  it('routes the standalone proxy manager', () => {
+    expect(parseAppHash('#/proxy')).toEqual({ view: 'proxy', agentId: '' });
+    expect(parseAppHash('#/proxy/nodes')).toEqual({ view: 'proxy', agentId: '' });
+  });
+
   it('preserves explicit agent and project routes', () => {
     expect(parseAppHash('#/agent/w-1010')).toEqual({ view: 'workspace', agentId: 'w-1010' });
     expect(parseAppHash('#/project/music')).toEqual({ view: 'workspace', agentId: 'w-1001' });
