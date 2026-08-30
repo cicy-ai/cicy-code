@@ -44,6 +44,7 @@ func proxyNodesEnv(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CICY_MIHOMO_BIN", "/nonexistent/cicy-mihomo") // no validation binary, no reload
+	t.Setenv("CICY_MIHOMO_CONTROLLER", "http://127.0.0.1:1") // controller "not running" → no reload attempted
 	dir := filepath.Join(home, "cicy-ai", "db")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -151,4 +152,65 @@ func TestProxyNodesCRUDKeepsGroupsInSync(t *testing.T) {
 	if code, _ = proxyNodesCall(t, http.MethodDelete, "/api/proxy/nodes?name=zzz", nil); code != 404 {
 		t.Fatalf("delete missing: %d", code)
 	}
+}
+
+// The exit-IP probe must never touch a user group: it provisions its own
+// listener + group + rule once, keeps the group in step with proxies:, and
+// the private names stay out of the node/group listings.
+func TestProbePathIsProvisionedOnceAndHidden(t *testing.T) {
+	p := proxyNodesEnv(t)
+	port, err := ensureMihomoProbePath()
+	if err != nil || port == 0 {
+		t.Fatalf("provision: port=%d err=%v", port, err)
+	}
+	data, _ := os.ReadFile(p)
+	s := string(data)
+	for _, want := range []string{"name: cicy-probe\n", "name: cicy-probe-group\n", "- IN-NAME,cicy-probe,cicy-probe-group\n"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q in:\n%s", want, s)
+		}
+	}
+	if strings.Index(s, "IN-NAME,cicy-probe,") > strings.Index(s, "MATCH,g1") {
+		t.Fatalf("probe rule must come first:\n%s", s)
+	}
+	// idempotent
+	port2, err := ensureMihomoProbePath()
+	if err != nil || port2 != port {
+		t.Fatalf("second call: port=%d err=%v", port2, err)
+	}
+	if strings.Count(string(mustRead(t, p)), "name: cicy-probe-group") != 1 {
+		t.Fatal("probe group duplicated")
+	}
+	// hidden from the file-backed listing
+	code, out := proxyNodesCall(t, http.MethodGet, "/api/proxy/nodes", nil)
+	if code != 200 {
+		t.Fatal(code)
+	}
+	for _, g := range out["groups"].([]any) {
+		if g.(map[string]any)["name"] == "cicy-probe-group" {
+			t.Fatal("probe group must be hidden")
+		}
+	}
+	// a new node joins the probe group too, but the response doesn't mention it
+	code, out = proxyNodesCall(t, http.MethodPost, "/api/proxy/nodes", M{"yaml": "name: c\ntype: ss\nserver: c.example\nport: 3\ncipher: aes-128-gcm\npassword: z\n"})
+	if code != 200 {
+		t.Fatalf("create: %d %#v", code, out)
+	}
+	for _, g := range out["groups"].([]any) {
+		if g == "cicy-probe-group" {
+			t.Fatal("joined-groups must not list the probe group")
+		}
+	}
+	if !strings.Contains(string(mustRead(t, p)), "      - c\n") {
+		t.Fatalf("probe group did not receive the new node:\n%s", mustRead(t, p))
+	}
+}
+
+func mustRead(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

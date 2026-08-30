@@ -318,7 +318,7 @@ func handleProxyNodesList(w http.ResponseWriter) {
 	groups := []M{}
 	if s := d.seq("proxy-groups", false); s != nil {
 		for _, it := range s.Content {
-			if it.Kind != yaml.MappingNode {
+			if it.Kind != yaml.MappingNode || isMihomoProbeName(mappingGet(it, "name")) {
 				continue
 			}
 			groups = append(groups, M{
@@ -375,7 +375,9 @@ func handleProxyNodeCreate(w http.ResponseWriter, r *http.Request) {
 			members := mappingSeq(g, "proxies", true)
 			if !seqHas(members, name) {
 				members.Content = append(members.Content, scalar(name))
-				joined = append(joined, gname)
+				if !isMihomoProbeName(gname) {
+					joined = append(joined, gname)
+				}
 			}
 		}
 	}
@@ -460,7 +462,7 @@ func handleProxyNodeDelete(w http.ResponseWriter, r *http.Request) {
 			if members == nil || !seqHas(members, name) {
 				continue
 			}
-			if len(members.Content) <= 1 && len(seqStrings(mappingSeq(g, "use", false))) == 0 {
+			if !isMihomoProbeName(mappingGet(g, "name")) && len(members.Content) <= 1 && len(seqStrings(mappingSeq(g, "use", false))) == 0 {
 				httpErr(w, 409, fmt.Sprintf("%q is the only member of group %q — add another member first", name, mappingGet(g, "name")))
 				return
 			}
@@ -468,10 +470,15 @@ func handleProxyNodeDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	proxies := d.seq("proxies", false)
 	proxies.Content = append(proxies.Content[:idx], proxies.Content[idx+1:]...)
+	if g := d.findGroup(probeGroupName); g != nil {
+		if members := mappingSeq(g, "proxies", false); members != nil && len(members.Content) == 1 && seqHas(members, name) {
+			members.Content = append(members.Content, scalar("DIRECT"))
+		}
+	}
 	left := []string{}
 	if s := d.seq("proxy-groups", false); s != nil {
 		for _, g := range s.Content {
-			if members := mappingSeq(g, "proxies", false); members != nil && seqRemove(members, name) {
+			if members := mappingSeq(g, "proxies", false); members != nil && seqRemove(members, name) && !isMihomoProbeName(mappingGet(g, "name")) {
 				left = append(left, mappingGet(g, "name"))
 			}
 		}

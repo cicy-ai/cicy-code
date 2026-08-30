@@ -8,13 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -197,7 +197,7 @@ func handleProxyList(w http.ResponseWriter, r *http.Request) {
 	groups := []M{}
 	nodes := []M{}
 	for name, p := range body.Proxies {
-		if isMihomoBuiltinName(name) {
+		if isMihomoBuiltinName(name) || isMihomoProbeName(name) {
 			continue
 		}
 		var lastDelay int
@@ -355,56 +355,28 @@ func mihomoDelayProbe(parent context.Context, name, target string) M {
 //
 // curl is used inside the race (vs http.Client) so we get robust auth +
 // CONNECT semantics without re-implementing CONNECT-via-proxy here.
-// exitProbeMu serialises exit-IP probes. Each probe repoints
-// default_proxy_group at the node under test and restores it afterwards; two
-// overlapping probes would each remember the other's temporary target as the
-// "previous" selection and leave the group pointing at a random node after
-// "test all" — which is exactly what users saw as the group changing by itself.
+// exitProbeMu serialises exit-IP probes: each one repoints the private
+// cicy-probe-group (and only that group) at the node under test.
 var exitProbeMu sync.Mutex
 
 func mihomoExitIPProbe(name string) M {
 	exitProbeMu.Lock()
 	defer exitProbeMu.Unlock()
-	// globalPassword is empty when mihomo runs in localhost-skip-auth mode
-	// (skip-auth-prefixes 127.0.0.1) instead of the cloud's w-<id> auth model.
-	// The probe goes out from localhost, so it can connect WITHOUT credentials in
-	// that case — exactly like the exit-info dual probe (curlExitIP with a bare
-	// http://<mixed> URL). So don't bail on an empty password; just omit the auth.
-	password := readMihomoGlobalPasswordFromYAML()
-
-	// `default_proxy_group` is the group that worker traffic flows through
-	// (see IN-USER-PREFIX,w-,default_proxy_group). Switching it to itself is a
-	// no-op the controller rejects with HTTP 400, so skip the switch when the
-	// caller asked about the group itself — the probe naturally exercises
-	// whatever node is currently selected. For any other target we temporarily
-	// repoint the group to it, probe, then restore.
-	skipSwitch := name == "default_proxy_group"
-	var prevSelection, target string
-	if !skipSwitch {
-		// The probe repoints default_proxy_group at the target, so the target must
-		// be a NODE that default_proxy_group can select. A sibling GROUP (e.g.
-		// chrome-profile-1-group, routed via its own listener) is NOT a member of
-		// default_proxy_group → mihomo rejects the switch with HTTP 400. A group's
-		// exit IP equals its selected node's exit IP, so resolve groups down to the
-		// underlying node first.
-		target = resolveExitProbeTarget(name)
-		prevSelection = readMihomoGroupSelection("default_proxy_group")
-		if err := setMihomoGroupSelection("default_proxy_group", target); err != nil {
-			return M{"ok": false, "error": "switch: " + err.Error()}
-		}
+	// A group's selection belongs to the user — the probe must never switch
+	// default_proxy_group or any other user-visible group. It routes through
+	// the private probe listener instead (provisioned on first use).
+	probePort, err := ensureMihomoProbePath()
+	if err != nil {
+		return M{"ok": false, "error": "probe path: " + err.Error()}
 	}
-	defer func() {
-		if !skipSwitch && prevSelection != "" && prevSelection != target {
-			if err := setMihomoGroupSelection("default_proxy_group", prevSelection); err != nil {
-				log.Printf("[proxy] restore default_proxy_group=%s after probing %s failed: %v", prevSelection, target, err)
-			}
-		}
-	}()
-
-	proxyURL := "http://" + mihomoMixedAddr()
-	if password != "" {
-		proxyURL = fmt.Sprintf("http://w-proxytest:%s@%s", password, mihomoMixedAddr())
+	// A group's exit IP equals its selected node's exit IP; resolve groups
+	// down to the underlying node so the probe group can select it.
+	target := resolveExitProbeTarget(name)
+	if err := setMihomoGroupSelection(probeGroupName, target); err != nil {
+		return M{"ok": false, "error": "switch probe group: " + err.Error()}
 	}
+
+	proxyURL := "http://127.0.0.1:" + strconv.Itoa(probePort)
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	base := []string{"-sS", "-m", "8", "-x", proxyURL}
