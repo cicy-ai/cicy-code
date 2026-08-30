@@ -5101,6 +5101,23 @@ func aiGatewayFirstUserText(messages []map[string]interface{}) string {
 //   - a first message matching the compaction preamble IS the mainline thread
 //     continuing after auto-compact;
 //   - a different conversation id is the normal new-thread lifecycle.
+// A mainline turn rewrites current.json when each of its requests starts, so a
+// snapshot this old means no mainline has been recognised for a very long time —
+// far longer than any real subagent burst rides on its parent turn.
+const aiGatewayMainlineSnapshotTTL = 30 * time.Minute
+
+// aiGatewayLatestSnapshotTime is the freshest timestamp a current.json carries.
+// Older snapshots predate UpdatedAt, so fall back through the other two.
+func aiGatewayLatestSnapshotTime(snapshot aiGatewayCurrentSnapshot) time.Time {
+	latest := time.Time{}
+	for _, raw := range []string{snapshot.UpdatedAt, snapshot.Timestamp, snapshot.StartedAt} {
+		if at := parseUsageTS(strings.TrimSpace(raw)); !at.IsZero() && at.After(latest) {
+			latest = at
+		}
+	}
+	return latest
+}
+
 func aiGatewayIsSidechainRequest(agentID, conversationID string, requestHeaders http.Header, body map[string]interface{}) bool {
 	if strings.TrimSpace(requestHeaders.Get("X-Cicy-Current-Owned")) == "1" {
 		return false
@@ -5135,6 +5152,19 @@ func aiGatewayIsSidechainRequest(agentID, conversationID string, requestHeaders 
 	// mainline request as sidechain and freeze current/reply.json forever.
 	// Let the mainline reclaim the snapshot instead.
 	if aiGatewayAuxiliaryKind("", aiGatewayMap(disk.Body)) != "" {
+		return false
+	}
+	// Self-heal: ONLY a mainline request refreshes this snapshot, so the moment
+	// it goes stale the comparison below can never be dislodged — every later
+	// mainline keeps mismatching it, stays tagged sidechain, and therefore leaves
+	// the snapshot exactly as stale as it found it. w-101 sat in that deadlock
+	// for hours after one failed turn: 209 consecutive sidechain requests, its
+	// reply.json frozen at the failure, and the card stuck on that moment's model
+	// with cost pinned at 0. A genuine sidechain rides on a mainline turn that
+	// wrote this file minutes ago, so treat an ancient snapshot as abandoned and
+	// let the mainline reclaim it.
+	if at := aiGatewayLatestSnapshotTime(disk); !at.IsZero() && time.Since(at) > aiGatewayMainlineSnapshotTTL {
+		log.Printf("[ai-gateway] reclaiming stale mainline snapshot agent=%s conv=%s (idle %s)", agentID, conversationID, time.Since(at).Truncate(time.Second))
 		return false
 	}
 	diskFirst := aiGatewayFirstUserText(aiGatewayExtractMessages(aiGatewayMap(disk.Body)))
