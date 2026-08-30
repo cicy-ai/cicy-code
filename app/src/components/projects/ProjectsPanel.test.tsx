@@ -965,6 +965,33 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     await waitFor(() => expect(input).toHaveFocus());
   });
 
+  it('activates an inactive card as soon as its prompt takes focus', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' }]} onOpenAgent={vi.fn()} />);
+
+    // The footer swallows pointer events so typing never drags the card, which
+    // also keeps them from reaching the card's own select handler. The prompt is
+    // never disabled, so without this the user can type into a card that stays
+    // inactive and neither Enter nor the send button does anything.
+    const input = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
+      if (!node) throw new Error('agent prompt did not render');
+      return node as HTMLTextAreaElement;
+    });
+    expect(document.querySelector('[data-id="project-agent-prompt-send-w-101"]')).not.toBeInTheDocument();
+
+    fireEvent.focus(input);
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-prompt-send-w-101"]')).toBeInTheDocument());
+    fireEvent.change(input, { target: { value: '聚焦即可发送' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledTimes(1));
+    expect(input).toHaveValue('');
+  });
+
   it('keeps the shared history body mounted when card selection changes', async () => {
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },

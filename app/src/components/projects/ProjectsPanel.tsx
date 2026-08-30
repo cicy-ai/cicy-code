@@ -2327,6 +2327,14 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       data-id={`project-agent-prompt-input-${shortPaneId(agent.paneId)}`}
                       rows={1}
                       value={agentMessages[shortPaneId(agent.paneId)] || ''}
+                      // The footer stops pointer events from reaching the card's
+                      // onSelect (otherwise typing here would drag the card), so
+                      // clicking straight into the prompt used to leave the card
+                      // unselected: the textarea is never disabled, so the user
+                      // could type but Enter and the send button — both gated on
+                      // cardSelected — silently did nothing. Focusing the prompt
+                      // is an unambiguous "I mean this card", so select it.
+                      onFocus={() => toggleAgentSelection(agent)}
                       onChange={(event) => {
                         const id = shortPaneId(agent.paneId);
                         promptHistoryIndexRef.current[id] = null;
