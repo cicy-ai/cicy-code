@@ -89,8 +89,8 @@ export default function ProxyManagerPage() {
         apiService.getProxyList().catch(() => null),
         apiService.getProxyStatus().catch(() => null),
       ]);
-      setFileNodes((fileRes?.data?.nodes || []) as FileNode[]);
-      setFileGroups((fileRes?.data?.groups || []) as FileGroup[]);
+      setFileNodes(((fileRes?.data?.nodes || []) as FileNode[]).map((n) => ({ ...n, server: n.server || '', port: n.port || '' })));
+      setFileGroups(((fileRes?.data?.groups || []) as FileGroup[]).map((g) => ({ ...g, proxies: g.proxies || [], use: g.use || [] })));
       const map: Record<string, LiveEntry> = {};
       for (const e of [...(liveRes?.data?.groups || []), ...(liveRes?.data?.nodes || [])] as LiveEntry[]) map[e.name] = e;
       setLive(map);

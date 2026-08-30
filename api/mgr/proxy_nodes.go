@@ -144,7 +144,7 @@ func mappingSeq(m *yaml.Node, key string, create bool) *yaml.Node {
 
 func seqStrings(s *yaml.Node) []string {
 	if s == nil {
-		return nil
+		return []string{} // never nil: the JSON consumer indexes .length
 	}
 	out := make([]string, 0, len(s.Content))
 	for _, it := range s.Content {

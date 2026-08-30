@@ -80,6 +80,9 @@ func TestProxyNodesCRUDKeepsGroupsInSync(t *testing.T) {
 	if code != 200 || len(out["nodes"].([]any)) != 2 || len(out["groups"].([]any)) != 2 {
 		t.Fatalf("list: %d %#v", code, out)
 	}
+	if use, ok := out["groups"].([]any)[0].(map[string]any)["use"].([]any); !ok || use == nil {
+		t.Fatalf("group.use must be an empty array, not null: %#v", out["groups"])
+	}
 
 	// create → joins every group
 	code, out = proxyNodesCall(t, http.MethodPost, "/api/proxy/nodes", M{"yaml": "name: c\ntype: ss\nserver: c.example\nport: 3\ncipher: aes-128-gcm\npassword: z\n"})
