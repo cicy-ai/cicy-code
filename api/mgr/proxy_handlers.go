@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -354,7 +355,16 @@ func mihomoDelayProbe(parent context.Context, name, target string) M {
 //
 // curl is used inside the race (vs http.Client) so we get robust auth +
 // CONNECT semantics without re-implementing CONNECT-via-proxy here.
+// exitProbeMu serialises exit-IP probes. Each probe repoints
+// default_proxy_group at the node under test and restores it afterwards; two
+// overlapping probes would each remember the other's temporary target as the
+// "previous" selection and leave the group pointing at a random node after
+// "test all" — which is exactly what users saw as the group changing by itself.
+var exitProbeMu sync.Mutex
+
 func mihomoExitIPProbe(name string) M {
+	exitProbeMu.Lock()
+	defer exitProbeMu.Unlock()
 	// globalPassword is empty when mihomo runs in localhost-skip-auth mode
 	// (skip-auth-prefixes 127.0.0.1) instead of the cloud's w-<id> auth model.
 	// The probe goes out from localhost, so it can connect WITHOUT credentials in
@@ -385,7 +395,9 @@ func mihomoExitIPProbe(name string) M {
 	}
 	defer func() {
 		if !skipSwitch && prevSelection != "" && prevSelection != target {
-			_ = setMihomoGroupSelection("default_proxy_group", prevSelection)
+			if err := setMihomoGroupSelection("default_proxy_group", prevSelection); err != nil {
+				log.Printf("[proxy] restore default_proxy_group=%s after probing %s failed: %v", prevSelection, target, err)
+			}
 		}
 	}()
 

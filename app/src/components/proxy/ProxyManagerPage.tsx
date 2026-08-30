@@ -131,7 +131,9 @@ export default function ProxyManagerPage() {
     setTestingAll(true);
     const names = fileNodes.map((n) => n.name);
     const queue = [...names];
-    const workers = Array.from({ length: Math.min(4, queue.length) }, async () => {
+    // Sequential on purpose: an exit-IP probe repoints default_proxy_group at
+    // the node under test, and the server serialises probes anyway.
+    const workers = Array.from({ length: Math.min(1, queue.length) }, async () => {
       while (queue.length) {
         const n = queue.shift();
         if (n) await testOne(n);
