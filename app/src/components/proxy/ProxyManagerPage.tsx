@@ -326,14 +326,14 @@ export default function ProxyManagerPage() {
             <table data-id="proxy-page-nodes" className="w-full table-fixed border-separate border-spacing-0 text-[12px]">
               <thead>
                 <tr className="text-left text-[11px] uppercase tracking-wide text-zinc-500">
-                  <th className={TH + ' w-[22%]'}>{tp('colName', '名称')}</th>
-                  <th className={TH + ' w-[8%]'}>{tp('colType', '类型')}</th>
-                  <th className={TH + ' w-[20%]'}>{tp('colServer', '服务器')}</th>
-                  <th className={TH + ' w-[7%] text-right'}>{tp('colDelay', '延迟')}</th>
-                  {PROBES.map((p) => <th key={p.url} className={TH + ' w-[7%] text-right'}>{p.short}</th>)}
-                  <th className={TH + ' w-[11%]'}>{tp('colExit', '出口')}</th>
+                  <th className={TH + ' w-[15%]'}>{tp('colName', '名称')}</th>
+                  <th className={TH + ' w-[7%]'}>{tp('colType', '类型')}</th>
+                  <th className={TH + ' w-[16%]'}>{tp('colServer', '服务器')}</th>
+                  <th className={TH + ' w-[6%] text-right'}>{tp('colDelay', '延迟')}</th>
+                  {PROBES.map((p) => <th key={p.url} className={TH + ' w-[6%] text-right'}>{p.short}</th>)}
+                  <th className={TH + ' w-[10%]'}>{tp('colExit', '出口')}</th>
                   <th className={TH}>{tp('colGroups', '所属组')}</th>
-                  <th className={TH + ' w-[118px] text-right'} />
+                  <th className={TH + ' w-[104px] text-right'} />
                 </tr>
               </thead>
               <tbody>
@@ -360,9 +360,9 @@ export default function ProxyManagerPage() {
                       <td className={TD}>
                         <div className="flex flex-wrap gap-1">
                           {(groupsOf[n.name] || []).map((g) => (
-                            <span key={g} className={`rounded px-1.5 py-0.5 text-[10px] ${live[g]?.now === n.name ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/[0.05] text-zinc-400'}`} title={live[g]?.now === n.name ? tp('activeIn', '当前被该组选中') : ''}>{g}</span>
+                            <span key={g} className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] ${live[g]?.now === n.name ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/[0.05] text-zinc-400'}`} title={live[g]?.now === n.name ? tp('activeIn', '当前被该组选中') : ''}>{g}</span>
                           ))}
-                          {!(groupsOf[n.name] || []).length ? <span className="text-[11px] text-amber-300/80">{tp('noGroup', '未加入任何组')}</span> : null}
+                          {!(groupsOf[n.name] || []).length ? <span className="whitespace-nowrap text-[11px] text-amber-300/80">{tp('noGroup', '未加入任何组')}</span> : null}
                         </div>
                       </td>
                       <td className={TD + ' text-right'}>
