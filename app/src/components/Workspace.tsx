@@ -12,7 +12,7 @@ type ToastState = {
 };
 import { useApp } from '../contexts/AppContext';
 import { isCicyLiteAgent } from '../lib/agentType';
-import { interpretCicyUpdateResponse } from '../lib/cicyUpdate';
+import { interpretCicyUpdateResponse, shouldAutoUpdate } from '../lib/cicyUpdate';
 import { electronRPC } from '../lib/speedup/rpc';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
@@ -75,6 +75,7 @@ const cache = {
   set: (k: string, v: any) => localStorage.setItem(k, JSON.stringify(v)),
 };
 
+const AUTO_UPDATE_KEY = 'ws_autoUpdate';
 const CLI_DRAWER_WIDTH_KEY = 'ws_cliDrawerWidth';
 const CLI_CONTENT_MODE_KEY = 'ws_cliContentMode';
 const cliContentTabKey = (paneId: string) => `TeamPanel:${paneId}.paneId:cliContentTab`;
@@ -464,6 +465,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // Red badge (version row + activity-bar trigger) when a newer cicy-code is
   // published on npm. Backend caches the registry lookup; we re-check on focus.
   const [versionUpdate, setVersionUpdate] = useState(false);
+  // Opt-in: install every published release as soon as the badge notices it,
+  // instead of waiting for the user to press 更新.
+  const [autoUpdate, setAutoUpdate] = useState<boolean>(() => cache.get(AUTO_UPDATE_KEY, false));
   // CiCy Hub/Cloud identity for the gear menu badge (Settings → CiCy 账号 owns the full view).
   const [cloudAccount, setCloudAccount] = useState<CloudAccountInfo | null>(null);
   const refreshCloudAccount = useCallback(() => { fetchCloudAccount().then(setCloudAccount).catch(() => {}); }, []);
@@ -556,6 +560,23 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       }));
     }
   }, [t, updating]);
+  // Auto-update fires once per published version. Without the ref a failed
+  // install would re-arm the moment `updating` clears — versionUpdate is still
+  // true, so the effect would reinstall in a tight loop. Recording the target we
+  // already attempted leaves the manual 更新 button as the retry path.
+  const autoUpdateAttemptedRef = useRef('');
+  useEffect(() => {
+    const target = latestVersionRef.current;
+    if (!shouldAutoUpdate({
+      enabled: autoUpdate,
+      hasUpdate: versionUpdate,
+      updating,
+      target,
+      attempted: autoUpdateAttemptedRef.current,
+    })) return;
+    autoUpdateAttemptedRef.current = target;
+    void applyUpdate();
+  }, [autoUpdate, versionUpdate, updating, applyUpdate]);
   // Red badge on the Settings entry + 通用 item: true when the token-delivery
   // email isn't fully set up — SMTP not ready OR no delivery address (default_to).
   // Refetched when the settings modal closes so configuring it clears the badge.
@@ -2701,6 +2722,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 {providersNeedKey && <span data-id="membership-settings-providers-badge" className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title={t('providerMissingApiKey', { defaultValue: '缺少 API key' })} />}
               </span>
               <Boxes className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div data-id="membership-auto-update" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] font-semibold text-zinc-200">
+            <span data-id="membership-auto-update-label">{t('autoUpdate', { defaultValue: '自动更新' })}</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoUpdate}
+              aria-label={t('autoUpdate', { defaultValue: '自动更新' })}
+              data-id="membership-auto-update-toggle"
+              onClick={() => { const next = !autoUpdate; setAutoUpdate(next); cache.set(AUTO_UPDATE_KEY, next); }}
+              title={t('autoUpdateHint', { defaultValue: '开启后每次发布新版本都会自动安装并重启' })}
+              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${autoUpdate ? 'bg-blue-500' : 'bg-zinc-700'}`}
+            >
+              <span data-id="membership-auto-update-toggle-thumb" className={`absolute top-1 h-3 w-3 rounded-full bg-white shadow transition-transform ${autoUpdate ? 'translate-x-5' : 'translate-x-1'}`} />
             </button>
           </div>
           <div data-id="membership-version" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] text-zinc-500">

@@ -14,6 +14,8 @@
   "wsReconnect": "重新连接",
   "versionUpdateAvailable": "有新版本可更新",
   "updateNow": "更新",
+  "autoUpdate": "自动更新",
+  "autoUpdateHint": "开启后每次发布新版本都会自动安装并重启",
   "updating": "更新中…",
   "updateFailed": "更新失败",
   "updateInstalledRestartRequired": "版本 {{version}} 已安装，重启 cicy-code 后生效"

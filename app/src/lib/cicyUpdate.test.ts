@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest';
-import { interpretCicyUpdateResponse } from './cicyUpdate';
+import { interpretCicyUpdateResponse, shouldAutoUpdate } from './cicyUpdate';
 
 describe('interpretCicyUpdateResponse', () => {
   it('preserves the backend error when the update did not start', () => {
@@ -43,5 +43,40 @@ describe('interpretCicyUpdateResponse', () => {
       kind: 'failed',
       message: 'Update failed',
     });
+  });
+});
+
+describe('shouldAutoUpdate', () => {
+  const base = { enabled: true, hasUpdate: true, updating: false, target: '2.3.593', attempted: '' };
+
+  it('fires for a newly published version when auto-update is on', () => {
+    expect(shouldAutoUpdate(base)).toBe(true);
+  });
+
+  it('stays off until the user opts in', () => {
+    expect(shouldAutoUpdate({ ...base, enabled: false })).toBe(false);
+  });
+
+  it('waits for a published update', () => {
+    expect(shouldAutoUpdate({ ...base, hasUpdate: false })).toBe(false);
+  });
+
+  it('does not stack a second install on a running one', () => {
+    expect(shouldAutoUpdate({ ...base, updating: true })).toBe(false);
+  });
+
+  // The badge is still lit after a failed install, so without this the effect
+  // would reinstall the same version on every render.
+  it('attempts a given version only once', () => {
+    expect(shouldAutoUpdate({ ...base, attempted: '2.3.593' })).toBe(false);
+  });
+
+  it('re-arms when a newer version is published', () => {
+    expect(shouldAutoUpdate({ ...base, target: '2.3.594', attempted: '2.3.593' })).toBe(true);
+  });
+
+  it('does nothing until the version check reports a target', () => {
+    expect(shouldAutoUpdate({ ...base, target: '' })).toBe(false);
+    expect(shouldAutoUpdate({ ...base, target: '   ' })).toBe(false);
   });
 });

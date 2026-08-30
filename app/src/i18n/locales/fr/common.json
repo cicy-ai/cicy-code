@@ -14,6 +14,8 @@
   "wsReconnect": "Reconnecter",
   "versionUpdateAvailable": "Une nouvelle version est disponible",
   "updateNow": "Mettre à jour",
+  "autoUpdate": "Mise à jour automatique",
+  "autoUpdateHint": "Installe automatiquement chaque nouvelle version et redémarre",
   "updating": "Mise à jour…",
   "updateFailed": "Échec de la mise à jour",
   "updateInstalledRestartRequired": "La version {{version}} est installée. Redémarrez cicy-code pour l’appliquer."

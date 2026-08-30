@@ -31,3 +31,23 @@ export function interpretCicyUpdateResponse(
   }
   return { kind: 'poll', target };
 }
+
+/**
+ * Whether an auto-update should fire now.
+ *
+ * The badge stays lit while an install is pending, so a failed auto-update
+ * would otherwise re-arm the instant `updating` clears and reinstall in a tight
+ * loop. Gating on the target version means each published release is attempted
+ * at most once and the manual update button remains the retry path.
+ */
+export function shouldAutoUpdate(state: {
+  enabled: boolean;
+  hasUpdate: boolean;
+  updating: boolean;
+  target: string;
+  attempted: string;
+}): boolean {
+  if (!state.enabled || !state.hasUpdate || state.updating) return false;
+  const target = String(state.target || '').trim();
+  return target !== '' && target !== state.attempted;
+}

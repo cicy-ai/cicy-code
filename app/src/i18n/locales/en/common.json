@@ -14,6 +14,8 @@
   "wsReconnect": "Reconnect",
   "versionUpdateAvailable": "A new version is available",
   "updateNow": "Update",
+  "autoUpdate": "Auto-update",
+  "autoUpdateHint": "Install every new release automatically and restart",
   "updating": "Updating…",
   "updateFailed": "Update failed",
   "updateInstalledRestartRequired": "Version {{version}} is installed. Restart cicy-code to apply it."
