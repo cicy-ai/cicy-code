@@ -497,7 +497,13 @@ const api = {
 
   // desktop snapshots (periodic win/mac/linux screen captures)
   getDesktopSnapshots: (clientId: string) => http.get('/api/desktop/snapshots', { params: { client_id: clientId } }),
-  desktopSnapshotNow: (clientId: string) => http.post('/api/desktop/snapshot-now', { client_id: clientId }),
+  // maxWidth/quality come from the 桌面 tab's 画质 picker; omitted → server defaults.
+  desktopSnapshotNow: (clientId: string, opts?: { maxWidth?: number; quality?: number }) =>
+    http.post('/api/desktop/snapshot-now', {
+      client_id: clientId,
+      max_width: opts?.maxWidth,
+      quality: opts?.quality,
+    }),
   desktopSnapshotImageUrl: (clientId: string, name: string): string => {
     const token = TokenManager.getToken() || '';
     const base = (config.apiBase || '').replace(/\/$/, '');

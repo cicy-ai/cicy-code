@@ -143,7 +143,13 @@ export function HistoryList(props: HistoryListProps) {
     }
     loadingDetachedRef.current = false;
     updateLoadingVisibility();
-    if (loadingVisibleRef.current) node.scrollTop = node.scrollHeight;
+    // A just-sent question is appended BELOW the fold, so updateLoadingVisibility
+    // reports the thinking marker as off-screen and the guarded scroll below
+    // never fires — the new bubble stays pinned at the very bottom edge, under
+    // the fade. Sending is an explicit "show me the bottom" intent, so jump
+    // there unconditionally and let the ResizeObserver keep up from there.
+    node.scrollTop = node.scrollHeight;
+    loadingVisibleRef.current = true;
     const observer = new ResizeObserver(() => {
       if (loadingVisibleRef.current && !loadingDetachedRef.current) node.scrollTop = node.scrollHeight;
       updateLoadingVisibility();
@@ -544,7 +550,10 @@ export function HistoryList(props: HistoryListProps) {
             <div
               data-id="current-history-final-answer-placeholder"
               aria-hidden="true"
-              className={`${replyPending || liveStreaming || retryingKey ? 'h-8' : 'h-2'} shrink-0`}
+              // Minimum h-5 (20px) clears fade-scroll-y's 16px bottom mask
+              // (index.css .fade-scroll-y): with the old h-2 the newest bubble
+              // sat inside the mask and faded to nothing against the composer.
+              className={`${replyPending || liveStreaming || retryingKey ? 'h-10' : 'h-5'} shrink-0`}
             />
           </>}
         </div>

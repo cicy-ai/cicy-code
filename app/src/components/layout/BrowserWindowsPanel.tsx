@@ -35,6 +35,11 @@ import { cn } from '../../lib/utils';
 import { listPhones, type MobileDevice, type MobileSel } from './MobileDevicesPanel';
 import { detectRegion, detectOS } from '../../lib/speedup/detect';
 import { execShell } from '../../lib/speedup/rpc';
+import DesktopScreenView from './devices/DesktopScreenView';
+import {
+  Btn, Chip, Dot, ErrorStrip, HeaderBar, IconBtn, ListSkeleton, SegTabs, StateBlock, Toolbar,
+  type SegItem,
+} from './devices/ui';
 
 // i18n helper for non-component (plain async/util) code paths — components use the
 // useTranslation('layout') hook instead so they re-render on language change.
@@ -637,43 +642,27 @@ async function windowAction(clientId: string, p: Profile, w: WinItem, action: Wi
   if (r && r.error) throw new Error(r.error);
 }
 
-// Loading placeholder — shimmer rows (shown while devices/profiles load).
-function ProfileSkeleton() {
-  return (
-    <div data-id="browser-windows-skeleton" className="py-1">
-      {[0, 1, 2, 3].map((i) => (
-        <div key={i} className="flex items-center gap-2 px-2.5 py-2.5 border-b border-white/[0.03]">
-          <span className="w-1.5 h-1.5 rounded-full bg-white/[0.06]" />
-          <div className="flex-1 min-w-0">
-            <div className="h-2.5 rounded bg-white/[0.06] animate-pulse" style={{ width: `${55 - i * 8}%` }} />
-            <div className="h-2 mt-1.5 rounded bg-white/[0.035] animate-pulse" style={{ width: `${38 - i * 5}%` }} />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // No desktop connected → a calm download CTA (not an alarming error box).
 function NoDesktopCTA() {
   const { t } = useTranslation('layout');
   return (
-    <div data-id="browser-windows-no-desktop" className="flex flex-col items-center justify-center text-center px-6 py-10 gap-3">
-      <div className="w-12 h-12 rounded-2xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center">
-        <MonitorOff className="w-5 h-5 text-zinc-500" />
-      </div>
-      <div className="text-[13px] text-zinc-300">{t('bwNoDesktopTitle')}</div>
-      <div className="text-[12px] text-zinc-600 leading-relaxed max-w-[220px]">{t('bwNoDesktopDesc')}</div>
-      <a
-        data-id="browser-windows-download-btn"
-        href="https://cicy-ai.com/#/download"
-        target="_blank"
-        rel="noreferrer"
-        className="mt-1 inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[12px] font-medium bg-white/[0.08] text-zinc-100 hover:bg-white/[0.14] transition-colors cursor-pointer"
-      >
-        <Download className="w-3.5 h-3.5" /> {t('bwDownloadDesktop')}
-      </a>
-    </div>
+    <StateBlock
+      dataId="browser-windows-no-desktop"
+      icon={<MonitorOff className="h-5 w-5" />}
+      title={t('bwNoDesktopTitle')}
+      hint={t('bwNoDesktopDesc')}
+      action={
+        <a
+          data-id="browser-windows-download-btn"
+          href="https://cicy-ai.com/#/download"
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg bg-[var(--dev-accent-bg)] px-2.5 text-[12px] font-medium text-[var(--dev-accent)] transition-[filter] hover:brightness-110"
+        >
+          <Download className="h-3.5 w-3.5" /> {t('bwDownloadDesktop')}
+        </a>
+      }
+    />
   );
 }
 
@@ -720,9 +709,10 @@ function fmtUptime(sec?: number): string {
 }
 
 // Custom device selector — replaces the native <select> (whose long device-ids
-// got truncated with no way to see the full detail). A trigger button shows the
-// current device compactly; the dropdown lists every device with full id /
-// platform / region / IP / uptime / language so you can tell them apart.
+// got truncated with no way to see the full detail). The trigger now reads as a
+// device *identity card* (platform, id, where it is, how long it has been up)
+// rather than one grey line, because on a multi-machine account "which box am I
+// driving" is the question this panel exists to answer.
 function DeviceSelect({ devices, value, onChange, loading }: {
   devices: Device[]; value: string; onChange: (clientId: string) => void; loading: boolean;
 }) {
@@ -732,185 +722,92 @@ function DeviceSelect({ devices, value, onChange, loading }: {
   useEffect(() => {
     if (!open) return;
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    document.addEventListener('keydown', k);
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
   }, [open]);
   const cur = devices.find((d) => d.clientId === value) || null;
   const empty = devices.length === 0;
   return (
     <div data-id="browser-windows-device-select" ref={ref} className="relative w-full min-w-0">
       <button
+        type="button"
         data-id="browser-windows-device-trigger"
         onClick={() => !empty && setOpen((v) => !v)}
         disabled={loading || empty}
-        className="w-full min-w-0 flex items-center gap-2 bg-[#141414] border border-white/[0.08] rounded-lg px-2 py-1.5 text-left outline-none hover:border-white/20 focus:border-white/20 cursor-pointer disabled:opacity-50"
+        aria-expanded={open}
+        className={cn(
+          'flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-xl border px-2.5 py-2 text-left outline-none transition-colors',
+          'border-[var(--dev-border)] bg-[var(--dev-surface-2)] hover:border-[var(--dev-border-strong)]',
+          'disabled:cursor-not-allowed disabled:opacity-50',
+        )}
       >
-        {cur ? platformIcon(cur.platform) : <Monitor className="w-3.5 h-3.5 text-zinc-600 shrink-0" />}
+        {cur ? platformIcon(cur.platform) : <Monitor className="h-3.5 w-3.5 shrink-0 text-[var(--dev-text-3)]" />}
         <div className="min-w-0 flex-1">
           {cur ? (
             <>
-              <div className="text-[12px] text-zinc-200 truncate">{platformLabel(cur.platform)}{cur.deviceId ? ` · ${cur.deviceId}` : ''}</div>
-              {(cur.region || cur.ip) ? <div className="text-[10px] text-zinc-600 truncate">{[cur.region, cur.ip].filter(Boolean).join(' · ')}</div> : null}
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-[12px] font-medium text-[var(--dev-text)]">{platformLabel(cur.platform)}</span>
+                <Dot tone="ok" />
+                {fmtUptime(cur.uptimeSec) ? (
+                  <span className="shrink-0 text-[10px] text-[var(--dev-text-3)]">{fmtUptime(cur.uptimeSec)}</span>
+                ) : null}
+              </div>
+              <div className="truncate text-[10px] text-[var(--dev-text-3)]">
+                {[cur.deviceId || cur.clientId, cur.region, cur.ip].filter(Boolean).join(' · ')}
+              </div>
             </>
           ) : (
-            <span className="text-[12px] text-zinc-500">{loading ? t('bwLoadingDevices') : t('bwNoDevices')}</span>
+            <span className="text-[12px] text-[var(--dev-text-3)]">{loading ? t('bwLoadingDevices') : t('bwNoDevices')}</span>
           )}
         </div>
-        <ChevronRight className={cn('w-3.5 h-3.5 text-zinc-600 shrink-0 transition-transform', open ? 'rotate-90' : '')} />
+        {devices.length > 1 ? (
+          <span className="shrink-0 rounded bg-[var(--dev-raise)] px-1 text-[9px] leading-4 text-[var(--dev-text-3)]">{devices.length}</span>
+        ) : null}
+        <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-[var(--dev-text-3)] transition-transform', open ? 'rotate-90' : '')} />
       </button>
       {open && !empty && (
-        <div data-id="browser-windows-device-dropdown" className="absolute z-[140] left-0 right-0 mt-1 max-h-[320px] overflow-auto rounded-lg border border-white/[0.1] bg-[#141416] shadow-[0_18px_48px_rgba(0,0,0,0.5)] py-1">
+        <div
+          data-id="browser-windows-device-dropdown"
+          className="absolute left-0 right-0 z-[140] mt-1 max-h-[320px] overflow-auto rounded-xl border border-[var(--dev-border)] bg-[var(--dev-surface)] py-1"
+          style={{ boxShadow: 'var(--dev-shadow)' }}
+        >
           {devices.map((d) => {
             const sel = d.clientId === value;
             return (
               <button
                 key={d.clientId}
+                type="button"
                 data-id="browser-windows-device-option"
                 onClick={() => { onChange(d.clientId); setOpen(false); }}
-                className={cn('w-full flex items-start gap-2 px-2.5 py-2 text-left transition-colors cursor-pointer', sel ? 'bg-white/[0.07]' : 'hover:bg-white/[0.04]')}
+                className={cn(
+                  'flex w-full cursor-pointer items-start gap-2 px-2.5 py-2 text-left transition-colors',
+                  sel ? 'bg-[var(--dev-active)]' : 'hover:bg-[var(--dev-hover)]',
+                )}
               >
                 <span className="mt-0.5 shrink-0">{platformIcon(d.platform)}</span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[12px] text-zinc-100 truncate">{platformLabel(d.platform)}</span>
-                    <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-400/80 shrink-0"><Wifi className="w-2.5 h-2.5" />{fmtUptime(d.uptimeSec) || t('bwOnline')}</span>
+                    <span className="truncate text-[12px] font-medium text-[var(--dev-text)]">{platformLabel(d.platform)}</span>
+                    <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-[var(--dev-ok)]">
+                      <Dot tone="ok" />{fmtUptime(d.uptimeSec) || t('bwOnline')}
+                    </span>
                   </div>
-                  <div className="text-[10px] text-zinc-500 truncate mt-0.5">{d.deviceId || d.clientId}</div>
-                  {(d.region || d.ip || d.systemLanguage) ? <div className="text-[10px] text-zinc-600 truncate">{[d.region, d.ip, d.systemLanguage].filter(Boolean).join(' · ')}</div> : null}
+                  <div className="mt-0.5 truncate text-[10px] text-[var(--dev-text-2)]">{d.deviceId || d.clientId}</div>
+                  {(d.region || d.ip || d.systemLanguage) ? (
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                      {d.region ? <Chip>{d.region}</Chip> : null}
+                      {d.ip ? <Chip tone="accent" title={d.ip}>{d.ip}</Chip> : null}
+                      {d.systemLanguage ? <Chip>{d.systemLanguage}</Chip> : null}
+                    </div>
+                  ) : null}
                 </div>
-                {sel && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />}
+                {sel && <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--dev-accent)]" />}
               </button>
             );
           })}
         </div>
-      )}
-    </div>
-  );
-}
-
-// ── Desktop snapshot view (桌面 tab) ──────────────────────────────────────────
-// Shows the selected device's periodic desktop screenshots: a hero (selected /
-// latest) image with a click-to-zoom lightbox, a history grid, and a manual
-// "capture now" button. The backend scheduler stores these to disk; this view
-// just lists + serves them and pokes /snapshot-now for an immediate capture.
-interface SnapItem { name: string; ts: number }
-
-function fmtSnapTime(ms: number): string {
-  try {
-    return new Date(ms).toLocaleString(i18n.language || undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-  } catch { return String(ms); }
-}
-
-function DesktopSnapshotView({ clientId, onSendToAgent }: { clientId: string; onSendToAgent?: (text: string) => void }) {
-  const { t } = useTranslation('layout');
-  const [latest, setLatest] = useState<SnapItem | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [capturing, setCapturing] = useState(false);
-  const [error, setError] = useState('');
-  const [lightbox, setLightbox] = useState(false);
-
-  const fetchLatest = useCallback(async (silent = false) => {
-    if (!clientId) { setLatest(null); return; }
-    if (!silent) setLoading(true);
-    try {
-      const resp = await apiService.getDesktopSnapshots(clientId);
-      const list: SnapItem[] = Array.isArray(resp?.data?.items) ? resp.data.items : [];
-      setLatest(list[0] ?? null);
-    } catch (e: any) {
-      if (!silent) setError(e?.response?.data || e?.message || String(e));
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, [clientId]);
-
-  // 不再定时截图:挂载时拉一次「最近一张」,之后只有用户点「立即截图 / 刷新」才会
-  // 触发桌面端真正截图(captureNow → desktopSnapshotNow → 写盘 → 再拉 image)。
-  useEffect(() => {
-    setError('');
-    fetchLatest();
-  }, [fetchLatest]);
-
-  const captureNow = async () => {
-    if (capturing || !clientId) return;
-    setCapturing(true); setError('');
-    try {
-      await apiService.desktopSnapshotNow(clientId);
-      await fetchLatest(true);
-    } catch (e: any) {
-      setError(e?.response?.data?.error || e?.response?.data || e?.message || String(e));
-    } finally {
-      setCapturing(false);
-    }
-  };
-
-  // cache-bust by ts so the same <img> updates when a new capture replaces it
-  const imgUrl = (s: SnapItem) => apiService.desktopSnapshotImageUrl(clientId, s.name) + `&_=${s.ts}`;
-
-  if (!clientId) return <div className="p-4 text-[12px] text-zinc-600">{t('bwNoDevices')}</div>;
-
-  return (
-    <div data-id="desktop-snapshot-view" className="flex flex-col h-full">
-      <div data-id="desktop-snapshot-toolbar" className="flex items-center gap-2 px-2.5 py-2 border-b border-white/[0.06] shrink-0">
-        <span className="text-[11px] text-zinc-500 flex-1 truncate">{latest ? fmtSnapTime(latest.ts) : ''}</span>
-        <button
-          data-id="desktop-snapshot-now"
-          onClick={captureNow}
-          disabled={capturing}
-          title={t('bwSnapNow')}
-          className="flex items-center gap-1 rounded-lg px-2 py-1 text-[12px] font-medium bg-white/[0.07] text-zinc-200 hover:bg-white/[0.12] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-        >
-          {capturing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}{t('bwSnapNow')}
-        </button>
-        {onSendToAgent && (
-          <button
-            data-id="desktop-snapshot-send-agent"
-            onClick={() => onSendToAgent(t('bwPromptDesktop', { clientId, c: `agent-desktop --client ${clientId}` }))}
-            title={t('bwSendToAgent')}
-            className="flex items-center gap-1 rounded-lg px-2 py-1 text-[12px] font-medium bg-white/[0.07] text-blue-300 hover:text-blue-200 hover:bg-white/[0.12] transition-colors cursor-pointer shrink-0"
-          >
-            <Send className="w-3.5 h-3.5" />{t('bwSendToAgent')}
-          </button>
-        )}
-        <button
-          data-id="desktop-snapshot-refresh"
-          onClick={() => fetchLatest()}
-          disabled={loading}
-          title={t('bwRefreshWindows')}
-          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-        >
-          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-        </button>
-      </div>
-
-      {error && (
-        <div className="flex items-start gap-2 m-2.5 mb-0 p-2 rounded-lg bg-white/[0.03] border border-white/[0.07] text-[11px] text-zinc-400">
-          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-zinc-500" />
-          <span>{String(error)}</span>
-        </div>
-      )}
-
-      {loading && !latest ? (
-        <div className="p-2.5"><div data-id="desktop-snapshot-loading" className="aspect-video rounded-xl bg-gradient-to-b from-[#222228] to-[#16161a] animate-pulse" /></div>
-      ) : !latest ? (
-        <div data-id="desktop-snapshot-empty" className="flex-1 flex flex-col items-center justify-center text-center px-6 py-10 gap-2 text-zinc-600">
-          <Monitor className="w-6 h-6 text-zinc-700" />
-          <div className="text-[12px]">{t('bwSnapEmpty')}</div>
-          <div className="text-[11px] text-zinc-700">{t('bwSnapEmptyHint')}</div>
-        </div>
-      ) : (
-        <div className="flex-1 overflow-auto p-2.5">
-          <button data-id="desktop-snapshot-hero" onClick={() => setLightbox(true)} className="block w-full rounded-xl overflow-hidden border border-white/[0.08] bg-[#0e0e0e] cursor-zoom-in">
-            <img src={imgUrl(latest)} alt="desktop" className="w-full block" />
-          </button>
-        </div>
-      )}
-
-      {lightbox && latest && createPortal(
-        <div data-id="desktop-snapshot-lightbox" className="fixed inset-0 z-[300] bg-black/85 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setLightbox(false)}>
-          <img src={imgUrl(latest)} alt="desktop" className="max-w-full max-h-full rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
-          <button data-id="desktop-snapshot-lightbox-close" className="absolute top-4 right-4 p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 cursor-pointer" onClick={() => setLightbox(false)}><X className="w-5 h-5" /></button>
-        </div>,
-        document.body,
       )}
     </div>
   );
@@ -924,6 +821,7 @@ export default function BrowserWindowsPanel({
   onSelectMobile,
   selectedMobileKey,
   onSendToAgent,
+  onSelectDesktop,
   inlineActions = false,
 }: {
   selectedKey?: string | null;
@@ -935,6 +833,11 @@ export default function BrowserWindowsPanel({
   selectedMobileKey?: string | null; // `${clientId}:${id}`
   // Desktop tab: "send to agent" on a desktop snapshot routes a prompt to the CLI.
   onSendToAgent?: (text: string) => void;
+  // Desktop tab: the screen belongs in the WIDE detail pane, not this 280px list
+  // column — a 600-1920px screenshot squeezed into the sidebar was unreadable,
+  // which is half of why the old view felt like a thumbnail rather than a screen.
+  // The panel hands the selection up and the host renders DesktopScreenView big.
+  onSelectDesktop?: (sel: { clientId: string; label: string } | null) => void;
   // Account Matrix embeds this panel without the old left-panel header portal.
   // Render eye/add/refresh beside the device selector in that layout.
   inlineActions?: boolean;
@@ -1051,201 +954,274 @@ export default function BrowserWindowsPanel({
     setTimeout(() => window.dispatchEvent(new CustomEvent('cicy-open-config-modal', { detail: { key: prof.key } })), 400);
   }, [pendingConfig, profiles, backend, clientId, devices, onSelect]);
 
-  // Icon-only segmented control (tooltips carry the names) — frees the horizontal
-  // space the old icon+text tabs ate, so a 5th "桌面" tab fits without crowding.
-  const TABS: { k: Backend; label: string; icon: React.ReactNode }[] = [
-    { k: 'chrome', label: 'Chrome', icon: <Chrome className="w-4 h-4" /> },
-    { k: 'electron', label: 'Electron', icon: <Atom className="w-4 h-4" /> },
-    { k: 'android', label: 'Android', icon: <AndroidLogo className="w-4 h-4" /> },
-    { k: 'ios', label: 'iOS', icon: <AppleLogo className="w-4 h-4" /> },
-    { k: 'desktop', label: t('bwTabDesktop'), icon: <Monitor className="w-4 h-4" /> },
+  // Labeled segmented control with live counts. The previous strip was icon-only
+  // with five near-identical monitor-ish glyphs, so telling Electron from 桌面
+  // meant clicking each one; the count badge now says where the things actually
+  // are before you click.
+  const TABS: SegItem<Backend>[] = [
+    { k: 'chrome', label: 'Chrome', icon: <Chrome className="h-3.5 w-3.5" />, count: backend === 'chrome' ? profiles.length : undefined },
+    { k: 'electron', label: 'Electron', icon: <Atom className="h-3.5 w-3.5" />, count: backend === 'electron' ? profiles.length : undefined },
+    { k: 'android', label: 'Android', icon: <AndroidLogo className="h-3.5 w-3.5" />, count: backend === 'android' ? phones.length : undefined },
+    { k: 'ios', label: 'iOS', icon: <AppleLogo className="h-3.5 w-3.5" />, count: backend === 'ios' ? phones.length : undefined },
+    { k: 'desktop', label: t('bwTabDesktop'), icon: <Monitor className="h-3.5 w-3.5" /> },
   ];
 
   // Device-actions (eye/add/refresh) — portaled into the panel header so they sit
   // on the "设备" title row rather than a separate bar below it.
   const deviceActions = (
-    <div data-id="browser-windows-device-actions" className="flex items-center gap-1">
+    <div data-id="browser-windows-device-actions" className="flex items-center gap-0.5">
       {backend === 'electron' && (
-        <button
-          data-id="browser-windows-show-system"
+        <IconBtn
+          dataId="browser-windows-show-system"
+          icon={<Eye className="h-3.5 w-3.5" />}
+          active={showSystem}
           onClick={() => setShowSystem((v) => !v)}
           title={showSystem ? t('bwHideSystem') : t('bwShowSystem')}
-          className={cn(
-            'p-1.5 rounded-lg transition-colors cursor-pointer shrink-0',
-            showSystem ? 'text-blue-400 bg-blue-500/10' : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04]',
-          )}
-        >
-          <Eye className="w-3.5 h-3.5" />
-        </button>
+        />
       )}
       {!isMobile && !isDesktop && (
-        <button
-          data-id="browser-windows-add-profile"
+        <IconBtn
+          dataId="browser-windows-add-profile"
+          icon={<Plus className="h-3.5 w-3.5" />}
+          busy={addingProfile}
+          disabled={!clientId}
           onClick={onAddProfile}
-          disabled={addingProfile || !clientId}
           title={t('bwAddProfileTitle', { backend: backend === 'chrome' ? 'Chrome' : 'Electron' })}
-          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-        >
-          {addingProfile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-        </button>
+        />
       )}
-      <button
-        data-id="browser-windows-refresh"
+      <IconBtn
+        dataId="browser-windows-refresh"
+        icon={<RefreshCw className="h-3.5 w-3.5" />}
+        busy={devLoading || loading}
         onClick={() => { refreshDevices(); refresh(); }}
-        disabled={devLoading || loading}
         title={t('bwRefreshProfile')}
-        className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-      >
-        {(devLoading || loading) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-      </button>
+      />
     </div>
   );
 
+  // 桌面 tab: publish the selection so the host can render the screen in the wide
+  // pane, and clear it when the user leaves the tab or the device goes away.
+  const curDevice = devices.find((d) => d.clientId === clientId);
+  const desktopLabel = curDevice ? `${platformLabel(curDevice.platform)}${curDevice.deviceId ? ` · ${curDevice.deviceId}` : ''}` : '';
+  useEffect(() => {
+    if (!onSelectDesktop) return;
+    if (backend === 'desktop' && clientId) {
+      onSelect(null);
+      onSelectMobile?.(null);
+      onSelectDesktop({ clientId, label: desktopLabel });
+    } else {
+      onSelectDesktop(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backend, clientId, desktopLabel]);
+
+  // The 桌面 tab owns its whole column (header + toolbar + frame), so it renders
+  // instead of — not inside — the list body.
+  const body = (() => {
+    if (devices.length === 0) {
+      if (devLoading) return <ListSkeleton />;
+      if (devError) {
+        return (
+          <StateBlock
+            dataId="browser-windows-deverror"
+            tone="error"
+            icon={<AlertCircle className="h-5 w-5" />}
+            title={t('bwDevErrorTitle', { defaultValue: '无法读取设备列表' })}
+            hint={devError}
+            action={<Btn variant="solid" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => refreshDevices()}>{t('bwRetry', { defaultValue: '重试' })}</Btn>}
+          />
+        );
+      }
+      return <NoDesktopCTA />;
+    }
+    if (isDesktop) {
+      // Hosts that can render the wide pane get a one-row list here (the screen is
+      // over there); hosts that cannot fall back to rendering it inline.
+      if (!onSelectDesktop) return <DesktopScreenView clientId={clientId} onSendToAgent={onSendToAgent} />;
+      return (
+        <div data-id="browser-windows-desktop-list" className="py-1">
+          <div
+            data-id="browser-windows-desktop-row"
+            className="flex w-full items-center gap-2.5 bg-[var(--dev-active)] px-3 py-2.5 text-left"
+          >
+            <Dot tone="ok" />
+            <Monitor className="h-4 w-4 shrink-0 text-[var(--dev-text-3)]" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] font-medium text-[var(--dev-text)]">{t('bwDesktopScreenRow', { defaultValue: '整机屏幕' })}</div>
+              <div className="truncate text-[10px] text-[var(--dev-text-3)]">{desktopLabel}</div>
+            </div>
+          </div>
+          <div className="px-3 py-2 text-[11px] leading-relaxed text-[var(--dev-text-3)]">
+            {t('bwDesktopScreenHint', { defaultValue: '右侧可实时刷新并切换截屏质量。' })}
+          </div>
+        </div>
+      );
+    }
+    if (error) {
+      // A raw "electronRPC not available" told the user nothing and offered no
+      // way out. Name the failure, explain it, and put the fix on screen.
+      const rpcDown = /electronrpc|not available|disconnect/i.test(error);
+      return (
+        <StateBlock
+          dataId="browser-windows-error"
+          tone="warn"
+          icon={<AlertCircle className="h-5 w-5" />}
+          title={rpcDown
+            ? t('bwRpcDownTitle', { defaultValue: '这台设备暂时无法响应' })
+            : t('bwLoadFailedTitle', { defaultValue: '加载失败' })}
+          hint={rpcDown
+            ? t('bwRpcDownHint', { defaultValue: '桌面端连接已断开或还在启动。确认目标机器上的 CiCy Desktop 正在运行，然后重试。' })
+            : error}
+          action={<Btn variant="solid" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => { refreshDevices(); refresh(); }}>{t('bwRetry', { defaultValue: '重试' })}</Btn>}
+        />
+      );
+    }
+    if (isMobile) {
+      if (loading && phones.length === 0) return <ListSkeleton />;
+      if (phones.length === 0) {
+        return (
+          <StateBlock
+            dataId="browser-windows-no-phones"
+            icon={<Smartphone className="h-5 w-5" />}
+            title={t('bwNoPhones', { kind: backend === 'android' ? 'Android' : 'iOS', defaultValue: `没有连接的 ${backend === 'android' ? 'Android' : 'iOS'} 设备` })}
+            hint={backend === 'android'
+              ? t('bwNoPhonesHintAndroid', { defaultValue: '用 USB 连上这台机器并在手机上允许 USB 调试，然后点刷新。' })
+              : t('bwNoPhonesHintIos', { defaultValue: '用 USB 连上这台机器并在 iPhone 上点「信任」，然后点刷新。' })}
+            action={<Btn variant="solid" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => refresh()}>{t('bwRetry', { defaultValue: '重试' })}</Btn>}
+          />
+        );
+      }
+      return (
+        <div data-id="browser-windows-phone-list" className="py-1">
+          {phones.map((d) => {
+            const key = `${clientId}:${d.id}`;
+            const unauth = d.status === 'unauthorized';
+            return (
+              <button
+                key={key}
+                type="button"
+                data-id="mobile-device-row"
+                onClick={() => { onSelect(null); onSelectMobile?.({ clientId, platform: d.platform, id: d.id, label: d.model || d.id }); }}
+                className={cn(
+                  'flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left transition-colors',
+                  selectedMobileKey === key ? 'bg-[var(--dev-active)]' : 'hover:bg-[var(--dev-hover)]',
+                )}
+              >
+                <Dot tone={unauth ? 'warn' : 'ok'} />
+                <Smartphone className="h-4 w-4 shrink-0 text-[var(--dev-text-3)]" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] text-[var(--dev-text)]">{d.model || d.id}</div>
+                  <div className="mt-0.5 flex items-center gap-1">
+                    <span className="truncate text-[10px] text-[var(--dev-text-3)]">{d.id}</span>
+                    {unauth ? <Chip tone="warn">{t('bwUnauthorized', { defaultValue: '未授权' })}</Chip> : null}
+                  </div>
+                </div>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--dev-text-3)]" />
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+    if (loading && profiles.length === 0) return <ListSkeleton />;
+    const visible = profiles.filter((pf) => showSystem || !isSystem(pf));
+    if (profiles.length === 0) {
+      return (
+        <StateBlock
+          dataId="browser-windows-no-profiles"
+          icon={<Globe className="h-5 w-5" />}
+          title={t('bwNoProfiles', { backend: backend === 'chrome' ? 'Chrome' : 'Electron' })}
+          hint={t('bwNoProfilesHint', { defaultValue: '每个 Profile 是一份独立的登录态与代理配置。新建一个开始。' })}
+          action={
+            <Btn variant="accent" icon={<Plus className="h-3.5 w-3.5" />} busy={addingProfile} disabled={!clientId} onClick={onAddProfile}>
+              {t('bwAddProfileTitle', { backend: backend === 'chrome' ? 'Chrome' : 'Electron' })}
+            </Btn>
+          }
+        />
+      );
+    }
+    if (visible.length === 0) {
+      return (
+        <StateBlock
+          dataId="browser-windows-all-hidden"
+          icon={<Eye className="h-5 w-5" />}
+          title={t('bwSystemHiddenTitle', { defaultValue: '只剩系统 Profile' })}
+          hint={t('bwSystemHiddenHint', { defaultValue: '系统保留的 Profile 默认隐藏。点眼睛图标可以显示它们。' })}
+          action={<Btn variant="solid" icon={<Eye className="h-3.5 w-3.5" />} onClick={() => setShowSystem(true)}>{t('bwShowSystem')}</Btn>}
+        />
+      );
+    }
+    return (
+      <div data-id="browser-windows-profile-list" className="py-1">
+        {visible.map((pf) => (
+          <ProfileRow
+            key={pf.key}
+            profile={pf}
+            selected={selectedKey === pf.key}
+            onClick={() => { onSelectMobile?.(null); onSelect({ clientId, deviceId: devices.find((d) => d.clientId === clientId)?.deviceId || '', profile: pf }); }}
+          />
+        ))}
+      </div>
+    );
+  })();
+
   return (
-    <div data-id="BrowserWindowsPanel" className="absolute inset-0 flex flex-col bg-[#0A0A0A]">
+    <div data-id="BrowserWindowsPanel" className="absolute inset-0 flex flex-col bg-[var(--dev-bg)]">
       {!inlineActions && headerSlot ? createPortal(deviceActions, headerSlot) : null}
-      {/* device selector */}
-      <div data-id="browser-windows-device" className="flex items-center gap-2 px-2 py-2 border-b border-white/[0.06] shrink-0">
-        {/* device select on its own full-width line — custom dropdown so long
-            device-ids + full detail (region/IP/uptime/lang) are visible */}
+
+      {/* which machine */}
+      <div data-id="browser-windows-device" className="flex shrink-0 items-center gap-1.5 border-b border-[var(--dev-border)] px-2 py-2">
         <div className="min-w-0 flex-1">
           <DeviceSelect devices={devices} value={clientId} onChange={setClientId} loading={devLoading} />
         </div>
         {inlineActions ? deviceActions : null}
       </div>
 
-      {/* backend tabs — icon-only segmented control (tooltips name each) */}
-      <div data-id="browser-windows-tabs" className="flex items-center gap-1 px-2 py-2 border-b border-white/[0.06] shrink-0">
-        {TABS.map((tabItem) => (
-          <button
-            key={tabItem.k}
-            data-id={`browser-windows-tab-${tabItem.k}`}
-            onClick={() => setBackend(tabItem.k)}
-            title={tabItem.label}
-            aria-label={tabItem.label}
-            className={cn(
-              'flex flex-1 items-center justify-center rounded-lg py-1.5 transition-colors cursor-pointer',
-              backend === tabItem.k ? 'bg-white/[0.07] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]',
-            )}
-          >
-            {tabItem.icon}
-          </button>
-        ))}
+      {/* what on it */}
+      <div data-id="browser-windows-tabs" className="shrink-0 border-b border-[var(--dev-border)] px-2 py-1.5">
+        <SegTabs<Backend> items={TABS} value={backend} onChange={setBackend} />
       </div>
 
-      {/* body */}
-      <div data-id="browser-windows-body" className="flex-1 overflow-auto">
-        {devices.length === 0 ? (
-          devLoading ? (
-            <ProfileSkeleton />
-          ) : devError ? (
-            <div data-id="browser-windows-deverror" className="flex items-start gap-2 m-3 p-3 rounded-lg bg-white/[0.03] border border-white/[0.07] text-[12px] text-zinc-400">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-zinc-500" />
-              <span>{devError}</span>
-            </div>
-          ) : (
-            <NoDesktopCTA />
-          )
-        ) : error ? (
-          <div data-id="browser-windows-error" className="flex items-start gap-2 m-3 p-3 rounded-lg bg-white/[0.03] border border-white/[0.07] text-[12px] text-zinc-400">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-zinc-500" />
-            <span>{error}</span>
-          </div>
-        ) : isDesktop ? (
-          <DesktopSnapshotView clientId={clientId} onSendToAgent={onSendToAgent} />
-        ) : isMobile ? (
-          loading && phones.length === 0 ? (
-            <ProfileSkeleton />
-          ) : phones.length === 0 ? (
-            <div className="p-4 text-[12px] text-zinc-600">没有连接的 {backend === 'android' ? 'Android' : 'iOS'} 设备</div>
-          ) : (
-            <div data-id="browser-windows-phone-list" className="py-1">
-              {phones.map((d) => {
-                const key = `${clientId}:${d.id}`;
-                const unauth = d.status === 'unauthorized';
-                return (
-                  <button
-                    key={key}
-                    data-id="mobile-device-row"
-                    onClick={() => { onSelect(null); onSelectMobile?.({ clientId, platform: d.platform, id: d.id, label: d.model || d.id }); }}
-                    className={cn(
-                      'w-full flex items-center gap-2 px-3 py-2 text-left transition-colors cursor-pointer',
-                      selectedMobileKey === key ? 'bg-white/[0.07]' : 'hover:bg-white/[0.03]',
-                    )}
-                  >
-                    <Smartphone className="w-4 h-4 text-zinc-500 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[13px] text-zinc-200 truncate">{d.model || d.id}</div>
-                      <div className="text-[11px] text-zinc-600 truncate">{d.id}{unauth ? ' · 未授权' : ''}</div>
-                    </div>
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
-                  </button>
-                );
-              })}
-            </div>
-          )
-        ) : loading && profiles.length === 0 ? (
-          <ProfileSkeleton />
-        ) : profiles.length === 0 ? (
-          <div className="p-4 text-[12px] text-zinc-600">{t('bwNoProfiles', { backend: backend === 'chrome' ? 'Chrome' : 'Electron' })}</div>
-        ) : (
-          <div data-id="browser-windows-profile-list" className="py-1">
-            {profiles.filter((p) => showSystem || !isSystem(p)).map((p) => (
-              <ProfileRow
-                key={p.key}
-                profile={p}
-                selected={selectedKey === p.key}
-                onClick={() => { onSelectMobile?.(null); onSelect({ clientId, deviceId: devices.find((d) => d.clientId === clientId)?.deviceId || '', profile: p }); }}
-              />
-            ))}
-            {!showSystem && profiles.some(isSystem) && profiles.every(isSystem) && (
-              <div className="px-3 py-4 text-[12px] text-zinc-600">{t('bwSystemHiddenPre')}<Eye className="w-3 h-3 inline -mt-0.5" />{t('bwSystemHiddenPost')}</div>
-            )}
-          </div>
-        )}
+      <div data-id="browser-windows-body" className="flex min-h-0 flex-1 flex-col overflow-auto">
+        {body}
       </div>
     </div>
   );
 }
 
 function ProfileRow({ profile, selected, onClick }: { profile: Profile; selected: boolean; onClick: () => void }) {
-  const proxyOn = profile.proxy?.enabled && profile.proxy?.url;
-  // The Google identity (gmail), resolved from the accounts map, shown inline on
-  // the Profile-name line.
+  const { t } = useTranslation('layout');
+  const proxyOn = !!(profile.proxy?.enabled && profile.proxy?.url);
   const gmail = profile.gmail || '';
   const ip = profile.ipInfo?.ip;
   const area = profile.ipInfo?.area;
+  const running = profile.backend === 'electron' || profile.running;
   return (
     <button
+      type="button"
       data-id="BrowserProfileRow"
       onClick={onClick}
       className={cn(
-        'w-full flex items-center gap-2 px-2.5 py-2 text-left border-b border-white/[0.04] transition-colors cursor-pointer',
-        selected ? 'bg-white/[0.07]' : 'hover:bg-white/[0.03]',
+        'flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left transition-colors',
+        selected ? 'bg-[var(--dev-active)]' : 'hover:bg-[var(--dev-hover)]',
       )}
     >
-      <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', profile.backend === 'electron' || profile.running ? 'bg-emerald-500/80' : 'bg-zinc-600')} />
+      <Dot tone={running ? 'ok' : 'neutral'} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span data-id="browser-profile-name" className={cn('text-[13px] truncate shrink-0', selected ? 'text-zinc-100' : 'text-zinc-200')}>{profile.name}</span>
-          <span className="text-[10px] text-zinc-600 shrink-0">#{profile.accountIdx}</span>
-          {gmail && <span data-id="browser-profile-gmail" className="text-[11px] text-zinc-500 truncate" title={gmail}>{gmail}</span>}
+          <span data-id="browser-profile-name" className="shrink-0 truncate text-[13px] font-medium text-[var(--dev-text)]">{profile.name}</span>
+          {gmail ? (
+            <span data-id="browser-profile-gmail" className="truncate text-[11px] text-[var(--dev-text-3)]" title={gmail}>{gmail}</span>
+          ) : null}
         </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          {proxyOn ? (
-            <span className="text-[10px] px-1 rounded bg-violet-500/10 text-violet-300/80 truncate shrink-0" title={profile.proxy.url}>proxy</span>
-          ) : (
-            <span className="text-[10px] px-1 rounded bg-white/[0.04] text-zinc-600 shrink-0">no proxy</span>
-          )}
-          {ip && (
-            <span className="text-[10px] px-1 rounded bg-sky-500/10 text-sky-300/80 truncate shrink-0"
-              title={`${ip}${area ? ' · ' + area : ''}`}>
-              {ip}{area ? ` · ${area}` : ''}
-            </span>
-          )}
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          {proxyOn
+            ? <Chip tone="accent" title={profile.proxy.url}>proxy</Chip>
+            : <Chip title={t('bwNoProxyTitle', { defaultValue: '未配置代理，直连出口' })}>no proxy</Chip>}
+          {ip ? <Chip tone="ok" title={`${ip}${area ? ' · ' + area : ''}`}>{ip}{area ? ` · ${area}` : ''}</Chip> : null}
         </div>
       </div>
-      <ChevronRight className={cn('w-3.5 h-3.5 shrink-0', selected ? 'text-zinc-300' : 'text-zinc-700')} />
+      <ChevronRight className={cn('h-3.5 w-3.5 shrink-0', selected ? 'text-[var(--dev-text-2)]' : 'text-[var(--dev-text-3)]')} />
     </button>
   );
 }
@@ -1344,79 +1320,77 @@ export function BrowserWindowsColumn({
   };
 
   return (
-    <div data-id="BrowserWindowsColumn" className="absolute inset-0 flex flex-col bg-[#0A0A0A]">
-      {/* header */}
-      <div data-id="browser-windows-column-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center gap-2 px-2.5 bg-[#0e0e0e] shrink-0">
-        {profile.backend === 'electron' ? <Atom className="w-3.5 h-3.5 text-zinc-500 shrink-0" /> : <Chrome className="w-3.5 h-3.5 text-zinc-500 shrink-0" />}
-        <span data-id="browser-windows-column-title" className="text-[13px] text-zinc-200 truncate flex-1">{profile.name}</span>
-        {/* New tab — sits to the LEFT of the profile-setting (config) button */}
+    <div data-id="BrowserWindowsColumn" className="absolute inset-0 flex flex-col bg-[var(--dev-bg)]">
+      <HeaderBar
+        icon={profile.backend === 'electron' ? <Atom className="h-3.5 w-3.5" /> : <Chrome className="h-3.5 w-3.5" />}
+        title={profile.name}
+        subtitle={windows && windows.length
+          ? t('bwTabCount', { count: windows.length, unit: profile.backend === 'chrome' ? t('bwUnitTab') : t('bwUnitWindow') })
+          : (profile.backend === 'electron' ? 'Electron' : 'Chrome')}
+      >
         {canAddTab && (
-          <button
-            data-id="browser-windows-column-add-btn"
+          <Btn
+            dataId="browser-windows-column-add-btn"
+            variant="accent"
+            icon={<Plus className="h-3.5 w-3.5" />}
+            busy={adding}
             onClick={onAdd}
-            disabled={adding}
             title={t('bwAddTabTitle')}
-            className="flex items-center gap-1 rounded-lg px-2 py-1 text-[12px] font-medium bg-white/[0.07] text-zinc-200 hover:bg-white/[0.12] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
           >
-            {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}{addLabel}
-          </button>
+            {addLabel}
+          </Btn>
         )}
-        <button data-id="browser-windows-column-config" onClick={() => setConfigOpen(true)} title={t('bwConfigProfile')}
-          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer">
-          <Settings className="w-3.5 h-3.5" />
-        </button>
-        <button data-id="browser-windows-column-refresh" onClick={() => load()} disabled={loading} title={t('bwRefreshWindows')}
-          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50">
-          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-        </button>
-        <button data-id="browser-windows-column-close" onClick={onClose} title={t('bwClose')}
-          className="p-1 rounded text-zinc-600 hover:text-zinc-300 transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
-      </div>
+        <IconBtn dataId="browser-windows-column-config" icon={<Settings className="h-3.5 w-3.5" />} onClick={() => setConfigOpen(true)} title={t('bwConfigProfile')} />
+        <IconBtn dataId="browser-windows-column-refresh" icon={<RefreshCw className="h-3.5 w-3.5" />} busy={loading} onClick={() => load()} title={t('bwRefreshWindows')} />
+        <IconBtn dataId="browser-windows-column-close" icon={<X className="h-3.5 w-3.5" />} onClick={onClose} title={t('bwClose')} />
+      </HeaderBar>
 
       {configOpen && <ProfileConfigModal clientId={clientId} profile={profile} onClose={() => setConfigOpen(false)} />}
 
-      {/* windows: Chrome-style compact tab list + preview pane for the selected one */}
-      <div data-id="browser-windows-column-body" className="flex-1 flex flex-col overflow-hidden">
+      <div data-id="browser-windows-column-body" className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {error && (
           isChromeMissingError(error) && profile.backend === 'chrome' ? (
-            <div data-id="browser-windows-chrome-missing" className="flex items-start gap-2 m-2.5 mb-0 p-3 rounded-lg bg-amber-950/30 border border-amber-900/40 text-[12px] text-amber-200/90">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
-              <div className="min-w-0 flex-1">
-                <div className="font-medium text-amber-100">{t('bwChromeMissingTitle')}</div>
-                <div className="mt-0.5 text-amber-200/80">{t('bwChromeMissingDesc')}</div>
-                <button
-                  type="button"
-                  data-id="browser-windows-chrome-install-link"
+            <StateBlock
+              dataId="browser-windows-chrome-missing"
+              tone="warn"
+              icon={<Chrome className="h-5 w-5" />}
+              title={t('bwChromeMissingTitle')}
+              hint={t('bwChromeMissingDesc')}
+              action={
+                <Btn
+                  dataId="browser-windows-chrome-install-link"
+                  variant="accent"
+                  icon={<Download className="h-3.5 w-3.5" />}
                   onClick={() => { void openOfficialChromeDownload(); }}
-                  className="mt-2 inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium bg-amber-500/20 text-amber-100 hover:bg-amber-500/30 transition-colors cursor-pointer"
                 >
-                  <Download className="w-3 h-3" />{t('bwChromeInstallBtn')}
-                </button>
-              </div>
-            </div>
+                  {t('bwChromeInstallBtn')}
+                </Btn>
+              }
+            />
           ) : (
-            <div className="flex items-start gap-2 m-2.5 mb-0 p-2 rounded-lg bg-white/[0.03] border border-white/[0.07] text-[11px] text-zinc-400">
-              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-zinc-500" />
-              <span>{error}{profile.backend === 'chrome' ? t('bwChromeRefreshHint') : ''}</span>
-            </div>
+            <ErrorStrip icon={<AlertCircle className="h-3.5 w-3.5" />}>
+              {error}{profile.backend === 'chrome' ? t('bwChromeRefreshHint') : ''}
+            </ErrorStrip>
           )
         )}
         {loading ? (
-          <div data-id="browser-windows-cards-loading" className="flex-1 flex items-center justify-center py-10">
-            <Loader2 className="w-5 h-5 animate-spin text-zinc-600" />
+          <div data-id="browser-windows-cards-loading" className="flex flex-1 items-center justify-center py-10">
+            <Loader2 className="h-5 w-5 animate-spin text-[var(--dev-text-3)]" />
           </div>
         ) : !windows || windows.length === 0 ? (
           !error && (
-            <div className="flex-1 flex flex-col items-center justify-center text-center px-6 py-10 gap-2 text-zinc-600">
-              <MonitorOff className="w-6 h-6 text-zinc-700" />
-              <div className="text-[12px]">{t('bwNoTabsYet', { unit: unitLabel })}</div>
-              <div className="text-[11px] text-zinc-700">{t('bwNoTabsHint', { label: addLabel })}</div>
-            </div>
+            <StateBlock
+              dataId="browser-windows-no-tabs"
+              icon={<MonitorOff className="h-5 w-5" />}
+              title={t('bwNoTabsYet', { unit: unitLabel })}
+              hint={t('bwNoTabsHint', { label: addLabel })}
+              action={canAddTab
+                ? <Btn variant="accent" icon={<Plus className="h-3.5 w-3.5" />} busy={adding} onClick={onAdd}>{addLabel}</Btn>
+                : undefined}
+            />
           )
         ) : (
-          /* each tab shown as a screenshot card */
-          <div data-id="browser-windows-cards" className="flex-1 overflow-auto p-2.5 flex flex-col gap-2.5">
-            <div className="text-[10px] text-zinc-600 px-0.5">{t('bwTabCount', { count: windows.length, unit: profile.backend === 'chrome' ? t('bwUnitTab') : t('bwUnitWindow') })}</div>
+          <div data-id="browser-windows-cards" className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-2.5">
             {windows.map((w) => (
               <WindowCard
                 key={w.key}
@@ -1864,66 +1838,67 @@ function WindowCard({ clientId, deviceId, profile, win, onRefresh, onSendToAgent
   };
 
   const open = win.status === 'open';
-  const ActBtn = ({ action, title, icon }: { action: WinAction; title: string; icon: React.ReactNode; }) => {
+  const ActBtn = ({ action, title, icon }: { action: WinAction; title: string; icon: React.ReactNode }) => (
     // reload/close need a live window; open is always allowed (reopen if closed)
-    const disabled = !!busy || (action !== 'open' && !open);
-    return (
-      <button
-        data-id={`browser-window-${action}`}
-        onClick={() => act(action)}
-        disabled={disabled}
-        title={title}
-        className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.06] transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-      >
-        {busy === action ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : icon}
-      </button>
-    );
-  };
+    <IconBtn
+      dataId={`browser-window-${action}`}
+      icon={icon}
+      title={title}
+      busy={busy === action}
+      disabled={!!busy || (action !== 'open' && !open)}
+      onClick={() => act(action)}
+    />
+  );
 
   return (
-    <div data-id="BrowserWindowCard" className="shrink-0 rounded-xl border border-white/[0.1] bg-[#161619] overflow-hidden shadow-lg shadow-black/50 hover:border-white/20 transition-colors">
-      <div data-id="browser-window-shot" className="relative aspect-[16/10] bg-gradient-to-b from-[#222228] to-[#16161a] flex items-center justify-center">
+    <div
+      data-id="BrowserWindowCard"
+      className="shrink-0 overflow-hidden rounded-xl border border-[var(--dev-border)] bg-[var(--dev-surface)] transition-colors hover:border-[var(--dev-border-strong)]"
+    >
+      <div data-id="browser-window-shot" className="relative flex aspect-[16/10] items-center justify-center bg-[var(--dev-surface-2)]">
         {shot ? (
-          <img src={shot} alt={win.title} className="w-full h-full object-cover object-top" />
+          <img src={shot} alt={win.title} className="h-full w-full object-cover object-top" />
         ) : shooting ? (
-          <Loader2 className="w-5 h-5 animate-spin text-zinc-600" />
+          <Loader2 className="h-5 w-5 animate-spin text-[var(--dev-text-3)]" />
         ) : err ? (
-          <div className="flex flex-col items-center gap-1 px-2 text-center text-[10px] text-zinc-600">
-            <MonitorOff className="w-4 h-4" />{err}
+          <div className="flex flex-col items-center gap-1 px-3 text-center text-[10px] text-[var(--dev-text-3)]">
+            <MonitorOff className="h-4 w-4" />{err}
           </div>
         ) : (
-          <Globe className="w-5 h-5 text-zinc-700" />
+          <Globe className="h-5 w-5 text-[var(--dev-text-3)]" />
         )}
         <button
+          type="button"
           data-id="browser-window-capture"
           onClick={capture}
           disabled={shooting || win.status === 'closed'}
           title={win.status === 'closed' ? t('bwWindowClosed') : t('bwScreenshot')}
-          className="absolute bottom-1.5 right-1.5 p-1.5 rounded-md bg-black/60 text-zinc-300 hover:text-white hover:bg-black/80 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          className="absolute bottom-1.5 right-1.5 cursor-pointer rounded-md bg-black/55 p-1.5 text-white/90 transition-colors hover:bg-black/75 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {shooting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+          {shooting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
         </button>
         {win.status === 'closed' && (
-          <span className="absolute top-1.5 left-1.5 text-[10px] px-1 rounded bg-zinc-700/70 text-zinc-300">{t('bwClosedBadge')}</span>
+          <span className="absolute left-1.5 top-1.5">
+            <Chip>{t('bwClosedBadge')}</Chip>
+          </span>
         )}
       </div>
-      <div className="px-2.5 py-2 flex items-center gap-1.5 bg-white/[0.035] border-t border-white/[0.06]">
+      <div className="flex items-center gap-1.5 border-t border-[var(--dev-border)] px-2.5 py-2">
         <div className="min-w-0 flex-1">
-          <div data-id="browser-window-title" className="text-[12px] text-zinc-200 font-medium truncate" title={win.title}>{win.title}</div>
-          {win.url && <div className="text-[10px] text-zinc-500 truncate" title={win.url}>{win.url}</div>}
+          <div data-id="browser-window-title" className="truncate text-[12px] font-medium text-[var(--dev-text)]" title={win.title}>{win.title}</div>
+          {win.url && <div className="truncate text-[10px] text-[var(--dev-text-3)]" title={win.url}>{win.url}</div>}
         </div>
-        <div data-id="browser-window-actions" className="flex items-center gap-0.5 shrink-0">
-          <button
-            data-id="browser-window-send"
-            onClick={() => onSendToAgent(buildAgentPrompt({ clientId, deviceId }, profile, win))}
+        <div data-id="browser-window-actions" className="flex shrink-0 items-center gap-0.5">
+          <IconBtn
+            dataId="browser-window-send"
+            icon={<Send className="h-3.5 w-3.5" />}
+            tone="accent"
             title={t('bwSendToAgent')}
-            className="p-1 rounded text-zinc-500 hover:text-blue-300 hover:bg-white/[0.06] transition-colors cursor-pointer"
-          >
-            <Send className="w-3.5 h-3.5" />
-          </button>
-          <ActBtn action="open" title={open ? t('bwBringFront') : t('bwReopen')} icon={<Eye className="w-3.5 h-3.5" />} />
-          <ActBtn action="reload" title={t('bwReloadPage')} icon={<RotateCcw className="w-3.5 h-3.5" />} />
-          <ActBtn action="close" title={t('bwCloseWindow')} icon={<X className="w-3.5 h-3.5" />} />
+            onClick={() => onSendToAgent(buildAgentPrompt({ clientId, deviceId }, profile, win))}
+          />
+          <ActBtn action="open" title={open ? t('bwBringFront') : t('bwReopen')} icon={<Eye className="h-3.5 w-3.5" />} />
+          <ActBtn action="reload" title={t('bwReloadPage')} icon={<RotateCcw className="h-3.5 w-3.5" />} />
+          <ActBtn action="close" title={t('bwCloseWindow')} icon={<X className="h-3.5 w-3.5" />} />
         </div>
       </div>
       {injectOpen && (

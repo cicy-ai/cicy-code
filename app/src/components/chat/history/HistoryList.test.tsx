@@ -72,7 +72,8 @@ describe('HistoryList pending reply placement', () => {
 
     expect(document.querySelector('[data-id="current-history-q-toggle-9"]')).not.toBeInTheDocument();
     expect(screen.getByText('最后一个问题')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="current-history-final-answer-placeholder"]')).toHaveClass('h-2');
+    // h-5 (20px) clears fade-scroll-y's 16px bottom mask; h-2 left the newest bubble inside it.
+    expect(document.querySelector('[data-id="current-history-final-answer-placeholder"]')).toHaveClass('h-5');
   });
 
   it('does not offer a lazy-answer toggle between adjacent consecutive questions', () => {
@@ -270,7 +271,7 @@ describe('HistoryList pending reply placement', () => {
     expect(previousAnswer.querySelector('[data-id="current-history-stream-loading"]')).not.toBeInTheDocument();
     expect(newAnswerPlaceholder).toBeInTheDocument();
     expect(newAnswerPlaceholder.querySelector('[data-id="current-history-stream-loading"]')).toBeInTheDocument();
-    expect(view.container.querySelector('[data-id="current-history-final-answer-placeholder"]')).toHaveClass('h-8');
+    expect(view.container.querySelector('[data-id="current-history-final-answer-placeholder"]')).toHaveClass('h-10');
     expect(previousAnswer.compareDocumentPosition(newQuestion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(newQuestion.compareDocumentPosition(newAnswerPlaceholder) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

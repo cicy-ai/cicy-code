@@ -27,6 +27,7 @@ import AliyunAccountsPanel, { AliyunIcon } from "./AliyunAccountsPanel";
 import { AppModal, useDialogs } from "../ui/Modal";
 import BrowserWindowsPanel, { BrowserWindowsColumn, type Profile as BrowserProfile } from "../layout/BrowserWindowsPanel";
 import { MobileDeviceColumn, type MobileSel } from "../layout/MobileDevicesPanel";
+import DesktopScreenView from "../layout/devices/DesktopScreenView";
 
 type Platform = "github" | "cloudflare" | "google" | "chatgpt" | "npm" | "docker" | "aliyun";
 type MatrixSection = "accounts" | "devices";
@@ -65,6 +66,8 @@ export default function AccountMatrixPanel({
   const [platform, setPlatform] = useState<Platform>("github");
   const [browserSel, setBrowserSel] = useState<{ clientId: string; deviceId: string; profile: BrowserProfile } | null>(null);
   const [mobileSel, setMobileSel] = useState<MobileSel | null>(null);
+  // The 桌面 tab renders its screen here, in the wide pane — see BrowserWindowsPanel.
+  const [desktopSel, setDesktopSel] = useState<{ clientId: string; label: string } | null>(null);
   const [accounts, setAccounts] = useState<CFAccount[]>([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState("");
@@ -496,12 +499,20 @@ export default function AccountMatrixPanel({
               onSelectMobile={setMobileSel}
               selectedMobileKey={mobileSel ? `${mobileSel.clientId}:${mobileSel.id}` : null}
               onSendToAgent={onSendToAgent}
+              onSelectDesktop={setDesktopSel}
               inlineActions
             />
           ) : null}
         </div>
         <div data-id="account-matrix-device-detail" className="relative h-full min-w-0 flex-1">
-          {browserSel ? (
+          {desktopSel ? (
+            <DesktopScreenView
+              key={desktopSel.clientId}
+              clientId={desktopSel.clientId}
+              deviceLabel={desktopSel.label}
+              onSendToAgent={onSendToAgent}
+            />
+          ) : browserSel ? (
             <BrowserWindowsColumn
               key={`${browserSel.clientId}:${browserSel.profile.key}`}
               clientId={browserSel.clientId}

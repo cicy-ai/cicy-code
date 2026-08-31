@@ -41,7 +41,32 @@ const (
 	snapMinIntervalSec     = 30
 	snapDefaultKeep        = 1 // keep only the latest snapshot per device
 	snapRPCTimeout         = 25 * time.Second
+
+	// Capture geometry/compression. The scheduler keeps the cheap defaults; the
+	// UI's 画质 picker overrides them per request (流畅 480/q45 → 超清 1920/q92),
+	// so a user watching a live screen can trade bandwidth for legibility.
+	snapDefaultMaxWidth = 600
+	snapDefaultQuality  = 60
+	snapMinMaxWidth     = 320
+	snapMaxMaxWidth     = 3840
+	snapMinQuality      = 20
+	snapMaxQuality      = 95
 )
+
+// clampInt keeps a caller-supplied capture parameter inside its supported range;
+// 0 (absent) falls back to def.
+func clampInt(v, def, lo, hi int) int {
+	if v <= 0 {
+		return def
+	}
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
 
 type snapConfig struct {
 	enabled  bool
@@ -134,9 +159,14 @@ func desktopRPC(clientID, tool string, args map[string]interface{}, timeout time
 const desktopSnapshotTool = "desktop_snapshot"
 
 // captureDevice fetches a desktop snapshot from cicy-desktop and writes it to disk.
-func captureDevice(clientID, deviceID, platform string, keep int) (string, error) {
+// maxWidth/quality are clamped; pass 0 for the scheduler's defaults.
+func captureDevice(clientID, deviceID, platform string, keep, maxWidth, quality int) (string, error) {
 	_ = platform // capture happens inside cicy-desktop; platform is informational
-	res, err := desktopRPC(clientID, desktopSnapshotTool, map[string]interface{}{"maxWidth": 600}, snapRPCTimeout)
+	args := map[string]interface{}{
+		"maxWidth": clampInt(maxWidth, snapDefaultMaxWidth, snapMinMaxWidth, snapMaxMaxWidth),
+		"quality":  clampInt(quality, snapDefaultQuality, snapMinQuality, snapMaxQuality),
+	}
+	res, err := desktopRPC(clientID, desktopSnapshotTool, args, snapRPCTimeout)
 	if err != nil {
 		return "", err
 	}
@@ -270,7 +300,7 @@ type desktopClient struct {
 func captureAllDesktops(keep int) {
 	clients := hub.snapshotEligibleClients()
 	for _, c := range clients {
-		if _, err := captureDevice(c.clientID, c.deviceID, c.platform, keep); err != nil {
+		if _, err := captureDevice(c.clientID, c.deviceID, c.platform, keep, 0, 0); err != nil {
 			log.Printf("[snapshot] capture failed device=%s platform=%s: %v", snapDeviceKey(c.deviceID, c.clientID), c.platform, err)
 		}
 	}
@@ -378,7 +408,7 @@ func handleDesktopSnapshotImage(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, name, st.ModTime(), f)
 }
 
-// POST /api/desktop/snapshot-now { client_id } → capture immediately.
+// POST /api/desktop/snapshot-now { client_id, max_width?, quality? } → capture now.
 func handleDesktopSnapshotNow(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "method not allowed", 405)
@@ -386,6 +416,8 @@ func handleDesktopSnapshotNow(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		ClientID string `json:"client_id"`
+		MaxWidth int    `json:"max_width"`
+		Quality  int    `json:"quality"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", 400)
@@ -402,7 +434,7 @@ func handleDesktopSnapshotNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := loadSnapConfig()
-	name, err := captureDevice(clientID, deviceID, platform, cfg.keep)
+	name, err := captureDevice(clientID, deviceID, platform, cfg.keep, req.MaxWidth, req.Quality)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(502)

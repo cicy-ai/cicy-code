@@ -602,11 +602,16 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
         })}
       </div>
       {activeBodyTab === 'history' ? (
+        // -mx-5 keeps the transcript full-bleed. The matching -mb-4 is gone: it
+        // pulled the list's bottom edge onto the composer's top border, so
+        // fade-scroll-y's 16px bottom mask landed ON the composer and a
+        // just-sent bubble read as clipped in half. Keeping the parent's pb-4
+        // ends the list clear of the footer.
         <div
           data-id={`project-agent-card-history-body-${shortPaneId(agent.paneId)}`}
           onPointerDown={(event) => event.stopPropagation()}
           onWheel={(event) => event.stopPropagation()}
-          className="-mx-5 -mb-4 min-h-0 flex-1 overflow-hidden bg-[#0b0b0d]"
+          className="-mx-5 min-h-0 flex-1 overflow-hidden bg-[#0b0b0d]"
         >
           <CurrentHistoryView
             paneId={shortPaneId(agent.paneId)}

@@ -24,6 +24,34 @@
   --vsc-error: #f14c4c;
   --chat-question-bg: rgba(255, 255, 255, 0.035);
   --chat-question-border: rgba(255, 255, 255, 0.065);
+
+  /* ── Devices UI (设备面板) design tokens ────────────────────────────────────
+     The light theme below is otherwise driven by a hard-coded allowlist of dark
+     Tailwind class strings (`html[data-theme="light"] [class~="bg-[#0A0A0A]"]`…),
+     which silently fails for any NEW colour. The devices panel therefore paints
+     itself from these semantic tokens instead — defined once per theme, so both
+     themes stay correct without touching that allowlist. */
+  --dev-bg: #0a0a0a;
+  --dev-surface: #121214;
+  --dev-surface-2: #17171a;
+  --dev-raise: #1d1d21;
+  --dev-border: rgba(255, 255, 255, 0.08);
+  --dev-border-strong: rgba(255, 255, 255, 0.16);
+  --dev-text: #e8e8ea;
+  --dev-text-2: #a1a1aa;
+  --dev-text-3: #6f6f78;
+  --dev-hover: rgba(255, 255, 255, 0.05);
+  --dev-active: rgba(255, 255, 255, 0.09);
+  --dev-accent: #60a5fa;
+  --dev-accent-bg: rgba(96, 165, 250, 0.16);
+  --dev-live: #f87171;
+  --dev-live-bg: rgba(248, 113, 113, 0.14);
+  --dev-ok: #34d399;
+  --dev-ok-bg: rgba(52, 211, 153, 0.14);
+  --dev-warn: #fbbf24;
+  --dev-warn-bg: rgba(251, 191, 36, 0.14);
+  --dev-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --dev-skeleton: rgba(255, 255, 255, 0.06);
 }
 
 html[data-theme="light"] {
@@ -46,6 +74,29 @@ html[data-theme="light"] {
   --vsc-block-border: #e4e4e7;
   --chat-question-bg: #f5f5f5;
   --chat-question-border: #e5e5e5;
+
+  /* devices UI — light counterparts (see the dark block above) */
+  --dev-bg: #ffffff;
+  --dev-surface: #ffffff;
+  --dev-surface-2: #f7f7f8;
+  --dev-raise: #f0f0f2;
+  --dev-border: #e7e7ea;
+  --dev-border-strong: #d0d0d6;
+  --dev-text: #18181b;
+  --dev-text-2: #52525b;
+  --dev-text-3: #8b8b95;
+  --dev-hover: #f4f4f5;
+  --dev-active: #e8e8ec;
+  --dev-accent: #2563eb;
+  --dev-accent-bg: rgba(37, 99, 235, 0.1);
+  --dev-live: #dc2626;
+  --dev-live-bg: rgba(220, 38, 38, 0.09);
+  --dev-ok: #059669;
+  --dev-ok-bg: rgba(5, 150, 105, 0.1);
+  --dev-warn: #b45309;
+  --dev-warn-bg: rgba(180, 83, 9, 0.1);
+  --dev-shadow: 0 12px 32px rgba(24, 24, 27, 0.12);
+  --dev-skeleton: rgba(24, 24, 27, 0.06);
 }
 
 html[data-theme="light"],

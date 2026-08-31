@@ -707,7 +707,10 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     expect(historyTab).toHaveAttribute('aria-selected', 'true');
     const historyBody = document.querySelector('[data-id="project-agent-card-history-body-w-101"]');
     expect(historyBody).toBeInTheDocument();
-    expect(historyBody).toHaveClass('-mb-4');
+    // -mx-5 keeps the transcript full-bleed; -mb-4 must NOT come back — it put
+    // fade-scroll-y's bottom mask on the composer and clipped the newest bubble.
+    expect(historyBody).toHaveClass('-mx-5');
+    expect(historyBody).not.toHaveClass('-mb-4');
     expect(historyBody?.querySelector('[data-id="current-history-view"]')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '角色' }));
     expect(document.querySelector('[data-id="project-agent-card-history-body-w-101"]')).not.toBeInTheDocument();
