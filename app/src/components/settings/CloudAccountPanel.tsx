@@ -13,6 +13,7 @@ import {
   Monitor, Network, RefreshCw, Search, Server, ShieldCheck, Terminal, WifiOff, X, Zap,
 } from 'lucide-react';
 import apiService from '../../services/api';
+import { openOrActivateElectronProfileTab } from '../../lib/speedup/rpc';
 import { useDialogs } from '../ui/Modal';
 
 export interface CloudAccountInfo {
@@ -112,27 +113,48 @@ export async function fetchCloudAccount(): Promise<CloudAccountInfo | null> {
 
 /** Open an instance host (or one of its ports) in a new tab. On Hub the tab
  *  is pre-authenticated through a one-time grant; on Cloud it is a plain link. */
-async function openInstanceHost(inst: CloudInstanceInfo, port = 0) {
+// The node's real URL is only known after an async round-trip (the hub mints a
+// signed one), so resolve it first and let each host decide how to open it.
+async function resolveInstanceUrl(inst: CloudInstanceInfo, port: number): Promise<string> {
   const fallback = port ? `https://${(inst.proxyHost || '').replace(/^([^.]+)\./, `$1-${port}.`)}` : `https://${inst.proxyHost}`;
-  // Open synchronously so popup blockers treat it as user-initiated, then steer
-  // it. NOT with the 'noopener' feature: that makes window.open return null, so
-  // the blank tab could never be steered and a SECOND window.open followed —
-  // the desktop showed an empty 新标签页 next to the real one. Keep the handle
-  // and sever the opener link by hand instead.
+  if (!inst.hub) return fallback;
+  try {
+    const res = await apiService.openCiCyCloudInstance(inst.instanceId, port);
+    const url = String(res?.data?.url || '');
+    if (url) return url;
+  } catch (e) { toast(errText(e)); }
+  return fallback;
+}
+
+export async function openInstanceHost(inst: CloudInstanceInfo, port = 0) {
+  // Inside cicy-desktop, open through the tab manager — NOT window.open.
+  //
+  // window.open lands the tab in whatever profile the calling page belongs to,
+  // which is not necessarily profile 0, and the popup-blocker dance (open
+  // about:blank synchronously, steer it once the URL resolves) left a stray
+  // blank tab behind: the resolve is async, so by the time the real URL is
+  // known the blank tab is already sitting in the tab strip. The desktop has
+  // no popup blocker to appease, so neither trick is needed here — resolve
+  // first, then hand the finished URL to profile 0.
+  if (typeof (window as any).electronRPC === 'function') {
+    const url = await resolveInstanceUrl(inst, port);
+    // accountIdx 0 is the home profile — the same one the homepage lives in,
+    // so a node opens beside it instead of in a sandbox profile.
+    if (await openOrActivateElectronProfileTab(url, 0, { activate: true })) return;
+    window.open(url, '_blank', 'noopener');
+    return;
+  }
+
+  // Plain browser: keep the synchronous open so the popup blocker sees a user
+  // gesture. NOT with the 'noopener' feature: that makes window.open return
+  // null, so the blank tab could never be steered and a SECOND window.open
+  // followed — an empty tab next to the real one. Keep the handle and sever
+  // the opener link by hand instead.
   const tab = window.open('about:blank', '_blank');
   if (tab) { try { tab.opener = null; } catch { /* cross-origin later; fine */ } }
-  const steer = (url: string) => {
-    if (tab && !tab.closed) tab.location.href = url;
-    else window.open(url, '_blank', 'noopener');
-  };
-  try {
-    if (inst.hub) {
-      const res = await apiService.openCiCyCloudInstance(inst.instanceId, port);
-      const url = String(res?.data?.url || '');
-      if (url) { steer(url); return; }
-    }
-  } catch (e) { toast(errText(e)); }
-  steer(fallback);
+  const url = await resolveInstanceUrl(inst, port);
+  if (tab && !tab.closed) tab.location.href = url;
+  else window.open(url, '_blank', 'noopener');
 }
 
 /* ───────────────────────── visual atoms ───────────────────────── */

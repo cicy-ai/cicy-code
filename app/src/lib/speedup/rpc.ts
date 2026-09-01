@@ -39,8 +39,19 @@ function comparableTabUrl(value: string): string {
 /**
  * Open a URL in an Electron profile tab without creating duplicates.
  * Returns false outside cicy-desktop so callers can fall back to window.open.
+ *
+ * `activate` brings the tab to the front. It matters because the two branches
+ * below are otherwise inconsistent: re-using an existing tab always activates
+ * it, while `electron_tab_open` defaults to opening in the BACKGROUND (so an
+ * agent can work without stealing focus). For a tab the user asked for by
+ * clicking, that reads as "nothing happened" the first time and "it works" the
+ * second — pass activate:true from those call sites.
  */
-export async function openOrActivateElectronProfileTab(url: string, accountIdx = 1): Promise<boolean> {
+export async function openOrActivateElectronProfileTab(
+  url: string,
+  accountIdx = 1,
+  opts: { activate?: boolean } = {},
+): Promise<boolean> {
   if (typeof (window as any).electronRPC !== 'function') return false;
 
   const listed = parseElectronRPCJSON(await electronRPC('electron_tabs', { accountIdx }));
@@ -53,7 +64,7 @@ export async function openOrActivateElectronProfileTab(url: string, accountIdx =
   if (existing && typeof existing.webContentsId === 'number') {
     await electronRPC('electron_tab_activate', { webContentsId: existing.webContentsId });
   } else {
-    await electronRPC('electron_tab_open', { accountIdx, url });
+    await electronRPC('electron_tab_open', { accountIdx, url, activate: opts.activate === true });
   }
   return true;
 }
