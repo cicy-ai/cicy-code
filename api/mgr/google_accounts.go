@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -112,7 +113,15 @@ func handleGoogleAccounts(w http.ResponseWriter, r *http.Request) {
 			}
 			items = append(items, item{Profile: profileName, Email: email, Mobile: googleString(account, "mobile"), RecoveryEmail: googleString(account, "recovery_email"), PasswordSet: googleString(account, "password") != "", TwoFASet: googleString(account, "totp") != ""})
 		}
-		sort.Slice(items, func(i, j int) bool { return items[i].Profile < items[j].Profile })
+		// 按 profile_<N> 的数字 N 排序(而非字符串,否则 profile_10 会排在 profile_2 前面)。
+		sort.Slice(items, func(i, j int) bool {
+			ai, _ := strconv.Atoi(strings.TrimPrefix(items[i].Profile, "profile_"))
+			aj, _ := strconv.Atoi(strings.TrimPrefix(items[j].Profile, "profile_"))
+			if ai != aj {
+				return ai < aj
+			}
+			return items[i].Profile < items[j].Profile
+		})
 		J(w, M{"accounts": items})
 		return
 	}
