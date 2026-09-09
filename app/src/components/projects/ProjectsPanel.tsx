@@ -607,11 +607,18 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
         // fade-scroll-y's 16px bottom mask landed ON the composer and a
         // just-sent bubble read as clipped in half. Keeping the parent's pb-4
         // ends the list clear of the footer.
+        //
+        // select-text is NOT decoration: the card root carries `cursor-pointer`
+        // (the whole card is a click target) and index.css gives that utility
+        // `user-select: none` — meant for controls, but it inherits, so every
+        // answer in the transcript became unselectable. Reading a reply you
+        // cannot copy is the wrong trade for a card-level click target, so the
+        // conversation takes selection back for its whole subtree.
         <div
           data-id={`project-agent-card-history-body-${shortPaneId(agent.paneId)}`}
           onPointerDown={(event) => event.stopPropagation()}
           onWheel={(event) => event.stopPropagation()}
-          className="-mx-5 min-h-0 flex-1 overflow-hidden bg-[#0b0b0d]"
+          className="-mx-5 min-h-0 flex-1 select-text overflow-hidden bg-[#0b0b0d]"
         >
           <CurrentHistoryView
             paneId={shortPaneId(agent.paneId)}
