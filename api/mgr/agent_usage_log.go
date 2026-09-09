@@ -143,6 +143,22 @@ func agentUsageLogRead(agentID string, limit int) []agentUsageLogRecord {
 	return out
 }
 
+// agentUsageLogLatestMainlineModel is the model of the newest mainline
+// (non-aux) record — what the agent itself answers with. Auxiliary calls
+// (aux_kind set: Task subagents, post-turn housekeeping on a cheaper model)
+// are skipped so they never masquerade as the agent's model.
+func agentUsageLogLatestMainlineModel(agentID string) string {
+	for _, rec := range agentUsageLogRead(agentID, 50) {
+		if strings.TrimSpace(rec.AuxKind) != "" {
+			continue
+		}
+		if model := strings.TrimSpace(rec.Model); model != "" {
+			return model
+		}
+	}
+	return ""
+}
+
 // agentUsageRuntimeSummary scans the append-only usage log without retaining
 // it in memory. Pointers distinguish an explicitly recorded numeric zero from
 // a missing field; Cloud roster consumers must preserve that distinction.
@@ -171,6 +187,11 @@ func agentUsageRuntimeSummary(agentID string) (provider, model *string, cost *fl
 		if value, ok := values["cost_credit"].(float64); ok && !math.IsNaN(value) && !math.IsInf(value, 0) {
 			total += value
 			hasCost = true
+		}
+		// provider/model: mainline records only — an aux call (sidechain
+		// subagent on a cheaper model) must not become the roster's model.
+		if strings.TrimSpace(aiGatewayString(values["aux_kind"])) != "" {
+			continue
 		}
 		if value := strings.TrimSpace(aiGatewayString(values["provider"])); value != "" {
 			copy := value

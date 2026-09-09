@@ -59,3 +59,46 @@ func TestAgentInspectorLiveModelFallsBackToReplyWithoutUsageLog(t *testing.T) {
 		t.Fatalf("want claude-opus-5 from the reply snapshot, got %q", got)
 	}
 }
+
+// Claude Code fires auxiliary calls (aux_kind "sidechain": Task subagents,
+// post-turn housekeeping) on a cheaper model right after a turn, so the literal
+// last usage line is often haiku. The live model — and the roster summary the
+// hub / mobile read — must skip those and report the mainline model.
+func TestAgentInspectorLiveModelSkipsAuxiliarySidechainRecords(t *testing.T) {
+	withTempCicyRoot(t)
+	withTestStore(t)
+
+	const paneID = "w-9104"
+	if _, err := store.Exec(
+		"INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, use_custom_gateway) VALUES (?,?,?,?,?,?,?,?,?)",
+		normPaneID(paneID), paneID, "/tmp/"+paneID, "", "{}", "worker", "", "claude", 0,
+	); err != nil {
+		t.Fatalf("insert %s: %v", paneID, err)
+	}
+	aiGatewayAppendUsageLog(paneID, agentUsageLogRecord{TS: "2026-09-08T03:02:05Z", Model: "claude-fable-5-1", Status: "completed", CostCredit: 0.3})
+	aiGatewayAppendUsageLog(paneID, agentUsageLogRecord{TS: "2026-09-08T03:02:07Z", Model: "claude-haiku-4-5-20251001", Status: "completed", AuxKind: "sidechain", CostCredit: 0.01})
+
+	if got := agentInspectorLiveModel(paneID, aiGatewayReplySnapshot{Model: "claude-fable-5-1"}); got != "claude-fable-5-1" {
+		t.Fatalf("live model: want mainline claude-fable-5-1, got %q", got)
+	}
+	_, model, cost := agentUsageRuntimeSummary(paneID)
+	if model == nil || *model != "claude-fable-5-1" {
+		t.Fatalf("runtime summary model: want claude-fable-5-1, got %v", model)
+	}
+	// aux spend still bills to the pane
+	if cost == nil || *cost < 0.31-1e-9 {
+		t.Fatalf("runtime summary cost must include aux spend, got %v", cost)
+	}
+	// only aux records so far → no mainline model, fall back to the reply
+	const auxOnly = "w-9105"
+	if _, err := store.Exec(
+		"INSERT INTO agent_config (pane_id, title, workspace, init_script, config, role, default_model, agent_type, use_custom_gateway) VALUES (?,?,?,?,?,?,?,?,?)",
+		normPaneID(auxOnly), auxOnly, "/tmp/"+auxOnly, "", "{}", "worker", "", "claude", 0,
+	); err != nil {
+		t.Fatalf("insert %s: %v", auxOnly, err)
+	}
+	aiGatewayAppendUsageLog(auxOnly, agentUsageLogRecord{TS: "2026-09-08T03:02:07Z", Model: "claude-haiku-4-5-20251001", Status: "completed", AuxKind: "sidechain"})
+	if got := agentInspectorLiveModel(auxOnly, aiGatewayReplySnapshot{Model: "claude-opus-4-8"}); got != "claude-opus-4-8" {
+		t.Fatalf("aux-only log: want the reply model claude-opus-4-8, got %q", got)
+	}
+}

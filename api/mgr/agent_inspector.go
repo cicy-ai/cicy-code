@@ -2596,10 +2596,12 @@ func agentIsNonGateway(shortID string) bool {
 // request).
 func agentInspectorLiveModel(shortID string, reply aiGatewayReplySnapshot) string {
 	if agentIsNonGateway(shortID) {
-		if records := agentUsageLogRead(shortID, 1); len(records) > 0 {
-			if model := strings.TrimSpace(records[0].Model); model != "" {
-				return model
-			}
+		// Newest MAINLINE record only. Claude Code fires auxiliary calls
+		// (aux_kind "sidechain": Task subagents, post-turn housekeeping) on a
+		// cheaper model right after a turn; taking the literal last line made
+		// every idle fable/opus agent show as haiku.
+		if model := agentUsageLogLatestMainlineModel(shortID); model != "" {
+			return model
 		}
 	}
 	return aiGatewayReplyPrimaryModel(reply)
