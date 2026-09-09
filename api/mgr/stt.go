@@ -188,6 +188,15 @@ func runOpenAICompatibleSTT(w http.ResponseWriter, r *http.Request, audio []byte
 		model = "whisper-1"
 	}
 	_ = mw.WriteField("model", model)
+	// Recogniser-side context: the caller's own `prompt` wins; otherwise the
+	// agent's vocabulary (title / projects / recent prompts) is used.
+	agentID := strings.TrimSpace(r.FormValue("agent_id"))
+	agentCtx := loadSTTAgentContext(agentID)
+	if prompt := strings.TrimSpace(r.FormValue("prompt")); prompt != "" {
+		_ = mw.WriteField("prompt", prompt)
+	} else if prompt := sttWhisperPrompt(agentCtx); prompt != "" {
+		_ = mw.WriteField("prompt", prompt)
+	}
 	if lang := strings.TrimSpace(r.FormValue("language")); lang != "" {
 		_ = mw.WriteField("language", lang)
 	}
@@ -221,7 +230,26 @@ func runOpenAICompatibleSTT(w http.ResponseWriter, r *http.Request, audio []byte
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(respBody)
+	// LLM correction pass (on unless correct=0). The upstream JSON is passed
+	// through with `text` replaced and `raw` / `corrected` added, so clients
+	// that only read `text` keep working.
+	var parsed map[string]any
+	if json.Unmarshal(respBody, &parsed) != nil || parsed == nil {
+		_, _ = w.Write(respBody)
+		return
+	}
+	raw, _ := parsed["text"].(string)
+	parsed["raw"] = raw
+	parsed["corrected"] = false
+	if v := strings.TrimSpace(r.FormValue("correct")); v != "0" && v != "false" && strings.TrimSpace(raw) != "" {
+		if text, corrected, err := sttCorrectTranscript(raw, agentCtx); err != nil {
+			log.Printf("[stt] correction skipped: %v", err)
+		} else if corrected {
+			parsed["text"] = text
+			parsed["corrected"] = true
+		}
+	}
+	_ = json.NewEncoder(w).Encode(parsed)
 }
 
 func loadSTTDefaultKey() string {
