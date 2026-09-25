@@ -66,8 +66,8 @@ vi.mock('../layout/WechatBindModal', () => ({
   ),
 }));
 vi.mock('../layout/ForkConfirmModal', () => ({
-  default: ({ sourcePaneId, masterPaneId, projectId, onClose }: { sourcePaneId: string; masterPaneId: string; projectId?: number | string; onClose: () => void }) => (
-    <div data-id="mock-fork-confirm-modal">{sourcePaneId}:{masterPaneId}:{projectId}<button data-id="mock-fork-confirm-close" onClick={onClose}>close</button></div>
+  default: ({ sourcePaneId, masterPaneId, projectId, onClose, onForked }: { sourcePaneId: string; masterPaneId: string; projectId?: number | string; onClose: () => void; onForked: (newPaneId: string) => void }) => (
+    <div data-id="mock-fork-confirm-modal">{sourcePaneId}:{masterPaneId}:{projectId}<button data-id="mock-fork-confirm-close" onClick={onClose}>close</button><button data-id="mock-fork-confirm-send" onClick={() => { onForked('w-103:main.0'); onClose(); }}>send</button></div>
   ),
 }));
 vi.mock('@uiw/react-codemirror', () => ({
@@ -463,6 +463,69 @@ describe('<ProjectsPanel /> project view cache', () => {
     await waitFor(() => expect(api.updateGroupPaneLayout).toHaveBeenCalledWith(1, 'w-102:main.0', expect.objectContaining({ pos_x: 680, pos_y: 40 })));
     const cached = JSON.parse(localStorage.getItem('cicy_project_view:default') || '{}');
     expect(cached.layouts['w-102']).toMatchObject({ x: 680, y: 40 });
+  });
+
+  // A fork continues its source, so its card lands directly to the right of
+  // the source card — not in the first free slot anywhere on the canvas (which
+  // put it below or far away) — and slides further right past any card that
+  // already sits there. The slot is cached + persisted before the roster
+  // refresh, so the fallback placement never gets to move it.
+  it('places a fork directly to the right of its source card and past anything in the way', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0'], pane_count: 2 }] },
+    });
+    api.getGroup.mockResolvedValue({ data: { panes: [
+      { pane_id: 'w-101:main.0', pos_x: 40, pos_y: 40, width: 600, height: 320, z_index: 1 },
+      { pane_id: 'w-102:main.0', pos_x: 680, pos_y: 40, width: 600, height: 320, z_index: 2 },
+    ] } });
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({
+      zoom: 1,
+      pan: { x: 60, y: 60 },
+      layouts: {
+        'w-101': { x: 40, y: 40, z: 1, width: 600, height: 320 },
+        'w-102': { x: 680, y: 40, z: 2, width: 600, height: 320 },
+      },
+    }));
+    const onAgentsRefresh = vi.fn();
+    render(<ProjectsPanel agents={[
+      { paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' },
+      { paneId: 'w-102:main.0', title: '全栈', agentType: 'claude' },
+    ]} onOpenAgent={vi.fn()} masterPaneId="w-1001:main.0" onAgentsRefresh={onAgentsRefresh} />);
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-w-101"]')).toBeInTheDocument());
+
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-menu-w-101"]') as HTMLElement);
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-action-fork-w-101"]') as HTMLElement);
+    fireEvent.click(await waitFor(() => document.querySelector('[data-id="mock-fork-confirm-send"]') as HTMLElement));
+
+    // w-102 already occupies the slot right of w-101, so the fork goes right of w-102: 680 + 600 + 40.
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('cicy_project_view:default') || '{}').layouts['w-103'])
+      .toMatchObject({ x: 1320, y: 40, width: 600, height: 320, z: 3 }));
+    await waitFor(() => expect(api.updateGroupPaneLayout).toHaveBeenCalledWith(1, 'w-103:main.0', expect.objectContaining({ pos_x: 1320, pos_y: 40, z_index: 3 })));
+    expect(onAgentsRefresh).toHaveBeenCalled();
+  });
+
+  // The card dropdown (and its 移动到/添加到 submenus) must paint above every
+  // other card. jsdom does not evaluate the :has() rule in index.css, so
+  // assert the contract it relies on: the node carries the hook class and the
+  // menu renders inside that node.
+  it('renders the card dropdown inside its liftable canvas node', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'claude' }]} onOpenAgent={vi.fn()} masterPaneId="w-1001:main.0" />);
+    const node = await waitFor(() => {
+      const found = document.querySelector('[data-id="project-canvas-node-w-101"]');
+      if (!found) throw new Error('canvas node did not render');
+      return found as HTMLElement;
+    });
+    expect(node).toHaveClass('project-canvas-node');
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-menu-w-101"]') as HTMLElement);
+    const menu = await waitFor(() => {
+      const found = document.querySelector('[data-id="project-agent-card-menu"]');
+      if (!found) throw new Error('card menu did not open');
+      return found as HTMLElement;
+    });
+    expect(node.contains(menu)).toBe(true);
   });
 
   it('never stacks cards that have no stored layout on top of each other', async () => {

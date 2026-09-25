@@ -1839,6 +1839,40 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     height: DEFAULT_PROJECT_AGENT_HEIGHT,
   };
 
+  // A fork is a continuation of its source, so it lands directly to the RIGHT
+  // of the source card (same row, same size) rather than in the first free
+  // slot anywhere on the canvas. If that spot is taken, keep sliding right
+  // past whatever is in the way. The layout is cached and persisted BEFORE
+  // the roster refresh brings the new agent in, so the fallback placement
+  // never gets a chance to put it somewhere else.
+  const placeForkBesideSource = (source: ProjectAgent, newPaneId: string) => {
+    const newId = shortPaneId(newPaneId);
+    if (!newId || agentLayouts[newId]) return;
+    const sourceLayout = layoutForAgent(source);
+    const occupied = Object.values({ ...resolvedLayouts, ...agentLayouts });
+    const width = sourceLayout.width || DEFAULT_PROJECT_AGENT_WIDTH;
+    const height = sourceLayout.height || DEFAULT_PROJECT_AGENT_HEIGHT;
+    let x = sourceLayout.x + sourceLayout.width + PROJECT_AGENT_GAP;
+    const y = sourceLayout.y;
+    for (let guard = 0; guard < 64; guard += 1) {
+      const blocker = occupied.find((item) => projectLayoutsOverlap({ x, y, width, height }, item));
+      if (!blocker) break;
+      x = blocker.x + blocker.width + PROJECT_AGENT_GAP;
+    }
+    const z = Math.max(0, ...occupied.map((item) => item.z || 0)) + 1;
+    const layout: ProjectAgentLayout = { x, y, z, width, height };
+    setAgentLayouts((current) => {
+      const next = { ...current, [newId]: layout };
+      writeProjectViewCache(selectedProject.id, { layouts: next });
+      return next;
+    });
+    if (selectedProject.api_id) {
+      void apiService.updateGroupPaneLayout(selectedProject.api_id, newPaneId, {
+        pos_x: x, pos_y: y, width, height, z_index: z,
+      }).catch(() => {});
+    }
+  };
+
   const beginAgentDrag = (event: ReactPointerEvent<HTMLDivElement>, agent: ProjectAgent, index: number) => {
     // Never start a drag (and never setPointerCapture) from the title: with the
     // pointer captured by this wrapper, Chrome retargets the follow-up click /
@@ -2208,7 +2242,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               <div
                 key={agent.paneId}
                 data-id={`project-canvas-node-${shortPaneId(agent.paneId)}`}
-                className="pointer-events-auto absolute touch-none cursor-move"
+                // project-canvas-node lifts itself above every other card while its
+                // dropdown is open (index.css, :has()) — no re-render, no state.
+                className="project-canvas-node pointer-events-auto absolute touch-none cursor-move"
                 style={{ left: layout.x, top: layout.y, zIndex: cardSelected ? 1000 : layout.z }}
                 onPointerDown={(event) => beginAgentDrag(event, agent, index)}
                 onPointerMove={moveAgent}
@@ -2762,7 +2798,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           masterPaneId={shortPaneId(masterPaneId)}
           projectId={selectedProject.api_id}
           onClose={() => setForkTarget(null)}
-          onForked={() => { void onAgentsRefresh(); void load(false); }}
+          onForked={(newPaneId) => { placeForkBesideSource(forkTarget, newPaneId); void onAgentsRefresh(); void load(false); }}
           onOpenAgentFile={onOpenAgentFile}
         />
       ) : null}

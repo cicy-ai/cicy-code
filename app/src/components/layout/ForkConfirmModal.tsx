@@ -48,7 +48,7 @@ interface ForkConfirmModalProps {
   masterPaneId: string;
   projectId?: number | string;
   onClose: () => void;
-  onForked: () => void;
+  onForked: (newPaneId: string) => void;
   // Opens a file (workspace-relative path) in the source agent's file editor.
   onOpenAgentFile: (paneId: string, relPath: string) => void;
 }
@@ -195,7 +195,7 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, projectId
         prompt,
       });
       if (data?.pane_id) {
-        onForked();
+        onForked(String(data.pane_id));
         onClose();
       } else {
         setError(t('toastForkFailed') as string);

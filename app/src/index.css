@@ -1409,3 +1409,14 @@ html[data-theme="light"] [data-id^="model-picker-route-item-"] {
 html[data-theme="light"] [data-id^="model-picker-route-item-"]:hover {
   background: #e4e4e7 !important;
 }
+
+@layer utilities {
+  /* Projects canvas: a card's own dropdown (More menu + 移动到/添加到 submenus)
+     must paint above EVERY other card. Card nodes carry their stacking order
+     as an inline z-index, so lift the node hosting an open menu above all of
+     them without touching React state (a state round-trip re-rendered the
+     panel mid-action). */
+  .project-canvas-node:has([data-id="project-agent-card-menu"]) {
+    z-index: 2000 !important;
+  }
+}
