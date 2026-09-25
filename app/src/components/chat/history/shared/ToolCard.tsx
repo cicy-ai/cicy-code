@@ -158,7 +158,7 @@ export const ToolCard = memo(function ToolCard({ tool, toolId, running, runContr
         )}
         <span data-id="current-history-tool-toggle-name" className="shrink-0 rounded border border-white/[0.04] bg-white/[0.035] px-1.5 py-0.5 text-xs text-zinc-300">{toolName || 'tool'}</span>
         {headline ? (
-          <span data-id="current-history-tool-toggle-arg-preview" className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-400/90" title={headline}>{headline}</span>
+          <span data-id="current-history-tool-toggle-arg-preview" className="min-w-0 flex-1 select-text truncate font-mono text-xs text-zinc-400/90" title={headline}>{headline}</span>
         ) : <span data-id="current-history-tool-toggle-spacer" className="flex-1" />}
         {runControl}
         {!hideExpandIndicator ? (
