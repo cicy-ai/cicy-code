@@ -90,8 +90,47 @@ const CJK_FALLBACK = isWindows
 const MONO_FONT = isWindows
   ? `"JetBrains Mono Variable", "Cascadia Mono", "Cascadia Code", Consolas, ${CJK_FALLBACK}, ${EMOJI_FALLBACK}, monospace`
   : `"JetBrains Mono Variable", "SF Mono", Menlo, Consolas, ${CJK_FALLBACK}, ${EMOJI_FALLBACK}, monospace`
+// xterm's DOM renderer emits a `.xterm-bg-<n>` / `.xterm-fg-<n>` rule for every
+// 256-palette index straight from the active theme. Indices 16–255 are NOT in
+// our `TERM_THEMES` below, so xterm falls back to its built-in 256 table — whose
+// 24-step grayscale ramp (232–255) tops out at #eeeeee. On the dark terminal
+// (#000000 background) a program that paints with color 255 as a *background*
+// (e.g. `.xterm-bg-255`) renders a near-white block that glares against black.
+//
+// Fix: supply `extendedAnsi` (proposed API, already enabled via
+// allowProposedApi) so we control indices 16–255 ourselves on dark. We keep the
+// 6×6×6 color cube (16–231) at its real values — those are intentional colors —
+// and only re-map the grayscale ramp (232–255) so its bright end lands on a
+// soft dark gray instead of white. Light keeps the built-in table (it reads
+// fine on a pale background and minimumContrastRatio 4.5 tames outliers).
+const GRAY_RAMP_DARK_MIN = 0x0a // #0a0a0a — just above the black background
+const GRAY_RAMP_DARK_MAX = 0x45 // #454545 — readable yet never glaring on black
+function buildDarkExtendedAnsi(): string[] {
+  // extendedAnsi covers palette indices 16..255 (length up to 240). Element i
+  // maps to palette index i + 16.
+  const out: string[] = []
+  const hex = (n: number) => n.toString(16).padStart(2, '0')
+  for (let idx = 16; idx <= 255; idx += 1) {
+    if (idx < 232) {
+      // 6×6×6 color cube — reproduce xterm's default so real colors are kept.
+      const c = idx - 16
+      const r = Math.floor(c / 36)
+      const g = Math.floor((c % 36) / 6)
+      const b = c % 6
+      const level = (v: number) => (v === 0 ? 0 : 55 + v * 40)
+      out.push(`#${hex(level(r))}${hex(level(g))}${hex(level(b))}`)
+    } else {
+      // 24-step grayscale (232–255) compressed into a dark, non-glaring band.
+      const step = idx - 232 // 0..23
+      const v = Math.round(GRAY_RAMP_DARK_MIN + (step / 23) * (GRAY_RAMP_DARK_MAX - GRAY_RAMP_DARK_MIN))
+      out.push(`#${hex(v)}${hex(v)}${hex(v)}`)
+    }
+  }
+  return out
+}
+
 const TERM_THEMES = {
-  dark: { background: '#000000', foreground: '#d4d4d8', cursor: '#e4e4e7', selectionBackground: '#3b82f640' },
+  dark: { background: '#000000', foreground: '#d4d4d8', cursor: '#e4e4e7', selectionBackground: '#3b82f640', extendedAnsi: buildDarkExtendedAnsi() },
   light: {
     background: '#fafafa', foreground: '#27272a', cursor: '#18181b', selectionBackground: '#93c5fd80', selectionForeground: '#18181b',
     black: '#18181b', red: '#b91c1c', green: '#047857', yellow: '#a16207', blue: '#1d4ed8', magenta: '#a21caf', cyan: '#0e7490', white: '#d4d4d8',
