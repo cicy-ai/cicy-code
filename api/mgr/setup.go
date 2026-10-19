@@ -243,8 +243,14 @@ func cicyInstallCmd() string {
 	return npmGlobalInstallCmd("cicy-claude@latest")
 }
 
+// kiroCliInstallCmd is run in a fresh bash by /api/agents/install, so it must be
+// self-contained: it carries the same helper definitions the pane boot script
+// uses (kiroCliBootHelperLines) and then calls the installer. Previously this
+// returned a bare function name that was never defined anywhere, so the UI
+// "安装 Kiro CLI" button always failed with "command not found".
 func kiroCliInstallCmd() string {
-	return "__cicy_install_kiro_cli_with_progress"
+	lines := append(kiroCliBootHelperLines(), "__cicy_local_install_kiro")
+	return strings.Join(lines, "\n")
 }
 
 func packageInstallCmd(pkg string) string {
@@ -470,10 +476,11 @@ var builtinAgents = []struct {
 	{"claude", "Claude"},
 	{"codex", "Codex"},
 	{"opencode", "OpenCode"},
+	{"kiro-cli", "Kiro CLI"},
 	{"cicy", "CiCy"},
 }
 
-var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "cicy"}
+var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "kiro-cli", "cicy"}
 
 // cliAgentsEnabled reports whether pane-based CLI agent types (everything except
 // headless cicy) are available on this host. Windows always ships cicy-only:
