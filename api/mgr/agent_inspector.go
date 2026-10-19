@@ -2341,6 +2341,16 @@ func handleAgentHistoryIDsByPane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+	if view, ok := loadNativeSessionView(paneID); ok {
+		J(w, M{
+			"id":              int64(len(view.Items)),
+			"conversation_id": view.SessionID,
+			"model":           view.Model,
+			"provider":        "native-session",
+			"prompts":         view.prompts(),
+		})
+		return
+	}
 	resolvedConversationID, maxID, err := agentHistoryCurrentMaxID(paneID, conversationID)
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
@@ -2465,6 +2475,10 @@ func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+	if view, ok := loadNativeSessionView(paneID); ok {
+		J(w, view.replyPayload(paneID))
+		return
+	}
 	// The web UI polls this every 500 ms per open chat. current.json is the whole
 	// outbound body — megabytes — so read and parse it ONCE, from the (mtime,size)
 	// cache. It used to be read and parsed twice per call (here, and again inside
@@ -2954,6 +2968,17 @@ func handleAgentCurrentHistoryByPane(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+	if view, ok := loadNativeSessionView(paneID); ok {
+		page := view.window(limit, before)
+		J(w, M{
+			"pane_id":         paneID,
+			"conversation_id": page.ConversationID,
+			"items":           page.Items,
+			"next_before":     page.NextBefore,
+			"has_more":        page.HasMore,
+		})
+		return
+	}
 	page, err := agentHistoryLoadCurrentItemsPage(paneID, conversationID, limit, before)
 	if err == nil {
 		J(w, M{
