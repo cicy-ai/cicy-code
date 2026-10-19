@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -3918,6 +3919,20 @@ func isOpenClawInputReady(out string) bool {
 		!strings.Contains(lower, "connecting |")
 }
 
+// kiroStatusBarRe matches kiro's status bar. Older builds printed "Kiro · auto";
+// kiro-cli 2.3x prints the active agent name instead, e.g.
+// "kiro_default · auto · ◔ 2%" (agent · model · context).
+var kiroStatusBarRe = regexp.MustCompile(`(?m)^\s*(?:Kiro|[\w.-]+) · [\w.-]+ · `)
+
+// isKiroInputReady requires both the prompt placeholder and the status bar: the
+// placeholder alone flashes briefly during boot before kiro accepts input.
+func isKiroInputReady(out string) bool {
+	if !strings.Contains(out, "ask a question or describe a task") {
+		return false
+	}
+	return strings.Contains(out, "Kiro ·") || kiroStatusBarRe.MatchString(out)
+}
+
 func isAgentInputReady(agentType, out string) bool {
 	switch normalizeAgentType(agentType) {
 	case "claude":
@@ -3931,10 +3946,7 @@ func isAgentInputReady(agentType, out string) bool {
 	case "openclaw":
 		return isOpenClawInputReady(out)
 	case "kiro-cli", "kiro":
-		// Require both: status bar ("Kiro · auto") and prompt placeholder.
-		// The placeholder alone shows up briefly during boot before kiro is
-		// truly ready to accept input.
-		return strings.Contains(out, "Kiro ·") && strings.Contains(out, "ask a question or describe a task")
+		return isKiroInputReady(out)
 	case "cicy":
 		// The REPL prints this banner immediately on start (dispatcher_repl.go).
 		return strings.Contains(out, "● CiCy")
