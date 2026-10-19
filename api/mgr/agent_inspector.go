@@ -928,6 +928,18 @@ func agentInspectorHistoryData(agentID string) ([]aiGatewayMessageRecord, bool, 
 			return snapshotMessages, snapshotManaged, ""
 		}
 	}
+	// v3: official-login agents (kiro-cli, and later codex/opencode/claude) have
+	// no gateway/MITM snapshot, but write their own native session log on disk.
+	// Prefer that over the lossy tmux capture when a provider owns the type.
+	if atype := nativeSessionAgentType(agentID); atype != "" {
+		if native, claimed := nativeSessionMessages(agentID, atype, paneWorkspace(normPaneID(agentID))); claimed {
+			if len(native) > 0 {
+				return agentInspectorCollapseHistoryRecords(native), false, ""
+			}
+			// A provider owns this type but found nothing yet (fresh session,
+			// cwd not matched). Fall through to the existing paths.
+		}
+	}
 	if runtimeManaged {
 		return []aiGatewayMessageRecord{}, true, ""
 	}
