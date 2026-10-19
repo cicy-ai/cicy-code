@@ -162,16 +162,33 @@ func (v nativeSessionView) window(limit int, before int64) agentHistoryPage {
 	return agentHistoryPage{Items: out, ConversationID: v.SessionID, NextBefore: nextBefore, HasMore: hasMore}
 }
 
-// inFlight: the last message is a user message (question or tool result) the
-// agent has not answered yet. A stale log (agent killed mid-turn) stops reading
-// as busy after nativeInFlightMaxAge so the composer never locks forever.
+// inFlight: the agent still owes a reply. Native logs are written one completed
+// block at a time, so the log is SILENT both while the model generates and while
+// a tool runs. Busy therefore means the last message is either
+//   - a user message (question or tool_result) not yet answered, or
+//   - an assistant message ending in tool_use (the tool is running; its result
+//     line only lands when it finishes — observed: a 4-minute tool run with zero
+//     log writes in between).
+// A stale log (agent killed mid-turn) stops reading as busy after
+// nativeInFlightMaxAge so the composer never locks forever.
 const nativeInFlightMaxAge = 10 * time.Minute
 
 func (v nativeSessionView) inFlight() bool {
 	if len(v.Items) == 0 || time.Since(v.ModTime) > nativeInFlightMaxAge {
 		return false
 	}
-	return aiGatewayString(v.Items[len(v.Items)-1]["role"]) == "user"
+	last := v.Items[len(v.Items)-1]
+	switch aiGatewayString(last["role"]) {
+	case "user":
+		return true
+	case "assistant":
+		blocks := aiGatewaySlice(last["content"])
+		if len(blocks) == 0 {
+			return false
+		}
+		return aiGatewayString(aiGatewayMap(blocks[len(blocks)-1])["type"]) == "tool_use"
+	}
+	return false
 }
 
 // replyPayload is the current-reply response for a native session. Every line

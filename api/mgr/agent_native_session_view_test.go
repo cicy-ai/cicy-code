@@ -74,6 +74,17 @@ func TestKiroParseItemsChatShape(t *testing.T) {
 	if v.inFlight() {
 		t.Error("stale log must not read as in flight")
 	}
+
+	// assistant ending in tool_use = tool still running (log is silent until
+	// the result lands) → busy
+	v.ModTime = time.Now()
+	v.Items = append(v.Items[:4], map[string]interface{}{"role": "assistant", "content": []interface{}{
+		map[string]interface{}{"type": "text", "text": "let me run it"},
+		map[string]interface{}{"type": "tool_use", "id": "t9", "name": "shell"},
+	}})
+	if !v.inFlight() {
+		t.Error("trailing tool_use must read as in flight")
+	}
 }
 
 func TestKiroWindowPaging(t *testing.T) {
