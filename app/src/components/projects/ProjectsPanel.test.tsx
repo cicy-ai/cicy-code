@@ -288,6 +288,7 @@ describe('<ProjectsPanel /> project view cache', () => {
   });
 
   it('only zooms with the mouse wheel while hand mode is active', async () => {
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({ layoutMode: 'canvas', zoom: 1, pan: { x: 60, y: 60 }, layouts: {} }));
     render(<ProjectsPanel agents={[]} onOpenAgent={vi.fn()} />);
     await screen.findByText('projectDefault');
 
@@ -328,6 +329,7 @@ describe('<ProjectsPanel /> project view cache', () => {
     });
     api.getGroup.mockReturnValue(new Promise(() => {}));
     localStorage.setItem('cicy_project_view:default', JSON.stringify({
+      layoutMode: 'canvas',
       zoom: 1.25,
       pan: { x: 18, y: 24 },
       layouts: { 'w-101': { x: 120, y: 80, z: 3, width: 420, height: 360 } },
@@ -386,6 +388,7 @@ describe('<ProjectsPanel /> project view cache', () => {
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
     });
     localStorage.setItem('cicy_project_view:default', JSON.stringify({
+      layoutMode: 'canvas',
       zoom: 1,
       pan: { x: 60, y: 60 },
       layouts: { 'w-101': { x: 4000, y: 3000, z: 1, width: 300, height: 320 } },
@@ -412,6 +415,7 @@ describe('<ProjectsPanel /> project view cache', () => {
     let resolveLayout: (value: any) => void = () => {};
     api.getGroup.mockReturnValue(new Promise((resolve) => { resolveLayout = resolve; }));
     localStorage.setItem('cicy_project_view:default', JSON.stringify({
+      layoutMode: 'canvas',
       zoom: 1,
       pan: { x: 60, y: 60 },
       layouts: { 'w-101': { x: 40, y: 40, z: 1, width: 300, height: 320 } },
@@ -447,6 +451,7 @@ describe('<ProjectsPanel /> project view cache', () => {
       { pane_id: 'w-102:main.0', pos_x: 20, pos_y: 20, width: 600, height: 320, z_index: 2 },
     ] } });
     localStorage.setItem('cicy_project_view:default', JSON.stringify({
+      layoutMode: 'canvas',
       zoom: 1,
       pan: { x: 60, y: 60 },
       layouts: { 'w-101': { x: 40, y: 40, z: 1, width: 600, height: 320 } },
@@ -479,6 +484,7 @@ describe('<ProjectsPanel /> project view cache', () => {
       { pane_id: 'w-102:main.0', pos_x: 680, pos_y: 40, width: 600, height: 320, z_index: 2 },
     ] } });
     localStorage.setItem('cicy_project_view:default', JSON.stringify({
+      layoutMode: 'canvas',
       zoom: 1,
       pan: { x: 60, y: 60 },
       layouts: {
@@ -904,6 +910,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
 
   it('shows the agent role editor without a redundant toolbar and isolates its scrolling', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({ layoutMode: 'canvas', zoom: 1, pan: { x: 60, y: 60 }, layouts: {} }));
     render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} activeAgentId="w-101" onOpenAgent={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('tab', { name: '角色' }));

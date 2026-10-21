@@ -2319,6 +2319,27 @@ func codexResumeBootLines() []string {
 	}
 }
 
+// kiroResumeBootLines emits boot.sh shell that sets $CICY_KIRO_RESUME to
+// "--resume" when kiro's local session store already has a conversation for
+// THIS workspace, else empty (fresh start). kiro's `--resume` resumes the most
+// recent conversation from the current directory, but ERRORS OUT ("no previous
+// session found for this directory") when there is none — so we must guard it.
+// The signal is kiro's own per-conversation metadata file
+// ~/.kiro/sessions/cli/<id>.json carrying `"cwd": "<workspace>"`. Directory-
+// scoped like the codex/claude resume paths; all decided inside boot.sh with
+// no send-keys. Only local sessions are considered (cloud/KAS sessions are not
+// resumed this way).
+func kiroResumeBootLines() []string {
+	return []string{
+		`CICY_KIRO_RESUME=""`,
+		`for _f in "$HOME"/.kiro/sessions/cli/*.json; do`,
+		`  [ -f "$_f" ] || continue`,
+		`  if grep -Eq "\"cwd\"[[:space:]]*:[[:space:]]*\"$WORKSPACE\"" "$_f" 2>/dev/null; then CICY_KIRO_RESUME="--resume"; echo "[cicy] resuming kiro session in $WORKSPACE"; break; fi`,
+		`done`,
+		`unset _f`,
+	}
+}
+
 func agentBootLines(agentType string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useMitm bool, shortID string, defaultModel string) []string {
 	aiCfg := loadRuntimeAIConfig()
 	switch normalizeAgentType(agentType) {
@@ -3505,10 +3526,14 @@ fi`,
 		// enabled) so its turns are audited; no-op when MITM is off (default).
 		// Parity with the codex/claude/opencode official-login paths.
 		lines = append(lines, mitmAgentProxyBootLines(useMitm)...)
+		// Auto-resume this workspace's most recent kiro conversation on restart
+		// (parity with claude --resume / codex resume --last) so the pane comes
+		// back to the latest session instead of a fresh chat + manual /chat pick.
+		lines = append(lines, kiroResumeBootLines()...)
 		if allowAllActions {
-			lines = append(lines, "kiro-cli chat --trust-all-tools")
+			lines = append(lines, "kiro-cli chat $CICY_KIRO_RESUME --trust-all-tools")
 		} else {
-			lines = append(lines, "kiro-cli chat")
+			lines = append(lines, "kiro-cli chat $CICY_KIRO_RESUME")
 		}
 		return lines
 	case "cicy":

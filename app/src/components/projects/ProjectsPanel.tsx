@@ -131,6 +131,47 @@ const placeProjectAgentLayout = (occupied: ProjectAgentLayout[], width = DEFAULT
   return { x: PROJECT_AGENT_ORIGIN, y: bottom };
 };
 const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
+// Lay a list of cards out on a uniform grid that FILLS the given viewport:
+// identical cell size, equal gaps, aligned rows/columns, cells stretched so the
+// whole area is used with no wasted space (window-manager tiling style).
+// Columns are chosen to keep the grid square-ish; cell width/height are then
+// derived from the actual canvas width/height. Shared by the default layout and
+// the grid-mode render so both agree on the same geometry.
+const GRID_MODE_GAP = 12;
+const GRID_MODE_MARGIN = 16;
+const GRID_MODE_MIN_CELL_W = 320;
+const GRID_MODE_MIN_CELL_H = 240;
+const evenGridColumns = (count: number, viewportWidth: number) => {
+  const n = Math.max(1, count);
+  const square = Math.ceil(Math.sqrt(n));
+  // Never make a column narrower than the min cell width.
+  const maxByWidth = Math.max(1, Math.floor((viewportWidth - GRID_MODE_MARGIN * 2 + GRID_MODE_GAP) / (GRID_MODE_MIN_CELL_W + GRID_MODE_GAP)));
+  return Math.max(1, Math.min(n, square, maxByWidth) || 1);
+};
+const evenGridLayouts = (ids: string[], viewportWidth: number, viewportHeight = 0): Record<string, ProjectAgentLayout> => {
+  const count = ids.length;
+  const cols = evenGridColumns(count, viewportWidth);
+  const rows = Math.max(1, Math.ceil(count / cols));
+  const vw = Math.max(GRID_MODE_MIN_CELL_W + GRID_MODE_MARGIN * 2, viewportWidth || 1200);
+  // When a height is known, stretch rows to fill it; otherwise fall back to the
+  // default card height so the infinite canvas still gets sane values.
+  const vh = viewportHeight && viewportHeight > 0 ? viewportHeight : (rows * (DEFAULT_PROJECT_AGENT_HEIGHT + GRID_MODE_GAP) + GRID_MODE_MARGIN * 2);
+  const cellW = Math.max(GRID_MODE_MIN_CELL_W, Math.floor((vw - GRID_MODE_MARGIN * 2 - GRID_MODE_GAP * (cols - 1)) / cols));
+  const cellH = Math.max(GRID_MODE_MIN_CELL_H, Math.floor((vh - GRID_MODE_MARGIN * 2 - GRID_MODE_GAP * (rows - 1)) / rows));
+  const out: Record<string, ProjectAgentLayout> = {};
+  ids.forEach((id, index) => {
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    out[id] = {
+      x: GRID_MODE_MARGIN + col * (cellW + GRID_MODE_GAP),
+      y: GRID_MODE_MARGIN + row * (cellH + GRID_MODE_GAP),
+      z: index + 1,
+      width: cellW,
+      height: cellH,
+    };
+  });
+  return out;
+};
 const projectAgentIdentity = (agent: ProjectAgent) => agent.remote
   ? `remote:${String(agent.instanceId || agent.instanceTeam || '')}:${String(agent.remoteAgentId || shortPaneId(agent.paneId))}`
   : `local:${shortPaneId(agent.paneId)}`;
@@ -238,6 +279,7 @@ interface ProjectViewCache {
   zoom: number;
   pan: { x: number; y: number };
   layouts: Record<string, ProjectAgentLayout>;
+  layoutMode: 'grid' | 'canvas';
 }
 
 const projectViewCacheKey = (projectId: number | string) => `${PROJECT_VIEW_CACHE_PREFIX}${projectId}`;
@@ -249,11 +291,13 @@ const readProjectViewCache = (projectId: number | string): ProjectViewCache | nu
       zoom: Math.min(2, Math.max(0.1, Number(value.zoom) || 1)),
       pan: { x: Number(value.pan?.x) || 0, y: Number(value.pan?.y) || 0 },
       layouts: value.layouts && typeof value.layouts === 'object' ? value.layouts : {},
+      // Default to the tidy grid; only an explicit 'canvas' opts into free drag.
+      layoutMode: value.layoutMode === 'canvas' ? 'canvas' : 'grid',
     };
   } catch { return null; }
 };
 const writeProjectViewCache = (projectId: number | string, patch: Partial<ProjectViewCache>) => {
-  const current = readProjectViewCache(projectId) || { zoom: 1, pan: { x: 60, y: 60 }, layouts: {} };
+  const current = readProjectViewCache(projectId) || { zoom: 1, pan: { x: 60, y: 60 }, layouts: {}, layoutMode: 'grid' as const };
   try { localStorage.setItem(projectViewCacheKey(projectId), JSON.stringify({ ...current, ...patch })); } catch {}
 };
 
@@ -451,7 +495,34 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
             </span>
           </div>
         </div>
-        <div data-id="project-agent-card-header-actions" className="flex shrink-0 items-center gap-0.5">
+        <div data-id="project-agent-card-header-actions" className="flex shrink-0 items-center gap-3">
+        <div
+          data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`}
+          role="tablist"
+          className="order-1 flex h-7 items-end gap-4"
+        >
+          {([
+            ['history', '会话'],
+            ...(agent.remote || String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
+            ['role', '角色'],
+          ] as Array<[ProjectAgentBodyTab, string]>).map(([tab, label]) => {
+            const unavailable = tab === 'terminal' && (!agent.ttydSrc || agent.isApiOnly);
+            return (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={activeBodyTab === tab}
+                disabled={unavailable}
+                data-id={`project-agent-card-tab-${tab}-${shortPaneId(agent.paneId)}`}
+                onClick={(event) => { event.stopPropagation(); selectBodyTab(tab); }}
+                className={cn('relative h-7 text-[12px] font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full', activeBodyTab === tab ? 'text-zinc-100 after:bg-blue-500' : 'text-zinc-500 after:bg-transparent hover:text-zinc-300', unavailable && 'cursor-not-allowed opacity-30 hover:text-zinc-500')}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
         <div data-id="project-agent-card-menu-wrap" ref={menuRef} className="relative order-2">
           <button
             type="button"
@@ -573,33 +644,6 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
         >
           {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost">{fmtCost(metrics.cost)}</span> : null}
         </span>
-      </div>
-      <div
-        data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`}
-        role="tablist"
-        className="flex h-7 shrink-0 items-end gap-5 border-b border-white/[0.08]"
-      >
-        {([
-          ['history', '会话'],
-          ...(agent.remote || String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
-          ['role', '角色'],
-        ] as Array<[ProjectAgentBodyTab, string]>).map(([tab, label]) => {
-          const unavailable = tab === 'terminal' && (!agent.ttydSrc || agent.isApiOnly);
-          return (
-            <button
-              key={tab}
-              type="button"
-              role="tab"
-              aria-selected={activeBodyTab === tab}
-              disabled={unavailable}
-              data-id={`project-agent-card-tab-${tab}-${shortPaneId(agent.paneId)}`}
-              onClick={(event) => { event.stopPropagation(); selectBodyTab(tab); }}
-              className={cn('relative h-7 text-[12px] font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full', activeBodyTab === tab ? 'text-zinc-100 after:bg-blue-500' : 'text-zinc-500 after:bg-transparent hover:text-zinc-300', unavailable && 'cursor-not-allowed opacity-30 hover:text-zinc-500')}
-            >
-              {label}
-            </button>
-          );
-        })}
       </div>
       {activeBodyTab === 'history' ? (
         // -mx-5 keeps the transcript full-bleed. The matching -mb-4 is gone: it
@@ -782,6 +826,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [canvasPan, setCanvasPan] = useState({ x: 60, y: 60 });
   const [canvasZoom, setCanvasZoom] = useState(1);
   const [wheelZoomActive, setWheelZoomActive] = useState(false);
+  // Layout mode: 'grid' (default) tiles cards to fill the viewport; 'canvas'
+  // is the original free-drag infinite canvas. Persisted per project in the
+  // view cache. The free canvas is always available — grid is just the default.
+  const [layoutMode, setLayoutMode] = useState<'grid' | 'canvas'>('grid');
+  const [canvasSize, setCanvasSize] = useState({ width: 1200, height: 800 });
   const [dockHeight, setDockHeight] = useState(0);
   const liveMetrics = useMemo(() => {
     const result: Record<string, AgentLiveMetrics> = {};
@@ -843,6 +892,20 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     observer.observe(canvas, { childList: true, subtree: true });
     return () => { observer.disconnect(); resizeObserver.disconnect(); };
   }, [dockOpen]);
+  // Track the canvas client size so grid mode can stretch cards to fill it.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const apply = () => setCanvasSize((prev) => {
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      return (prev.width === width && prev.height === height) ? prev : { width, height };
+    });
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, []);
 
   const load = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -1028,6 +1091,17 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const resolvedLayouts = useMemo(() => {
     const resolved: Record<string, ProjectAgentLayout> = {};
     const occupied: ProjectAgentLayout[] = [];
+    // Grid mode: always tile every card to fill the viewport, ignoring stored
+    // free-canvas positions (those are restored when the user switches back).
+    if (layoutMode === 'grid' && visibleAgents.length) {
+      // Reserve the bottom controls footer (48px) and any open dock/shell panel.
+      const reserved = 48 + (dockHeight || 0);
+      return evenGridLayouts(
+        visibleAgents.map((agent) => shortPaneId(agent.paneId)),
+        canvasSize.width,
+        Math.max(1, canvasSize.height - reserved),
+      );
+    }
     for (const agent of visibleAgents) {
       const id = shortPaneId(agent.paneId);
       if (agentLayouts[id]) {
@@ -1043,7 +1117,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       occupied.push(layout);
     });
     return resolved;
-  }, [agentLayouts, visibleAgentKey]);
+  }, [agentLayouts, visibleAgentKey, layoutMode, canvasSize.width, canvasSize.height, dockHeight]);
   useEffect(() => {
     const receiveCloudReply = (event: Event) => {
       const detail = (event as CustomEvent)?.detail || {};
@@ -1132,6 +1206,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setAgentLayouts(cached?.layouts || {});
     setCanvasPan(cached?.pan || { x: 60, y: 60 });
     setCanvasZoom(cached?.zoom || 1);
+    setLayoutMode(cached?.layoutMode || 'grid');
     setLayoutReadyProjectId(cached ? String(selectedProject.id) : '');
     setSelectedAgentIds(new Set());
     setAgentMessages({});
@@ -1971,6 +2046,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   };
 
   const beginCanvasPan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (layoutMode === 'grid') return;
     if (event.button !== 0 || event.target !== event.currentTarget) return;
     panDragRef.current = {
       pointerId: event.pointerId,
@@ -2025,30 +2101,16 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const resetCanvasView = () => {
     const canvas = canvasRef.current;
     if (!canvas || !visibleAgents.length) return;
-    const gap = 24;
-    const columnCount = Math.max(1, Math.ceil(Math.sqrt(visibleAgents.length)));
-    let cursorX = 0;
-    let cursorY = 0;
-    let rowHeight = 0;
-    const arrangedLayouts = { ...agentLayouts };
-    const layouts = visibleAgents.map((agent, index) => {
-      const current = layoutForAgent(agent, index);
-      if (index > 0 && index % columnCount === 0) {
-        cursorX = 0;
-        cursorY += rowHeight + gap;
-        rowHeight = 0;
-      }
-      const layout = { ...current, x: cursorX, y: cursorY };
-      arrangedLayouts[shortPaneId(agent.paneId)] = layout;
-      cursorX += current.width + gap;
-      rowHeight = Math.max(rowHeight, current.height);
-      return layout;
-    });
+    // Even grid: identical cell size, equal gaps, aligned rows/columns. Shares
+    // geometry with the default layout via evenGridLayouts.
+    const margin = 40;
+    const gridLayouts = evenGridLayouts(visibleAgents.map((agent) => shortPaneId(agent.paneId)), canvas.clientWidth);
+    const arrangedLayouts = { ...agentLayouts, ...gridLayouts };
+    const layouts = visibleAgents.map((agent) => gridLayouts[shortPaneId(agent.paneId)]);
     const minX = Math.min(...layouts.map((layout) => layout.x));
     const minY = Math.min(...layouts.map((layout) => layout.y));
     const maxX = Math.max(...layouts.map((layout) => layout.x + layout.width));
     const maxY = Math.max(...layouts.map((layout) => layout.y + layout.height));
-    const margin = 40;
     const availableWidth = Math.max(1, canvas.clientWidth - margin * 2);
     const availableHeight = Math.max(1, canvas.clientHeight - margin * 2);
     const zoom = Number(Math.min(1, Math.max(0.1, Math.min(
@@ -2069,6 +2131,28 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         });
       }
     }
+  };
+
+  const toggleLayoutMode = () => {
+    setLayoutMode((prev) => {
+      const next = prev === 'grid' ? 'canvas' : 'grid';
+      writeProjectViewCache(selectedProject.id, { layoutMode: next });
+      if (next === 'canvas') {
+        // Entering free canvas: seed stored layouts from whatever the grid is
+        // currently showing so cards don't jump, and reset pan/zoom to a sane
+        // frame. If the user already has stored layouts, keep them.
+        setAgentLayouts((current) => {
+          if (Object.keys(current).length) return current;
+          const seeded: Record<string, ProjectAgentLayout> = { ...resolvedLayouts };
+          writeProjectViewCache(selectedProject.id, { layouts: seeded });
+          return seeded;
+        });
+        setCanvasPan({ x: 0, y: 0 });
+        setCanvasZoom(1);
+        writeProjectViewCache(selectedProject.id, { pan: { x: 0, y: 0 }, zoom: 1 });
+      }
+      return next;
+    });
   };
 
   return (
@@ -2210,18 +2294,18 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             event.preventDefault();
             zoomCanvasAt(event.clientX, event.clientY, event.deltaY > 0 ? -0.02 : 0.02);
           }}
-          className="relative min-h-0 flex-1 touch-none overflow-hidden cursor-grab active:cursor-grabbing"
+          className={cn('relative min-h-0 flex-1 touch-none overflow-hidden', layoutMode === 'grid' ? 'cursor-default' : 'cursor-grab active:cursor-grabbing')}
           style={{
             backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.09) 1px, transparent 1px)',
-            backgroundPosition: `${canvasPan.x}px ${canvasPan.y}px`,
-            backgroundSize: `${32 * canvasZoom}px ${32 * canvasZoom}px`,
+            backgroundPosition: layoutMode === 'grid' ? '0px 0px' : `${canvasPan.x}px ${canvasPan.y}px`,
+            backgroundSize: layoutMode === 'grid' ? '32px 32px' : `${32 * canvasZoom}px ${32 * canvasZoom}px`,
           }}
         >
         {visibleAgents.length ? (
           <div
             data-id="project-canvas-world"
             className="pointer-events-none absolute inset-0 z-20 origin-top-left"
-            style={{ transform: `translate(${canvasPan.x}px, ${canvasPan.y}px) scale(${canvasZoom})` }}
+            style={{ transform: layoutMode === 'grid' ? 'none' : `translate(${canvasPan.x}px, ${canvasPan.y}px) scale(${canvasZoom})` }}
           >
             {visibleAgents.map((agent, index) => {
               const layout = layoutForAgent(agent, index);
@@ -2244,12 +2328,12 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 data-id={`project-canvas-node-${shortPaneId(agent.paneId)}`}
                 // project-canvas-node lifts itself above every other card while its
                 // dropdown is open (index.css, :has()) — no re-render, no state.
-                className="project-canvas-node pointer-events-auto absolute touch-none cursor-move"
+                className={cn('project-canvas-node pointer-events-auto absolute touch-none', layoutMode === 'grid' ? 'cursor-default' : 'cursor-move')}
                 style={{ left: layout.x, top: layout.y, zIndex: cardSelected ? 1000 : layout.z }}
-                onPointerDown={(event) => beginAgentDrag(event, agent, index)}
-                onPointerMove={moveAgent}
-                onPointerUp={(event) => endAgentDrag(event, agent)}
-                onPointerCancel={(event) => endAgentDrag(event, agent)}
+                onPointerDown={layoutMode === 'grid' ? undefined : (event) => beginAgentDrag(event, agent, index)}
+                onPointerMove={layoutMode === 'grid' ? undefined : moveAgent}
+                onPointerUp={layoutMode === 'grid' ? undefined : (event) => endAgentDrag(event, agent)}
+                onPointerCancel={layoutMode === 'grid' ? undefined : (event) => endAgentDrag(event, agent)}
               >
                   <ProjectAgentCard
                     agent={agent}
@@ -2499,9 +2583,27 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             <p className="text-sm" data-id="projects-agent-empty-title">{t('projectNoAgents')}</p>
           </div>
         )}
-        {shellPanel ? <div data-id="project-canvas-shell-panel" className="absolute inset-x-0 bottom-12 z-40 max-h-[260px] overflow-hidden [&_[data-id^=agent-stack-shell-terminal]]:!h-52">{shellPanel}</div> : null}
+        {shellPanel ? <div data-id="project-canvas-shell-panel" className="absolute inset-x-0 bottom-12 z-40 max-h-[260px] overflow-hidden border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur [&_[data-id^=agent-stack-shell-terminal]]:!h-52">{shellPanel}</div> : null}
         <div data-id="project-canvas-footer" className="absolute inset-x-0 bottom-0 z-[70] h-12 border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur">
         <div data-id="project-canvas-controls" className="absolute bottom-1.5 left-4 flex items-center gap-0.5 p-1">
+          <button
+            type="button"
+            data-id="project-canvas-mode-toggle"
+            aria-pressed={layoutMode === 'canvas'}
+            title={t(layoutMode === 'grid' ? 'projectLayoutModeToCanvas' : 'projectLayoutModeToGrid')}
+            aria-label={t(layoutMode === 'grid' ? 'projectLayoutModeToCanvas' : 'projectLayoutModeToGrid')}
+            onClick={toggleLayoutMode}
+            className={cn(
+              'grid h-7 w-7 place-items-center rounded-md transition-colors',
+              layoutMode === 'canvas'
+                ? 'bg-blue-500/15 text-blue-300 hover:bg-blue-500/25 hover:text-blue-200'
+                : 'text-zinc-500 hover:bg-white/[0.08] hover:text-white',
+            )}
+          >
+            {layoutMode === 'grid' ? <Hand className="h-3.5 w-3.5" /> : <LayoutGrid className="h-3.5 w-3.5" />}
+          </button>
+          {layoutMode === 'canvas' ? (
+          <>
           <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
           <span data-id="project-canvas-zoom-value" className="w-9 text-center font-mono text-[9px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
           <button type="button" data-id="project-canvas-zoom-in" onClick={() => changeZoom(0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomIn')}><Plus className="h-3.5 w-3.5" /></button>
@@ -2522,6 +2624,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           >
             <Hand className="h-3.5 w-3.5" />
           </button>
+          </>
+          ) : null}
         </div>
         {footerControls ? (
           <div data-id="project-canvas-footer-controls" className="absolute bottom-1.5 right-4 flex items-center gap-2 px-2 py-1">

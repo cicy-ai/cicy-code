@@ -42,3 +42,22 @@ func TestClaudeResumeBootLinesScopedToOwnProjectDir(t *testing.T) {
 		}
 	}
 }
+
+// kiro's --resume errors out when no session exists for the directory, so the
+// boot guard must only enable it after confirming a local session whose cwd
+// matches THIS workspace (parity with the codex cwd scan).
+func TestKiroResumeBootLinesScopedToWorkspace(t *testing.T) {
+	script := strings.Join(kiroResumeBootLines(), "\n")
+	if !strings.Contains(script, `CICY_KIRO_RESUME=""`) {
+		t.Fatalf("kiro resume guard must default to empty (fresh start):\n%s", script)
+	}
+	if !strings.Contains(script, `"$HOME"/.kiro/sessions/cli/*.json`) {
+		t.Fatalf("kiro resume guard must scan the local session store:\n%s", script)
+	}
+	if !strings.Contains(script, `"\"cwd\"[[:space:]]*:[[:space:]]*\"$WORKSPACE\""`) {
+		t.Fatalf("kiro resume guard must match the session cwd against this workspace:\n%s", script)
+	}
+	if !strings.Contains(script, `CICY_KIRO_RESUME="--resume"`) {
+		t.Fatalf("kiro resume guard must enable --resume on a cwd match:\n%s", script)
+	}
+}

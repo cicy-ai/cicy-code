@@ -58,8 +58,11 @@ func TestAgentBootLinesKiroWritesChineseReplySteeringWhenEnabled(t *testing.T) {
 	if !strings.Contains(script, "inclusion: always") {
 		t.Fatalf("kiro boot lines missing steering frontmatter: %s", script)
 	}
-	if !strings.Contains(script, "kiro-cli chat --trust-all-tools") {
+	if !strings.Contains(script, "kiro-cli chat $CICY_KIRO_RESUME --trust-all-tools") {
 		t.Fatalf("kiro boot lines missing trust-all-tools startup when allowAllActions=true: %s", script)
+	}
+	if !strings.Contains(script, `CICY_KIRO_RESUME="--resume"`) {
+		t.Fatalf("kiro boot lines must set up the workspace-scoped resume guard: %s", script)
 	}
 }
 
