@@ -48,7 +48,7 @@ export interface CloudInstanceInfo {
   sshUser?: string;
   resources?: {
     cpu_usage_pct?: number; cpu_cores?: number;
-    mem_usage_pct?: number; mem_total_bytes?: number; mem_used_bytes?: number;
+    mem_usage_pct?: number; mem_total_bytes?: number; mem_used_bytes?: number; mem_configured_bytes?: number; mem_balloon_bytes?: number;
     disk_usage_pct?: number; disk_total_bytes?: number; disk_used_bytes?: number;
     load_1?: number; load_5?: number; load_15?: number; updated_at?: string;
   };
@@ -56,7 +56,7 @@ export interface CloudInstanceInfo {
 
 function fmtBytes(value?: number): string {
   if (value == null || !Number.isFinite(value) || value <= 0) return '--';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
   let next = value; let unit = units[0];
   for (let i = 0; i < units.length; i += 1) { unit = units[i]; if (next < 1024 || i === units.length - 1) break; next /= 1024; }
   return `${next >= 100 ? next.toFixed(0) : next.toFixed(1)} ${unit}`;
@@ -167,11 +167,11 @@ function gaugeColor(value: number | null): string {
 }
 
 /** Circular gauge: the percentage is the picture, the detail is the caption. */
-function Ring({ value, label, caption, icon }: { value: number | null; label: string; caption: string; icon: React.ReactNode }) {
+function Ring({ value, label, caption, icon, title }: { value: number | null; label: string; caption: string; icon: React.ReactNode; title?: string }) {
   const size = 56; const stroke = 5; const r = (size - stroke) / 2; const c = 2 * Math.PI * r;
   const v = value == null ? 0 : Math.max(0, Math.min(100, value));
   return (
-    <div className="flex min-w-0 flex-1 flex-col items-center gap-1" title={`${label} ${caption}`}>
+    <div className="flex min-w-0 flex-1 flex-col items-center gap-1" title={title ? `${label} ${caption} · ${title}` : `${label} ${caption}`}>
       <div className="relative" style={{ width: size, height: size }}>
         <svg width={size} height={size} className="-rotate-90">
           <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeWidth={stroke} className="text-white/[0.07]" />
@@ -292,7 +292,7 @@ function NodeCard({ inst, latest, t }: { inst: CloudInstanceInfo; latest: string
         {r ? (
           <div data-id={`cloud-instance-res-${inst.instanceId}`} className="flex items-start gap-2">
             <Ring value={pct(r.cpu_usage_pct)} label="CPU" caption={r.cpu_cores ? `${r.cpu_cores} cores` : '—'} icon={<Cpu size={16} />} />
-            <Ring value={memPct} label={t('cloudSysMem', { defaultValue: '内存' })} caption={`${fmtBytes(r.mem_used_bytes)} / ${fmtBytes(r.mem_total_bytes)}`} icon={<MemoryStick size={16} />} />
+            <Ring value={memPct} label={t('cloudSysMem', { defaultValue: '内存' })} caption={`${fmtBytes(r.mem_used_bytes)} / ${fmtBytes(r.mem_total_bytes)}`} title={(r.mem_balloon_bytes || 0) > 0 && r.mem_configured_bytes ? t('cloudSysMemBalloon', { defaultValue: '配置 {{configured}} · 宿主回收 {{balloon}}', configured: fmtBytes(r.mem_configured_bytes), balloon: fmtBytes(r.mem_balloon_bytes) }) : undefined} icon={<MemoryStick size={16} />} />
             <Ring value={diskPct} label={t('cloudSysDisk', { defaultValue: '磁盘' })} caption={`${fmtBytes(r.disk_used_bytes)} / ${fmtBytes(r.disk_total_bytes)}`} icon={<HardDrive size={16} />} />
           </div>
         ) : (

@@ -118,6 +118,10 @@ const api = {
   // + compression ratio + the default inherit prompt. Does NOT create a pane.
   forkPreview: (data: { source_pane_id: string }) => http.post('/api/tmux/fork/preview', data),
   restartPane: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/restart`),
+  // Free an agent's processes (card minimized) / bring it back on its latest
+  // session (card restored; no-op if it's still running).
+  stopPane: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/stop`),
+  resumePane: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/resume`),
   capturePane: (id: string, lines = 100) => http.post('/api/tmux/capture_pane', { pane_id: id, lines }),
 
   // MITM CA install status (whether this node's CA is trusted in the OS store).

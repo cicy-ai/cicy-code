@@ -209,16 +209,15 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, projectId
 
   const fileRow = (label: string, icon: React.ReactNode, f?: ForkFile) => {
     if (!f) return null;
+    // A div, not a <button>: buttons are globally user-select:none, which made
+    // the paths impossible to select/copy. Opening is the icon button on the right.
     return (
-      <button
+      <div
         data-id={`fork-confirm-file-${label}`}
-        type="button"
-        onClick={() => openFile(f.path)}
-        disabled={!f.path}
-        className="group flex w-full items-center gap-2.5 rounded-lg border border-white/[0.06] bg-white/[0.02] px-2.5 py-1.5 text-left transition hover:border-blue-400/40 hover:bg-blue-400/[0.06] disabled:cursor-not-allowed disabled:opacity-40"
+        className={`group flex w-full items-center gap-2.5 rounded-lg border border-white/[0.06] bg-white/[0.02] px-2.5 py-1.5 text-left transition hover:border-blue-400/40 hover:bg-blue-400/[0.06] ${f.path ? '' : 'opacity-40'}`}
       >
         <span className="shrink-0 text-zinc-400 group-hover:text-blue-300">{icon}</span>
-        <span className="min-w-0 flex-1">
+        <span className="min-w-0 flex-1 select-text">
           {/* Show the ABSOLUTE path — the fork prompt references these files by
               absolute path, so the row must match what the agent will read.
               (openFile still converts to workspace-relative for the FS API.) */}
@@ -228,8 +227,17 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, projectId
             {f.truncated ? ` · ${t('forkTruncated')}` : ''}
           </span>
         </span>
-        <ExternalLink className="h-3.5 w-3.5 shrink-0 text-zinc-600 group-hover:text-blue-300" />
-      </button>
+        <button
+          type="button"
+          data-id={`fork-confirm-file-open-${label}`}
+          onClick={() => openFile(f.path)}
+          disabled={!f.path}
+          title={f.path}
+          className="grid h-6 w-6 shrink-0 place-items-center rounded text-zinc-600 hover:bg-white/[0.06] hover:text-blue-300 disabled:cursor-not-allowed"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+        </button>
+      </div>
     );
   };
 
@@ -246,7 +254,13 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, projectId
     <div
       data-id="fork-confirm-card"
       onClick={(e) => e.stopPropagation()}
-      className="z-[10000] flex flex-col overflow-hidden rounded-2xl border border-white/[0.12] bg-[#141416] shadow-2xl"
+      // React bubbles events through portals to the card/canvas that rendered
+      // this modal; their drag / pointer-capture handlers swallowed text
+      // selection. Stop them here and opt the whole modal back into selection.
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      className="z-[10000] flex select-text flex-col overflow-hidden rounded-2xl border border-white/[0.12] bg-[#141416] shadow-2xl"
       style={cardStyle}
     >
       {/* header */}

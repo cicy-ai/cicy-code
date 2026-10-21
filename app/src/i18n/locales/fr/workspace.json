@@ -27,6 +27,8 @@
   "toastSendFilePathFailed": "Échec de l'envoi du chemin de fichier",
   "toastClientIdSent": "client_id de la page envoyé à l'agent",
   "toastClientIdFailed": "Échec de l'envoi du client_id",
+  "toastOpenFileMissing": "Fichier introuvable : {{path}}",
+  "toastOpenFileIsDir": "C'est un dossier, pas un fichier : {{path}}",
   "toastCreateWorkerFailed": "Échec de la création",
   "toastWorkerRestarting": "{{name}} redémarre…",
   "toastWorkerRestartFailed": "Erreur : échec du redémarrage de {{name}}",
@@ -470,5 +472,6 @@
   "marketplaceUpdateAllCount": "Tout mettre à jour ({{count}})",
   "marketplaceUpdatingAll": "Mise à jour en cours…",
   "marketplaceUpdateAllResult": "Mise à jour terminée : {{succeeded}} réussies, {{failed}} échouées",
-  "agentTitleFeishuSyncFailed": "Le titre de l’Agent a été mis à jour, mais certains noms de groupes Feishu n’ont pas pu être synchronisés. Vérifiez l’autorisation im:chat:update de l’application."
+  "agentTitleFeishuSyncFailed": "Le titre de l’Agent a été mis à jour, mais certains noms de groupes Feishu n’ont pas pu être synchronisés. Vérifiez l’autorisation im:chat:update de l’application.",
+  "systemResourceMemBalloon": "VM {{configured}} · {{balloon}} reclaimed by host"
 }

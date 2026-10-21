@@ -142,6 +142,9 @@ export default function CreateAgentDialog({
     ? mergedAgentTypeOptions.filter((option) => option.value === values.agent_type)
     : mergedAgentTypeOptions;
   const supportsAPIStyle = values.agent_type === 'cicy' || values.agent_type.startsWith('custom:');
+  // Kiro talks to AWS (SigV4) and CiCy uses its own provider config — neither
+  // can route through the local gateway, so the toggle is hidden and forced off.
+  const supportsLocalGateway = values.agent_type !== 'kiro-cli' && values.agent_type !== 'cicy';
 
   const set = (patch: Partial<CreateAgentValues>) => {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -161,6 +164,7 @@ export default function CreateAgentDialog({
     await onSubmit({
       ...values,
       title: values.title.trim(),
+      use_custom_gateway: supportsLocalGateway ? values.use_custom_gateway : false,
     });
   };
 
@@ -309,6 +313,7 @@ export default function CreateAgentDialog({
 
           {/* use_proxy toggle hidden per product decision — defaults to false. */}
 
+          {supportsLocalGateway ? (
           <div data-id="create-agent-dialog-use-custom-gateway" className="flex items-center justify-between py-1">
             <div data-id="create-agent-dialog-use-custom-gateway-copy">
               <p data-id="create-agent-dialog-use-custom-gateway-title" className="text-[13px] font-medium text-zinc-300">{ts('customGatewayTitle')}</p>
@@ -323,6 +328,7 @@ export default function CreateAgentDialog({
               <div data-id="create-agent-dialog-use-custom-gateway-toggle-thumb" className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${values.use_custom_gateway ? 'translate-x-[22px]' : 'translate-x-1'}`} />
             </button>
           </div>
+          ) : null}
 
           {/* Inheritance retired: every agent is seeded with a self-contained
               guidance file from the global template, so there is no master-rules

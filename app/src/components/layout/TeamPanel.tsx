@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trans } from 'react-i18next';
 import i18n from '../../i18n';
-import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, ArrowUpCircle, Search, GitBranch, ChevronRight, ChevronDown, ClipboardList, MessageCircle, Zap } from 'lucide-react';
+import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, ArrowUpCircle, Search, GitBranch, ChevronRight, ChevronDown, ClipboardList, MessageCircle, Zap, FolderPlus, Check } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
@@ -174,6 +174,45 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   // 绑定微信:目标 worker;modal 内部走 /api/im/accounts 的 bind/unbind。
   const [wechatTarget, setWechatTarget] = useState<{ wid: string; title: string } | null>(null);
   const [feishuTarget, setFeishuTarget] = useState<{ wid: string; title: string } | null>(null);
+  // 「加入项目」:菜单内展开的项目列表(懒加载 /api/groups),勾选即加入/移出。
+  const [projectMenuFor, setProjectMenuFor] = useState<string | null>(null);
+  const [projectGroups, setProjectGroups] = useState<Array<{ id: number | string; name: string; pane_ids: string[] }> | null>(null);
+  const [projectBusy, setProjectBusy] = useState<string | null>(null);
+  useEffect(() => { if (openMenuId !== projectMenuFor) setProjectMenuFor(null); }, [openMenuId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const loadProjectGroups = useCallback(async () => {
+    try {
+      const { data } = await apiService.listGroups();
+      const groups = Array.isArray(data?.groups) ? data.groups : [];
+      setProjectGroups(groups.map((g: any) => ({
+        id: g.id,
+        name: String(g.name || g.id),
+        pane_ids: Array.isArray(g.pane_ids) ? g.pane_ids.map(String) : [],
+      })));
+    } catch {
+      setProjectGroups([]);
+    }
+  }, []);
+  const toggleAgentProject = async (wid: string, paneId: string, group: { id: number | string; name: string; pane_ids: string[] }) => {
+    const inGroup = group.pane_ids.some((p) => p.replace(/:.*$/, '') === wid);
+    const busyKey = `${wid}:${group.id}`;
+    setProjectBusy(busyKey);
+    try {
+      if (inGroup) await apiService.removeGroupPane(group.id, paneId);
+      else await apiService.addGroupPane(group.id, paneId, 'add');
+      setProjectGroups((current) => (current || []).map((g) => String(g.id) !== String(group.id) ? g : {
+        ...g,
+        pane_ids: inGroup ? g.pane_ids.filter((p) => p.replace(/:.*$/, '') !== wid) : [...g.pane_ids, paneId],
+      }));
+      window.dispatchEvent(new CustomEvent('cicy:project-groups-changed'));
+      window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: inGroup ? `已从「${group.name}」移出` : `已加入「${group.name}」`,
+      }));
+    } catch (cause: any) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: cause?.response?.data?.error || cause?.message || '操作失败' }));
+    } finally {
+      setProjectBusy(null);
+    }
+  };
   // bottom-most cards: not enough room below the … button → flip dropdown upward
   const [menuDropUp, setMenuDropUp] = useState(false);
   // hover tooltip for menu items — portal-rendered to the RIGHT of the dropdown
@@ -791,6 +830,52 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               <Zap className="w-3.5 h-3.5 shrink-0" />
               <span data-id="team-panel-worker-menu-feishu-label">{i18n.t('feishuBindTitle', { ns: 'teamPanel', defaultValue: '飞书会话' })}</span>
             </button>
+            <button
+              type="button"
+              data-id="team-panel-worker-menu-project"
+              aria-expanded={projectMenuFor === wid}
+              onClick={() => {
+                setMenuTip(null);
+                const opening = projectMenuFor !== wid;
+                setProjectMenuFor(opening ? wid : null);
+                if (opening) void loadProjectGroups();
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-white/[0.06]"
+            >
+              <FolderPlus className="w-3.5 h-3.5 shrink-0" />
+              <span data-id="team-panel-worker-menu-project-label" className="flex-1">{i18n.t('joinProject', { ns: 'teamPanel', defaultValue: '加入项目' })}</span>
+              {projectMenuFor === wid ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-zinc-500" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-zinc-500" />}
+            </button>
+            {projectMenuFor === wid ? (
+              <div data-id="team-panel-worker-menu-project-list" className="mb-1 ml-3 max-h-56 overflow-y-auto border-l border-white/[0.08] pl-1.5">
+                {projectGroups === null ? (
+                  <div className="flex items-center gap-2 px-2.5 py-2 text-xs text-zinc-500"><Spinner size="sm" />加载中…</div>
+                ) : projectGroups.length === 0 ? (
+                  <div className="px-2.5 py-2 text-xs text-zinc-500">{i18n.t('noProjects', { ns: 'teamPanel', defaultValue: '还没有项目' })}</div>
+                ) : projectGroups.map((group) => {
+                  const inGroup = group.pane_ids.some((p) => p.replace(/:.*$/, '') === wid);
+                  const busyHere = projectBusy === `${wid}:${group.id}`;
+                  const paneId = panes.find((p) => shortId(p.pane_id) === wid)?.pane_id || `${wid}:main.0`;
+                  return (
+                    <button
+                      key={String(group.id)}
+                      type="button"
+                      data-id={`team-panel-worker-menu-project-${group.id}`}
+                      role="menuitemcheckbox"
+                      aria-checked={inGroup}
+                      disabled={Boolean(projectBusy)}
+                      onClick={() => { void toggleAgentProject(wid, paneId, group); }}
+                      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] transition-colors ${projectBusy ? 'cursor-wait' : 'cursor-pointer'} ${inGroup ? 'text-blue-200' : 'text-zinc-300'} hover:bg-white/[0.06]`}
+                    >
+                      <span className="grid h-3.5 w-3.5 shrink-0 place-items-center">
+                        {busyHere ? <RefreshCw className="w-3 h-3 animate-spin" /> : inGroup ? <Check className="w-3.5 h-3.5" /> : null}
+                      </span>
+                      <span className="min-w-0 truncate">{group.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
             {/* /compact、/clear 已从此菜单移除 —— 这两个命令改由对话输入框的斜杠命令菜单
                 (输入 `/` 弹出)触发,菜单里不再重复。 */}
             {/* Fork(分身):coding-CLI agent 走 agent-summary + 新 tmux pane 拉起

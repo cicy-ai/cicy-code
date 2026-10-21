@@ -45,6 +45,8 @@ export interface SystemResourceSnapshot {
   mem_usage_pct: number;
   mem_total_bytes: number;
   mem_used_bytes: number;
+  mem_configured_bytes?: number;
+  mem_balloon_bytes?: number;
   disk_usage_pct: number;
   disk_total_bytes: number;
   disk_used_bytes: number;

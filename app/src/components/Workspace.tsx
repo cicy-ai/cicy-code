@@ -18,7 +18,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, Folder, X, Settings, Brain, Search,
   LayoutList, Users, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Bot, BookOpen, Store, Timer, Grid3X3, Globe2, Smartphone, FolderKanban, UserCircle } from 'lucide-react';
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Bot, BookOpen, Timer, Grid3X3, Globe2, Smartphone, FolderKanban, UserCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag, isChatModel } from '../lib/modelTag';
 import AgentAvatar from './AgentAvatar';
@@ -41,7 +41,6 @@ import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
 import { ProxyManagerDialog } from './layout/ProxyManagerDialog';
 import { openOrActivateElectronProfileTab } from '../lib/speedup/rpc';
 import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
-import CustomAgentsPanel from './layout/CustomAgentsPanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
 import AgentUsageLogView from './layout/AgentUsageLogView';
@@ -59,6 +58,7 @@ import { useDialogs } from './ui/Modal';
 import TipBelow from './ui/TipBelow';
 import config, { defaultWorkerWorkspace, syncHostHomeFromPath, urls } from '../config';
 import apiService from '../services/api';
+import { fsApi } from './files/api';
 import { loadHandled } from './audit/auditHandled';
 import { sendToAgent } from '../services/agentSend';
 import { clearAgentSendTarget, getAgentSendTarget, setAgentSendTarget, subscribeAgentSendTarget } from '../services/agentSendTarget';
@@ -252,7 +252,7 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 }
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
-type LeftPanelView = 'team' | 'skills' | 'customAgents' | 'agents' | 'todo' | null;
+type LeftPanelView = 'team' | 'skills' | 'agents' | 'todo' | null;
 type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'audit' | 'github' | RequestViewTab;
 type CliContentMode = 'fixed';
 
@@ -299,7 +299,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const v = cache.get(leftPanelKey(paneId), null);
     // 刷新后恢复上次打开的左栏面板;'todo' 若技能未装会被下方 effect 关掉。
     // 旧缓存里的 'office' 已不在白名单 → 自动落到 null(办公室视图 2026-06-05 下线)。
-    const ok: LeftPanelView[] = ['team', 'skills', 'customAgents', 'agents', 'todo'];
+    const ok: LeftPanelView[] = ['team', 'skills', 'agents', 'todo'];
     return ok.includes(v) ? v : null;
   });
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
@@ -1026,7 +1026,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     return () => window.removeEventListener('agent-status-change', handler as EventListener);
   }, []);
 
-  const toggleLeft = (p: 'team' | 'skills' | 'customAgents' | 'todo') => {
+  const toggleLeft = (p: 'team' | 'skills' | 'todo') => {
     setPortsOpen(false);
     // Skills is a companion drawer for the Projects workspace: opening the
     // marketplace must not navigate away from the active project. Other
@@ -1518,23 +1518,43 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const openCodeFile = useCallback((rawPath: string, requestId?: string) => {
     const filePath = String(rawPath || '').trim();
     if (!filePath) return;
-    setCliContentTab('files');
-    setCliContentOpen(true);
     const targetPagePane = String(paneId || '').trim();
     const targetClientId = `${pageClientId}:code-ext`;
-    apiService.chatPush({
-      agent_id: targetPagePane,
-      client_id: targetClientId,
-      type: 'host.open_file',
-      data: {
-        path: filePath,
-        requestId: String(requestId || '').trim(),
-        page_client_id: pageClientId,
-        code_client_id: targetClientId,
-        page_pane: targetPagePane,
-      },
-    }).catch(() => {});
-  }, [pageClientId, paneId, token]);
+    const sendOpen = () => {
+      setCliContentTab('files');
+      setCliContentOpen(true);
+      apiService.chatPush({
+        agent_id: targetPagePane,
+        client_id: targetClientId,
+        type: 'host.open_file',
+        data: {
+          path: filePath,
+          requestId: String(requestId || '').trim(),
+          page_client_id: pageClientId,
+          code_client_id: targetClientId,
+          page_pane: targetPagePane,
+        },
+      }).catch(() => {});
+    };
+    // Verify the path exists AND is a regular file before opening the editor.
+    // Terminal link clicks can point at a nonexistent path or a directory
+    // (e.g. a build log line, a `cd` target); only real files should open.
+    fsApi.stat(targetPagePane, filePath)
+      .then((st) => {
+        if (st.is_dir) {
+          window.dispatchEvent(new CustomEvent('show-toast', {
+            detail: t('toastOpenFileIsDir', { path: filePath }),
+          }));
+          return;
+        }
+        sendOpen();
+      })
+      .catch(() => {
+        window.dispatchEvent(new CustomEvent('show-toast', {
+          detail: t('toastOpenFileMissing', { path: filePath }),
+        }));
+      });
+  }, [pageClientId, paneId, t, token]);
 
   // Bind the ref now that openCodeFile is in scope; chat-ws message handler
   // (declared above for hoisting) reads via openCodeFileRef.current to avoid
@@ -2269,7 +2289,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           {!globalVar?.helper_mode && (
             <>
               <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} badge={publicSkillUpdate} badgeTitle={t('skillUpdateAvailable', { defaultValue: '有技能可更新' })} />
-              <SideBtn dataId="btn-agent-role-market" active={leftActive === 'customAgents'} icon={<Store className="w-5 h-5" />} title="角色市场" onClick={() => toggleLeft('customAgents')} />
               <SideBtn
                 dataId="btn-knowledge"
                 active={knowledgeOpen}
@@ -2394,9 +2413,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     </> : leftActive === 'skills' ? <>
                       <Brain className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-skills" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
-                    </> : leftActive === 'customAgents' ? <>
-                      <Store className="w-3.5 h-3.5 text-zinc-600" />
-                      <span data-id="left-panel-title-custom-agents" className="text-xs font-medium text-zinc-500 flex-1 ml-1">角色市场</span>
                     </> : <>
                       <Users className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-team" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelTeam')}</span>
@@ -2452,10 +2468,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                           onOpenDetail={handleSkillDetailOpen}
                           onCloseDetail={handleSkillDetailClose}
                         />
-                      </div>
-                    ) : leftActive === 'customAgents' ? (
-                      <div data-id="left-panel-custom-agents-view" className="absolute inset-0">
-                        <CustomAgentsPanel paneId={activeCliPaneId || paneId} onCreated={refreshPanes} onSelectAgent={onSelectAgent} marketOnly />
                       </div>
                     ) : null}
                   </div>
@@ -3130,7 +3142,8 @@ function formatResourcePct(value: number | null | undefined) {
 
 function formatResourceBytes(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value) || value <= 0) return '--';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  // Values are divided by 1024, so label them with binary units (GiB, not GB).
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
   let next = value;
   let unit = units[0];
   for (let i = 0; i < units.length; i += 1) {
@@ -3178,12 +3191,14 @@ const ResourceRow = memo(function ResourceRow({
   label,
   pct,
   sub,
+  note,
   dataId,
 }: {
   icon: React.ReactNode;
   label: string;
   pct: number | null | undefined;
   sub?: string;
+  note?: string;
   dataId: string;
 }) {
   const sev = resourceSeverity(pct);
@@ -3207,6 +3222,7 @@ const ResourceRow = memo(function ResourceRow({
           style={{ width: `${fillPct}%` }}
         />
       </div>
+      {note ? <div data-id={`${dataId}-note`} className="mt-1 text-right font-mono text-[10px] text-zinc-500">{note}</div> : null}
     </div>
   );
 });
@@ -3671,6 +3687,15 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
   const memSub = systemResources?.mem_total_bytes
     ? `${formatResourceBytes(systemResources?.mem_used_bytes)} / ${formatResourceBytes(systemResources?.mem_total_bytes)}`
     : undefined;
+  // VM with a virtio balloon: the usable total above is what's left after the
+  // hypervisor reclaimed RAM. Say so, otherwise "12.7 GiB" on a 32 GiB VM looks wrong.
+  const memNote = (systemResources?.mem_balloon_bytes || 0) > 0 && systemResources?.mem_configured_bytes
+    ? t('systemResourceMemBalloon', {
+      defaultValue: '配置 {{configured}} · 宿主回收 {{balloon}}',
+      configured: formatResourceBytes(systemResources.mem_configured_bytes),
+      balloon: formatResourceBytes(systemResources.mem_balloon_bytes),
+    })
+    : undefined;
   const diskSub = systemResources?.disk_total_bytes
     ? `${formatResourceBytes(systemResources?.disk_used_bytes)} / ${formatResourceBytes(systemResources?.disk_total_bytes)}`
     : undefined;
@@ -3736,6 +3761,7 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
               label={t('systemResourceMemory')}
               pct={memPct}
               sub={memSub}
+              note={memNote}
               dataId="system-resource-row-memory"
             />
             <ResourceRow

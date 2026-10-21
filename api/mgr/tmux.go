@@ -999,6 +999,10 @@ func handlePaneByID(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(path, "/restart") && r.Method == "POST":
 		handleRestartPane(w, r, strings.TrimSuffix(path, "/restart"))
+	case strings.HasSuffix(path, "/stop") && r.Method == "POST":
+		handleStopPane(w, r, strings.TrimSuffix(path, "/stop"))
+	case strings.HasSuffix(path, "/resume") && r.Method == "POST":
+		handleResumePane(w, r, strings.TrimSuffix(path, "/resume"))
 	case strings.HasSuffix(path, "/relaunch-agent") && r.Method == "POST":
 		handleRelaunchAgent(w, r, strings.TrimSuffix(path, "/relaunch-agent"))
 	case strings.HasSuffix(path, "/update-agent-cli") && r.Method == "POST":
@@ -1441,11 +1445,162 @@ func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
 	paneID := normPaneID(id)
 	token := getToken(r)
+	setAgentSuspended(paneID, false) // explicit restart = user wants it running
 	if err := restartPaneCore(paneID, token); err != nil {
 		J(w, M{"success": false, "error": err.Error()})
 		return
 	}
 	J(w, M{"success": true, "message": "Pane 软重启完成"})
+}
+
+// handleStopPane — POST /api/tmux/panes/<paneId>/stop
+//
+// Exits the agent CLI running in the pane (used when its project card is
+// minimized) while keeping the tmux session and its shell alive. The agent
+// writes its conversation to disk as it goes, so /resume brings it back on
+// its latest session.
+func handleStopPane(w http.ResponseWriter, r *http.Request, id string) {
+	paneID := normPaneID(id)
+	if paneAgentType(paneID) == "" {
+		httpErr(w, http.StatusBadRequest, "agent type not configured for pane")
+		return
+	}
+	setAgentSuspended(paneID, true)
+	stopped := stopAgentProcessInPane(paneID)
+	J(w, M{"success": true, "stopped": stopped})
+}
+
+// stopAgentProcessInPane terminates every job under the pane's shell (the
+// agent CLI and anything it spawned), leaving the shell at its prompt.
+// Interactive shells put each job in its own process group, so signalling the
+// negative pid takes the whole tree down. SIGTERM first (lets the CLI flush its
+// session file), SIGKILL whatever is left after a grace period.
+func stopAgentProcessInPane(paneID string) bool {
+	if !paneAgentProcessRunning(paneID) {
+		return false
+	}
+	shellPID := strings.TrimSpace(func() string {
+		out, _ := runTmux("display-message", "-p", "-t", paneID, "#{pane_pid}")
+		return out
+	}())
+	if shellPID == "" {
+		return false
+	}
+	children := func() []string {
+		out, _ := exec.Command("pgrep", "-P", shellPID).Output()
+		return strings.Fields(string(out))
+	}
+	signal := func(sig string) {
+		for _, pid := range children() {
+			exec.Command("kill", "-"+sig, "--", "-"+pid).Run()
+			exec.Command("kill", "-"+sig, pid).Run()
+		}
+	}
+	signal("TERM")
+	for i := 0; i < 30 && len(children()) > 0; i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if len(children()) > 0 {
+		signal("KILL")
+	}
+	log.Printf("[agent-stop] exited agent process in %s (tmux kept)", paneID)
+	return true
+}
+
+// The suspended marker (<workspace>/.cicy/suspended) records that the agent's
+// project card is minimized. It lives on disk so it survives cicy-code
+// restarts: initPaneEnv skips launching the agent CLI while it exists.
+func agentSuspendedMarker(workspace string) string {
+	ws := strings.TrimSpace(workspace)
+	if ws == "" {
+		return ""
+	}
+	if home, _ := os.UserHomeDir(); home != "" {
+		ws = strings.Replace(ws, "~", home, 1)
+	}
+	return filepath.Join(workspaceRuntimeDir(ws), "suspended")
+}
+
+func agentSuspended(workspace string) bool {
+	m := agentSuspendedMarker(workspace)
+	if m == "" {
+		return false
+	}
+	_, err := os.Stat(m)
+	return err == nil
+}
+
+func setAgentSuspended(paneID string, on bool) {
+	m := agentSuspendedMarker(paneWorkspace(paneID))
+	if m == "" {
+		return
+	}
+	if !on {
+		os.Remove(m)
+		return
+	}
+	if err := ensureRuntimeDir(filepath.Dir(m), 0755); err != nil {
+		log.Printf("[agent-stop] cannot create runtime dir for %s: %v", paneID, err)
+		return
+	}
+	os.WriteFile(m, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0644)
+}
+
+// paneAgentProcessRunning reports whether the pane's foreground process is
+// something other than a bare login shell (i.e. the agent CLI is up).
+func paneAgentProcessRunning(paneID string) bool {
+	session := strings.Split(paneID, ":")[0]
+	if tmuxCommand("has-session", "-t", session).Run() != nil {
+		return false
+	}
+	switch strings.TrimPrefix(paneCurrentCommand(paneID), "-") {
+	case "", "bash", "zsh", "sh", "fish", "dash", "pwsh", "powershell", "cmd":
+		return false
+	}
+	return true
+}
+
+// relaunchAgentCommand is the command that (re)starts the agent CLI inside an
+// existing pane shell: re-source boot.sh from the workspace. boot.sh launches
+// the CLI with its resume-latest flag (claude --resume, codex resume --last,
+// kiro --resume).
+func relaunchAgentCommand(paneID string) string {
+	if ws := paneWorkspace(paneID); ws != "" {
+		return fmt.Sprintf("cd %s && source .cicy/boot.sh", tmuxShellQuote(toPosixPath(ws)))
+	}
+	return "source .cicy/boot.sh"
+}
+
+// handleResumePane — POST /api/tmux/panes/<paneId>/resume
+//
+// Counterpart of /stop (card restored from minimized). Agent still running →
+// no-op, never interrupt live work. Shell alive but agent exited → relaunch
+// the CLI in the same tmux pane. Session gone entirely → rebuild it.
+func handleResumePane(w http.ResponseWriter, r *http.Request, id string) {
+	paneID := normPaneID(id)
+	if paneAgentType(paneID) == "" {
+		httpErr(w, http.StatusBadRequest, "agent type not configured for pane")
+		return
+	}
+	setAgentSuspended(paneID, false)
+	if paneAgentProcessRunning(paneID) {
+		J(w, M{"success": true, "restarted": false})
+		return
+	}
+	session := strings.Split(paneID, ":")[0]
+	if tmuxCommand("has-session", "-t", session).Run() != nil {
+		if err := restartPaneCore(paneID, getToken(r)); err != nil {
+			J(w, M{"success": false, "error": err.Error()})
+			return
+		}
+		J(w, M{"success": true, "restarted": true, "mode": "session"})
+		return
+	}
+	if _, err := runTmux("send-keys", "-t", paneID, relaunchAgentCommand(paneID), "Enter"); err != nil {
+		J(w, M{"success": false, "error": err.Error()})
+		return
+	}
+	J(w, M{"success": true, "restarted": true, "mode": "relaunch"})
 }
 
 // handleRelaunchAgent — POST /api/tmux/panes/<paneId>/relaunch-agent
@@ -1472,10 +1627,8 @@ func handleRelaunchAgent(w http.ResponseWriter, r *http.Request, id string) {
 	// be the workspace folder (Ctrl+C out of claude/codex leaves the shell
 	// at its startup dir) — but cd explicitly when we know the workspace, so
 	// a stray `cd` by the user (or a Windows pane stranded in $HOME) recovers.
-	cmd := "source .cicy/boot.sh"
-	if ws := paneWorkspace(paneID); ws != "" {
-		cmd = fmt.Sprintf("cd %s && source .cicy/boot.sh", tmuxShellQuote(toPosixPath(ws)))
-	}
+	setAgentSuspended(paneID, false)
+	cmd := relaunchAgentCommand(paneID)
 	if _, err := runTmux("send-keys", "-t", paneID, cmd, "Enter"); err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -4963,6 +5116,14 @@ func initPaneEnv(opts paneEnvOpts) {
 	} else {
 		log.Printf("[init] shell prompt not confirmed for %s; sourcing .cicy/boot.sh anyway (best-effort)", shortPaneID(pid))
 	}
+	if agentSuspended(opts.workspace) {
+		// Card is minimized: keep the tmux session + shell, but don't start the
+		// agent CLI on cicy-code start/restart. /resume clears the marker and
+		// sources boot.sh then.
+		log.Printf("[init] %s is minimized (suspended); not starting agent CLI", shortPaneID(pid))
+		runTmux("send-keys", "-t", pid, "echo '[cicy] 该 agent 已最小化，恢复卡片后会自动启动并加载最新会话'", "Enter")
+		return
+	}
 	runTmux("send-keys", "-t", pid, bootCmd, "Enter")
 	// First-launch auto-confirm send-keys removed by design: the user goes through
 	// the CLI's own first-run prompts (theme / trust / Bypass) themselves instead
@@ -5904,8 +6065,14 @@ func readMihomoGlobalPassword() string {
 // inheritance artifacts (current.json, reply.json, summary current.md) plus the
 // short id. Shared by the preview endpoint and the fork creation path so both
 // agree on exactly which files the fork inherits.
-func forkSummarySources(srcID, srcWorkspace string) (curJSON, replyJSON, summaryPath, short string) {
+func forkSummarySources(srcID, srcAgentType, srcWorkspace string) (curJSON, replyJSON, summaryPath, short string) {
 	short = shortPaneID(srcID)
+	// kiro-cli has no gateway snapshot; inherit from its own session file.
+	if normalizeAgentType(srcAgentType) == "kiro-cli" {
+		if jsonl, meta, summary, ok := kiroForkSources(srcWorkspace); ok {
+			return jsonl, meta, summary, short
+		}
+	}
 	summaryDir := filepath.Join(srcWorkspace, ".cicy", "history", "summary")
 	_ = os.MkdirAll(summaryDir, 0755)
 
@@ -5978,7 +6145,7 @@ func handleForkPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	curPath, replyPath, summaryPath, short := forkSummarySources(srcID, srcWorkspace.String)
+	curPath, replyPath, summaryPath, short := forkSummarySources(srcID, srcAgentType.String, srcWorkspace.String)
 
 	const headCap = 256 * 1024 // 256KB head — enough to inspect, file editor shows the rest
 	curContent, curSize, curTrunc := readFileCapped(curPath, headCap)
@@ -6219,22 +6386,31 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 	// lives in workers/w-10001) — the dump silently fails and the fork starts
 	// blank. Hand it the explicit current.json path from the CONFIGURED
 	// workspace; fall back to the id form only when that file doesn't exist.
-	summaryTarget := short
-	if ws := strings.TrimSpace(srcWorkspace.String); ws != "" {
-		if p := filepath.Join(ws, ".cicy", "history", "current.json"); fileExistsPlain(p) {
-			summaryTarget = p
+	if normalizeAgentType(srcAgentType.String) == "kiro-cli" {
+		// kiro-cli has no gateway snapshot; render its own session file.
+		if _, _, summary, ok := kiroForkSources(srcWorkspace.String); ok {
+			usedPath = summary
+			log.Printf("[fork] %s kiro session transcript -> %s (%s)", short, summary, time.Since(start).Round(time.Millisecond))
 		}
 	}
-	if out, genErr := exec.Command("agent-summary", summaryTarget).Output(); genErr != nil {
-		log.Printf("[fork] agent-summary failed: %v", genErr)
-	} else {
-		log.Printf("[fork] %s summary generated -> %s (%s)", short, strings.TrimSpace(string(out)), time.Since(start).Round(time.Millisecond))
-	}
-	// Hand the fork the stable current.md symlink (always points at the latest
-	// dump). os.Stat follows the link, so Size()>0 means the target has content.
-	cur := filepath.Join(summaryDir, "current.md")
-	if info, err := os.Stat(cur); err == nil && info.Size() > 0 {
-		usedPath = cur
+	if usedPath == "" {
+		summaryTarget := short
+		if ws := strings.TrimSpace(srcWorkspace.String); ws != "" {
+			if p := filepath.Join(ws, ".cicy", "history", "current.json"); fileExistsPlain(p) {
+				summaryTarget = p
+			}
+		}
+		if out, genErr := exec.Command("agent-summary", summaryTarget).Output(); genErr != nil {
+			log.Printf("[fork] agent-summary failed: %v", genErr)
+		} else {
+			log.Printf("[fork] %s summary generated -> %s (%s)", short, strings.TrimSpace(string(out)), time.Since(start).Round(time.Millisecond))
+		}
+		// Hand the fork the stable current.md symlink (always points at the latest
+		// dump). os.Stat follows the link, so Size()>0 means the target has content.
+		cur := filepath.Join(summaryDir, "current.md")
+		if info, err := os.Stat(cur); err == nil && info.Size() > 0 {
+			usedPath = cur
+		}
 	}
 	log.Printf("[fork] src=%s usedPath=%s", srcID, usedPath)
 
@@ -6286,10 +6462,12 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		newPaneID, _ = result["session"].(string)
 	}
 	newPaneID = normPaneID(newPaneID)
-	if req.ProjectID > 0 && newPaneID != "" {
-		if err := addForkToProject(req.ProjectID, newPaneID); err != nil {
-			httpErr(w, 500, "add fork to project failed: "+err.Error())
-			return
+	if newPaneID != "" {
+		for _, pid := range forkTargetProjects(req.ProjectID, srcID) {
+			if err := addForkToProject(pid, newPaneID); err != nil {
+				httpErr(w, 500, "add fork to project failed: "+err.Error())
+				return
+			}
 		}
 	}
 
@@ -6409,6 +6587,35 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		"prompt_pending": newPaneID != "",
 		"prompt_path":    usedPath,
 	})
+}
+
+// forkTargetProjects picks the project(s) a fork joins. An explicit project
+// (the Projects view the fork was started from) wins. Otherwise — Team panel,
+// `cicy-agent fork`, or the default project view — the fork joins every
+// project its source agent belongs to, instead of falling into the default one.
+func forkTargetProjects(requested int64, srcPaneID string) []int64 {
+	if requested > 0 {
+		return []int64{requested}
+	}
+	src := normPaneID(srcPaneID)
+	short := strings.Split(src, ":")[0]
+	rows, err := store.Query(
+		"SELECT DISTINCT group_id FROM group_windows WHERE win_type='agent_ttyd' AND (win_id=? OR win_id=? OR ref_id=? OR ref_id=?) ORDER BY group_id",
+		src, short, src, short,
+	)
+	if err != nil {
+		log.Printf("[fork] lookup source projects for %s: %v", src, err)
+		return nil
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil && id > 0 {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func addForkToProject(projectID int64, paneID string) error {

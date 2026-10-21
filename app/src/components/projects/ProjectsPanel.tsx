@@ -3,7 +3,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDown, ArrowRight, ArrowUpCircle, BookOpen, Check, FileText, FolderKanban, GitBranch, Hand, History, LayoutGrid, Loader2, MessageCircle, Minus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, Pin, PinOff, Plus, RefreshCw, Search, SendHorizontal, Square, Trash2, UserPlus, Users, X, Zap } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUpCircle, BookOpen, Check, ChevronDown, ChevronUp, Copy, FileText, FolderKanban, GitBranch, Hand, History, LayoutDashboard, LayoutGrid, Loader2, MessageCircle, Minus, MoreHorizontal, Move, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, Pin, PinOff, Plus, RefreshCw, Search, SendHorizontal, Square, Trash2, UserPlus, Users, X, Zap } from 'lucide-react';
 import { Trans, useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -19,6 +19,7 @@ import ProjectAttachmentChip from './ProjectAttachmentChip';
 import { appendPromptHistory, canNavigatePromptHistory, readPromptHistory } from '../../lib/promptHistory';
 import { AppModal, useDialogs } from '../ui/Modal';
 import AgentAvatar from '../AgentAvatar';
+import ImageAnnotator from '../terminal/ImageAnnotator';
 import CurrentHistoryView from '../chat/CurrentHistoryView';
 import { MarkdownImg } from '../chat/history/shared/Markdown';
 import TerminalView from '../terminal/TerminalView';
@@ -139,8 +140,13 @@ const shortPaneId = (value: string) => String(value || '').replace(/:.*$/, '');
 // the grid-mode render so both agree on the same geometry.
 const GRID_MODE_GAP = 12;
 const GRID_MODE_MARGIN = 16;
-const GRID_MODE_MIN_CELL_W = 320;
-const GRID_MODE_MIN_CELL_H = 240;
+// Minimum readable card size in grid mode. When the viewport can't fit every
+// card at this size the grid grows downward and the grid viewport scrolls,
+// instead of squashing cards until their transcript is a sliver.
+const GRID_MODE_MIN_CELL_W = 420;
+const GRID_MODE_MIN_CELL_H = 480;
+// Room for the vertical scrollbar so overflowing grids never scroll sideways.
+const GRID_MODE_SCROLLBAR_GUTTER = 12;
 const evenGridColumns = (count: number, viewportWidth: number) => {
   const n = Math.max(1, count);
   const square = Math.ceil(Math.sqrt(n));
@@ -280,6 +286,10 @@ interface ProjectViewCache {
   pan: { x: number; y: number };
   layouts: Record<string, ProjectAgentLayout>;
   layoutMode: 'grid' | 'canvas';
+  // Cards hidden from the grid/canvas (minimized); restorable from the footer selector.
+  minimized: string[];
+  // Grid order of cards (short pane ids); cards not listed keep roster order after these.
+  order: string[];
 }
 
 const projectViewCacheKey = (projectId: number | string) => `${PROJECT_VIEW_CACHE_PREFIX}${projectId}`;
@@ -293,11 +303,13 @@ const readProjectViewCache = (projectId: number | string): ProjectViewCache | nu
       layouts: value.layouts && typeof value.layouts === 'object' ? value.layouts : {},
       // Default to the tidy grid; only an explicit 'canvas' opts into free drag.
       layoutMode: value.layoutMode === 'canvas' ? 'canvas' : 'grid',
+      minimized: Array.isArray(value.minimized) ? value.minimized.map(String) : [],
+      order: Array.isArray(value.order) ? value.order.map(String) : [],
     };
   } catch { return null; }
 };
 const writeProjectViewCache = (projectId: number | string, patch: Partial<ProjectViewCache>) => {
-  const current = readProjectViewCache(projectId) || { zoom: 1, pan: { x: 60, y: 60 }, layouts: {}, layoutMode: 'grid' as const };
+  const current = readProjectViewCache(projectId) || { zoom: 1, pan: { x: 60, y: 60 }, layouts: {}, layoutMode: 'grid' as const, minimized: [] as string[], order: [] as string[] };
   try { localStorage.setItem(projectViewCacheKey(projectId), JSON.stringify({ ...current, ...patch })); } catch {}
 };
 
@@ -321,7 +333,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRenameTitle, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onDelete, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRenameTitle, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onDelete, onMinimize, reorder, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   terminalOpen?: boolean;
@@ -343,6 +355,9 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
   onBindFeishu?: () => void;
   onFork?: () => void;
   onDelete?: () => void;
+  onMinimize?: () => void;
+  // Grid mode only: move this card one slot earlier / later.
+  reorder?: { canUp: boolean; canDown: boolean; move: (delta: -1 | 1) => void };
   onTerminalOpenChange: (open: boolean) => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -451,6 +466,13 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
     >
       <div data-id="project-agent-card-body" className="flex min-h-0 flex-1 flex-col overflow-visible px-5 pb-4 pt-2.5">
       <div data-id="project-agent-card-header" className="flex items-center gap-3">
+        <AgentAvatar
+          agentType={agent.agentType}
+          title={titleText}
+          dataId={`project-agent-card-avatar-${shortPaneId(agent.paneId)}`}
+          variant="select"
+          className="shrink-0"
+        />
         <div data-id="project-agent-card-heading" className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <h3
@@ -485,44 +507,44 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
                   : cn('truncate', titleEditable && 'cursor-text'),
               )}
             >{titleText}</h3>
-            {agent.agentType ? <span data-id="project-agent-card-agent-type" className="shrink-0 font-mono text-[12px] text-zinc-500">{agent.agentType}</span> : null}
-            <span
-              data-id="project-agent-card-model-slot"
-              aria-hidden={!metrics?.model}
-              className="inline-flex w-24 shrink-0 overflow-hidden"
-            >
-              {metrics?.model ? <ModelTag model={metrics.model} className="max-w-full" /> : null}
-            </span>
           </div>
         </div>
-        <div data-id="project-agent-card-header-actions" className="flex shrink-0 items-center gap-3">
-        <div
-          data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`}
-          role="tablist"
-          className="order-1 flex h-7 items-end gap-4"
-        >
-          {([
-            ['history', '会话'],
-            ...(agent.remote || String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
-            ['role', '角色'],
-          ] as Array<[ProjectAgentBodyTab, string]>).map(([tab, label]) => {
-            const unavailable = tab === 'terminal' && (!agent.ttydSrc || agent.isApiOnly);
-            return (
+        <div data-id="project-agent-card-header-actions" className="flex shrink-0 items-center gap-0.5">
+        {reorder ? (
+          <div data-id={`project-agent-card-reorder-${shortPaneId(agent.paneId)}`} className="order-1 flex items-center">
+            {([
+              [-1, reorder.canUp, ChevronUp, 'projectMoveCardUp', '上移'],
+              [1, reorder.canDown, ChevronDown, 'projectMoveCardDown', '下移'],
+            ] as const).map(([delta, enabled, Icon, key, fallback]) => (
               <button
-                key={tab}
+                key={delta}
                 type="button"
-                role="tab"
-                aria-selected={activeBodyTab === tab}
-                disabled={unavailable}
-                data-id={`project-agent-card-tab-${tab}-${shortPaneId(agent.paneId)}`}
-                onClick={(event) => { event.stopPropagation(); selectBodyTab(tab); }}
-                className={cn('relative h-7 text-[12px] font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full', activeBodyTab === tab ? 'text-zinc-100 after:bg-blue-500' : 'text-zinc-500 after:bg-transparent hover:text-zinc-300', unavailable && 'cursor-not-allowed opacity-30 hover:text-zinc-500')}
+                data-id={`project-agent-card-move-${delta < 0 ? 'up' : 'down'}-${shortPaneId(agent.paneId)}`}
+                disabled={!enabled}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => { event.stopPropagation(); reorder.move(delta); }}
+                className="grid h-7 w-6 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200 disabled:cursor-default disabled:opacity-25 disabled:hover:bg-transparent"
+                title={t(key, { defaultValue: fallback })}
+                aria-label={t(key, { defaultValue: fallback })}
               >
-                {label}
+                <Icon className="h-4 w-4" />
               </button>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : null}
+        {onMinimize ? (
+          <button
+            type="button"
+            data-id={`project-agent-card-minimize-${shortPaneId(agent.paneId)}`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); onMinimize(); }}
+            className="order-1 grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
+            title={t('projectMinimizeAgent', { defaultValue: '最小化' })}
+            aria-label={t('projectMinimizeAgent', { defaultValue: '最小化' })}
+          >
+            <Minus className="h-4 w-4" />
+          </button>
+        ) : null}
         <div data-id="project-agent-card-menu-wrap" ref={menuRef} className="relative order-2">
           <button
             type="button"
@@ -609,11 +631,22 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
         </div>
       </div>
 
-      <div data-id="project-agent-card-metrics" className="flex h-5 min-w-0 items-center gap-2 font-mono text-[12px] text-zinc-500">
+      <div data-id="project-agent-card-metrics" className="flex h-7 min-w-0 items-center gap-2 font-mono text-[12px] text-zinc-500">
         <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
+        <span
+          data-id="project-agent-card-identity"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          className="min-w-0 cursor-text select-text truncate text-zinc-500"
+        >
+          {identity}
+        </span>
         <button
           type="button"
-          data-id="project-agent-card-identity"
+          data-id="project-agent-card-identity-copy"
+          aria-label={identityCopied ? t('copied', { defaultValue: '已复制' }) : t('copy', { defaultValue: '复制' })}
+          title={identityCopied ? t('copied', { defaultValue: '已复制' }) : t('copy', { defaultValue: '复制' })}
+          onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
             void copyToClipboard(identity).then((copied) => {
@@ -622,10 +655,20 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
               window.setTimeout(() => setIdentityCopied(false), 1500);
             });
           }}
-          className={cn('min-w-0 truncate hover:text-zinc-300', identityCopied ? 'text-emerald-400' : 'text-zinc-500')}
+          className={cn(
+            '-ml-1 grid h-5 w-5 shrink-0 place-items-center rounded transition-colors',
+            identityCopied ? 'text-emerald-400' : 'text-zinc-600 hover:bg-white/[0.06] hover:text-zinc-300',
+          )}
         >
-          {identityCopied ? t('copied', { defaultValue: '已复制' }) : identity}
+          {identityCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
         </button>
+        <span
+          data-id="project-agent-card-model-slot"
+          aria-hidden={!metrics?.model}
+          className="inline-flex max-w-24 shrink-0 overflow-hidden empty:hidden"
+        >
+          {metrics?.model ? <ModelTag model={metrics.model} className="max-w-full" /> : null}
+        </span>
         <span
           data-id="project-agent-card-context-slot"
           aria-hidden={!metrics || metrics.ctx <= 0}
@@ -644,6 +687,33 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
         >
           {metrics && metrics.cost > 0 ? <span data-id="project-agent-card-cost">{fmtCost(metrics.cost)}</span> : null}
         </span>
+        <div
+          data-id={`project-agent-card-tabs-${shortPaneId(agent.paneId)}`}
+          role="tablist"
+          className="ml-auto flex h-7 shrink-0 items-end gap-4 font-sans"
+        >
+          {([
+            ['history', '会话'],
+            ...(agent.remote || String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
+            ['role', '角色'],
+          ] as Array<[ProjectAgentBodyTab, string]>).map(([tab, label]) => {
+            const unavailable = tab === 'terminal' && (!agent.ttydSrc || agent.isApiOnly);
+            return (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={activeBodyTab === tab}
+                disabled={unavailable}
+                data-id={`project-agent-card-tab-${tab}-${shortPaneId(agent.paneId)}`}
+                onClick={(event) => { event.stopPropagation(); selectBodyTab(tab); }}
+                className={cn('relative h-7 text-[12px] font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full', activeBodyTab === tab ? 'text-zinc-100 after:bg-blue-500' : 'text-zinc-500 after:bg-transparent hover:text-zinc-300', unavailable && 'cursor-not-allowed opacity-30 hover:text-zinc-500')}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
       {activeBodyTab === 'history' ? (
         // -mx-5 keeps the transcript full-bleed. The matching -mb-4 is gone: it
@@ -830,6 +900,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   // is the original free-drag infinite canvas. Persisted per project in the
   // view cache. The free canvas is always available — grid is just the default.
   const [layoutMode, setLayoutMode] = useState<'grid' | 'canvas'>('grid');
+  const [minimizedIds, setMinimizedIds] = useState<string[]>([]);
+  const [cardOrder, setCardOrder] = useState<string[]>([]);
+  const [minimizedMenuOpen, setMinimizedMenuOpen] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ width: 1200, height: 800 });
   const [dockHeight, setDockHeight] = useState(0);
   const liveMetrics = useMemo(() => {
@@ -937,6 +1010,12 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   }, [t]);
 
   useEffect(() => { void load(); }, [load, agentMembershipKey]);
+  // Membership changed elsewhere (team panel 「加入项目」) → refresh the list.
+  useEffect(() => {
+    const reload = () => { void load(false); };
+    window.addEventListener('cicy:project-groups-changed', reload);
+    return () => window.removeEventListener('cicy:project-groups-changed', reload);
+  }, [load]);
 
   useEffect(() => {
     if (!projectMenuId) return;
@@ -1057,6 +1136,17 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       : t('projectAllIdle', { defaultValue: '空闲' });
   };
   const visibleAgents = allAgents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
+  // Minimized cards stay project members (polling, routing, counts) but are not
+  // laid out; the footer selector lists them for restore.
+  const minimizedSet = new Set(minimizedIds);
+  // User-chosen order (↑/↓ on the card) first; unranked cards keep roster order after them.
+  const orderRank = new Map(cardOrder.map((id, index) => [id, index]));
+  const shownAgents = visibleAgents
+    .filter((agent) => !minimizedSet.has(shortPaneId(agent.paneId)))
+    .map((agent, index) => ({ agent, rank: orderRank.get(shortPaneId(agent.paneId)) ?? cardOrder.length + index }))
+    .sort((a, b) => a.rank - b.rank)
+    .map((item) => item.agent);
+  const minimizedAgents = visibleAgents.filter((agent) => minimizedSet.has(shortPaneId(agent.paneId)));
   const availableAgents = allAgents.filter((agent) => !memberIds.has(shortPaneId(agent.paneId)));
   const availableAgentsForInstance = availableAgents.filter((agent) => addInstanceId === 'local' ? !agent.remote : agent.instanceId === addInstanceId);
   const availableAgentTypesForInstance = [...new Set(availableAgentsForInstance.map((agent) => String(agent.agentType || '').trim().toLowerCase()).filter(Boolean))].sort();
@@ -1084,6 +1174,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   });
   const paneMembershipKey = selectedProject.pane_ids.map(shortPaneId).sort().join('|');
   const visibleAgentKey = visibleAgents.map((agent) => shortPaneId(agent.paneId)).sort().join('|');
+  // Order-sensitive: a reorder must re-run the grid layout.
+  const shownAgentKey = shownAgents.map((agent) => shortPaneId(agent.paneId)).join('|');
   // Layout for every visible card. Cards without a stored layout (a fork that
   // just joined, an agent whose server row hasn't hydrated yet) get a free slot
   // next to the cards that are already on screen — never an index-based grid,
@@ -1093,23 +1185,23 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     const occupied: ProjectAgentLayout[] = [];
     // Grid mode: always tile every card to fill the viewport, ignoring stored
     // free-canvas positions (those are restored when the user switches back).
-    if (layoutMode === 'grid' && visibleAgents.length) {
+    if (layoutMode === 'grid' && shownAgents.length) {
       // Reserve the bottom controls footer (48px) and any open dock/shell panel.
       const reserved = 48 + (dockHeight || 0);
       return evenGridLayouts(
-        visibleAgents.map((agent) => shortPaneId(agent.paneId)),
-        canvasSize.width,
+        shownAgents.map((agent) => shortPaneId(agent.paneId)),
+        Math.max(1, canvasSize.width - GRID_MODE_SCROLLBAR_GUTTER),
         Math.max(1, canvasSize.height - reserved),
       );
     }
-    for (const agent of visibleAgents) {
+    for (const agent of shownAgents) {
       const id = shortPaneId(agent.paneId);
       if (agentLayouts[id]) {
         resolved[id] = agentLayouts[id];
         occupied.push(agentLayouts[id]);
       }
     }
-    visibleAgents.forEach((agent, index) => {
+    shownAgents.forEach((agent, index) => {
       const id = shortPaneId(agent.paneId);
       if (resolved[id]) return;
       const layout = { ...placeProjectAgentLayout(occupied), z: index + 1, width: DEFAULT_PROJECT_AGENT_WIDTH, height: DEFAULT_PROJECT_AGENT_HEIGHT };
@@ -1117,7 +1209,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       occupied.push(layout);
     });
     return resolved;
-  }, [agentLayouts, visibleAgentKey, layoutMode, canvasSize.width, canvasSize.height, dockHeight]);
+  }, [agentLayouts, shownAgentKey, layoutMode, canvasSize.width, canvasSize.height, dockHeight]);
   useEffect(() => {
     const receiveCloudReply = (event: Event) => {
       const detail = (event as CustomEvent)?.detail || {};
@@ -1170,13 +1262,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   }, [statuses]);
 
   useEffect(() => {
-    const checkKey = `${selectedProject.id}:${paneMembershipKey}:${visibleAgentKey}:${layoutVisibilityRevision}`;
-    if (layoutReadyProjectId !== String(selectedProject.id) || visibilityCheckedKeyRef.current === checkKey || !visibleAgents.length) return;
+    const checkKey = `${selectedProject.id}:${paneMembershipKey}:${shownAgentKey}:${layoutVisibilityRevision}`;
+    if (layoutReadyProjectId !== String(selectedProject.id) || visibilityCheckedKeyRef.current === checkKey || !shownAgents.length) return;
     const frame = window.requestAnimationFrame(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       visibilityCheckedKeyRef.current = checkKey;
-      const layouts = visibleAgents.map((agent) => resolvedLayouts[shortPaneId(agent.paneId)]);
+      const layouts = shownAgents.map((agent) => resolvedLayouts[shortPaneId(agent.paneId)]);
       const viewportWidth = canvas.clientWidth;
       const viewportHeight = Math.max(1, canvas.clientHeight - 48);
       const anyVisible = layouts.some((layout) => {
@@ -1198,7 +1290,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       writeProjectViewCache(selectedProject.id, { zoom: nextZoom, pan: nextPan });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [layoutReadyProjectId, layoutVisibilityRevision, paneMembershipKey, selectedProject.id, visibleAgentKey]);
+  }, [layoutReadyProjectId, layoutVisibilityRevision, paneMembershipKey, selectedProject.id, shownAgentKey]);
 
   useEffect(() => {
     visibilityCheckedKeyRef.current = '';
@@ -1207,6 +1299,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setCanvasPan(cached?.pan || { x: 60, y: 60 });
     setCanvasZoom(cached?.zoom || 1);
     setLayoutMode(cached?.layoutMode || 'grid');
+    setMinimizedIds(cached?.minimized || []);
+    setCardOrder(cached?.order || []);
+    setMinimizedMenuOpen(false);
     setLayoutReadyProjectId(cached ? String(selectedProject.id) : '');
     setSelectedAgentIds(new Set());
     setAgentMessages({});
@@ -1670,6 +1765,49 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     });
   };
 
+  // Pasted images open the same editor as the terminal before being attached.
+  const [annotateQueue, setAnnotateQueue] = useState<Array<{ agent: ProjectAgent; file: File }>>([]);
+  const [annotateTotal, setAnnotateTotal] = useState(0);
+  const pasteAgentFiles = (agent: ProjectAgent, files: File[]) => {
+    const images = files.filter((file) => file.type.startsWith('image/'));
+    const others = files.filter((file) => !file.type.startsWith('image/'));
+    if (others.length) addAgentFiles(agent, others);
+    if (!images.length) return;
+    setAnnotateQueue((queue) => [...queue, ...images.map((file) => ({ agent, file }))]);
+    setAnnotateTotal((total) => total + images.length);
+  };
+  // Notes typed in the editor, per agent, until the last queued image is done.
+  const annotatePromptsRef = useRef<Record<string, string[]>>({});
+  // Agents whose composer should send itself once its uploads settle.
+  const autoSendAgentsRef = useRef<Set<string>>(new Set());
+  const finishAnnotatedImage = (result: File | null, prompt?: string) => {
+    const head = annotateQueue[0];
+    const last = annotateQueue.length <= 1;
+    setAnnotateQueue((queue) => queue.slice(1));
+    if (last) setAnnotateTotal(0);
+    if (head && result) addAgentFiles(head.agent, [result]);
+    if (head && result && prompt) {
+      const id = shortPaneId(head.agent.paneId);
+      annotatePromptsRef.current[id] = [...(annotatePromptsRef.current[id] || []), prompt];
+    }
+    if (last) {
+      // Drop the prompts into each composer and send once the images finish uploading.
+      const pending = annotatePromptsRef.current;
+      annotatePromptsRef.current = {};
+      for (const [id, prompts] of Object.entries(pending)) {
+        if (!prompts.length) continue;
+        setAgentMessages((current) => ({ ...current, [id]: [String(current[id] || '').trim(), ...prompts].filter(Boolean).join('\n') }));
+        autoSendAgentsRef.current.add(id);
+      }
+    }
+    if (last && head) {
+      // Hand focus back to the composer that received the paste.
+      window.requestAnimationFrame(() => {
+        document.querySelector<HTMLTextAreaElement>(`[data-id="project-agent-card-footer-${shortPaneId(head.agent.paneId)}"] textarea`)?.focus();
+      });
+    }
+  };
+
   const retryAgentAttachment = (agent: ProjectAgent, attachmentId: string) => {
     const file = (agentAttachments[shortPaneId(agent.paneId)] || []).find((item) => item.id === attachmentId)?.file;
     if (file) uploadAgentAttachment(agent, attachmentId, file);
@@ -1787,6 +1925,20 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setAgentAttachments((current) => ({ ...current, [id]: [] }));
     await deliverAgentMessage(agent, message, displayQuestion, previousReply, attachments, text);
   };
+
+  // Auto-send a composer filled from the image editor once nothing is uploading.
+  // A failed upload cancels the auto-send so the user can retry and send by hand.
+  useEffect(() => {
+    if (!autoSendAgentsRef.current.size) return;
+    for (const id of [...autoSendAgentsRef.current]) {
+      const attachments = agentAttachments[id] || [];
+      if (attachments.some((item) => item.status === 'uploading')) continue;
+      autoSendAgentsRef.current.delete(id);
+      if (attachments.some((item) => item.status === 'error')) continue;
+      const agent = visibleAgents.find((item) => shortPaneId(item.paneId) === id);
+      if (agent) void sendAgentMessage(agent);
+    }
+  });
 
   const editQueuedAgentMessage = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
@@ -2100,13 +2252,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   };
   const resetCanvasView = () => {
     const canvas = canvasRef.current;
-    if (!canvas || !visibleAgents.length) return;
+    if (!canvas || !shownAgents.length) return;
     // Even grid: identical cell size, equal gaps, aligned rows/columns. Shares
     // geometry with the default layout via evenGridLayouts.
     const margin = 40;
-    const gridLayouts = evenGridLayouts(visibleAgents.map((agent) => shortPaneId(agent.paneId)), canvas.clientWidth);
+    const gridLayouts = evenGridLayouts(shownAgents.map((agent) => shortPaneId(agent.paneId)), canvas.clientWidth);
     const arrangedLayouts = { ...agentLayouts, ...gridLayouts };
-    const layouts = visibleAgents.map((agent) => gridLayouts[shortPaneId(agent.paneId)]);
+    const layouts = shownAgents.map((agent) => gridLayouts[shortPaneId(agent.paneId)]);
     const minX = Math.min(...layouts.map((layout) => layout.x));
     const minY = Math.min(...layouts.map((layout) => layout.y));
     const maxX = Math.max(...layouts.map((layout) => layout.x + layout.width));
@@ -2123,14 +2275,82 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setCanvasZoom(zoom);
     writeProjectViewCache(selectedProject.id, { layouts: arrangedLayouts, pan, zoom });
     if (selectedProject.api_id) {
-      for (let index = 0; index < visibleAgents.length; index += 1) {
-        const agent = visibleAgents[index];
+      for (let index = 0; index < shownAgents.length; index += 1) {
+        const agent = shownAgents[index];
         const layout = layouts[index];
         void apiService.updateGroupPaneLayout(selectedProject.api_id, agent.paneId, {
           pos_x: layout.x, pos_y: layout.y, width: layout.width, height: layout.height, z_index: layout.z,
         });
       }
     }
+  };
+
+  const setMinimized = (next: string[]) => {
+    setMinimizedIds(next);
+    writeProjectViewCache(selectedProject.id, { minimized: next });
+  };
+  // Minimizing frees the agent's processes (its tmux session is killed; the
+  // conversation is already on disk). Restoring brings it back on its latest
+  // session — the backend no-ops if the agent is somehow still running.
+  // Remote (other-instance) agents are only hidden, never stopped from here.
+  const minimizeAgent = (agent: ProjectAgent) => {
+    const id = shortPaneId(agent.paneId);
+    if (minimizedIds.includes(id)) return;
+    setMinimized([...minimizedIds, id]);
+    setSelectedAgentIds((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    if (agent.remote) return;
+    apiService.stopPane(agent.paneId)
+      .then(() => window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: t('projectAgentStopped', { defaultValue: '已停止 {{name}}，恢复时会重新启动并加载最新会话', name: agent.title || id }),
+      })))
+      .catch(() => window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: t('projectAgentStopFailed', { defaultValue: '停止 {{name}} 失败', name: agent.title || id }),
+      })));
+  };
+  const resumeAgentProcess = (agent: ProjectAgent | undefined) => {
+    if (!agent || agent.remote) return;
+    const id = shortPaneId(agent.paneId);
+    apiService.resumePane(agent.paneId)
+      .then((resp: any) => {
+        if (resp?.data?.success === false) throw new Error(resp?.data?.error || 'resume failed');
+        if (resp?.data?.restarted) window.dispatchEvent(new CustomEvent('show-toast', {
+          detail: t('projectAgentResuming', { defaultValue: '正在重启 {{name}} 并加载最新会话…', name: agent.title || id }),
+        }));
+      })
+      .catch(() => window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: t('projectAgentResumeFailed', { defaultValue: '重启 {{name}} 失败', name: agent.title || id }),
+      })));
+  };
+  const restoreAgent = (id: string) => {
+    setMinimized(minimizedIds.filter((item) => item !== id));
+    if (minimizedIds.length <= 1) setMinimizedMenuOpen(false);
+    const agent = visibleAgents.find((item) => shortPaneId(item.paneId) === id);
+    // Restored card becomes the active one (selected + send target).
+    if (agent) toggleAgentSelection(agent);
+    resumeAgentProcess(agent);
+  };
+  const reorderAgent = (agent: ProjectAgent, delta: -1 | 1) => {
+    const ids = shownAgents.map((item) => shortPaneId(item.paneId));
+    const from = ids.indexOf(shortPaneId(agent.paneId));
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    // Keep minimized cards' previous rank so restoring them doesn't reshuffle.
+    const next = [...ids, ...cardOrder.filter((id) => !ids.includes(id))];
+    setCardOrder(next);
+    writeProjectViewCache(selectedProject.id, { order: next });
+  };
+  const restoreAllAgents = () => {
+    const restored = minimizedAgents;
+    setMinimized([]);
+    setMinimizedMenuOpen(false);
+    if (restored[0]) toggleAgentSelection(restored[0]);
+    restored.forEach((agent) => resumeAgentProcess(agent));
   };
 
   const toggleLayoutMode = () => {
@@ -2290,7 +2510,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           onPointerUp={endCanvasPan}
           onPointerCancel={endCanvasPan}
           onWheel={(event) => {
-            if (!wheelZoomActive) return;
+            if (!wheelZoomActive || layoutMode === 'grid') return;
             event.preventDefault();
             zoomCanvasAt(event.clientX, event.clientY, event.deltaY > 0 ? -0.02 : 0.02);
           }}
@@ -2301,13 +2521,31 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             backgroundSize: layoutMode === 'grid' ? '32px 32px' : `${32 * canvasZoom}px ${32 * canvasZoom}px`,
           }}
         >
-        {visibleAgents.length ? (
+        {shownAgents.length ? (
           <div
             data-id="project-canvas-world"
-            className="pointer-events-none absolute inset-0 z-20 origin-top-left"
-            style={{ transform: layoutMode === 'grid' ? 'none' : `translate(${canvasPan.x}px, ${canvasPan.y}px) scale(${canvasZoom})` }}
+            // Grid mode: the world is a scroll viewport that stops above the
+            // footer/dock; cards keep a readable minimum size and overflow
+            // scrolls vertically. Canvas mode: pan/zoom transform as before.
+            className={cn(
+              'absolute inset-0 z-20 origin-top-left',
+              layoutMode === 'grid' ? 'pointer-events-auto overflow-y-auto overflow-x-hidden overscroll-contain' : 'pointer-events-none',
+            )}
+            style={layoutMode === 'grid'
+              ? { transform: 'none', bottom: 48 + (dockHeight || 0) }
+              : { transform: `translate(${canvasPan.x}px, ${canvasPan.y}px) scale(${canvasZoom})` }}
           >
-            {visibleAgents.map((agent, index) => {
+            {layoutMode === 'grid' ? (
+              // Absolutely positioned cards don't size the scroll area; this
+              // spacer makes the viewport scroll exactly to the last row.
+              <div
+                data-id="project-canvas-grid-spacer"
+                aria-hidden
+                className="pointer-events-none w-px"
+                style={{ height: Math.max(0, ...Object.values(resolvedLayouts).map((item) => item.y + item.height)) + GRID_MODE_MARGIN }}
+              />
+            ) : null}
+            {shownAgents.map((agent, index) => {
               const layout = layoutForAgent(agent, index);
               const cardMetrics = liveMetrics[shortPaneId(agent.paneId)] || (agentReplies[shortPaneId(agent.paneId)] ? metricsFromCurrentReply(agentReplies[shortPaneId(agent.paneId)]) : undefined);
               const cardShortId = shortPaneId(agent.paneId);
@@ -2474,7 +2712,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                       }}
                       onPaste={(event) => {
                         const files = Array.from(event.clipboardData?.files || []);
-                        if (files.length) { event.preventDefault(); addAgentFiles(agent, files); }
+                        if (files.length) { event.preventDefault(); pasteAgentFiles(agent, files); }
                       }}
                       onKeyDown={(event) => {
                         if (event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -2557,6 +2795,12 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 onRemove={() => { void removeAgent(agent); }}
                 onMoveProject={(projectId) => { void changeAgentProject(agent, projectId, 'move'); }}
                 onAddProject={(projectId) => { void changeAgentProject(agent, projectId, 'add'); }}
+                onMinimize={() => minimizeAgent(agent)}
+                reorder={layoutMode === 'grid' && shownAgents.length > 1 ? {
+                  canUp: index > 0,
+                  canDown: index < shownAgents.length - 1,
+                  move: (delta) => reorderAgent(agent, delta),
+                } : undefined}
                 onRestart={hasCliLifecycleActions ? () => { void restartAgent(agent); } : undefined}
                 onUpdate={hasCliLifecycleActions ? () => setUpdateTarget(agent) : undefined}
                 onBindWechat={hasLocalActions ? () => setWechatTarget(agent) : undefined}
@@ -2580,34 +2824,46 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         ) : (
           <div data-id="projects-agent-empty" className="flex min-h-[420px] flex-col items-center justify-center text-center text-zinc-600">
             <FolderKanban className="mb-3 h-10 w-10 opacity-40" />
-            <p className="text-sm" data-id="projects-agent-empty-title">{t('projectNoAgents')}</p>
+            <p className="text-sm" data-id="projects-agent-empty-title">{minimizedAgents.length ? t('projectAllMinimized', { defaultValue: '所有 Agent 都已最小化，可在左下角恢复' }) : t('projectNoAgents')}</p>
           </div>
         )}
         {shellPanel ? <div data-id="project-canvas-shell-panel" className="absolute inset-x-0 bottom-12 z-40 max-h-[260px] overflow-hidden border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur [&_[data-id^=agent-stack-shell-terminal]]:!h-52">{shellPanel}</div> : null}
         <div data-id="project-canvas-footer" className="absolute inset-x-0 bottom-0 z-[70] h-12 border-t border-white/[0.08] bg-[#111216]/95 backdrop-blur">
         <div data-id="project-canvas-controls" className="absolute bottom-1.5 left-4 flex items-center gap-0.5 p-1">
-          <button
-            type="button"
+          <div
             data-id="project-canvas-mode-toggle"
-            aria-pressed={layoutMode === 'canvas'}
-            title={t(layoutMode === 'grid' ? 'projectLayoutModeToCanvas' : 'projectLayoutModeToGrid')}
-            aria-label={t(layoutMode === 'grid' ? 'projectLayoutModeToCanvas' : 'projectLayoutModeToGrid')}
-            onClick={toggleLayoutMode}
-            className={cn(
-              'grid h-7 w-7 place-items-center rounded-md transition-colors',
-              layoutMode === 'canvas'
-                ? 'bg-blue-500/15 text-blue-300 hover:bg-blue-500/25 hover:text-blue-200'
-                : 'text-zinc-500 hover:bg-white/[0.08] hover:text-white',
-            )}
+            role="radiogroup"
+            aria-label={t('projectLayoutMode', { defaultValue: '布局' })}
+            className="mr-1 flex items-center rounded-lg border border-white/[0.08] bg-white/[0.03] p-0.5"
           >
-            {layoutMode === 'grid' ? <Hand className="h-3.5 w-3.5" /> : <LayoutGrid className="h-3.5 w-3.5" />}
-          </button>
+            {([
+              ['grid', LayoutGrid, 'projectLayoutModeGrid', '网格'],
+              ['canvas', Move, 'projectLayoutModeCanvas', '画布'],
+            ] as const).map(([mode, Icon, key, fallback]) => (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={layoutMode === mode}
+                data-id={`project-canvas-mode-${mode}`}
+                title={t(key, { defaultValue: fallback })}
+                onClick={() => { if (layoutMode !== mode) toggleLayoutMode(); }}
+                className={cn(
+                  'flex h-6 items-center gap-1 rounded-md px-2 text-[11px] transition-colors',
+                  layoutMode === mode ? 'bg-blue-500/20 text-blue-200' : 'text-zinc-500 hover:text-zinc-200',
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span>{t(key, { defaultValue: fallback })}</span>
+              </button>
+            ))}
+          </div>
           {layoutMode === 'canvas' ? (
           <>
           <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
           <span data-id="project-canvas-zoom-value" className="w-9 text-center font-mono text-[9px] text-zinc-500">{Math.round(canvasZoom * 100)}%</span>
           <button type="button" data-id="project-canvas-zoom-in" onClick={() => changeZoom(0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomIn')}><Plus className="h-3.5 w-3.5" /></button>
-          <button type="button" data-id="project-canvas-reset" onClick={resetCanvasView} className="grid h-7 w-7 place-items-center rounded-md text-zinc-500 hover:bg-white/[0.08] hover:text-white" title={t('projectResetView')}><LayoutGrid className="h-3.5 w-3.5" /></button>
+          <button type="button" data-id="project-canvas-reset" onClick={resetCanvasView} className="grid h-7 w-7 place-items-center rounded-md text-zinc-500 hover:bg-white/[0.08] hover:text-white" title={t('projectResetView')}><LayoutDashboard className="h-3.5 w-3.5" /></button>
           <button
             type="button"
             data-id="project-canvas-wheel-zoom-toggle"
@@ -2625,6 +2881,59 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             <Hand className="h-3.5 w-3.5" />
           </button>
           </>
+          ) : null}
+          {minimizedAgents.length ? (
+            <div data-id="project-canvas-minimized" className="relative ml-1">
+              <button
+                type="button"
+                data-id="project-canvas-minimized-toggle"
+                aria-haspopup="menu"
+                aria-expanded={minimizedMenuOpen}
+                onClick={() => setMinimizedMenuOpen((open) => !open)}
+                className={cn(
+                  'flex h-7 items-center gap-1.5 rounded-lg border px-2 text-[11px] transition-colors',
+                  minimizedMenuOpen
+                    ? 'border-blue-500/40 bg-blue-500/15 text-blue-200'
+                    : 'border-white/[0.08] bg-white/[0.03] text-zinc-400 hover:text-zinc-200',
+                )}
+              >
+                <Minus className="h-3.5 w-3.5" />
+                <span>{t('projectMinimizedCount', { defaultValue: '已最小化 {{count}}', count: minimizedAgents.length })}</span>
+              </button>
+              {minimizedMenuOpen ? (
+                <div data-id="project-canvas-minimized-menu" role="menu" className="absolute bottom-9 left-0 z-[220] max-h-72 w-64 overflow-y-auto rounded-xl border border-white/10 bg-[#1a1b20] p-1 shadow-2xl">
+                  {minimizedAgents.map((agent) => {
+                    const id = shortPaneId(agent.paneId);
+                    return (
+                      <button
+                        key={agent.paneId}
+                        type="button"
+                        role="menuitem"
+                        data-id={`project-canvas-minimized-restore-${id}`}
+                        onClick={() => restoreAgent(id)}
+                        title={t('projectRestoreAgent', { defaultValue: '恢复到网格' })}
+                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-white/[0.06]"
+                      >
+                        <AgentAvatar agentType={agent.agentType} title={agent.title || id} variant="option" />
+                        <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-200">{agent.title || id}</span>
+                        <span className="shrink-0 font-mono text-[10px] text-zinc-500">{agent.remote ? id : `${id} · ${t('projectAgentStoppedBadge', { defaultValue: '已停止' })}`}</span>
+                      </button>
+                    );
+                  })}
+                  {minimizedAgents.length > 1 ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-id="project-canvas-minimized-restore-all"
+                      onClick={restoreAllAgents}
+                      className="mt-1 flex w-full items-center justify-center rounded-lg border-t border-white/[0.07] px-2.5 py-1.5 text-[12px] text-blue-300 hover:bg-white/[0.06]"
+                    >
+                      {t('projectRestoreAll', { defaultValue: '全部恢复' })}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
         {footerControls ? (
@@ -2896,11 +3205,22 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         />,
         document.body,
       ) : null}
+      {annotateQueue[0] ? (
+        <ImageAnnotator
+          key={`${annotateQueue[0].file.name}-${annotateQueue[0].file.size}-${annotateTotal - annotateQueue.length}`}
+          file={annotateQueue[0].file}
+          index={annotateTotal - annotateQueue.length + 1}
+          total={annotateTotal}
+          onDone={finishAnnotatedImage}
+        />
+      ) : null}
       {forkTarget ? (
         <ForkConfirmModal
           sourcePaneId={shortPaneId(forkTarget.paneId)}
           masterPaneId={shortPaneId(masterPaneId)}
-          projectId={selectedProject.api_id}
+          // Default view has no real project: omit it so the fork joins its
+          // source agent's project(s) server-side.
+          projectId={selectedProject.api_id || undefined}
           onClose={() => setForkTarget(null)}
           onForked={(newPaneId) => { placeForkBesideSource(forkTarget, newPaneId); void onAgentsRefresh(); void load(false); }}
           onOpenAgentFile={onOpenAgentFile}

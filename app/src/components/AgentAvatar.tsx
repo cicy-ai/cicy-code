@@ -76,10 +76,21 @@ export default function AgentAvatar({
     )
   }
 
+  // kiro's logo already IS a rounded purple tile. Framing it inside our light
+  // avatar chip (and shrinking it to the icon size) shows a small purple square
+  // inside a grey square at small sizes. Render it full-bleed instead: no chip
+  // background/border, the image fills and is clipped to the avatar's corners.
+  const fullBleed = normalizedAgentType === 'kiro-cli'
+
   return (
     <div
       data-id={dataId}
-      className={cn('flex shrink-0 items-center justify-center border text-zinc-950', variantStyle.container, className)}
+      className={cn(
+        'flex shrink-0 items-center justify-center border text-zinc-950',
+        variantStyle.container,
+        fullBleed && 'overflow-hidden border-transparent bg-transparent shadow-none',
+        className,
+      )}
       style={mergedStyle}
       title={icon.label}
     >
@@ -88,7 +99,11 @@ export default function AgentAvatar({
           data-id="agent-avatar-icon"
           src={icon.src}
           alt={icon.label}
-          className={cn('object-contain', (normalizedAgentType === 'kiro-cli' || normalizedAgentType === 'cicy-claude') && 'scale-125', variantStyle.icon)}
+          className={cn(
+            'object-contain',
+            fullBleed ? 'h-full w-full object-cover' : variantStyle.icon,
+            normalizedAgentType === 'cicy-claude' && 'scale-125',
+          )}
         />
       ) : (
         <span data-id="agent-avatar-icon-text" className={cn(textClassName)} aria-label={icon.label}>{icon.text}</span>

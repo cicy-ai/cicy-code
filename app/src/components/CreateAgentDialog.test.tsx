@@ -16,6 +16,7 @@ const appState = vi.hoisted(() => ({
   agentTypeOptions: [
     { value: 'codex', label: 'Codex', description: 'Codex agent' },
     { value: 'cicy', label: 'CiCy', description: 'CiCy agent' },
+    { value: 'kiro-cli', label: 'Kiro CLI', description: 'Kiro agent' },
   ],
 }));
 
@@ -70,4 +71,32 @@ describe('<CreateAgentDialog /> project assignment', () => {
     await waitFor(() => expect(projectSelect).toHaveTextContent('不加入 Project'));
     expect(projectSelect).toBeDisabled();
   });
+});
+
+describe('<CreateAgentDialog /> local gateway toggle', () => {
+  const gatewayToggle = () => document.querySelector('[data-id="create-agent-dialog-use-custom-gateway-toggle"]');
+
+  it.each([['CiCy', 'cicy'], ['Kiro CLI', 'kiro-cli']])('hides the local gateway toggle for %s and submits it off', async (label, value) => {
+    const onSubmit = vi.fn();
+    render(<CreateAgentDialog open onClose={vi.fn()} onSubmit={onSubmit} />);
+    const pick = (text: string) => {
+      const opts = document.querySelector('[data-id="create-agent-dialog-agent-type-options"]')!;
+      const el = Array.from(opts.querySelectorAll('button, [role="option"], [role="radio"]')).find((n) => n.textContent?.includes(text));
+      fireEvent.click(el as HTMLElement);
+    };
+    await waitFor(() => expect(document.querySelector('[data-id="create-agent-dialog-agent-type-options"]')).toBeInTheDocument());
+    pick('Codex');
+    expect(gatewayToggle()).toBeInTheDocument();
+    fireEvent.click(gatewayToggle()!); // turn it on for Codex first
+
+    pick(label);
+    expect(gatewayToggle()).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('namePlaceholder'), { target: { value: 'x' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      agent_type: value,
+      use_custom_gateway: false,
+    })));
+  }, 15_000);
 });

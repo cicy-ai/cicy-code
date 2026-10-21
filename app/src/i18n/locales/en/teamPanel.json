@@ -84,5 +84,7 @@
   "feishuChatAuthLink": "Chat permissions",
   "feishuCreateAndBindChat": "Create Agent group",
   "feishuSendMessageFirst": "Send any message to this Bot in Feishu first",
-  "feishuWaitingForMessage": "Waiting for Bot message"
+  "feishuWaitingForMessage": "Waiting for Bot message",
+  "joinProject": "Add to project",
+  "noProjects": "No projects yet"
 }

@@ -17,14 +17,19 @@
 // (the server-side capture-pane backfill) arrives — no blank gap.
 
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
 import { replAttachmentMarkdown } from '../../lib/attachmentMarkdown'
+import ImageAnnotator from './ImageAnnotator'
 import apiService from '../../services/api'
 import { scanLinksOnText, type LinkKind } from './linkDetect'
 import { getCicyTheme } from '../../lib/theme'
+import { openOrActivateElectronProfileTab, execShell } from '../../lib/speedup/rpc'
+import { detectOS } from '../../lib/speedup/detect'
+import { fsApi } from '../files/api'
 
 // ── 逻辑行重建(移植自 api/js/src/xterm.ts)──
 // xterm 的 link provider 按"物理行"询问;URL/路径经常跨软换行,必须把 wrap
@@ -170,6 +175,25 @@ function wsUrlFromTtydSrc(ttydSrc: string): string {
 }
 
 // `<base>/ttyd/<pane>/…` → pane id, for the mask-model lookup.
+// Open a URL in the HOST's default browser. Inside cicy-desktop, window.open
+// lands in an Electron webview, so shell out to xdg-open/open/start via the
+// electron bridge. Plain browser (no bridge) → window.open is already the
+// system browser.
+async function openInSystemBrowser(url: string): Promise<void> {
+  if (typeof (window as any).electronRPC !== 'function') {
+    window.open(url, '_blank', 'noopener,noreferrer')
+    return
+  }
+  const q = url.replace(/"/g, '%22')
+  const os = detectOS()
+  const cmd = os === 'windows' ? `start "" "${q}"` : os === 'mac' ? `open "${q}"` : `xdg-open "${q}"`
+  try {
+    await execShell(cmd)
+  } catch {
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: '无法调用系统浏览器' }))
+  }
+}
+
 function paneIdFromTtydSrc(ttydSrc: string): string {
   const m = /\/ttyd(?:-shell)?\/([^/?#]+)/.exec(ttydSrc)
   return m ? decodeURIComponent(m[1]) : ''
@@ -292,6 +316,46 @@ export function shouldUseTerminalView(_agentType?: string): boolean {
 export function TerminalView({ ttydSrc, className }: { ttydSrc: string; className?: string }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const [connState, setConnState] = useState<'connecting' | 'open' | 'retrying' | 'dead'>('connecting')
+  // Terminal link clicks on a URL open a confirm popup: system browser vs.
+  // Electron profile 1. Null = closed. Set from inside the xterm effect's
+  // activateLink closure (setState identity is stable, so no effect re-run).
+  const [urlConfirm, setUrlConfirm] = useState<string | null>(null)
+  // File link clicks: stat first; only an existing regular file opens this
+  // confirm. Null = closed.
+  const [fileConfirm, setFileConfirm] = useState<string | null>(null)
+  // Pasted images wait here for the annotator; head = the one being edited.
+  const [editQueue, setEditQueue] = useState<File[]>([])
+  const [editTotal, setEditTotal] = useState(0)
+  const pendingPartsRef = useRef<string[]>([])
+  const pendingPromptsRef = useRef<string[]>([])
+  const uploadChainRef = useRef<Promise<void>>(Promise.resolve())
+  // Set inside the xterm effect so the annotator callbacks reach the live socket.
+  const uploadRef = useRef<((file: File) => Promise<string | null>) | null>(null)
+  const sendInputRef = useRef<((text: string, submit?: boolean) => void) | null>(null)
+
+  const finishEditedImage = (result: File | null, prompt?: string) => {
+    const last = editQueue.length <= 1
+    if (result && prompt) pendingPromptsRef.current.push(prompt)
+    setEditQueue((queue) => queue.slice(1))
+    if (last) setEditTotal(0)
+    // Serialize uploads so a fast second confirm can't flush before the first finishes.
+    uploadChainRef.current = uploadChainRef.current.then(async () => {
+      if (result) {
+        const md = await uploadRef.current?.(result)
+        if (md) pendingPartsRef.current.push(md)
+      }
+      if (last) {
+        const parts = pendingPartsRef.current
+        const prompts = pendingPromptsRef.current
+        pendingPartsRef.current = []
+        pendingPromptsRef.current = []
+        // A note typed in the editor means "send it": prompt first, then the
+        // image references, and submit. Without one, keep the old behaviour of
+        // only inserting the references for the user to review.
+        sendInputRef.current?.([...prompts, ...parts].join('\n\n'), prompts.length > 0)
+      }
+    })
+  }
 
   useEffect(() => {
     const host = hostRef.current
@@ -332,12 +396,24 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
       event.stopPropagation()
       term.clearSelection()
       if (kind === 'url') {
-        window.open(uri, '_blank', 'noopener,noreferrer')
+        // Don't open immediately — ask how (system browser vs Electron profile 1).
+        setUrlConfirm(uri)
         return
       }
       const path = uri.replace(/^(?:file|image):\/\//, '').replace(/(?::\d+){1,2}$/, '')
-      const openFn = (window as any).__cicyOpenCodeFile
-      if (path && typeof openFn === 'function') openFn(path)
+      if (!path) return
+      const statAgent = paneIdFromTtydSrc(ttydSrc).split(':')[0]
+      fsApi.stat(statAgent, path)
+        .then((st) => {
+          if (st.is_dir) {
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: `这是一个目录,不能用编辑器打开:${path}` }))
+            return
+          }
+          setFileConfirm(path)
+        })
+        .catch(() => {
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: `文件不存在:${path}` }))
+        })
     }
     term.registerLinkProvider({
       provideLinks(bufferLineNumber: number, callback: (links: any[] | undefined) => void): void {
@@ -584,30 +660,52 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
     // ── 粘贴图片/文档:上传到该 agent 的资产库,再把 markdown 引用打进当前
     // 终端的输入流(不自动回车,用户过目后自己发)。纯文本粘贴不拦截,走
     // xterm 原生通道。与头部回形针按钮(AttachSendButton)同一条上传链路。
+    // 图片先进编辑弹窗(裁剪/文字/浮层/图片/箭头/方框),确认后再上传。
+    const uploadPane = paneIdFromTtydSrc(ttydSrc)
+    const uploadOne = async (file: File): Promise<string | null> => {
+      if (!uploadPane) return null
+      try {
+        const resp: any = await apiService.uploadAssetFile(uploadPane, file)
+        const f = resp?.data?.file || {}
+        const ref = String(f.file_ref || f.fileRef || '')
+        const url = String(f.url || f.URL || '')
+        const abs = ref ? '/' + ref.replace(/^file:\/\//, '').replace(/^\/+/, '') : url
+        // 打进 CLI agent 的 REPL —— 一律用链接形式,图片也不加 `!`。
+        // 为什么见 replAttachmentMarkdown 的注释(行首 `!` 会被当 shell 命令跑)。
+        return abs ? replAttachmentMarkdown(file.name, abs) : null
+      } catch { return null /* 单个文件失败跳过,其余继续 */ }
+    }
+    uploadRef.current = uploadOne
+    sendInputRef.current = (text: string, submit = false) => {
+      if (text && ws?.readyState === WebSocket.OPEN) {
+        ws.send(MSG_IN_INPUT + text)
+        // Separate Enter after a beat: CLI TUIs treat a burst of input as a
+        // paste and would turn an inline \r into a newline instead of submit.
+        if (submit) window.setTimeout(() => { if (ws?.readyState === WebSocket.OPEN) ws.send(MSG_IN_INPUT + '\r') }, 250)
+      }
+      term.focus()
+    }
     const onPaste = (e: ClipboardEvent) => {
       const files = e.clipboardData?.files
       if (!files || files.length === 0) return
       e.preventDefault()
       e.stopPropagation()
-      const uploadPane = paneIdFromTtydSrc(ttydSrc)
       if (!uploadPane) return
       const list = Array.from(files)
+      const images = list.filter((file) => file.type.startsWith('image/'))
+      const others = list.filter((file) => !file.type.startsWith('image/'))
       void (async () => {
         const parts: string[] = []
-        for (const file of list) {
-          try {
-            const resp: any = await apiService.uploadAssetFile(uploadPane, file)
-            const f = resp?.data?.file || {}
-            const ref = String(f.file_ref || f.fileRef || '')
-            const url = String(f.url || f.URL || '')
-            const abs = ref ? '/' + ref.replace(/^file:\/\//, '').replace(/^\/+/, '') : url
-            if (!abs) continue
-            // 打进 CLI agent 的 REPL —— 一律用链接形式,图片也不加 `!`。
-            // 为什么见 replAttachmentMarkdown 的注释(行首 `!` 会被当 shell 命令跑)。
-            parts.push(replAttachmentMarkdown(file.name, abs))
-          } catch { /* 单个文件失败跳过,其余继续 */ }
+        for (const file of others) {
+          const md = await uploadOne(file)
+          if (md) parts.push(md)
         }
-        if (parts.length && ws?.readyState === WebSocket.OPEN) {
+        if (images.length) {
+          // Flushed together with the edited images once the queue drains.
+          pendingPartsRef.current.push(...parts)
+          setEditQueue((queue) => [...queue, ...images])
+          setEditTotal((total) => total + images.length)
+        } else if (parts.length && ws?.readyState === WebSocket.OPEN) {
           ws.send(MSG_IN_INPUT + parts.join('\n\n'))
         }
       })()
@@ -656,6 +754,114 @@ export function TerminalView({ ttydSrc, className }: { ttydSrc: string; classNam
           <span data-id="terminal-view-retrying-dot" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
           <span>重连中…</span>
         </div>
+      ) : null}
+      {urlConfirm ? createPortal(
+        <div
+          data-id="terminal-url-confirm"
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => setUrlConfirm(null)}
+        >
+          <div
+            data-id="terminal-url-confirm-dialog"
+            className="w-[min(460px,90%)] rounded-lg border border-white/[0.08] bg-[#111216] p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-[13px] font-medium text-zinc-100">打开链接</div>
+            <div
+              data-id="terminal-url-confirm-url"
+              className="mt-2 max-h-24 overflow-auto break-all rounded-md border border-white/[0.06] bg-black/40 px-3 py-2 text-[12px] text-zinc-300 select-text"
+            >
+              {urlConfirm}
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                data-id="terminal-url-confirm-cancel"
+                className="rounded-md border border-white/[0.08] px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-white/[0.06]"
+                onClick={() => setUrlConfirm(null)}
+              >
+                取消
+              </button>
+              <button
+                data-id="terminal-url-confirm-system"
+                className="rounded-md border border-white/[0.08] px-3 py-1.5 text-[12px] text-zinc-200 hover:bg-white/[0.06]"
+                onClick={() => {
+                  const url = urlConfirm
+                  setUrlConfirm(null)
+                  void openInSystemBrowser(url)
+                }}
+              >
+                系统浏览器
+              </button>
+              <button
+                data-id="terminal-url-confirm-electron"
+                className="rounded-md bg-blue-500 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-blue-400"
+                onClick={() => {
+                  const url = urlConfirm
+                  setUrlConfirm(null)
+                  void openOrActivateElectronProfileTab(url, 1, { activate: true })
+                    .then((handled) => {
+                      // Not in Electron (or no RPC) → fall back to the system browser.
+                      if (!handled) window.open(url, '_blank', 'noopener,noreferrer')
+                    })
+                    .catch(() => window.open(url, '_blank', 'noopener,noreferrer'))
+                }}
+              >
+                Electron Profile 1
+              </button>
+            </div>
+          </div>
+        </div>, document.body)
+      : null}
+      {fileConfirm ? createPortal(
+        <div
+          data-id="terminal-file-confirm"
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => setFileConfirm(null)}
+        >
+          <div
+            data-id="terminal-file-confirm-dialog"
+            className="w-[min(460px,90%)] rounded-lg border border-white/[0.08] bg-[#111216] p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-[13px] font-medium text-zinc-100">是否打开这个文件?</div>
+            <div
+              data-id="terminal-file-confirm-path"
+              className="mt-2 max-h-24 overflow-auto break-all rounded-md border border-white/[0.06] bg-black/40 px-3 py-2 text-[12px] text-zinc-300 select-text"
+            >
+              {fileConfirm}
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                data-id="terminal-file-confirm-cancel"
+                className="rounded-md border border-white/[0.08] px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-white/[0.06]"
+                onClick={() => setFileConfirm(null)}
+              >
+                取消
+              </button>
+              <button
+                data-id="terminal-file-confirm-open"
+                className="rounded-md bg-blue-500 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-blue-400"
+                onClick={() => {
+                  const path = fileConfirm
+                  setFileConfirm(null)
+                  const openFn = (window as any).__cicyOpenCodeFile
+                  if (typeof openFn === 'function') openFn(path)
+                }}
+              >
+                打开
+              </button>
+            </div>
+          </div>
+        </div>, document.body)
+      : null}
+      {editQueue[0] ? (
+        <ImageAnnotator
+          key={`${editQueue[0].name}-${editQueue[0].size}-${editTotal - editQueue.length}`}
+          file={editQueue[0]}
+          index={editTotal - editQueue.length + 1}
+          total={editTotal}
+          onDone={finishEditedImage}
+        />
       ) : null}
     </div>
   )

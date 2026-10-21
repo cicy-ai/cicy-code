@@ -84,5 +84,7 @@
   "feishuChatAuthLink": "会话权限",
   "feishuCreateAndBindChat": "新建 Agent 群聊",
   "feishuSendMessageFirst": "请先在飞书里给这个 Bot 发任意消息",
-  "feishuWaitingForMessage": "等待 Bot 收到消息"
+  "feishuWaitingForMessage": "等待 Bot 收到消息",
+  "joinProject": "加入项目",
+  "noProjects": "还没有项目"
 }

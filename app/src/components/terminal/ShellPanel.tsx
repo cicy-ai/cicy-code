@@ -45,9 +45,14 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
   // panel never lists or attaches to it.
   const isAgentWin = (wn: Win) => wn.index === '0' || wn.name === 'main'
 
+  // While a tab switch is in flight, a stale poll reply must not flip the
+  // highlight back to the old tab.
+  const switchingRef = useRef<string | null>(null)
   const load = () => {
     apiService.listWindows(grouped).then(({ data }) => {
       const ws: Win[] = data.windows || []
+      const pending = switchingRef.current
+      if (pending && !ws.some(w => w.index === pending && w.active)) return
       setWins(ws)
       // If the grouped session is parked on main, it would mirror the agent.
       // Steer it to a real shell window (creating one if none exists). Once.
@@ -69,7 +74,14 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
     return () => clearInterval(id)
   }, [open, grouped])
 
-  const select = async (idx: string) => { try { await apiService.selectWindow(grouped, idx) } catch { /* ignore */ } setTimeout(load, 300) }
+  // Optimistic: highlight the clicked tab immediately, then confirm from tmux.
+  const select = async (idx: string) => {
+    switchingRef.current = idx
+    setWins(ws => ws.map(w => ({ ...w, active: w.index === idx })))
+    try { await apiService.selectWindow(grouped, idx) } catch { /* ignore */ }
+    switchingRef.current = null
+    load()
+  }
   const create = async () => { try { await apiService.createWindow(grouped) } catch { /* ignore */ } setTimeout(load, 300) }
   const del = async (e: React.MouseEvent, idx: string) => {
     e.stopPropagation()
@@ -118,7 +130,7 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
   return (
     <div
       data-id={`agent-stack-shell-dock-${agentId}`}
-      className="shrink-0 border-t border-white/[0.06] bg-black/[0.28]"
+      className="shrink-0 border-t border-[var(--dev-border)] bg-[var(--dev-surface)]"
       style={open ? undefined : { display: 'none' }}
     >
       {/* Top-edge resize handle — full-width strip over the dock's top border.
@@ -131,22 +143,24 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
         className="group/resize -mt-px h-1.5 w-full shrink-0 cursor-ns-resize"
         style={{ touchAction: 'none' }}
       >
-        <div className="mx-auto h-0.5 w-10 rounded-full bg-white/[0.12] transition-colors group-hover/resize:bg-emerald-400/60" />
+        <div className="mx-auto h-0.5 w-10 rounded-full bg-[var(--dev-border-strong)] transition-colors group-hover/resize:bg-[var(--dev-accent)]" />
       </div>
-      <div data-id={`agent-stack-shell-bar-${agentId}`} className="flex h-9 items-center gap-1 px-2">
-        <span data-id={`agent-stack-shell-label-${agentId}`} className="flex shrink-0 items-center gap-1.5 px-1 text-xs font-medium text-zinc-500">
+      <div data-id={`agent-stack-shell-bar-${agentId}`} className="flex h-9 items-center gap-1 border-b border-[var(--dev-border)] bg-[var(--dev-surface)] px-2">
+        <span data-id={`agent-stack-shell-label-${agentId}`} className="flex shrink-0 items-center gap-1.5 px-1 text-xs font-medium text-[var(--dev-text-3)]">
           <Terminal className="h-3.5 w-3.5" />
-          Shell
         </span>
         <div data-id={`agent-stack-shell-tabs-${agentId}`} className="flex min-w-0 flex-1 select-none items-center gap-1 overflow-x-auto">
           {tabs.map(wn => (
             <button
               type="button"
               key={wn.index}
-              onClick={() => select(wn.index)}
-              className={`group/tab flex shrink-0 items-center gap-1 rounded-t px-2 py-1 font-mono text-xs transition-colors ${wn.active ? 'bg-white/[0.10] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'}`}
+              data-id={`agent-stack-shell-tab-${agentId}-${wn.index}`}
+              data-active={wn.active ? 'true' : 'false'}
+              aria-pressed={wn.active}
+              onClick={() => { if (!wn.active) void select(wn.index) }}
+              className={`group/tab flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 font-mono text-xs transition-colors ${wn.active ? 'border-[var(--dev-border-strong)] bg-[var(--dev-active)] font-semibold text-[var(--dev-text)] shadow-[inset_0_-2px_0_var(--dev-accent)]' : 'border-[var(--dev-border)] bg-[var(--dev-surface-2)] text-[var(--dev-text-2)] hover:border-[var(--dev-border-strong)] hover:bg-[var(--dev-hover)] hover:text-[var(--dev-text)]'}`}
             >
-              <span className="text-zinc-600">{wn.index}</span>{wn.name}
+              <span className={wn.active ? 'text-[var(--dev-accent)]' : 'text-[var(--dev-text-3)]'}>{wn.index}</span>{wn.name}
               {/* single remaining tab can't be closed from the tab itself — the
                   bar-level close button (right side) hides the whole dock */}
               {tabs.length > 1 && (
@@ -154,7 +168,7 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
                   role="button"
                   tabIndex={-1}
                   onClick={(e) => del(e, wn.index)}
-                  className="ml-0.5 inline-flex rounded p-0.5 opacity-0 transition-opacity pointer-events-none hover:bg-white/[0.12] hover:text-red-400 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100"
+                  className="ml-0.5 inline-flex rounded p-0.5 opacity-0 transition-opacity pointer-events-none hover:bg-[var(--dev-hover)] hover:text-[var(--dev-live)] group-hover/tab:pointer-events-auto group-hover/tab:opacity-100"
                 >
                   <X className="h-3 w-3" />
                 </span>
@@ -165,7 +179,7 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
             type="button"
             onClick={create}
             title={t('shellPanelNew', { defaultValue: 'New window' })}
-            className="shrink-0 rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
+            className="shrink-0 rounded-md p-1 text-[var(--dev-text-3)] transition-colors hover:bg-[var(--dev-hover)] hover:text-[var(--dev-text)]"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -176,7 +190,7 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
           data-id={`agent-stack-shell-close-${agentId}`}
           onClick={() => setShellOpen(agentId, false)}
           title={t('shellPanelClose', { defaultValue: 'Close panel' })}
-          className="shrink-0 rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
+          className="shrink-0 rounded-md p-1 text-[var(--dev-text-3)] transition-colors hover:bg-[var(--dev-hover)] hover:text-[var(--dev-text)]"
         >
           <X className="h-3.5 w-3.5" />
         </button>

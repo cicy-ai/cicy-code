@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -20,18 +21,25 @@ import (
 )
 
 type systemResourceSnapshot struct {
-	CPUUsagePct    float64 `json:"cpu_usage_pct"`
-	CPUCores       int     `json:"cpu_cores"`
-	MemUsagePct    float64 `json:"mem_usage_pct"`
-	MemTotalBytes  uint64  `json:"mem_total_bytes"`
-	MemUsedBytes   uint64  `json:"mem_used_bytes"`
-	DiskUsagePct   float64 `json:"disk_usage_pct"`
-	DiskTotalBytes uint64  `json:"disk_total_bytes"`
-	DiskUsedBytes  uint64  `json:"disk_used_bytes"`
-	Load1          float64 `json:"load_1"`
-	Load5          float64 `json:"load_5"`
-	Load15         float64 `json:"load_15"`
-	UpdatedAt      string  `json:"updated_at"`
+	CPUUsagePct   float64 `json:"cpu_usage_pct"`
+	CPUCores      int     `json:"cpu_cores"`
+	MemUsagePct   float64 `json:"mem_usage_pct"`
+	MemTotalBytes uint64  `json:"mem_total_bytes"`
+	MemUsedBytes  uint64  `json:"mem_used_bytes"`
+	// On a VM whose hypervisor reclaims RAM through virtio-balloon, the guest's
+	// MemTotal shrinks to what is usable right now. MemTotalBytes/MemUsagePct stay
+	// on that usable figure (the real pressure); these two expose the VM's
+	// configured RAM and how much the balloon currently holds. Both 0 when not
+	// ballooned / not detectable (bare metal, macOS, no balloon driver).
+	MemConfiguredBytes uint64  `json:"mem_configured_bytes,omitempty"`
+	MemBalloonBytes    uint64  `json:"mem_balloon_bytes,omitempty"`
+	DiskUsagePct       float64 `json:"disk_usage_pct"`
+	DiskTotalBytes     uint64  `json:"disk_total_bytes"`
+	DiskUsedBytes      uint64  `json:"disk_used_bytes"`
+	Load1              float64 `json:"load_1"`
+	Load5              float64 `json:"load_5"`
+	Load15             float64 `json:"load_15"`
+	UpdatedAt          string  `json:"updated_at"`
 }
 
 type cpuCounters struct {
@@ -243,19 +251,22 @@ func sampleSystemResources(prev cpuCounters) (systemResourceSnapshot, cpuCounter
 	if err != nil {
 		return systemResourceSnapshot{}, prev, err
 	}
+	memConfigured, memBalloon := readMemoryBalloon(memTotal)
 	return systemResourceSnapshot{
-		CPUUsagePct:    cpuUsagePct,
-		CPUCores:       runtime.NumCPU(),
-		MemUsagePct:    memUsagePct,
-		MemTotalBytes:  memTotal,
-		MemUsedBytes:   memUsed,
-		DiskUsagePct:   diskUsagePct,
-		DiskTotalBytes: diskTotal,
-		DiskUsedBytes:  diskUsed,
-		Load1:          load1,
-		Load5:          load5,
-		Load15:         load15,
-		UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
+		CPUUsagePct:        cpuUsagePct,
+		CPUCores:           runtime.NumCPU(),
+		MemUsagePct:        memUsagePct,
+		MemTotalBytes:      memTotal,
+		MemUsedBytes:       memUsed,
+		MemConfiguredBytes: memConfigured,
+		MemBalloonBytes:    memBalloon,
+		DiskUsagePct:       diskUsagePct,
+		DiskTotalBytes:     diskTotal,
+		DiskUsedBytes:      diskUsed,
+		Load1:              load1,
+		Load5:              load5,
+		Load15:             load15,
+		UpdatedAt:          time.Now().UTC().Format(time.RFC3339),
 	}, currentCPU, nil
 }
 
@@ -337,6 +348,67 @@ func readMemorySnapshot() (uint64, uint64, float64, error) {
 	}
 	used := total - available
 	return total, used, float64(used) * 100 / float64(total), nil
+}
+
+// Overridable in tests.
+var (
+	memoryBlocksRoot = "/sys/devices/system/memory"
+	procVMStatPath   = "/proc/vmstat"
+)
+
+// readMemoryBalloon reports the VM's configured RAM and the bytes a
+// virtio-balloon currently holds, given the guest's usable MemTotal. Configured
+// RAM is the sum of online memory blocks (sysfs); balloon bytes come from the
+// balloon_inflate/balloon_deflate page counters in /proc/vmstat. Returns (0,0)
+// unless a balloon is actually holding memory, so callers can show the extra
+// detail only when it explains a shrunken total.
+func readMemoryBalloon(usableTotal uint64) (configured, balloon uint64) {
+	if runtime.GOOS != "linux" {
+		return 0, 0
+	}
+	vm, err := os.ReadFile(procVMStatPath)
+	if err != nil {
+		return 0, 0
+	}
+	var inflate, deflate uint64
+	for _, line := range strings.Split(string(vm), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		value, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		switch fields[0] {
+		case "balloon_inflate":
+			inflate = value
+		case "balloon_deflate":
+			deflate = value
+		}
+	}
+	if inflate <= deflate {
+		return 0, 0
+	}
+	balloon = (inflate - deflate) * uint64(os.Getpagesize())
+
+	if raw, err := os.ReadFile(memoryBlocksRoot + "/block_size_bytes"); err == nil {
+		if blockSize, err := strconv.ParseUint(strings.TrimSpace(string(raw)), 16, 64); err == nil && blockSize > 0 {
+			states, _ := filepath.Glob(memoryBlocksRoot + "/memory*/state")
+			var online uint64
+			for _, state := range states {
+				if s, err := os.ReadFile(state); err == nil && strings.TrimSpace(string(s)) == "online" {
+					online++
+				}
+			}
+			configured = online * blockSize
+		}
+	}
+	// No usable sysfs view: usable + ballooned is the best estimate.
+	if configured < usableTotal+balloon/2 {
+		configured = usableTotal + balloon
+	}
+	return configured, balloon
 }
 
 func readLoadAverage() (float64, float64, float64, error) {

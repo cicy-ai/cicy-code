@@ -47,6 +47,8 @@ const api = vi.hoisted(() => ({
   getMemoryTemplate: vi.fn(),
   saveMemoryTemplate: vi.fn(),
   restartPane: vi.fn(),
+  stopPane: vi.fn(),
+  resumePane: vi.fn(),
   deletePane: vi.fn(),
 }));
 const agentSend = vi.hoisted(() => ({ sendToAgent: vi.fn() }));
@@ -116,6 +118,8 @@ beforeEach(() => {
   api.getMemoryTemplate.mockResolvedValue({ data: { content: '# Global', path: '/home/cicy/cicy-ai/memory/global.md' } });
   api.saveMemoryTemplate.mockResolvedValue({ data: { saved: true } });
   api.restartPane.mockResolvedValue({ data: { success: true } });
+  api.stopPane.mockResolvedValue({ data: { success: true } });
+  api.resumePane.mockResolvedValue({ data: { success: true, restarted: true } });
   api.deletePane.mockResolvedValue({ data: { success: true } });
   vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:queued-image'), revokeObjectURL: vi.fn() });
 });
@@ -311,6 +315,133 @@ describe('<ProjectsPanel /> project view cache', () => {
     expect(zoom).toHaveTextContent('102%');
   });
 
+  it('reorders grid cards with the up/down buttons and remembers the order', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0'], pane_count: 2 }] } });
+    render(<ProjectsPanel agents={[
+      { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' },
+      { paneId: 'w-102:main.0', title: '全栈工程师', agentType: 'claude' },
+    ]} onOpenAgent={vi.fn()} />);
+
+    const order = () => [...document.querySelectorAll('[data-id^="project-canvas-node-"]')].map((node) => node.getAttribute('data-id'));
+    await waitFor(() => expect(order()).toEqual(['project-canvas-node-w-101', 'project-canvas-node-w-102']));
+    expect(document.querySelector('[data-id="project-agent-card-move-up-w-101"]')).toBeDisabled();
+    expect(document.querySelector('[data-id="project-agent-card-move-down-w-102"]')).toBeDisabled();
+
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-move-down-w-101"]')!);
+    await waitFor(() => expect(order()).toEqual(['project-canvas-node-w-102', 'project-canvas-node-w-101']));
+    expect(JSON.parse(localStorage.getItem('cicy_project_view:default') || '{}').order).toEqual(['w-102', 'w-101']);
+
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-move-up-w-101"]')!);
+    await waitFor(() => expect(order()).toEqual(['project-canvas-node-w-101', 'project-canvas-node-w-102']));
+  });
+
+  it('minimizes a card out of the grid and restores it from the footer selector', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0'], pane_count: 2 }] } });
+    const onActive = vi.fn();
+    render(<ProjectsPanel agents={[
+      { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' },
+      { paneId: 'w-102:main.0', title: '全栈工程师', agentType: 'claude' },
+    ]} onOpenAgent={vi.fn()} onActiveAgentChange={onActive} />);
+
+    const minimize = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-minimize-w-101"]');
+      if (!node) throw new Error('minimize button missing');
+      return node as HTMLButtonElement;
+    });
+    expect(document.querySelector('[data-id="project-canvas-minimized-toggle"]')).not.toBeInTheDocument();
+
+    fireEvent.click(minimize);
+    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-node-w-101"]')).not.toBeInTheDocument());
+    expect(document.querySelector('[data-id="project-canvas-node-w-102"]')).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem('cicy_project_view:default') || '{}').minimized).toEqual(['w-101']);
+    // Minimizing frees the agent's processes.
+    await waitFor(() => expect(api.stopPane).toHaveBeenCalledWith(expect.stringMatching(/^w-101/)));
+
+    fireEvent.click(document.querySelector('[data-id="project-canvas-minimized-toggle"]')!);
+    fireEvent.click(await screen.findByText('架构师'));
+    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-node-w-101"]')).toBeInTheDocument());
+    expect(document.querySelector('[data-id="project-canvas-minimized-toggle"]')).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem('cicy_project_view:default') || '{}').minimized).toEqual([]);
+    // Restoring restarts it on its latest session and makes it the active card.
+    await waitFor(() => expect(api.resumePane).toHaveBeenCalledWith(expect.stringMatching(/^w-101/)));
+    await waitFor(() => expect(document.querySelector('[data-id^="project-agent-card-w-101"]')?.getAttribute('data-selected') ?? 'skip').not.toBe('false'));
+  });
+
+  it('opens the image editor for an image pasted into the card composer, then attaches it', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    URL.createObjectURL = URL.createObjectURL || (vi.fn(() => 'blob:fake') as any);
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+
+    const textarea = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-footer-w-101"] textarea');
+      if (!node) throw new Error('composer missing');
+      return node as HTMLTextAreaElement;
+    });
+    const image = new File([new Uint8Array([1, 2, 3])], 'image.png', { type: 'image/png' });
+    fireEvent.paste(textarea, { clipboardData: { files: [image], getData: () => '' } });
+
+    await waitFor(() => expect(document.querySelector('[data-id="image-annotator"]')).toBeInTheDocument());
+    expect(api.uploadAssetFile).not.toHaveBeenCalled();
+
+    fireEvent.click(document.querySelector('[data-id="image-annotator-original"]')!);
+    await waitFor(() => expect(document.querySelector('[data-id="image-annotator"]')).not.toBeInTheDocument());
+    await waitFor(() => expect(api.uploadAssetFile).toHaveBeenCalledWith('w-101:main.0', image, expect.any(Function)));
+  });
+
+  it('sends a prompt typed in the image editor together with the pasted image', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+    URL.createObjectURL = URL.createObjectURL || (vi.fn(() => 'blob:fake') as any);
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+
+    const textarea = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-footer-w-101"] textarea');
+      if (!node) throw new Error('composer missing');
+      return node as HTMLTextAreaElement;
+    });
+    const image = new File([new Uint8Array([1, 2, 3])], 'image.png', { type: 'image/png' });
+    fireEvent.paste(textarea, { clipboardData: { files: [image], getData: () => '' } });
+
+    const prompt = await waitFor(() => {
+      const node = document.querySelector('[data-id="image-annotator-prompt"]');
+      if (!node) throw new Error('editor prompt missing');
+      return node as HTMLTextAreaElement;
+    });
+    fireEvent.change(prompt, { target: { value: '看下这个报错' } });
+    fireEvent.click(document.querySelector('[data-id="image-annotator-original"]')!);
+
+    await waitFor(() => expect(api.uploadAssetFile).toHaveBeenCalled());
+    await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledTimes(1));
+    const sent = JSON.stringify(agentSend.sendToAgent.mock.calls[0]);
+    expect(sent).toContain('看下这个报错');
+    expect(sent).toContain('/home/cicy/cicy-ai/assets/queued.png');
+  });
+
+  it('copies the agent id from the copy icon without replacing the id text', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+
+    const id = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-identity"]');
+      if (!node) throw new Error('identity not rendered');
+      return node as HTMLElement;
+    });
+    const before = id.textContent;
+    expect(document.querySelector('[data-id="project-agent-card-agent-type"]')).not.toBeInTheDocument();
+
+    fireEvent.click(id);
+    expect(writeText).not.toHaveBeenCalled();
+    expect(id.textContent).toBe(before);
+
+    const copy = document.querySelector('[data-id="project-agent-card-identity-copy"]') as HTMLButtonElement;
+    fireEvent.click(copy);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(before));
+    await waitFor(() => expect(copy).toHaveClass('text-emerald-400'));
+    expect(id.textContent).toBe(before);
+  });
+
   it('renders duplicate roster records for one pane only once', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-1010:main.0'], pane_count: 1 }] } });
     render(<ProjectsPanel agents={[
@@ -364,7 +495,7 @@ describe('<ProjectsPanel /> project view cache', () => {
     const modelSlot = document.querySelector('[data-id="project-agent-card-model-slot"]');
     const contextSlot = document.querySelector('[data-id="project-agent-card-context-slot"]');
     const costSlot = document.querySelector('[data-id="project-agent-card-cost-slot"]');
-    expect(modelSlot).toHaveClass('w-24', 'shrink-0');
+    expect(modelSlot).toHaveClass('max-w-24', 'shrink-0');
     expect(contextSlot).toHaveClass('w-3', 'shrink-0');
     expect(costSlot).toHaveClass('w-16', 'shrink-0');
     expect(modelSlot).toBeEmptyDOMElement();
