@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -881,6 +882,69 @@ func createSelectedWorkers(selected []string) {
 	}
 }
 
+// --- preinstalled roster seed marker -------------------------------------
+//
+// seededRosterPanesKey stores a JSON array of every builtin/preinstalled pane
+// id we have EVER created (first-boot seed or later top-up). It lets us tell a
+// "never seeded" role (genuinely new in a version bump → should be topped up)
+// apart from a "seeded then deleted" role (operator removed it → must stay
+// gone). Lives in global_vars so it survives restarts.
+const seededRosterPanesKey = "seeded_roster_panes"
+
+func loadSeededRosterPanes() map[string]bool {
+	out := map[string]bool{}
+	var raw string
+	if err := store.QueryRow("SELECT value FROM global_vars WHERE key_name=?", seededRosterPanesKey).Scan(&raw); err != nil {
+		return out
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return out
+	}
+	var list []string
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		return out
+	}
+	for _, p := range list {
+		if p = strings.TrimSpace(p); p != "" {
+			out[p] = true
+		}
+	}
+	return out
+}
+
+func rosterPaneWasSeeded(paneID string) bool {
+	return loadSeededRosterPanes()[paneID]
+}
+
+func markRosterPaneSeeded(paneID string) {
+	paneID = strings.TrimSpace(paneID)
+	if paneID == "" {
+		return
+	}
+	set := loadSeededRosterPanes()
+	if set[paneID] {
+		return // already recorded
+	}
+	set[paneID] = true
+	list := make([]string, 0, len(set))
+	for p := range set {
+		list = append(list, p)
+	}
+	sort.Strings(list)
+	data, err := json.Marshal(list)
+	if err != nil {
+		log.Printf("[startup] failed to marshal seeded roster panes: %v", err)
+		return
+	}
+	if _, err := store.Exec(
+		store.Upsert("global_vars", "key_name", []string{"key_name", "value"}, []string{"value"}),
+		seededRosterPanesKey, string(data),
+	); err != nil {
+		log.Printf("[startup] failed to persist seeded roster pane %s: %v", paneID, err)
+	}
+}
+
 // ensureMissingRosterMembers tops up preinstalled roster agents that don't exist
 // yet on an ALREADY-set-up install. The first-boot path (count==0 → createSelected
 // Workers) only runs on an empty DB, so roles ADDED in a later version (e.g. the
@@ -888,13 +952,25 @@ func createSelectedWorkers(selected []string) {
 // and older installs would never get them. This runs every startup, creates only
 // the missing ones (idempotent COUNT check per pane), and leaves existing agents
 // (and the user's own) untouched. Gate to the official roster only.
+//
+// A roster agent is seeded ONCE. If the operator later DELETES a preinstalled
+// agent, we must not resurrect it on the next restart. markRosterPaneSeeded
+// records every pane we ever created; a pane that is both already-seeded AND now
+// absent from agent_config was deliberately removed by the user, so we skip it.
+// Only panes we have NEVER seeded (genuinely new roles from a version bump) are
+// topped up.
 func ensureMissingRosterMembers(selected []string) {
 	for _, w := range selectedBuiltinWorkers(selected) {
 		paneID := builtinWorkerSession(w.Port) + ":main.0"
 		var count int
 		store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id=?", paneID).Scan(&count)
 		if count > 0 {
-			continue // already installed
+			markRosterPaneSeeded(paneID) // backfill marker for pre-existing installs
+			continue                     // already installed
+		}
+		if rosterPaneWasSeeded(paneID) {
+			// Seeded before, now gone → user deleted it. Do not recreate.
+			continue
 		}
 		log.Printf("[startup] top-up missing preinstalled agent: %s (%s)", w.Title, paneID)
 		createBuiltinWorker(w)
@@ -970,6 +1046,7 @@ func createBuiltinWorker(w builtinWorker) {
 		return
 	}
 	fmt.Printf("  ✅ %s (w-%d, port %d)\n", w.Title, w.Port, w.Port)
+	markRosterPaneSeeded(session + ":main.0")
 }
 
 func runSetup() {
