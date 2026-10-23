@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // 进度 tab of a project agent card: the main agent's todo list on top (kept in
-// sync by a hidden cheap-model kiro-cli "progress helper" running the
-// agent-progress skill) and that helper's terminal below.
+// sync by a hidden 副 agent — a custom cicy agent on a cheap model running the
+// agent-progress skill in-process, no CLI) and that sub-agent's conversation
+// below.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleDot, Loader2, RefreshCw, Undo2 } from 'lucide-react';
 import apiService from '../../services/api';
-import TerminalView from '../terminal/TerminalView';
+import CurrentHistoryView from '../chat/CurrentHistoryView';
 import { cn } from '../../lib/utils';
 
 interface ProgressTodo {
@@ -36,9 +37,6 @@ const readSplit = () => {
 
 const shortId = (id: string) => String(id || '').split(':')[0];
 
-// The helper's terminal URL is the main agent's with the pane id swapped.
-export const helperTtydSrc = (mainTtydSrc: string, mainId: string, helperId: string) =>
-  mainTtydSrc && helperId ? mainTtydSrc.replace(`/ttyd/${shortId(mainId)}/`, `/ttyd/${helperId}/`) : '';
 
 const timeLabel = (iso?: string) => {
   const t = iso ? new Date(iso) : null;
@@ -106,11 +104,10 @@ function TodoRow({ todo, kind, busy, onConfirm, onUndo }: {
 
 interface Props {
   mainId: string;
-  mainTtydSrc?: string;
   mainBusy: boolean;
 }
 
-export default function AgentProgressPanel({ mainId, mainTtydSrc = '', mainBusy }: Props) {
+export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
   const main = shortId(mainId);
   const [helper, setHelper] = useState('');
   const [helperError, setHelperError] = useState('');
@@ -229,7 +226,6 @@ export default function AgentProgressPanel({ mainId, mainTtydSrc = '', mainBusy 
   const doing = (todos || []).filter((t) => t.status === 'todo');
   const review = (todos || []).filter((t) => t.status === 'test').sort(byRecent);
   const done = (todos || []).filter((t) => t.status === 'done').sort(byRecent);
-  const termSrc = helperTtydSrc(mainTtydSrc, main, helper);
 
   return (
     <div ref={rootRef} data-id={`agent-progress-${main}`} className={cn('flex h-full min-h-0 flex-col', dragging && 'cursor-row-resize select-none')}>
@@ -313,11 +309,11 @@ export default function AgentProgressPanel({ mainId, mainTtydSrc = '', mainBusy 
       >
         <span className={cn('h-[3px] w-10 rounded-full bg-white/20 transition-colors group-hover:bg-sky-400/70', dragging && 'bg-sky-400')} />
       </div>
-      <div data-id={`agent-progress-terminal-${main}`} className={cn('min-h-0 flex-1 overflow-hidden bg-black', dragging && 'pointer-events-none')}>
+      <div data-id={`agent-progress-helper-${main}`} onWheel={(e) => e.stopPropagation()} className={cn('min-h-0 flex-1 overflow-hidden', dragging && 'pointer-events-none')}>
         {helperError ? (
           <p className="grid h-full place-items-center px-4 text-center text-[11px] text-red-400">进度助手启动失败：{helperError}</p>
-        ) : termSrc ? (
-          <TerminalView key={helper} ttydSrc={termSrc} className="h-full w-full" />
+        ) : helper ? (
+          <CurrentHistoryView key={helper} paneId={helper} open pollLive fullWidth leftAlignQuestions agentType="cicy" />
         ) : (
           <div className="grid h-full place-items-center"><Loader2 className="h-4 w-4 animate-spin text-zinc-600" /></div>
         )}

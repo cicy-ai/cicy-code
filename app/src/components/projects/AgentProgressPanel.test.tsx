@@ -8,13 +8,12 @@ const api = vi.hoisted(() => ({
   updateTodo: vi.fn(),
 }));
 vi.mock('../../services/api', () => ({ default: api }));
-vi.mock('../terminal/TerminalView', () => ({
-  default: ({ ttydSrc }: { ttydSrc: string }) => <div data-testid="term">{ttydSrc}</div>,
+vi.mock('../chat/CurrentHistoryView', () => ({
+  default: ({ paneId, agentType }: { paneId: string; agentType: string }) => <div data-testid="term">{`${agentType}:${paneId}`}</div>,
 }));
 
-import AgentProgressPanel, { helperTtydSrc } from './AgentProgressPanel';
+import AgentProgressPanel from './AgentProgressPanel';
 
-const SRC = 'http://h/ttyd/w-1075/?token=t';
 
 describe('AgentProgressPanel', () => {
   beforeEach(() => {
@@ -28,15 +27,10 @@ describe('AgentProgressPanel', () => {
     api.refreshAgentProgress.mockResolvedValue({ data: { success: true, helper: 'w-1090' } });
   });
 
-  it('swaps the pane id in the terminal url', () => {
-    expect(helperTtydSrc(SRC, 'w-1075:main.0', 'w-1090')).toBe('http://h/ttyd/w-1090/?token=t');
-    expect(helperTtydSrc(SRC, 'w-1075', '')).toBe('');
-  });
-
   it('creates the helper on first open, groups todos and shows its terminal', async () => {
     api.getAgentProgress.mockResolvedValue({ data: { helper: '' } });
-    render(<AgentProgressPanel mainId="w-1075:main.0" mainTtydSrc={SRC} mainBusy={false} />);
-    await waitFor(() => expect(screen.getByTestId('term')).toHaveTextContent('/ttyd/w-1090/'));
+    render(<AgentProgressPanel mainId="w-1075:main.0" mainBusy={false} />);
+    await waitFor(() => expect(screen.getByTestId('term')).toHaveTextContent('cicy:w-1090'));
     expect(api.refreshAgentProgress).toHaveBeenCalledWith('w-1075');
     expect(document.querySelector('[data-id="agent-progress-doing-w-1075"]')).toHaveTextContent('卡片新增进度 tab');
     expect(document.querySelector('[data-id="agent-progress-review-w-1075"]')).toHaveTextContent('修复技能页遮挡');
@@ -49,10 +43,10 @@ describe('AgentProgressPanel', () => {
 
   it('refreshes when the main agent goes idle and on click', async () => {
     api.getAgentProgress.mockResolvedValue({ data: { helper: 'w-1090' } });
-    const { rerender } = render(<AgentProgressPanel mainId="w-1075" mainTtydSrc={SRC} mainBusy />);
+    const { rerender } = render(<AgentProgressPanel mainId="w-1075" mainBusy />);
     await waitFor(() => expect(screen.getByTestId('term')).toBeInTheDocument());
     expect(api.refreshAgentProgress).not.toHaveBeenCalled();
-    rerender(<AgentProgressPanel mainId="w-1075" mainTtydSrc={SRC} mainBusy={false} />);
+    rerender(<AgentProgressPanel mainId="w-1075" mainBusy={false} />);
     await waitFor(() => expect(api.refreshAgentProgress).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(document.querySelector('[data-id="agent-progress-refresh-w-1075"]')).not.toBeDisabled(), { timeout: 3000 });
     fireEvent.click(document.querySelector('[data-id="agent-progress-refresh-w-1075"]') as HTMLElement);
@@ -62,7 +56,7 @@ describe('AgentProgressPanel', () => {
   it('confirms a task manually and can undo it', async () => {
     api.getAgentProgress.mockResolvedValue({ data: { helper: 'w-1090' } });
     api.updateTodo.mockResolvedValue({ data: {} });
-    render(<AgentProgressPanel mainId="w-1075" mainTtydSrc={SRC} mainBusy={false} />);
+    render(<AgentProgressPanel mainId="w-1075" mainBusy={false} />);
     const btn = await waitFor(() => { const el = document.querySelector('[data-id="agent-progress-confirm-2"]'); expect(el).not.toBeNull(); return el as HTMLElement; });
     fireEvent.click(btn);
     expect(api.updateTodo).toHaveBeenCalledWith('w-1075', '2', { status: 'done' });

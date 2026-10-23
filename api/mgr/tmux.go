@@ -614,7 +614,7 @@ func resolveCustomAgentSelection(agentType, roleTemplate string) (string, string
 	return agentType, roleTemplate
 }
 
-func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, projectTemplate string, roleTemplate string, lang string, apiStyle string, token string, runtimeAI *runtimeAIOverride) (M, error) {
+func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, projectTemplate string, roleTemplate string, lang string, apiStyle string, token string, runtimeAI *runtimeAIOverride, tweak ...func(*paneCreateOpts)) (M, error) {
 	agentType, roleTemplate = resolveCustomAgentSelection(agentType, roleTemplate)
 	agentType = normalizeAgentType(agentType)
 	if agentType == "" {
@@ -673,7 +673,7 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 	if title != "" {
 		t = title
 	}
-	return createManagedPane(paneCreateOpts{
+	opts := paneCreateOpts{
 		session:          session,
 		title:            t,
 		role:             role,
@@ -696,7 +696,11 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 		lang:             lang,
 		apiStyle:         apiStyle,
 		runtimeAI:        runtimeAI,
-	})
+	}
+	for _, fn := range tweak {
+		fn(&opts)
+	}
+	return createManagedPane(opts)
 }
 
 func proxySettingsPassword(p *proxySettings) string {
@@ -3693,9 +3697,7 @@ fi`,
 		if allowAllActions {
 			kiroCmd += " --trust-all-tools"
 		}
-		// A progress helper (agent_progress.go) never keeps a resident kiro: it
-		// runs one-shot per refresh, so a dozen cards don't pin a dozen CLIs.
-		lines = append(lines, `if [ -f "$WORKSPACE/.cicy/progress.json" ]; then echo '[cicy] 进度助手：点「更新」或主 Agent 回复完成时运行一次，结束后自动退出'; else `+kiroCmd+`; fi`)
+		lines = append(lines, kiroCmd)
 		return lines
 	case "cicy":
 		// The dispatcher needs no external CLI — its pane runs a tiny REPL out

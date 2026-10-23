@@ -771,7 +771,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
           onPointerDown={(event) => event.stopPropagation()}
           className="-mx-5 min-h-0 flex-1 select-text overflow-hidden bg-[#0b0b0d]"
         >
-          <AgentProgressPanel mainId={agent.paneId} mainTtydSrc={agent.ttydSrc} mainBusy={busy || Boolean(metrics?.working)} />
+          <AgentProgressPanel mainId={agent.paneId} mainBusy={busy || Boolean(metrics?.working)} />
         </div>
       ) : activeBodyTab === 'role' ? (
         <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()} onTouchStart={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()} className="-mx-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-2xl bg-[#0b0b0d] overscroll-contain">

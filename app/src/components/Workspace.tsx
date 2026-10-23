@@ -1096,6 +1096,10 @@ leftActive === 'skills' && !globalVar?.helper_mode ? (
     knowledgeReturnPanelRef.current = leftPanelView;
     setPortsOpen(false);
     setProjectsOpen(false);
+    // Skills is a full-page overlay too: leaving it mounted under the knowledge
+    // page showed both at once, and the next 技能 click toggled it OFF instead of
+    // on. The activity bar is exclusive — close it (closeKnowledge restores it).
+    if (leftPanelView === 'skills') setLeftPanelView(null);
     setKnowledgeOpen(true);
   }, [leftPanelView]);
 
@@ -2552,7 +2556,9 @@ leftActive === 'skills' && !globalVar?.helper_mode ? (
         <div
           ref={membershipMenuRef}
           data-id="membership-user-popover"
-          className="fixed z-[220] min-w-[220px] rounded-xl border border-white/10 bg-[#101014]/95 p-2 shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur"
+          // z-[400]: above the skills page overlay (z-300), or the settings
+          // menu opens invisibly behind it while 技能 is active.
+          className="fixed z-[400] min-w-[220px] rounded-xl border border-white/10 bg-[#101014]/95 p-2 shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur"
           style={{ left: membershipPopoverPos.x, bottom: 12 }}
         >
           <button
