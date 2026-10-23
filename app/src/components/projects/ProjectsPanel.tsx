@@ -23,6 +23,7 @@ import ImageAnnotator from '../terminal/ImageAnnotator';
 import CurrentHistoryView from '../chat/CurrentHistoryView';
 import { MarkdownImg } from '../chat/history/shared/Markdown';
 import TerminalView from '../terminal/TerminalView';
+import AgentProgressPanel from './AgentProgressPanel';
 import MarkdownFileEditor from '../files/MarkdownFileEditor';
 import UpdateAgentModal from '../layout/UpdateAgentModal';
 import WechatBindModal from '../layout/WechatBindModal';
@@ -102,7 +103,7 @@ const PROJECT_VIEW_CACHE_PREFIX = 'cicy_project_view:';
 const PROJECT_AGENT_QUEUE_KEY = 'cicy_project_agent_queue:v1';
 const PROJECT_AGENT_BODY_TABS_KEY = 'cicy_project_agent_body_tabs:v1';
 const PROJECT_LIST_COLLAPSED_KEY = 'cicy_projects_list_collapsed';
-type ProjectAgentBodyTab = 'history' | 'terminal' | 'role';
+type ProjectAgentBodyTab = 'history' | 'progress' | 'terminal' | 'role';
 const DEFAULT_PROJECT_AGENT_WIDTH = 600;
 const DEFAULT_PROJECT_AGENT_HEIGHT = 320;
 const QUEUE_STATUS_GRACE_MS = 3000;
@@ -144,7 +145,7 @@ const GRID_MODE_MARGIN = 16;
 // card at this size the grid grows downward and the grid viewport scrolls,
 // instead of squashing cards until their transcript is a sliver.
 const GRID_MODE_MIN_CELL_W = 420;
-const GRID_MODE_MIN_CELL_H = 480;
+const GRID_MODE_MIN_CELL_H = 580;
 // Room for the vertical scrollbar so overflowing grids never scroll sideways.
 const GRID_MODE_SCROLLBAR_GUTTER = 12;
 const evenGridColumns = (count: number, viewportWidth: number) => {
@@ -204,7 +205,8 @@ const readProjectAgentBodyTabs = (): Record<string, ProjectAgentBodyTab> => {
 };
 const readProjectAgentBodyTab = (agent: ProjectAgent): ProjectAgentBodyTab => {
   const value = readProjectAgentBodyTabs()[projectAgentIdentity(agent)];
-  if (value !== 'history' && value !== 'terminal' && value !== 'role') return 'history';
+  if (value !== 'history' && value !== 'progress' && value !== 'terminal' && value !== 'role') return 'history';
+  if (value === 'progress' && agent.remote) return 'history';
   return value === 'terminal' && !projectAgentCanUseTerminal(agent) ? 'history' : value;
 };
 const persistProjectAgentBodyTab = (agent: ProjectAgent, tab: ProjectAgentBodyTab) => {
@@ -694,6 +696,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
         >
           {([
             ['history', '会话'],
+            ...(agent.remote ? [] : [['progress', '进度']]),
             ...(agent.remote || String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
             ['role', '角色'],
           ] as Array<[ProjectAgentBodyTab, string]>).map(([tab, label]) => {
@@ -761,6 +764,14 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
           {terminalOpen && agent.ttydSrc ? <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" /> : (
             <div data-id={`project-agent-card-terminal-loading-${shortPaneId(agent.paneId)}`} className="grid h-full place-items-center text-[11px] text-zinc-600"><Loader2 className="h-4 w-4 animate-spin" /></div>
           )}
+        </div>
+      ) : activeBodyTab === 'progress' ? (
+        <div
+          data-id={`project-agent-card-progress-body-${shortPaneId(agent.paneId)}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          className="-mx-5 min-h-0 flex-1 select-text overflow-hidden bg-[#0b0b0d]"
+        >
+          <AgentProgressPanel mainId={agent.paneId} mainTtydSrc={agent.ttydSrc} mainBusy={busy || Boolean(metrics?.working)} />
         </div>
       ) : activeBodyTab === 'role' ? (
         <div data-id={`project-agent-card-role-body-${shortPaneId(agent.paneId)}`} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()} onTouchStart={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()} className="-mx-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-2xl bg-[#0b0b0d] overscroll-contain">
@@ -901,6 +912,23 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   // view cache. The free canvas is always available — grid is just the default.
   const [layoutMode, setLayoutMode] = useState<'grid' | 'canvas'>('grid');
   const [minimizedIds, setMinimizedIds] = useState<string[]>([]);
+  // The designated knowledge specialist is always kept on screen (never minimized).
+  const [specialistId, setSpecialistId] = useState('');
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      Promise.resolve(apiService.getKnowledgeSpecialist?.())
+        .then((res: any) => { if (alive && res) setSpecialistId(shortPaneId(String(res?.data?.pane || res?.data?.default || ''))); })
+        .catch(() => { /* unknown → nothing pinned */ });
+    };
+    const onChanged = (event: Event) => {
+      const pane = String((event as CustomEvent)?.detail?.pane || '');
+      if (pane) setSpecialistId(shortPaneId(pane)); else load();
+    };
+    load();
+    window.addEventListener('cicy:knowledge-specialist-changed', onChanged);
+    return () => { alive = false; window.removeEventListener('cicy:knowledge-specialist-changed', onChanged); };
+  }, []);
   const [cardOrder, setCardOrder] = useState<string[]>([]);
   const [minimizedMenuOpen, setMinimizedMenuOpen] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ width: 1200, height: 800 });
@@ -1138,7 +1166,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const visibleAgents = allAgents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
   // Minimized cards stay project members (polling, routing, counts) but are not
   // laid out; the footer selector lists them for restore.
-  const minimizedSet = new Set(minimizedIds);
+  const minimizedSet = new Set(minimizedIds.filter((id) => id !== specialistId));
   // User-chosen order (↑/↓ on the card) first; unranked cards keep roster order after them.
   const orderRank = new Map(cardOrder.map((id, index) => [id, index]));
   const shownAgents = visibleAgents
@@ -2072,11 +2100,19 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   // past whatever is in the way. The layout is cached and persisted BEFORE
   // the roster refresh brings the new agent in, so the fallback placement
   // never gets a chance to put it somewhere else.
-  const placeForkBesideSource = (source: ProjectAgent, newPaneId: string) => {
-    const newId = shortPaneId(newPaneId);
-    if (!newId || agentLayouts[newId]) return;
-    const sourceLayout = layoutForAgent(source);
+  // Several forks from one send land in a row to the right of the source,
+  // each past the previous one (they share one occupied list, not stale state).
+  const placeForksBesideSource = (source: ProjectAgent, newPaneIds: string[]) => {
     const occupied = Object.values({ ...resolvedLayouts, ...agentLayouts });
+    for (const newPaneId of newPaneIds) {
+      const layout = placeForkBesideSource(source, newPaneId, occupied);
+      if (layout) occupied.push(layout);
+    }
+  };
+  const placeForkBesideSource = (source: ProjectAgent, newPaneId: string, occupied: ProjectAgentLayout[]): ProjectAgentLayout | null => {
+    const newId = shortPaneId(newPaneId);
+    if (!newId || agentLayouts[newId]) return null;
+    const sourceLayout = layoutForAgent(source);
     const width = sourceLayout.width || DEFAULT_PROJECT_AGENT_WIDTH;
     const height = sourceLayout.height || DEFAULT_PROJECT_AGENT_HEIGHT;
     let x = sourceLayout.x + sourceLayout.width + PROJECT_AGENT_GAP;
@@ -2098,6 +2134,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         pos_x: x, pos_y: y, width, height, z_index: z,
       }).catch(() => {});
     }
+    return layout;
   };
 
   const beginAgentDrag = (event: ReactPointerEvent<HTMLDivElement>, agent: ProjectAgent, index: number) => {
@@ -2295,7 +2332,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   // Remote (other-instance) agents are only hidden, never stopped from here.
   const minimizeAgent = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
-    if (minimizedIds.includes(id)) return;
+    if (minimizedIds.includes(id) || id === specialistId) return;
     setMinimized([...minimizedIds, id]);
     setSelectedAgentIds((current) => {
       if (!current.has(id)) return current;
@@ -2326,6 +2363,15 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         detail: t('projectAgentResumeFailed', { defaultValue: '重启 {{name}} 失败', name: agent.title || id }),
       })));
   };
+  // A card that becomes (or already is) the knowledge specialist is restored for
+  // good. Minimizing stopped its CLI, so bring the process back too (the backend
+  // no-ops if it is already running).
+  useEffect(() => {
+    if (!specialistId || !minimizedIds.includes(specialistId)) return;
+    setMinimized(minimizedIds.filter((id) => id !== specialistId));
+    const agent = allAgents.find((item) => shortPaneId(item.paneId) === specialistId);
+    resumeAgentProcess(agent || ({ paneId: `${specialistId}:main.0`, title: specialistId } as ProjectAgent));
+  }, [specialistId, minimizedIds]); // eslint-disable-line react-hooks/exhaustive-deps
   const restoreAgent = (id: string) => {
     setMinimized(minimizedIds.filter((item) => item !== id));
     if (minimizedIds.length <= 1) setMinimizedMenuOpen(false);
@@ -2795,7 +2841,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 onRemove={() => { void removeAgent(agent); }}
                 onMoveProject={(projectId) => { void changeAgentProject(agent, projectId, 'move'); }}
                 onAddProject={(projectId) => { void changeAgentProject(agent, projectId, 'add'); }}
-                onMinimize={() => minimizeAgent(agent)}
+                onMinimize={shortPaneId(agent.paneId) === specialistId ? undefined : () => minimizeAgent(agent)}
                 reorder={layoutMode === 'grid' && shownAgents.length > 1 ? {
                   canUp: index > 0,
                   canDown: index < shownAgents.length - 1,
@@ -3222,7 +3268,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           // source agent's project(s) server-side.
           projectId={selectedProject.api_id || undefined}
           onClose={() => setForkTarget(null)}
-          onForked={(newPaneId) => { placeForkBesideSource(forkTarget, newPaneId); void onAgentsRefresh(); void load(false); }}
+          onForked={(newPaneIds) => { placeForksBesideSource(forkTarget, newPaneIds); void onAgentsRefresh(); void load(false); }}
           onOpenAgentFile={onOpenAgentFile}
         />
       ) : null}

@@ -1423,6 +1423,8 @@ func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 	store.Exec("DELETE FROM pane_agents WHERE agent_name=?", shortID)
 	store.Exec("DELETE FROM group_windows WHERE win_id=?", paneID)
 	store.Exec("DELETE FROM agent_config WHERE pane_id=?", paneID)
+	// A main agent's hidden progress helper goes with it.
+	deleteProgressHelpers(shortID)
 	// Reclaim the pane's in-memory resources so a deleted pane doesn't leak a
 	// parked send goroutine + its cicy session for the life of the daemon.
 	retirePaneSendWorker(paneID)
@@ -3683,11 +3685,17 @@ fi`,
 		// (parity with claude --resume / codex resume --last) so the pane comes
 		// back to the latest session instead of a fresh chat + manual /chat pick.
 		lines = append(lines, kiroResumeBootLines()...)
-		if allowAllActions {
-			lines = append(lines, "kiro-cli chat $CICY_KIRO_RESUME --trust-all-tools")
-		} else {
-			lines = append(lines, "kiro-cli chat $CICY_KIRO_RESUME")
+		kiroCmd := "kiro-cli chat $CICY_KIRO_RESUME"
+		if m := strings.TrimSpace(defaultModel); m != "" {
+			// Pinned model (e.g. the cheap model of a progress helper).
+			kiroCmd += " --model " + tmuxShellQuote(m)
 		}
+		if allowAllActions {
+			kiroCmd += " --trust-all-tools"
+		}
+		// A progress helper (agent_progress.go) never keeps a resident kiro: it
+		// runs one-shot per refresh, so a dozen cards don't pin a dozen CLIs.
+		lines = append(lines, `if [ -f "$WORKSPACE/.cicy/progress.json" ]; then echo '[cicy] 进度助手：点「更新」或主 Agent 回复完成时运行一次，结束后自动退出'; else `+kiroCmd+`; fi`)
 		return lines
 	case "cicy":
 		// The dispatcher needs no external CLI — its pane runs a tiny REPL out

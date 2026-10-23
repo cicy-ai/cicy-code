@@ -190,6 +190,8 @@ export default function KnowledgePanel({ open, onClose, agentId, workspaceFolder
     try {
       const { data } = await apiService.setKnowledgeSpecialist(paneId);
       setChatPane(String(data?.pane || paneId));
+      // Other views (Projects cards) pin the specialist; let them re-read it.
+      window.dispatchEvent(new CustomEvent('cicy:knowledge-specialist-changed', { detail: { pane: String(data?.pane || paneId) } }));
     } catch (error: any) {
       setChatPane(previous);
       setConfigError(error?.response?.data?.error || error?.message || '切换知识专员失败');

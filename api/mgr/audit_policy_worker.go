@@ -21,7 +21,7 @@ import "strings"
 // that should be hidden from the regular /api/panes listing. After the w-6001
 // removal there are no such panes, so this is always false. Kept as the single
 // filtering hook in case a future built-in needs hiding again.
+// The only hidden panes today are progress helpers (agent_progress.go).
 func isBuiltinAgent(paneID string) bool {
-	_ = strings.TrimSpace(paneID)
-	return false
+	return isProgressHelperPane(strings.TrimSpace(paneID))
 }

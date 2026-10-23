@@ -24,12 +24,13 @@ import ChatGPTAccountsPanel, { ChatGPTIcon } from "./ChatGPTAccountsPanel";
 import NpmAccountsPanel, { NpmIcon } from "./NpmAccountsPanel";
 import DockerAccountsPanel, { DockerIcon } from "./DockerAccountsPanel";
 import AliyunAccountsPanel, { AliyunIcon } from "./AliyunAccountsPanel";
+import AwsAccountsPanel, { AwsIcon } from "./AwsAccountsPanel";
 import { AppModal, useDialogs } from "../ui/Modal";
 import BrowserWindowsPanel, { BrowserWindowsColumn, type Profile as BrowserProfile } from "../layout/BrowserWindowsPanel";
 import { MobileDeviceColumn, type MobileSel } from "../layout/MobileDevicesPanel";
 import DesktopScreenView from "../layout/devices/DesktopScreenView";
 
-type Platform = "github" | "cloudflare" | "google" | "chatgpt" | "npm" | "docker" | "aliyun";
+type Platform = "github" | "cloudflare" | "google" | "chatgpt" | "npm" | "docker" | "aliyun" | "aws";
 type MatrixSection = "accounts" | "devices";
 type CFAccount = {
   name: string;
@@ -289,6 +290,15 @@ export default function AccountMatrixPanel({
           >
             <AliyunIcon className="h-4 w-4" />
           </button>
+          <button
+            data-id="account-matrix-platform-aws"
+            title="AWS"
+            aria-label="AWS"
+            onClick={() => setPlatform("aws")}
+            className={`grid h-9 w-9 place-items-center rounded-lg border ${platform === "aws" ? "border-amber-400/30 bg-amber-400/10 text-amber-300" : "border-transparent text-zinc-500 hover:bg-white/[0.04]"}`}
+          >
+            <AwsIcon className="h-4 w-4" />
+          </button>
         </aside>
         <main
           data-id="account-matrix-content"
@@ -318,6 +328,9 @@ export default function AccountMatrixPanel({
           </div>
           <div data-id="account-matrix-aliyun" className="h-full" style={{ display: platform === "aliyun" ? "block" : "none" }}>
             <AliyunAccountsPanel active={active && platform === "aliyun"} paneId={paneId} />
+          </div>
+          <div data-id="account-matrix-aws" className="h-full" style={{ display: platform === "aws" ? "block" : "none" }}>
+            <AwsAccountsPanel active={active && platform === "aws"} paneId={paneId} />
           </div>
           {platform === "cloudflare" && (
             <div data-id="account-matrix-cloudflare" className="p-4">

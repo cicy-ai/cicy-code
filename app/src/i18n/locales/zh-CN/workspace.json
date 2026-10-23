@@ -841,5 +841,19 @@
   "projectAgentStoppedBadge": "已停止",
   "projectAllMinimized": "所有 Agent 都已最小化，可在左下角恢复",
   "projectMoveCardUp": "上移",
-  "projectMoveCardDown": "下移"
+  "projectMoveCardDown": "下移",
+  "awsAccountsTitle": "AWS 账号",
+  "awsAccountsSubtitle": "管理本机 aws.json 中供 Agent 使用的多组 AWS Access Key，每组可写备注。Secret 不会在页面中回显。",
+  "awsAccountsSecurity": "Secret Access Key 仅保存在本机 ~/cicy-ai/db/aws.json，接口只返回是否已配置和末四位。",
+  "awsAccountsEmpty": "还没有 AWS 账号",
+  "awsAccountEditTitle": "编辑 AWS 账号 {{name}}",
+  "awsAccountRegion": "默认 Region",
+  "awsAccountNote": "备注",
+  "awsAccountNotePh": "例如：生产环境 / 个人测试 / 只读 S3",
+  "awsAccountSecretMissing": "未设置 Secret",
+  "awsAccountInspect": "从 Access Key 自动获取",
+  "awsAccountBind": "设为本机 aws CLI 账号",
+  "awsAccountBound": "已把 {{name}} 写入 ~/.aws/credentials（并设为 default）",
+  "awsAccountAgentPrompt": "请使用 aws-cli skill 操作 AWS，指定账号为「{{name}}」。先执行 aws-cli whoami --account {{name}} 确认身份，然后等待我的下一步指令。不要读取、输出或泄露 Secret Access Key。",
+  "awsUsageAccountId": "账号 {{id}}"
 }

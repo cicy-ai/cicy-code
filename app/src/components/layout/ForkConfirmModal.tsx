@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import i18n from '../../i18n';
-import { X, FileText, FileJson, FileCode, Loader2, Send, ExternalLink } from 'lucide-react';
+import { X, FileText, FileJson, FileCode, Loader2, Send, ExternalLink, Minus, Plus } from 'lucide-react';
 import apiService from '../../services/api';
 
 // ForkConfirmModal — fork ("分身") no longer fires-and-forgets the inherit
@@ -43,12 +43,15 @@ interface ForkPreview {
 
 type PromptLang = 'en' | 'zh';
 
+const MAX_FORKS = 10;
+
 interface ForkConfirmModalProps {
   sourcePaneId: string;
   masterPaneId: string;
   projectId?: number | string;
   onClose: () => void;
-  onForked: (newPaneId: string) => void;
+  /** Pane ids of every fork created by this send (one per requested copy). */
+  onForked: (newPaneIds: string[]) => void;
   // Opens a file (workspace-relative path) in the source agent's file editor.
   onOpenAgentFile: (paneId: string, relPath: string) => void;
 }
@@ -85,6 +88,10 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, projectId
   // manual edits are discarded on switch).
   const [promptLang, setPromptLang] = useState<PromptLang>(() => (i18n.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en');
   const [sending, setSending] = useState(false);
+  // How many forks one send creates (default 1). Created one after another so
+  // each gets its own pane id and the source summary isn't regenerated in parallel.
+  const [forkCount, setForkCount] = useState(1);
+  const [forkProgress, setForkProgress] = useState(0);
   const [anchor, setAnchor] = useState<AnchorRect | null>(null);
 
   const defaultPromptFor = useCallback((p: ForkPreview | null, lang: PromptLang): string => {
@@ -187,25 +194,37 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, projectId
   const send = useCallback(async () => {
     if (sending || !preview) return;
     setSending(true);
-    try {
-      const { data } = await apiService.forkPane({
-        source_pane_id: preview.source_pane_id,
-        master_pane_id: masterPaneId,
-        project_id: projectId,
-        prompt,
-      });
-      if (data?.pane_id) {
-        onForked(String(data.pane_id));
-        onClose();
-      } else {
-        setError(t('toastForkFailed') as string);
-        setSending(false);
+    setError('');
+    const total = Math.max(1, Math.min(MAX_FORKS, forkCount));
+    const created: string[] = [];
+    for (let i = 0; i < total; i += 1) {
+      setForkProgress(i + 1);
+      try {
+        const { data } = await apiService.forkPane({
+          source_pane_id: preview.source_pane_id,
+          master_pane_id: masterPaneId,
+          project_id: projectId,
+          prompt,
+        });
+        if (!data?.pane_id) break;
+        created.push(String(data.pane_id));
+      } catch {
+        break;
       }
-    } catch {
-      setError(t('toastForkFailed') as string);
-      setSending(false);
     }
-  }, [sending, preview, masterPaneId, projectId, prompt, onForked, onClose]);
+    setForkProgress(0);
+    if (created.length) onForked(created);
+    if (created.length === total) {
+      onClose();
+      return;
+    }
+    // Partial or total failure: keep the modal open and say how far it got.
+    setError(created.length
+      ? t('forkPartial', { defaultValue: '只创建了 {{done}}/{{total}} 个分身', done: created.length, total }) as string
+      : t('toastForkFailed') as string);
+    if (created.length) setForkCount(total - created.length);
+    setSending(false);
+  }, [sending, preview, masterPaneId, projectId, prompt, forkCount, onForked, onClose]);
 
   const fileRow = (label: string, icon: React.ReactNode, f?: ForkFile) => {
     if (!f) return null;
@@ -242,6 +261,8 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, projectId
   };
 
   const tu = preview?.token_use || {};
+  // kiro keeps no gateway reply.json, so the token box would only ever show dashes.
+  const showTokenUse = preview?.agent_type !== 'kiro-cli';
   const comp = preview?.compression;
   const ratioPct = comp ? (comp.ratio * 100).toFixed(1) : '—';
 
@@ -301,8 +322,9 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, projectId
             </div>
 
             {/* token use + compression */}
-            <div className="grid shrink-0 grid-cols-2 gap-2.5" data-id="fork-confirm-stats">
-              <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5">
+            <div className={`grid shrink-0 gap-2.5 ${showTokenUse ? 'grid-cols-2' : 'grid-cols-1'}`} data-id="fork-confirm-stats">
+              {showTokenUse ? (
+              <div data-id="fork-confirm-token-use" className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5">
                 <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{t('forkTokenUse')}</div>
                 <dl className="space-y-0.5 text-xs">
                   <div className="flex justify-between"><dt className="text-zinc-500">input</dt><dd className="font-mono text-zinc-200">{fmtTokens(tu.input_tokens)}</dd></div>
@@ -313,6 +335,7 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, projectId
                   {tu.model ? <div className="flex justify-between"><dt className="text-zinc-500">model</dt><dd className="truncate font-mono text-zinc-300">{String(tu.model)}</dd></div> : null}
                 </dl>
               </div>
+              ) : null}
               <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5">
                 <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{t('forkCompression')}</div>
                 <div className="text-2xl font-semibold text-blue-300">{ratioPct}<span className="text-base text-zinc-500">%</span></div>
@@ -363,6 +386,26 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, projectId
       <div data-id="fork-confirm-footer" className="flex shrink-0 items-center justify-between gap-3 border-t border-white/[0.06] px-4 py-2.5">
         <div className="min-w-0 truncate text-xs text-red-400">{error && preview ? error : ''}</div>
         <div className="flex shrink-0 items-center gap-2">
+          <div data-id="fork-confirm-count" className="mr-1 flex items-center gap-1 text-xs text-zinc-400" title={t('forkCountHint', { defaultValue: '一次创建几个分身' }) as string}>
+            <span>{t('forkCountLabel', { defaultValue: '分身数量' })}</span>
+            <div className="flex items-center rounded-lg border border-white/[0.08]">
+              <button type="button" data-id="fork-confirm-count-dec" disabled={sending || forkCount <= 1} onClick={() => setForkCount((n) => Math.max(1, n - 1))} className="grid h-7 w-6 place-items-center text-zinc-400 hover:text-zinc-100 disabled:opacity-30"><Minus className="h-3 w-3" /></button>
+              <input
+                data-id="fork-confirm-count-input"
+                type="number"
+                min={1}
+                max={MAX_FORKS}
+                value={forkCount}
+                disabled={sending}
+                onChange={(e) => {
+                  const n = Number.parseInt(e.target.value, 10);
+                  setForkCount(Number.isFinite(n) ? Math.max(1, Math.min(MAX_FORKS, n)) : 1);
+                }}
+                className="h-7 w-9 bg-transparent text-center font-mono text-xs text-zinc-100 outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              <button type="button" data-id="fork-confirm-count-inc" disabled={sending || forkCount >= MAX_FORKS} onClick={() => setForkCount((n) => Math.min(MAX_FORKS, n + 1))} className="grid h-7 w-6 place-items-center text-zinc-400 hover:text-zinc-100 disabled:opacity-30"><Plus className="h-3 w-3" /></button>
+            </div>
+          </div>
           <button
             data-id="fork-confirm-cancel"
             type="button"
@@ -379,7 +422,9 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, projectId
             className="flex items-center gap-1.5 rounded-lg bg-blue-500 px-3.5 py-1.5 text-xs font-medium text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-            {sending ? t('forkSending') : t('forkSendPrompt')}
+            {sending
+              ? (forkCount > 1 ? `${t('forkSending')} ${forkProgress}/${forkCount}` : t('forkSending'))
+              : (forkCount > 1 ? `${t('forkSendPrompt')} ×${forkCount}` : t('forkSendPrompt'))}
           </button>
         </div>
       </div>

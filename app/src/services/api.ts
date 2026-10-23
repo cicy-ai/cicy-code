@@ -438,6 +438,13 @@ const api = {
   bindAliyunAccount: (name: string) => http.post('/api/aliyun/accounts/bind', { name }),
   getAliyunAccountSecret: (name: string) => http.get('/api/aliyun/accounts', { params: { reveal_token: name } }),
   inspectAliyunAccount: (body: { name?: string; access_key_id?: string; access_key_secret?: string; region?: string }) => http.post('/api/aliyun/accounts/inspect', body),
+  getAwsAccounts: () => http.get('/api/aws/accounts'),
+  saveAwsAccount: (body: { name: string; old_name?: string; access_key_id?: string; secret_access_key?: string; region?: string; note?: string }) => http.put('/api/aws/accounts', body),
+  deleteAwsAccount: (name: string) => http.delete('/api/aws/accounts', { params: { name } }),
+  testAwsAccount: (name: string) => http.post('/api/aws/accounts/test', { name }),
+  bindAwsAccount: (name: string) => http.post('/api/aws/accounts/bind', { name }),
+  getAwsAccountSecret: (name: string) => http.get('/api/aws/accounts', { params: { reveal_token: name } }),
+  inspectAwsAccount: (body: { name?: string; access_key_id?: string; secret_access_key?: string; region?: string }) => http.post('/api/aws/accounts/inspect', body),
   getCloudflareAccounts: () => http.get('/api/cloudflare/accounts'),
   saveCloudflareAccount: (body: { name: string; old_name?: string; label?: string; account_id?: string; api_token?: string; username?: string; email?: string; password?: string; profile?: string; is_default?: boolean; details?: Record<string, string> }) => http.put('/api/cloudflare/accounts', body),
   deleteCloudflareAccount: (name: string) => http.delete('/api/cloudflare/accounts', { params: { name } }),
@@ -514,6 +521,12 @@ const api = {
     const qs = new URLSearchParams({ client_id: clientId, name, token }).toString();
     return `${base}/api/desktop/snapshot-image?${qs}`;
   },
+
+  // Progress helper of a main agent (hidden kiro-cli pane, cheap model) that
+  // keeps the main agent's todo list in sync with its conversation.
+  getAgentProgress: (mainId: string) => http.get(`/api/agents/progress/${encodeURIComponent(shortPaneRouteId(mainId))}`),
+  ensureAgentProgress: (mainId: string) => http.post(`/api/agents/progress/${encodeURIComponent(shortPaneRouteId(mainId))}`),
+  refreshAgentProgress: (mainId: string) => http.post(`/api/agents/progress/${encodeURIComponent(shortPaneRouteId(mainId))}/refresh`),
 
   listTodos: (paneId: string, allAgents?: boolean, params?: { status?: string; q?: string }) => {
     const pid = shortPaneRouteId(paneId);

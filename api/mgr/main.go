@@ -419,6 +419,10 @@ Options:
 	http.HandleFunc("/api/aliyun/accounts/usage", authM(handleAliyunAccountUsage))
 	http.HandleFunc("/api/aliyun/accounts/bind", authM(handleAliyunAccountBind))       // write ~/.aliyun/config.json profile
 	http.HandleFunc("/api/aliyun/accounts/inspect", authM(handleAliyunAccountInspect)) // fill the matrix from one pasted AccessKey
+	http.HandleFunc("/api/aws/accounts", authM(handleAwsAccounts))
+	http.HandleFunc("/api/aws/accounts/test", authM(handleAwsAccountTest))
+	http.HandleFunc("/api/aws/accounts/bind", authM(handleAwsAccountBind))       // write ~/.aws/credentials + config
+	http.HandleFunc("/api/aws/accounts/inspect", authM(handleAwsAccountInspect)) // fill the matrix from one pasted AccessKey
 	http.HandleFunc("/api/google/accounts", authM(handleGoogleAccounts))
 	http.HandleFunc("/api/google/accounts/totp", authM(handleGoogleAccountTOTP))
 	http.HandleFunc("/api/chatgpt/accounts", authM(handleChatGPTAccounts))
@@ -537,6 +541,7 @@ Options:
 	http.HandleFunc("/api/agents/install-status", authM(handleAgentInstallStatus)) // is the coding CLI installed?
 	http.HandleFunc("/api/agents/install", authM(handleAgentInstall))              // SSE: run the install
 	http.HandleFunc("/api/agents/current-history/", wa(handleAgentCurrentHistoryByPane))
+	http.HandleFunc("/api/agents/progress/", wa(handleAgentProgress))
 	http.HandleFunc("/api/agents/usage-log/", wa(handleAgentUsageLogByPane))
 	http.HandleFunc("/api/agents/usage-analysis/", wa(handleAgentUsageAnalysisByPane))
 	http.HandleFunc("/api/agents/usage-block/", wa(handleAgentUsageBlockByPane))

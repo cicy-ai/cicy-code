@@ -841,5 +841,19 @@
   "projectAgentStoppedBadge": "stopped",
   "projectAllMinimized": "All agents are minimized — restore them from the bottom-left",
   "projectMoveCardUp": "Move up",
-  "projectMoveCardDown": "Move down"
+  "projectMoveCardDown": "Move down",
+  "awsAccountsTitle": "AWS accounts",
+  "awsAccountsSubtitle": "Manage the AWS access keys in this machine's aws.json that agents can use; each key can have a note. Secrets are never shown here.",
+  "awsAccountsSecurity": "The secret access key is stored only on this machine in ~/cicy-ai/db/aws.json; the API returns only whether it is set and its last four characters.",
+  "awsAccountsEmpty": "No AWS accounts yet",
+  "awsAccountEditTitle": "Edit AWS account {{name}}",
+  "awsAccountRegion": "Default region",
+  "awsAccountNote": "Note",
+  "awsAccountNotePh": "e.g. production / personal sandbox / read-only S3",
+  "awsAccountSecretMissing": "Secret not set",
+  "awsAccountInspect": "Fill from access key",
+  "awsAccountBind": "Use for this machine's aws CLI",
+  "awsAccountBound": "Wrote {{name}} to ~/.aws/credentials (and set it as default)",
+  "awsAccountAgentPrompt": "Use the aws-cli skill to work with AWS as account \"{{name}}\". First run aws-cli whoami --account {{name}} to confirm the identity, then wait for my next instruction. Never read, print, or leak the secret access key.",
+  "awsUsageAccountId": "Account {{id}}"
 }
