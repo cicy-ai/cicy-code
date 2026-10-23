@@ -297,7 +297,7 @@ func (kiroSessionProvider) parseItems(path string) ([]map[string]interface{}, st
 				case "toolUse":
 					var tu kiroToolUse
 					if json.Unmarshal(c.Data, &tu) == nil {
-						var input interface{} = tu.Input
+						var input interface{} = string(tu.Input)
 						var parsed map[string]interface{}
 						if json.Unmarshal([]byte(tu.Input), &parsed) == nil {
 							input = parsed

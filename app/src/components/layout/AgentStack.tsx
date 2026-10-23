@@ -637,7 +637,8 @@ function AgentStack({
   // Effective slots. Falling back to activePaneId covers the first render
   // (leftPaneId not tracked yet) and a left pane that got deleted.
   const effLeft = leftPaneId && items.some((it) => it.paneId === leftPaneId) ? leftPaneId : activePaneId
-  const splitOn = !!splitPaneId && splitPaneId !== effLeft && items.some((it) => it.paneId === splitPaneId)
+  // 分屏入口已移除:始终单屏,忽略旧的已保存分屏状态。
+  const splitOn = false as boolean
   const openSplit = useCallback((target: string) => { setSplitPaneId(target) }, [])
   const closeSplit = useCallback(() => {
     setSplitPaneId(null)
@@ -1258,15 +1259,7 @@ function AgentStackCard({
               <span>{kouboBusy ? '启动中' : kouboHealthy ? '打开口播' : '启动口播'}</span>
             </button>
           ) : null}
-          {showHeaderButtons && splitControl.show && (splitControl.candidates.length > 0 || splitControl.isSplit) ? (
-            <SplitMenuButton
-              paneId={item.paneId}
-              candidates={splitControl.candidates}
-              isSplit={splitControl.isSplit}
-              onPick={splitControl.onPick}
-              onClose={splitControl.onClose}
-            />
-          ) : null}
+
           {showHeaderButtons ? (
             // The eight icon buttons that used to sit here inline now live in a
             // single ⋯ menu. Every data-id is preserved, so anything that

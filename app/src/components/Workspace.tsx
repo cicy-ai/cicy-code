@@ -829,6 +829,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const closeLeftPanel = useCallback(() => {
     setLeftPanelView(null);
   }, []);
+  // Skills is a full-area page; Esc closes it unless a nested dialog
+  // (skill detail etc.) already consumed the key.
+  useEffect(() => {
+    if (leftPanelView !== 'skills') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      setLeftPanelView(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [leftPanelView]);
   // The left menu panel closes from EXACTLY two places, by design:
   //   - data-id="left-panel-close" (the X in the panel header) → closeLeftPanel
   //   - data-id="btn-team" / the activity-bar icons → toggleLeft (toggles itself off)
@@ -1025,6 +1037,50 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     window.addEventListener('agent-status-change', handler as EventListener);
     return () => window.removeEventListener('agent-status-change', handler as EventListener);
   }, []);
+
+  const renderSkillMarketPage = () => (
+leftActive === 'skills' && !globalVar?.helper_mode ? (
+            <section
+              data-id="skill-market-overlay"
+              aria-label={t('leftPanelSkills')}
+              // z-[300]: must sit above the Projects header (z-200) and its card
+              // menus (z-220), or the project title shows through the skills page.
+              className="absolute inset-0 z-[300] flex min-h-0 flex-col overflow-hidden bg-[#0b0b0d]"
+            >
+              <header data-id="skill-market-dialog-header" className="flex h-12 shrink-0 items-center gap-2 border-b border-white/[0.07] px-4">
+                <Package className="h-4 w-4 text-zinc-400" />
+                <h2 data-id="skill-market-dialog-title" className="min-w-0 flex-1 truncate text-[13px] font-semibold text-zinc-100">{t('leftPanelSkills')}</h2>
+                <button
+                  type="button"
+                  data-id="skill-market-dialog-close"
+                  onClick={closeLeftPanel}
+                  aria-label={t('close', { defaultValue: '关闭' })}
+                  title={t('close', { defaultValue: '关闭' })}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </header>
+              <div data-id="skill-market-scroll" className="relative min-h-0 flex-1 overflow-y-auto">
+                <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[360px] bg-[radial-gradient(ellipse_60%_100%_at_50%_0%,rgba(124,58,237,0.18),rgba(59,130,246,0.06)_45%,transparent_75%)]" />
+                <div data-id="skill-market-dialog" className="relative mx-auto w-full max-w-[1240px] px-10 pb-16 pt-12">
+                  <div data-id="skill-market-dialog-body" className="relative">
+                    <SkillMarketplacePanel
+                      paneId={activeCliPaneId || paneId}
+                      onOpenDetail={handleSkillDetailOpen}
+                      onCloseDetail={handleSkillDetailClose}
+                    />
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : null
+  );
+
+  // Exactly one activity-bar icon is highlighted. Full-page views (knowledge,
+  // skills) take precedence over the Projects workspace they sit on top of.
+  const activeNav: 'knowledge' | 'skills' | 'team' | 'todo' | 'agents' | 'projects' | null =
+    knowledgeOpen ? 'knowledge' : leftPanelView ? leftPanelView : projectsOpen ? 'projects' : null;
 
   const toggleLeft = (p: 'team' | 'skills' | 'todo') => {
     setPortsOpen(false);
@@ -2262,11 +2318,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               team agent card (DispatcherChat). */}
           <SideBtn
             dataId="btn-projects"
-            active={projectsOpen}
+            active={activeNav === 'projects'}
             icon={<FolderKanban className="w-5 h-5" />}
             title={t('projectsTitle')}
             onClick={() => {
               setPortsOpen(false);
+              // Projects is underneath a full-page view: clicking it just returns
+              // to Projects instead of toggling it off.
+              if (projectsOpen && activeNav !== 'projects') {
+                setLeftPanelView(null);
+                setKnowledgeOpen(false);
+                return;
+              }
               setProjectsOpen((open) => {
                 const next = !open;
                 if (next) {
@@ -2281,17 +2344,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             }}
             disabled={!!globalVar?.helper_mode}
           />
-          <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} disabled={!!globalVar?.helper_mode} />
+          <SideBtn dataId="btn-team" active={activeNav === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} disabled={!!globalVar?.helper_mode} />
           {/* Helper-mode trial container hides Skills / Providers (gateway) /
               IM / Audit from the activity bar — the drawer should stay
               laser-focused on the install chat. See helperMode in cicy-code
               setup.go and /api/settings/global → helper_mode. */}
           {!globalVar?.helper_mode && (
             <>
-              <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} badge={publicSkillUpdate} badgeTitle={t('skillUpdateAvailable', { defaultValue: '有技能可更新' })} />
+              <SideBtn dataId="btn-skill" active={activeNav === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} badge={publicSkillUpdate} badgeTitle={t('skillUpdateAvailable', { defaultValue: '有技能可更新' })} />
               <SideBtn
                 dataId="btn-knowledge"
-                active={knowledgeOpen}
+                active={activeNav === 'knowledge'}
                 icon={<BookOpen className="w-5 h-5" />}
                 title={t('tabKnowledge', { defaultValue: '知识库' })}
                 onClick={toggleKnowledge}
@@ -2326,30 +2389,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <div data-id="main-layout" className="flex h-full min-w-0">
             {projectsOpen ? (
               <>
-              {leftActive === 'skills' && !globalVar?.helper_mode ? (
-                <div
-                  data-testid="left-panel"
-                  data-id="left-panel"
-                  className="h-full w-[360px] min-w-[360px] max-w-[360px] shrink-0"
-                >
-                  <div data-id="left-panel-wrap" className="h-full flex flex-col bg-[#0A0A0A] border-r border-[var(--vsc-border)] relative z-[130]">
-                    <div data-id="left-panel-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
-                      <Brain className="w-3.5 h-3.5 text-zinc-600" />
-                      <span data-id="left-panel-title-skills" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
-                      <button data-id="left-panel-close" onClick={closeLeftPanel} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
-                    </div>
-                    <div data-id="left-panel-body" className="flex-1 relative overflow-hidden bg-[#0A0A0A] z-[131]">
-                      <div data-id="left-panel-skills-view" className="absolute inset-0">
-                        <SkillMarketplacePanel
-                          paneId={activeCliPaneId || paneId}
-                          onOpenDetail={handleSkillDetailOpen}
-                          onCloseDetail={handleSkillDetailClose}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
+              <div data-id="projects-panel-wrap" className="relative flex h-full min-w-0 flex-1">
               <ProjectsPanel
                 agents={projectAgents}
                 statuses={pollStatuses}
@@ -2395,11 +2435,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 }}
                 onOpenGuidance={openAgentGuidanceDetail}
               />
+              {renderSkillMarketPage()}
+              </div>
               {cliFixedContent}
               </>
             ) : (
             <>
-            {leftActive && !globalVar?.helper_mode ? (
+            {leftActive && leftActive !== 'skills' && !globalVar?.helper_mode ? (
               <div
                 data-testid="left-panel"
                 data-id="left-panel"
@@ -2410,9 +2452,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     {leftActive === 'agents' ? <>
                       <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-agents" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelAgents')}</span>
-                    </> : leftActive === 'skills' ? <>
-                      <Brain className="w-3.5 h-3.5 text-zinc-600" />
-                      <span data-id="left-panel-title-skills" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
                     </> : <>
                       <Users className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-team" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelTeam')}</span>
@@ -2461,14 +2500,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                           onOpenRoster={() => setRosterOpen(true)}
                         />
                       </div>
-                    ) : leftActive === 'skills' ? (
-                      <div data-id="left-panel-skills-view" className="absolute inset-0">
-                        <SkillMarketplacePanel
-                          paneId={activeCliPaneId || paneId}
-                          onOpenDetail={handleSkillDetailOpen}
-                          onCloseDetail={handleSkillDetailClose}
-                        />
-                      </div>
                     ) : null}
                   </div>
                 </div>
@@ -2476,6 +2507,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             ) : null}
             <div data-testid="mid-panel" data-id="mid-panel" className="min-w-0 flex-1 relative">
               {rightContent}
+              {renderSkillMarketPage()}
             </div>
             {cliFixedContent}
             </>

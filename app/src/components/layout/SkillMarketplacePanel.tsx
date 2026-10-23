@@ -156,6 +156,41 @@ function SkillAvatar({ skill, size = 'md' }: { skill: MarketSkill; size?: 'sm' |
   );
 }
 
+const CATEGORY_LABELS: Record<string, string> = {
+  telegram: 'Telegram',
+  dev: '开发',
+  productivity: '效率',
+  agent: 'Agent',
+  ai: 'AI',
+  network: '网络',
+  system: '系统',
+  cloud: '云服务',
+  infra: '基础设施',
+  user: '我的',
+  other: '其他',
+};
+const CATEGORY_ORDER = ['agent', 'telegram', 'ai', 'dev', 'productivity', 'network', 'cloud', 'system', 'infra', 'user'];
+// Product families that span several registry categories are pulled into one
+// bucket so related skills sit together (e.g. all Telegram tooling).
+function isTelegramSkill(s: MarketSkill): boolean {
+  const name = s.name.toLowerCase();
+  return name === 'tg' || name.startsWith('tg-') || name.startsWith('telegram')
+    || (s.tags || []).some(tag => tag.toLowerCase() === 'telegram');
+}
+function skillCategoryKey(s: MarketSkill): string {
+  if (isTelegramSkill(s)) return 'telegram';
+  return (s.category || '').trim().toLowerCase() || 'other';
+}
+function categoryRank(k: string): number {
+  const i = CATEGORY_ORDER.indexOf(k);
+  return i === -1 ? CATEGORY_ORDER.length + (k === 'other' ? 1 : 0) : i;
+}
+function groupByCategory(list: MarketSkill[]): Array<[string, MarketSkill[]]> {
+  const out: Record<string, MarketSkill[]> = {};
+  for (const s of list) (out[skillCategoryKey(s)] ||= []).push(s);
+  return Object.entries(out).sort((a, b) => categoryRank(a[0]) - categoryRank(b[0]) || a[0].localeCompare(b[0]));
+}
+
 export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDetail }: {
   paneId: string;
   onOpenDetail?: () => void;
@@ -167,6 +202,7 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
   const [loadError, setLoadError] = useState<string>('');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [category, setCategory] = useState<string>('all');
   const [, setBusy] = useState<Record<string, boolean>>({});
   const [selectedName, setSelectedName] = useState<string | null>(null);
   // Three-pillar hub: Discover (browse+install across all sources) / Publish
@@ -214,6 +250,7 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
     let list = skills;
     if (filter === 'installed') list = list.filter(s => s.status.installed);
     if (filter === 'available') list = list.filter(s => !s.status.installed);
+    if (category !== 'all') list = list.filter(s => skillCategoryKey(s) === category);
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       list = list.filter(s =>
@@ -224,7 +261,7 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
       );
     }
     return list;
-  }, [skills, filter, query]);
+  }, [skills, filter, category, query]);
 
   // Group by SOURCE (team), not category: the public registry, then one section
   // per subscribed team (registry_source), then locally-authored skills. This
@@ -240,6 +277,14 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
     }
     return out;
   }, [filtered]);
+
+  // Category chips: every category present, most populated first.
+  const categories = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const s of skills) { const k = skillCategoryKey(s); c[k] = (c[k] || 0) + 1; }
+    return Object.entries(c).sort((a, b) => categoryRank(a[0]) - categoryRank(b[0]) || b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [skills]);
+  const categoryLabel = (k: string) => t(`marketCategory_${k}`, { defaultValue: CATEGORY_LABELS[k] || k });
 
   // public first, then teams alphabetically, then local.
   const groupRank = (k: string) => (k === 'public' ? 0 : k === 'local' ? 2 : 1);
@@ -350,9 +395,9 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
 
   return (
     <>
-      <div className="h-full flex flex-col overflow-hidden bg-[#0A0A0A]" data-id="skill-market-root">
+      <div className="flex flex-col" data-id="skill-market-root">
         {/* three-pillar hub tabs */}
-        <div className="px-2 pt-1.5 border-b border-[var(--vsc-border)] shrink-0 flex items-center gap-0.5" data-id="skill-hub-tabs">
+        <div className="mx-auto mb-8 inline-flex items-center gap-1 self-center rounded-full border border-white/10 bg-white/[0.03] p-1" data-id="skill-hub-tabs">
           {(['discover', 'publish', 'subscribe'] as const).map((key) => {
             const Icon = key === 'discover' ? Compass : key === 'publish' ? Server : Users;
             const label = key === 'discover'
@@ -364,13 +409,13 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
                 data-id={`skill-hub-tab-${key}`}
                 onClick={() => setHubTab(key)}
                 className={cn(
-                  'px-2.5 py-1.5 text-[11px] rounded-t inline-flex items-center gap-1 border-b-2 -mb-px transition-colors',
+                  'px-5 py-2 text-sm font-medium rounded-full inline-flex items-center gap-2 transition-colors',
                   hubTab === key
-                    ? 'text-zinc-100 border-violet-400'
-                    : 'text-zinc-500 border-transparent hover:text-zinc-300'
+                    ? 'bg-white text-zinc-900 shadow'
+                    : 'text-zinc-400 hover:text-zinc-100'
                 )}
               >
-                <Icon className="w-3 h-3" /> {label}
+                <Icon className="w-4 h-4" /> {label}
               </button>
             );
           })}
@@ -378,26 +423,26 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
 
         {hubTab === 'discover' && (
           <>
-            <div className="px-3 py-2 border-b border-[var(--vsc-border)] shrink-0 space-y-2" data-id="skill-market-header">
-              <div data-id="skill-market-search-wrap" className="relative">
-                <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+            <div className="mb-10 space-y-5" data-id="skill-market-header">
+              <div data-id="skill-market-search-wrap" className="relative mx-auto max-w-3xl">
+                <Search className="w-5 h-5 absolute left-5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
                 <input
                   data-id="skill-market-search"
                   value={query}
                   onChange={e => setQuery(e.target.value)}
                   placeholder={t('marketplaceSearchPlaceholder')}
-                  className="w-full pl-7 pr-2 py-1.5 text-xs bg-[#0e0e0e] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                  className="h-14 w-full rounded-full border border-white/10 bg-white/[0.04] pl-14 pr-6 text-base text-zinc-100 shadow-[0_8px_40px_-12px_rgba(0,0,0,0.8)] placeholder:text-zinc-500 focus:border-violet-400/60 focus:bg-white/[0.06] focus:outline-none"
                 />
               </div>
-              <div data-id="skill-market-filters" className="flex items-center gap-1 overflow-x-auto whitespace-nowrap text-[11px] scrollbar-hairline">
+              <div data-id="skill-market-filters" className="flex items-center justify-center gap-2 overflow-x-auto whitespace-nowrap text-sm scrollbar-hairline">
                 {(['all','installed','available'] as Filter[]).map(f => (
                   <button
                     key={f}
                     data-id={`skill-market-filter-${f}`}
                     onClick={() => setFilter(f)}
                     className={cn(
-                      'shrink-0 whitespace-nowrap px-2 py-0.5 rounded transition-colors',
-                      filter === f ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+                      'shrink-0 whitespace-nowrap px-4 py-1.5 rounded-full border transition-colors',
+                      filter === f ? 'border-white/20 bg-white/10 text-zinc-100' : 'border-white/[0.06] text-zinc-400 hover:border-white/15 hover:text-zinc-200'
                     )}
                   >
                     {f === 'all' && `${t('marketplaceAll')} ${counts.total}`}
@@ -409,17 +454,37 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
                   data-id="skill-market-update-all"
                   onClick={() => { void updateAll(); }}
                   disabled={bulkUpdating || counts.updates === 0}
-                  className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-2 py-0.5 text-amber-300 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:text-zinc-600"
+                  className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-amber-400/20 px-4 py-1.5 text-amber-300 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:text-zinc-600"
                   title={t('marketplaceUpdateAll')}
                 >
-                  <RefreshCw className={cn('h-3 w-3', bulkUpdating && 'animate-spin')} />
+                  <RefreshCw className={cn('h-3.5 w-3.5', bulkUpdating && 'animate-spin')} />
                   {bulkUpdating
                     ? t('marketplaceUpdatingAll')
                     : t('marketplaceUpdateAllCount', { count: counts.updates })}
                 </button>
-                <button data-id="skill-market-refresh" onClick={() => { void load(true); }} className="shrink-0 p-1 text-zinc-500 hover:text-zinc-300 rounded" title={t('marketplaceRetry')}>
-                  <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
+                <button data-id="skill-market-refresh" onClick={() => { void load(true); }} className="shrink-0 rounded-full border border-white/[0.06] p-2 text-zinc-400 hover:border-white/15 hover:text-zinc-200" title={t('marketplaceRetry')}>
+                  <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
                 </button>
+              </div>
+              <div data-id="skill-market-categories" className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                {[['all', skills.length] as [string, number], ...categories].map(([k, n]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    data-id={`skill-market-category-${k}`}
+                    aria-pressed={category === k}
+                    onClick={() => setCategory(k)}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition-colors',
+                      category === k
+                        ? 'bg-violet-500/20 text-violet-100 ring-1 ring-inset ring-violet-400/40'
+                        : 'bg-white/[0.03] text-zinc-400 ring-1 ring-inset ring-white/[0.06] hover:bg-white/[0.06] hover:text-zinc-200'
+                    )}
+                  >
+                    <span>{k === 'all' ? t('marketCategoryAll', { defaultValue: '全部分类' }) : categoryLabel(k)}</span>
+                    <span className={cn('text-xs', category === k ? 'text-violet-300' : 'text-zinc-600')}>{n}</span>
+                  </button>
+                ))}
               </div>
               {bulkUpdateResult && (
                 <div data-id="skill-market-update-all-result" className="text-[10px] text-zinc-500">
@@ -428,7 +493,7 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto" data-id="skill-market-list">
+            <div className="space-y-12" data-id="skill-market-list">
               {loading && skills.length === 0 ? (
                 <SkillListSkeleton />
               ) : loadError ? (
@@ -443,17 +508,29 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
                   .sort(([a],[b]) => groupRank(a) - groupRank(b) || a.localeCompare(b))
                   .map(([group, list]) => (
                   <div key={group} data-id={`skill-market-group-${group}`}>
-                    <div data-id="skill-market-group-label" className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-zinc-600">{groupLabel(group)}</div>
-                    <div data-id="skill-market-group-items">
-                      {list.map(skill => (
-                        <SkillRow
-                          key={skill.name}
-                          skill={skill}
-                          selected={selectedName === skill.name}
-                          onClick={() => openDetail(skill.name)}
-                        />
-                      ))}
-                    </div>
+                    <div data-id="skill-market-group-label" className="mb-5 flex items-baseline gap-3"><h2 className="text-2xl font-semibold tracking-tight text-zinc-100">{groupLabel(group)}</h2><span className="text-sm text-zinc-500">{list.length}</span></div>
+                    {(category === 'all' ? groupByCategory(list) : [[category, list] as [string, MarketSkill[]]]).map(([cat, catList]) => (
+                      <div key={cat} data-id={`skill-market-cat-${group}-${cat}`} className="mb-8 last:mb-0">
+                        {category === 'all' && (
+                          <h3 data-id="skill-market-cat-label" className="mb-3 flex items-center gap-2 text-sm font-medium text-zinc-400">
+                            <span className="h-1.5 w-1.5 rounded-full bg-violet-400/70" />
+                            {categoryLabel(cat)}
+                            <span className="text-xs text-zinc-600">{catList.length}</span>
+                          </h3>
+                        )}
+                        <div data-id="skill-market-group-items" className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+                          {catList.map(skill => (
+                            <SkillRow
+                              key={skill.name}
+                              skill={skill}
+                              variant="card"
+                              selected={selectedName === skill.name}
+                              onClick={() => openDetail(skill.name)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ))
               )}
@@ -462,13 +539,13 @@ export default function SkillMarketplacePanel({ paneId, onOpenDetail, onCloseDet
         )}
 
         {hubTab === 'publish' && (
-          <div className="flex-1 overflow-y-auto p-4" data-id="skill-hub-publish">
+          <div className="py-2" data-id="skill-hub-publish">
             <PublishPanel onChanged={load} onOpenDetail={openDetail} />
           </div>
         )}
 
         {hubTab === 'subscribe' && (
-          <div className="flex-1 overflow-y-auto p-4" data-id="skill-hub-subscribe">
+          <div className="py-2" data-id="skill-hub-subscribe">
             <SubscribePanel onChanged={load} skills={skills} onOpenDetail={openDetail} selectedName={selectedName} />
           </div>
         )}
@@ -823,7 +900,7 @@ function PublishPanel({ onChanged, onOpenDetail }: { onChanged: () => void; onOp
   );
 }
 
-function SkillRow({ skill, selected, onClick, trailing, hideSourceBadge }: {
+function SkillRow({ skill, selected, onClick, trailing, hideSourceBadge, variant = 'row' }: {
   skill: MarketSkill;
   selected: boolean;
   onClick: () => void;
@@ -831,9 +908,12 @@ function SkillRow({ skill, selected, onClick, trailing, hideSourceBadge }: {
   // Hide the registry-source badge when the row is already shown under that
   // team's header (subscribe tab) — avoids repeating "hk" on every row.
   hideSourceBadge?: boolean;
+  // 'card' = ChatGPT-plugin-store tile used by the centered discover grid.
+  variant?: 'row' | 'card';
 }) {
   const { t } = useTranslation('workspace');
   const installed = skill.status.installed;
+  const card = variant === 'card';
 
   return (
     <div
@@ -845,17 +925,23 @@ function SkillRow({ skill, selected, onClick, trailing, hideSourceBadge }: {
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
       className={cn(
-        'group min-h-[68px] px-3 py-2 border-b border-[var(--vsc-border)]/40 transition-colors cursor-pointer focus:outline-none flex items-start relative',
-        selected
-          ? 'bg-indigo-500/[0.08] before:absolute before:left-0 before:top-1 before:bottom-1 before:w-[2px] before:rounded-r before:bg-indigo-400'
-          : 'hover:bg-white/[0.03] focus:bg-white/[0.05]'
+        card
+          ? 'group h-full min-h-[148px] p-6 rounded-2xl border transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 flex items-start relative hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-16px_rgba(0,0,0,0.9)]'
+          : 'group min-h-[68px] px-3 py-2 border-b border-[var(--vsc-border)]/40 transition-colors cursor-pointer focus:outline-none flex items-start relative',
+        card
+          ? (selected
+            ? 'border-violet-400/60 bg-violet-500/[0.08]'
+            : 'border-white/[0.08] bg-white/[0.025] hover:bg-white/[0.05] hover:border-white/20')
+          : (selected
+            ? 'bg-indigo-500/[0.08] before:absolute before:left-0 before:top-1 before:bottom-1 before:w-[2px] before:rounded-r before:bg-indigo-400'
+            : 'hover:bg-white/[0.03] focus:bg-white/[0.05]')
       )}
     >
-      <div data-id="skill-row-inner" className="flex items-start gap-2.5 w-full">
-        <SkillAvatar skill={skill} size="md" />
+      <div data-id="skill-row-inner" className={cn('flex items-start w-full', card ? 'gap-4' : 'gap-2.5')}>
+        <SkillAvatar skill={skill} size={card ? 'lg' : 'md'} />
         <div data-id="skill-row-info" className="flex-1 min-w-0">
-          <div data-id="skill-row-title-row" className="flex items-center gap-2 mb-0.5">
-            <div data-id="skill-row-title" className="text-xs font-medium text-zinc-200 truncate">{skill.title}</div>
+          <div data-id="skill-row-title-row" className={cn('flex items-center gap-2', card ? 'mb-2' : 'mb-0.5')}>
+            <div data-id="skill-row-title" className={cn('font-medium truncate', card ? 'text-base font-semibold text-zinc-50' : 'text-xs text-zinc-200')}>{skill.title}</div>
             {skill.registry_source && !hideSourceBadge && (
               <span
                 className="text-[10px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-300 inline-flex items-center gap-0.5 shrink-0"
@@ -882,7 +968,7 @@ function SkillRow({ skill, selected, onClick, trailing, hideSourceBadge }: {
                 : `v${skill.version}`}
             </span>
           </div>
-          <div data-id="skill-row-desc" className="text-[11px] text-zinc-500 leading-snug">{skill.description}</div>
+          <div data-id="skill-row-desc" className={cn(card ? 'text-sm leading-relaxed text-zinc-400 line-clamp-3' : 'text-[11px] leading-snug text-zinc-500')}>{skill.description}</div>
         </div>
         {trailing && <div className="shrink-0 self-center" onClick={(e) => e.stopPropagation()}>{trailing}</div>}
       </div>

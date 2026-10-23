@@ -195,9 +195,33 @@ type kiroThinking struct {
 	ModelID string `json:"modelId"`
 }
 type kiroToolUse struct {
-	Name      string `json:"name"`
-	ToolUseID string `json:"toolUseId"`
-	Input     string `json:"input"`
+	Name      string        `json:"name"`
+	ToolUseID string        `json:"toolUseId"`
+	Input     kiroToolInput `json:"input"`
+}
+
+// kiroToolInput holds a toolUse "input" as a JSON string. Older kiro-cli wrote
+// it as an encoded string; 2.31.x writes a JSON object. Declaring it a plain
+// string made the object form fail to unmarshal, silently dropping every tool
+// call (the 会话 tab then showed orphan "tool_result" cards with no names).
+type kiroToolInput string
+
+func (k *kiroToolInput) UnmarshalJSON(b []byte) error {
+	trimmed := strings.TrimSpace(string(b))
+	if trimmed == "" || trimmed == "null" {
+		*k = ""
+		return nil
+	}
+	if strings.HasPrefix(trimmed, "\"") {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*k = kiroToolInput(s)
+		return nil
+	}
+	*k = kiroToolInput(trimmed) // object/array: keep raw JSON text
+	return nil
 }
 type kiroToolResultData struct {
 	ToolUseID string            `json:"toolUseId"`
@@ -279,7 +303,7 @@ func kiroParseJSONL(path string) ([]aiGatewayMessageRecord, error) {
 					if json.Unmarshal(c.Data, &tu) == nil {
 						cur.ToolCalls = append(cur.ToolCalls, aiGatewayMessageToolCall{
 							Name:  tu.Name,
-							Input: tu.Input,
+							Input: string(tu.Input),
 							Index: len(cur.ToolCalls),
 						})
 						if tu.ToolUseID != "" {
