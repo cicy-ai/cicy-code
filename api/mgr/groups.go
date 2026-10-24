@@ -324,7 +324,14 @@ func addWindowToGroup(w http.ResponseWriter, groupID, winID, winType, refID, res
 		httpErr(w, http.StatusBadRequest, "Agent id is required")
 		return
 	}
-	rows, err := store.Query("SELECT group_id FROM group_windows WHERE win_id=? ORDER BY id", winID)
+	// Agent memberships exist in both "w-N" and "w-N:main.0" forms (older rows
+	// used the short id). Match both, or a move leaves the other-form rows
+	// behind and the agent stays in its old project.
+	aliasA, aliasB := winID, winID
+	if winType == "agent_ttyd" {
+		aliasA, aliasB = shortPaneID(winID), normPaneID(shortPaneID(winID))
+	}
+	rows, err := store.Query("SELECT group_id FROM group_windows WHERE win_id IN (?,?) ORDER BY id", aliasA, aliasB)
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -350,7 +357,7 @@ func addWindowToGroup(w http.ResponseWriter, groupID, winID, winType, refID, res
 	}
 	moved := len(existingGroupIDs) > 0 && !preserveExisting
 	if moved {
-		if _, err = store.Exec("DELETE FROM group_windows WHERE win_id=? AND group_id<>?", winID, groupID); err != nil {
+		if _, err = store.Exec("DELETE FROM group_windows WHERE win_id IN (?,?) AND group_id<>?", aliasA, aliasB, groupID); err != nil {
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -367,7 +374,7 @@ func addWindowToGroup(w http.ResponseWriter, groupID, winID, winType, refID, res
 	}
 	rollback := func() {
 		if moved {
-			_, _ = store.Exec("DELETE FROM group_windows WHERE win_id=?", winID)
+			_, _ = store.Exec("DELETE FROM group_windows WHERE win_id IN (?,?)", aliasA, aliasB)
 			for _, id := range existingGroupIDs {
 				_, _ = store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id", "width"}), id, winID, winType, refID, defaultProjectAgentWidth)
 			}
