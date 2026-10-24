@@ -9,7 +9,14 @@ describe('global theme', () => {
     document.documentElement.className = '';
   });
 
-  it('defaults to light and applies the document contract', () => {
+  it('defaults to dark', () => {
+    expect(getCicyTheme()).toBe('dark');
+    localStorage.setItem('cicy_theme', 'garbage');
+    expect(getCicyTheme()).toBe('dark');
+  });
+
+  it('keeps an explicitly saved light preference and applies the document contract', () => {
+    localStorage.setItem('cicy_theme', 'light');
     expect(getCicyTheme()).toBe('light');
     applyCicyTheme('light');
     expect(document.documentElement).toHaveAttribute('data-theme', 'light');

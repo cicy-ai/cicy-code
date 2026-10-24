@@ -5,8 +5,9 @@ export type CicyTheme = 'light' | 'dark';
 
 const THEME_KEY = 'cicy_theme';
 
+// Dark is the default; light only when the user explicitly picked it.
 export function getCicyTheme(): CicyTheme {
-  return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light';
+  return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
 }
 
 export function applyCicyTheme(theme: CicyTheme) {
