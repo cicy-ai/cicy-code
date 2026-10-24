@@ -92,6 +92,8 @@ export default function KiroAccountsPanel({ active, paneId }: { active: boolean;
           save: apiService.saveKiroAccount as any,
           remove: apiService.deleteKiroAccount,
           totp: apiService.getKiroAccountTOTP,
+          // Every card asks on load; the server answers from a 3-minute cache.
+          usage: (name: string) => apiService.getKiroAccountUsage(name),
         }}
         headerActions={
           <button data-id="kiro-account-import" type="button" onClick={() => { setImportResult(""); setImportOpen(true); }} className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-white/[0.1] px-2.5 py-1.5 text-[11px] text-zinc-300 hover:bg-white/[0.06]">
@@ -104,6 +106,31 @@ export default function KiroAccountsPanel({ active, paneId }: { active: boolean;
             name,
             defaultValue: "需要登录 Kiro 时使用账号「{{name}}」（登录信息在本机 Kiro 账号矩阵里，需要 2FA 时向我要验证码）。不要读取、输出或泄露密码和 2FA 种子。",
           })
+        }
+        renderUsage={(usage) =>
+          usage.logged_in ? (
+            <>
+              <span data-id="kiro-account-signed-in" className="text-emerald-400">{t("kiroSignedInHere", { defaultValue: "本机登录中" })}</span>
+              {usage.plan && <span>{usage.plan}</span>}
+              {usage.credits_limit > 0 && (
+                <span data-id="kiro-account-credits">
+                  {t("kiroCredits", { used: Number(usage.credits_used).toFixed(2).replace(/\.00$/, ""), limit: usage.credits_limit, pct: Math.round(usage.used_pct), defaultValue: `Credits ${usage.credits_used} / ${usage.credits_limit}（${Math.round(usage.used_pct)}%）` })}
+                </span>
+              )}
+              {usage.resets_on && <span>{t("kiroResetsOn", { date: usage.resets_on, defaultValue: `${usage.resets_on} 重置` })}</span>}
+              {usage.credits_limit > 0 && (
+                <span data-id="kiro-account-credits-progress" className="mt-1 h-1 w-full overflow-hidden rounded-full bg-white/[0.06]">
+                  <span className={`block h-full rounded-full ${usage.used_pct >= 90 ? "bg-rose-500" : usage.used_pct >= 70 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${Math.min(100, usage.used_pct)}%` }} />
+                </span>
+              )}
+            </>
+          ) : (
+            <span data-id="kiro-account-not-signed-in" className="text-zinc-600">
+              {usage.logged_in_email
+                ? t("kiroNotSignedIn", { email: usage.logged_in_email, defaultValue: `未在本机登录，无法查询用量（当前登录：${usage.logged_in_email}）` })
+                : t("kiroUsageUnavailable", { defaultValue: "本机 kiro-cli 未登录，无法查询用量" })}
+            </span>
+          )
         }
         renderBadge={(account) => <span data-id="kiro-account-type" className="rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-300">{typeLabel(account.login_type)}</span>}
         renderMeta={(account) => (

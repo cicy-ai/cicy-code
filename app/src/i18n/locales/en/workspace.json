@@ -896,5 +896,10 @@
   "keystoreDeleteTitle": "Delete secret",
   "keystoreDeleteBody": "Delete {{key}}? Commands that use it will no longer get its value.",
   "keystoreUsageTitle": "How agents use it",
-  "keystoreUsageHint": "exec injects values into the child process environment and replaces them with *** in its output."
+  "keystoreUsageHint": "exec injects values into the child process environment and replaces them with *** in its output.",
+  "kiroSignedInHere": "signed in on this machine",
+  "kiroCredits": "Credits {{used}} / {{limit}} ({{pct}}%)",
+  "kiroResetsOn": "resets {{date}}",
+  "kiroNotSignedIn": "not signed in here, usage unavailable (signed in: {{email}})",
+  "kiroUsageUnavailable": "kiro-cli is not signed in, usage unavailable"
 }

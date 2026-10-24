@@ -454,6 +454,7 @@ const api = {
   deleteKiroAccount: (name: string) => http.delete('/api/kiro/accounts', { params: { name } }),
   getKiroAccountSecret: (name: string) => http.get('/api/kiro/accounts', { params: { reveal_token: name } }),
   getKiroAccountTOTP: (name: string) => http.post('/api/kiro/accounts/totp', { name }),
+  getKiroAccountUsage: (name: string, force = false) => http.post('/api/kiro/accounts/usage', { name, force }),
   importKiroAccounts: (text: string) => http.post('/api/kiro/accounts/import', { text }),
   getCloudflareAccounts: () => http.get('/api/cloudflare/accounts'),
   saveCloudflareAccount: (body: { name: string; old_name?: string; label?: string; account_id?: string; api_token?: string; username?: string; email?: string; password?: string; profile?: string; is_default?: boolean; details?: Record<string, string> }) => http.put('/api/cloudflare/accounts', body),

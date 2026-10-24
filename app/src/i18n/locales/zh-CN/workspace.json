@@ -896,5 +896,10 @@
   "keystoreDeleteTitle": "删除密钥",
   "keystoreDeleteBody": "确定删除 {{key}}？使用它的命令将无法再获取这个值。",
   "keystoreUsageTitle": "Agent 如何使用",
-  "keystoreUsageHint": "exec 把值注入子进程的环境变量，并在其输出中把值替换为 ***。"
+  "keystoreUsageHint": "exec 把值注入子进程的环境变量，并在其输出中把值替换为 ***。",
+  "kiroSignedInHere": "本机登录中",
+  "kiroCredits": "Credits {{used}} / {{limit}}（{{pct}}%）",
+  "kiroResetsOn": "{{date}} 重置",
+  "kiroNotSignedIn": "未在本机登录，无法查询用量（当前登录：{{email}}）",
+  "kiroUsageUnavailable": "本机 kiro-cli 未登录，无法查询用量"
 }

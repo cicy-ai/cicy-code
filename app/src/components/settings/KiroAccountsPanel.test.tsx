@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
   deleteKiroAccount: vi.fn(),
   getKiroAccountTOTP: vi.fn(),
   importKiroAccounts: vi.fn(),
+  getKiroAccountUsage: vi.fn(),
 }));
 vi.mock('../../services/api', () => ({ default: api }));
 vi.mock('../../services/agentSend', () => ({ sendToAgent: vi.fn() }));
@@ -25,6 +26,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.getKiroAccounts.mockResolvedValue({ data: { accounts: [{ name: 'a@example.com', login_type: 'builder_id', email: 'a@example.com', password_set: true, '2fa_set': true, profile: '', note: '主号' }] } });
   api.getGoogleAccounts.mockResolvedValue({ data: { accounts: [] } });
+  api.getKiroAccountUsage.mockResolvedValue({ data: { logged_in: true, plan: 'KIRO PRO MAX', credits_used: 4650.65, credits_limit: 5000, used_pct: 93, resets_on: '2026-11-01' } });
   api.importKiroAccounts.mockResolvedValue({ data: { added: ['b@example.com'], updated: [], skipped_lines: [] } });
 });
 
@@ -33,6 +35,17 @@ describe('KiroAccountsPanel', () => {
     const { container } = render(<KiroAccountsPanel active paneId="w-1" />);
     await waitFor(() => expect(container.querySelector('[data-id="kiro-account-type"]')?.textContent).toBe('AWS Builder ID'));
     expect(container.querySelector('[data-id="kiro-account-note"]')?.textContent).toContain('主号');
+  });
+
+  it('shows credits for the signed-in account and a hint for others', async () => {
+    const { container, unmount } = render(<KiroAccountsPanel active paneId="w-1" />);
+    await waitFor(() => expect(container.querySelector('[data-id="kiro-account-credits"]')?.textContent).toContain('4650.65 / 5000'));
+    expect(container.querySelector('[data-id="kiro-account-signed-in"]')).toBeTruthy();
+    expect(container.querySelector('[data-id="kiro-account-credits-progress"] span')?.className).toContain('bg-rose-500');
+    unmount();
+    api.getKiroAccountUsage.mockResolvedValue({ data: { logged_in: false, logged_in_email: 'x@example.com' } });
+    const other = render(<KiroAccountsPanel active paneId="w-1" />);
+    await waitFor(() => expect(other.container.querySelector('[data-id="kiro-account-not-signed-in"]')?.textContent).toContain('x@example.com'));
   });
 
   it('bulk-imports pasted lines and reloads the list', async () => {
