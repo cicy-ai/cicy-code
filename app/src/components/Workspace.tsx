@@ -18,7 +18,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, Folder, X, Settings, Brain, Search,
   LayoutList, Users, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Bot, BookOpen, Timer, Grid3X3, Globe2, Smartphone, FolderKanban, UserCircle } from 'lucide-react';
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Bot, BookOpen, Timer, Grid3X3, Globe2, Smartphone, FolderKanban, UserCircle, KeyRound } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag, isChatModel } from '../lib/modelTag';
 import AgentAvatar from './AgentAvatar';
@@ -29,6 +29,7 @@ import { SendingProvider } from '../contexts/SendingContext';
 // import ChatView from './chat/ChatView';
 import TodoPanel from './TodoPanel';
 import AccountMatrixPanel from './settings/AccountMatrixPanel';
+const KeystorePanel = lazy(() => import('./settings/KeystorePanel'));
 // Lazy: these pull in the heavy CodeMirror editor stack. Behind tab gates, so
 // dynamic-importing them keeps codemirror off the first-paint critical path.
 const FilesView = lazy(() => import('./files/FilesView'));
@@ -253,11 +254,11 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'agents' | 'todo' | null;
-type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'audit' | 'github' | RequestViewTab;
+type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'audit' | 'github' | 'keystore' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'todo' || value === 'audit' || value === 'github') {
+  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'todo' || value === 'audit' || value === 'github' || value === 'keystore') {
     return value;
   }
   return 'files';
@@ -1871,6 +1872,7 @@ leftActive === 'skills' && !globalVar?.helper_mode ? (
     { id: 'memory', label: t('tabMemory'), icon: <Brain className="h-3.5 w-3.5" /> },
     ...(globalVar?.audit_enabled === true ? [{ id: 'audit', label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }), icon: <ShieldCheck className="h-3.5 w-3.5" /> }] : []),
     { id: 'github', label: t('accountMatrixTitle', { defaultValue: '账号矩阵' }), icon: <Grid3X3 className="h-3.5 w-3.5" /> },
+    { id: 'keystore', label: t('keystoreTitle', { defaultValue: '密钥库' }), icon: <KeyRound className="h-3.5 w-3.5" /> },
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
   useEffect(() => {
@@ -2097,6 +2099,18 @@ leftActive === 'skills' && !globalVar?.helper_mode ? (
               onClose={() => {}}
             />
           )}
+        </div>
+        <div
+          data-id="cli-content-keystore-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'keystore' ? 'block' : 'none' }}
+        >
+          {/* Mounted only while open: no secret-entry form lingers off-screen. */}
+          {cliContentOpen && cliContentTab === 'keystore' ? (
+            <Suspense fallback={null}>
+              <KeystorePanel active />
+            </Suspense>
+          ) : null}
         </div>
         <div
           data-id="cli-content-github-host"

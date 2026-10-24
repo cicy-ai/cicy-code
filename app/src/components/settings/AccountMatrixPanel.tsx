@@ -25,12 +25,13 @@ import NpmAccountsPanel, { NpmIcon } from "./NpmAccountsPanel";
 import DockerAccountsPanel, { DockerIcon } from "./DockerAccountsPanel";
 import AliyunAccountsPanel, { AliyunIcon } from "./AliyunAccountsPanel";
 import AwsAccountsPanel, { AwsIcon } from "./AwsAccountsPanel";
+import KiroAccountsPanel, { KiroIcon } from "./KiroAccountsPanel";
 import { AppModal, useDialogs } from "../ui/Modal";
 import BrowserWindowsPanel, { BrowserWindowsColumn, type Profile as BrowserProfile } from "../layout/BrowserWindowsPanel";
 import { MobileDeviceColumn, type MobileSel } from "../layout/MobileDevicesPanel";
 import DesktopScreenView from "../layout/devices/DesktopScreenView";
 
-type Platform = "github" | "cloudflare" | "google" | "chatgpt" | "npm" | "docker" | "aliyun" | "aws";
+type Platform = "github" | "cloudflare" | "google" | "chatgpt" | "npm" | "docker" | "aliyun" | "aws" | "kiro";
 type MatrixSection = "accounts" | "devices";
 type CFAccount = {
   name: string;
@@ -299,6 +300,15 @@ export default function AccountMatrixPanel({
           >
             <AwsIcon className="h-4 w-4" />
           </button>
+          <button
+            data-id="account-matrix-platform-kiro"
+            title="Kiro"
+            aria-label="Kiro"
+            onClick={() => setPlatform("kiro")}
+            className={`grid h-9 w-9 place-items-center rounded-lg border ${platform === "kiro" ? "border-violet-400/30 bg-violet-400/10" : "border-transparent opacity-70 hover:bg-white/[0.04] hover:opacity-100"}`}
+          >
+            <KiroIcon className="h-4 w-4" />
+          </button>
         </aside>
         <main
           data-id="account-matrix-content"
@@ -331,6 +341,9 @@ export default function AccountMatrixPanel({
           </div>
           <div data-id="account-matrix-aws" className="h-full" style={{ display: platform === "aws" ? "block" : "none" }}>
             <AwsAccountsPanel active={active && platform === "aws"} paneId={paneId} />
+          </div>
+          <div data-id="account-matrix-kiro" className="h-full" style={{ display: platform === "kiro" ? "block" : "none" }}>
+            <KiroAccountsPanel active={active && platform === "kiro"} paneId={paneId} />
           </div>
           {platform === "cloudflare" && (
             <div data-id="account-matrix-cloudflare" className="p-4">

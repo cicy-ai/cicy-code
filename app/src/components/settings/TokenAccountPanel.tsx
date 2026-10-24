@@ -24,7 +24,9 @@ export type AccountField = {
   // render as "<platform>-account-token-input".
   id?: string;
   label: string;
-  kind?: "text" | "secret";
+  kind?: "text" | "secret" | "select";
+  // Choices for kind "select" (value + label).
+  options?: { value: string; label: string }[];
   placeholder?: string;
   // Secret fields may be left blank on edit to keep the stored value.
   keepOnEdit?: boolean;
@@ -72,6 +74,10 @@ export type TokenAccountPanelProps<A extends AccountBase> = {
   bindToast?: (name: string, response: any) => string;
   agentPrompt: (name: string) => string;
   inspect?: AccountInspect;
+  // Extra buttons beside 添加账号 (e.g. bulk import).
+  headerActions?: ReactNode;
+  // Bump to make the panel re-fetch its list (after an external change).
+  reloadKey?: number;
 };
 
 export default function TokenAccountPanel<A extends AccountBase>({
@@ -94,13 +100,15 @@ export default function TokenAccountPanel<A extends AccountBase>({
   bindToast,
   agentPrompt,
   inspect,
+  headerActions,
+  reloadKey,
 }: TokenAccountPanelProps<A>) {
   const { t } = useTranslation("workspace");
   const [accounts, setAccounts] = useState<A[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
-  const emptyForm = useCallback(() => Object.fromEntries(fields.map((field) => [field.key, ""])) as Record<string, string>, [fields]);
+  const emptyForm = useCallback(() => Object.fromEntries(fields.map((field) => [field.key, field.kind === "select" ? field.options?.[0]?.value || "" : ""])) as Record<string, string>, [fields]);
   const [form, setForm] = useState<Record<string, string>>(emptyForm);
   const [profiles, setProfiles] = useState<string[]>([]);
   const [visible, setVisible] = useState<Record<string, boolean>>({});
@@ -137,7 +145,7 @@ export default function TokenAccountPanel<A extends AccountBase>({
   }, []);
   useEffect(() => {
     if (active) void load();
-  }, [active, load]);
+  }, [active, load, reloadKey]);
 
   const fetchUsage = useCallback(
     async (name: string) => {
@@ -303,10 +311,13 @@ export default function TokenAccountPanel<A extends AccountBase>({
             </h2>
             <p className="mt-1 truncate text-[11px] text-zinc-500">{subtitle}</p>
           </div>
+          <div className="flex shrink-0 items-center gap-2">
+          {headerActions}
           <button data-id={`${dataId}-account-add`} type="button" onClick={beginNew} className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-[11px] font-medium ${accent.button}`}>
             <Plus className="h-3.5 w-3.5" />
             {t("githubAccountAdd", { defaultValue: "添加账号" })}
           </button>
+          </div>
         </header>
         {error && (
           <div data-id={`${dataId}-accounts-error`} className="mb-4 rounded-lg border border-rose-500/20 bg-rose-500/[0.08] px-3 py-2 text-[12px] text-rose-300">
@@ -323,6 +334,21 @@ export default function TokenAccountPanel<A extends AccountBase>({
                   <div key={field.key} className={field.half ? "" : "md:col-span-2"}>
                     <label className="mb-1 block text-[11px] text-zinc-500">{field.label}</label>
                     <div className="relative">
+                      {field.kind === "select" ? (
+                        <select
+                          data-id={`${dataId}-account-${fieldId}-input`}
+                          value={form[field.key] || ""}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setForm((v) => ({ ...v, [field.key]: value }));
+                          }}
+                          className={inputClass}
+                        >
+                          {(field.options || []).map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      ) : (
                       <input
                         data-id={`${dataId}-account-${fieldId}-input`}
                         type={secret && !visible[field.key] ? "password" : "text"}
@@ -335,6 +361,7 @@ export default function TokenAccountPanel<A extends AccountBase>({
                         placeholder={secret && editing && field.keepOnEdit ? t("githubAccountTokenKeep", { defaultValue: "留空保持现有 Token" }) : field.placeholder}
                         autoComplete={secret ? "new-password" : "off"}
                       />
+                      )}
                       {secret && (
                         <button
                           data-id={`${dataId}-account-${fieldId}-toggle`}

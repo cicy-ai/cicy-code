@@ -420,9 +420,15 @@ Options:
 	http.HandleFunc("/api/aliyun/accounts/bind", authM(handleAliyunAccountBind))       // write ~/.aliyun/config.json profile
 	http.HandleFunc("/api/aliyun/accounts/inspect", authM(handleAliyunAccountInspect)) // fill the matrix from one pasted AccessKey
 	http.HandleFunc("/api/aws/accounts", authM(handleAwsAccounts))
+	http.HandleFunc("/api/keystore", authM(handleKeystore))                // key/value/note secrets; list never returns values
+	http.HandleFunc("/api/keystore/resolve", authM(handleKeystoreResolve)) // values for cicy-keystore exec only
 	http.HandleFunc("/api/aws/accounts/test", authM(handleAwsAccountTest))
 	http.HandleFunc("/api/aws/accounts/bind", authM(handleAwsAccountBind))       // write ~/.aws/credentials + config
 	http.HandleFunc("/api/aws/accounts/inspect", authM(handleAwsAccountInspect)) // fill the matrix from one pasted AccessKey
+	http.HandleFunc("/api/kiro/accounts", authM(handleKiroAccounts))
+	http.HandleFunc("/api/kiro/accounts/totp", authM(handleKiroAccountTOTP))
+	http.HandleFunc("/api/kiro/accounts/usage", authM(handleKiroAccountUsage))   // credits of the account kiro-cli is signed in as
+	http.HandleFunc("/api/kiro/accounts/import", authM(handleKiroAccountImport)) // bulk type:email:password:2fa lines
 	http.HandleFunc("/api/google/accounts", authM(handleGoogleAccounts))
 	http.HandleFunc("/api/google/accounts/totp", authM(handleGoogleAccountTOTP))
 	http.HandleFunc("/api/chatgpt/accounts", authM(handleChatGPTAccounts))
