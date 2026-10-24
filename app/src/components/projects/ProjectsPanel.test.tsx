@@ -335,28 +335,25 @@ describe('<ProjectsPanel /> project view cache', () => {
     await waitFor(() => expect(order()).toEqual(['project-canvas-node-w-101', 'project-canvas-node-w-102']));
   });
 
-  it('never lets the designated knowledge specialist be minimized', async () => {
+  it('minimizes the knowledge specialist without stopping its CLI', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-1007:main.0'], pane_count: 2 }] } });
     (api as any).getKnowledgeSpecialist = vi.fn().mockResolvedValue({ data: { pane: 'w-1007:main.0', default: 'w-1001:main.0' } });
-    // Even a stale cache that already lists the specialist as minimized must not hide it.
-    localStorage.setItem('cicy_project_view:default', JSON.stringify({ layoutMode: 'grid', zoom: 1, pan: { x: 0, y: 0 }, layouts: {}, minimized: ['w-1007'] }));
     render(<ProjectsPanel agents={[
       { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' },
       { paneId: 'w-1007:main.0', title: '知识专员', agentType: 'claude' },
     ]} onOpenAgent={vi.fn()} />);
 
-    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-node-w-1007"]')).toBeInTheDocument());
-    expect(document.querySelector('[data-id="project-agent-card-minimize-w-1007"]')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-minimize-w-101"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-canvas-minimized-toggle"]')).not.toBeInTheDocument();
-    // It was stopped while minimized: un-minimizing must relaunch it, never stop it.
-    await waitFor(() => expect(api.resumePane).toHaveBeenCalledWith('w-1007:main.0'));
+    await waitFor(() => expect((api as any).getKnowledgeSpecialist).toHaveBeenCalled());
+    const btn = await waitFor(() => { const el = document.querySelector('[data-id="project-agent-card-minimize-w-1007"]'); expect(el).not.toBeNull(); return el as HTMLElement; });
+    fireEvent.click(btn);
+    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-node-w-1007"]')).not.toBeInTheDocument());
+    expect(document.querySelector('[data-id="project-canvas-minimized-toggle"]')).toBeInTheDocument();
     expect(api.stopPane).not.toHaveBeenCalled();
 
-    // Switching the specialist elsewhere moves the pin.
-    window.dispatchEvent(new CustomEvent('cicy:knowledge-specialist-changed', { detail: { pane: 'w-101:main.0' } }));
-    await waitFor(() => expect(document.querySelector('[data-id="project-agent-card-minimize-w-101"]')).not.toBeInTheDocument());
-    expect(document.querySelector('[data-id="project-agent-card-minimize-w-1007"]')).toBeInTheDocument();
+    // A normal agent is still stopped when minimized.
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-minimize-w-101"]') as HTMLElement);
+    await waitFor(() => expect(api.stopPane).toHaveBeenCalledWith('w-101:main.0'));
+    expect(api.stopPane).toHaveBeenCalledTimes(1);
     delete (api as any).getKnowledgeSpecialist;
   });
 

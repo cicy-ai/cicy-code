@@ -912,7 +912,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   // view cache. The free canvas is always available — grid is just the default.
   const [layoutMode, setLayoutMode] = useState<'grid' | 'canvas'>('grid');
   const [minimizedIds, setMinimizedIds] = useState<string[]>([]);
-  // The designated knowledge specialist is always kept on screen (never minimized).
+  // The designated knowledge specialist may be minimized (hidden), but its CLI is
+  // never stopped: other agents and the knowledge panel rely on it staying live.
   const [specialistId, setSpecialistId] = useState('');
   useEffect(() => {
     let alive = true;
@@ -1166,7 +1167,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const visibleAgents = allAgents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
   // Minimized cards stay project members (polling, routing, counts) but are not
   // laid out; the footer selector lists them for restore.
-  const minimizedSet = new Set(minimizedIds.filter((id) => id !== specialistId));
+  const minimizedSet = new Set(minimizedIds);
   // User-chosen order (↑/↓ on the card) first; unranked cards keep roster order after them.
   const orderRank = new Map(cardOrder.map((id, index) => [id, index]));
   const shownAgents = visibleAgents
@@ -2329,10 +2330,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   // Minimizing frees the agent's processes (its tmux session is killed; the
   // conversation is already on disk). Restoring brings it back on its latest
   // session — the backend no-ops if the agent is somehow still running.
-  // Remote (other-instance) agents are only hidden, never stopped from here.
+  // Remote (other-instance) agents and the knowledge specialist are only hidden,
+  // never stopped from here.
   const minimizeAgent = (agent: ProjectAgent) => {
     const id = shortPaneId(agent.paneId);
-    if (minimizedIds.includes(id) || id === specialistId) return;
+    if (minimizedIds.includes(id)) return;
     setMinimized([...minimizedIds, id]);
     setSelectedAgentIds((current) => {
       if (!current.has(id)) return current;
@@ -2340,7 +2342,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       next.delete(id);
       return next;
     });
-    if (agent.remote) return;
+    if (agent.remote || id === specialistId) return;
     apiService.stopPane(agent.paneId)
       .then(() => window.dispatchEvent(new CustomEvent('show-toast', {
         detail: t('projectAgentStopped', { defaultValue: '已停止 {{name}}，恢复时会重新启动并加载最新会话', name: agent.title || id }),
@@ -2363,15 +2365,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         detail: t('projectAgentResumeFailed', { defaultValue: '重启 {{name}} 失败', name: agent.title || id }),
       })));
   };
-  // A card that becomes (or already is) the knowledge specialist is restored for
-  // good. Minimizing stopped its CLI, so bring the process back too (the backend
-  // no-ops if it is already running).
-  useEffect(() => {
-    if (!specialistId || !minimizedIds.includes(specialistId)) return;
-    setMinimized(minimizedIds.filter((id) => id !== specialistId));
-    const agent = allAgents.find((item) => shortPaneId(item.paneId) === specialistId);
-    resumeAgentProcess(agent || ({ paneId: `${specialistId}:main.0`, title: specialistId } as ProjectAgent));
-  }, [specialistId, minimizedIds]); // eslint-disable-line react-hooks/exhaustive-deps
   const restoreAgent = (id: string) => {
     setMinimized(minimizedIds.filter((item) => item !== id));
     if (minimizedIds.length <= 1) setMinimizedMenuOpen(false);
@@ -2841,7 +2834,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 onRemove={() => { void removeAgent(agent); }}
                 onMoveProject={(projectId) => { void changeAgentProject(agent, projectId, 'move'); }}
                 onAddProject={(projectId) => { void changeAgentProject(agent, projectId, 'add'); }}
-                onMinimize={shortPaneId(agent.paneId) === specialistId ? undefined : () => minimizeAgent(agent)}
+                onMinimize={() => minimizeAgent(agent)}
                 reorder={layoutMode === 'grid' && shownAgents.length > 1 ? {
                   canUp: index > 0,
                   canDown: index < shownAgents.length - 1,
