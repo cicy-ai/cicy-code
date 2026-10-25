@@ -4969,6 +4969,9 @@ func initPaneEnv(opts paneEnvOpts) {
 		sessionEnv["CICY_API_KEY"] = strings.TrimSpace(aiCfg.APIKey)
 		sessionEnv["CICY_API_URL"] = strings.TrimSpace(aiCfg.APIURL)
 	}
+	for key, value := range agentGitIdentityEnv(shortID) {
+		sessionEnv[key] = value
+	}
 	for key, value := range sessionEnv {
 		if value == "" {
 			_, _ = runTmux("set-environment", "-r", "-t", shortID, key)
