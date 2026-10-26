@@ -160,7 +160,7 @@ func roleMetaGreeting(slug, lang string) string {
 
 // Layered, user-editable memory templates. On agent creation the composed
 // content is copied verbatim into the new agent's native guidance file
-// (CLAUDE.md / AGENTS.md / .kiro/steering/memory.md). There is NO inheritance
+// (CLAUDE.md / AGENTS.md). There is NO inheritance
 // and NO gateway injection: every agent owns a self-contained file on disk that
 // both gateway and non-gateway CLIs read natively, keeping the two paths
 // consistent.

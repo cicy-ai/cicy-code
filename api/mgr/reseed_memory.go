@@ -4,7 +4,7 @@
 package main
 
 // `cicy-code reseed-memory` — one-shot CLI that regenerates agents' guidance
-// files (CLAUDE.md / AGENTS.md / .kiro/steering/memory.md) from the CURRENT
+// files (CLAUDE.md / AGENTS.md) from the CURRENT
 // memory templates (~/cicy-ai/memory/{global.md, projects/<slug>.md,
 // agents/<slug>.md}). Built for the roster memory-sync flow: ONLINE agents are
 // told (broadcast) to refresh their own file; OFFLINE agents cannot, so this
@@ -172,6 +172,11 @@ func reseedOne(t reseedTarget, dryRun bool, outDir string) error {
 		return fmt.Errorf("agent_type %q has no guidance file — skipped", t.agentType)
 	}
 	path := filepath.Join(t.workspace, rel)
+	if normalizeAgentType(t.agentType) == "kiro-cli" && !dryRun && outDir == "" {
+		// Move a legacy .kiro/steering/memory.md to AGENTS.md first so its
+		// custom section is carried over and kiro doesn't load both.
+		migrateKiroSteeringMemory(t.workspace)
+	}
 
 	content := composeGuidanceContent(t.workspace, t.agentType, t.paneID, t.projectTemplate, t.roleTemplate, "")
 

@@ -52,7 +52,7 @@ func TestComposeAgentMemoryIncludesRoleSystemBeforeProjectAndRole(t *testing.T) 
 	}
 }
 
-func TestKiroGuidancePinnedWithInclusionAlways(t *testing.T) {
+func TestKiroGuidanceMatchesAgentsMDAgents(t *testing.T) {
 	previousRoot := cicyRootDir
 	cicyRootDir = t.TempDir()
 	t.Cleanup(func() { cicyRootDir = previousRoot })
@@ -64,11 +64,14 @@ func TestKiroGuidancePinnedWithInclusionAlways(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// kiro now reads a plain workspace-root AGENTS.md, like codex: same body,
+	// no `inclusion: always` front-matter.
 	kiro := composeGuidanceContent("/tmp/workspace", "kiro-cli", "w-test", "", "", "en")
-	if !strings.HasPrefix(kiro, "---\ninclusion: always\n---\n\n") || !strings.Contains(kiro, "GLOBAL_RULES") {
-		t.Fatalf("kiro steering file must start with inclusion: always:\n%s", kiro)
+	codex := composeGuidanceContent("/tmp/workspace", "codex", "w-test", "", "", "en")
+	if strings.HasPrefix(kiro, "---") || !strings.Contains(kiro, "GLOBAL_RULES") {
+		t.Fatalf("kiro AGENTS.md must be plain markdown with the global rules:\n%s", kiro)
 	}
-	if codex := composeGuidanceContent("/tmp/workspace", "codex", "w-test", "", "", "en"); strings.HasPrefix(codex, "---") {
-		t.Fatalf("non-kiro guidance must not get front matter:\n%s", codex)
+	if strings.ReplaceAll(kiro, "kiro-cli", "codex") != codex {
+		t.Fatalf("kiro and codex guidance differ beyond the agent type:\n%s\n---\n%s", kiro, codex)
 	}
 }

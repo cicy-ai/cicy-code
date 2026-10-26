@@ -718,15 +718,15 @@ func proxySettingsRule(p *proxySettings) string {
 
 // guidanceFilenameForAgentType returns the per-agent guidance file path,
 // relative to the workspace. Returns "" for agents that don't have one.
-// kiro reads .kiro/steering/*.md, not CLAUDE.md — give it its own path.
+// kiro-cli loads a workspace-root AGENTS.md on its own (always included, no
+// front-matter); .kiro/steering/memory.md was its old home and is migrated by
+// migrateKiroSteeringMemory.
 func guidanceFilenameForAgentType(agentType string) string {
 	switch normalizeAgentType(agentType) {
 	case "claude", "cicy-claude":
 		return "CLAUDE.md"
-	case "codex", "gemini", "opencode", "cursor":
+	case "codex", "gemini", "opencode", "cursor", "kiro-cli":
 		return "AGENTS.md"
-	case "kiro-cli":
-		return filepath.Join(".kiro", "steering", "memory.md")
 	case "cicy":
 		return "AGENTS.md"
 	}
@@ -734,7 +734,7 @@ func guidanceFilenameForAgentType(agentType string) string {
 }
 
 // writeAgentGuidanceFile drops the agent's native guidance file (CLAUDE.md /
-// AGENTS.md / .kiro/steering/memory.md) into the workspace, seeded with the
+// AGENTS.md) into the workspace, seeded with the
 // composed memory template: global (always) + the selected project template
 // (~/cicy-ai/memory/{global.md, projects/<slug>.md}). The content is COPIED in
 // — self-contained, no inheritance, no gateway injection. Existing files are
@@ -806,17 +806,8 @@ func composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleT
 		}
 		return substituteTemplatePlaceholders(strings.Join(parts, "\n\n"), paneID, workspace, agentType)
 	}
-	content := composeAgentMemory(paneID, workspace, agentType, projectTemplate, roleTemplate, lang)
-	if normalizeAgentType(agentType) == "kiro-cli" {
-		content = kiroSteeringAlwaysHeader + content
-	}
-	return content
+	return composeAgentMemory(paneID, workspace, agentType, projectTemplate, roleTemplate, lang)
 }
-
-// kiroSteeringAlwaysHeader pins .kiro/steering/memory.md into every kiro turn.
-// The built-in kiro_default agent loads all steering files anyway, but a custom
-// agent (or the Kiro IDE) only includes front-matter-less files on demand.
-const kiroSteeringAlwaysHeader = "---\ninclusion: always\n---\n\n"
 
 // mergeLangIntoConfigJSON sets {"lang": <lang>} on a pane's config JSON blob.
 func mergeLangIntoConfigJSON(configJSON, lang string) string {
@@ -5012,6 +5003,9 @@ func initPaneEnv(opts paneEnvOpts) {
 			fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
 			fmt.Sprintf("export CICY_ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
 		)
+	}
+	if opts.workspace != "" && agentNorm == "kiro-cli" {
+		migrateKiroSteeringMemory(opts.workspace)
 	}
 	if opts.workspace != "" {
 		lines = append(lines,

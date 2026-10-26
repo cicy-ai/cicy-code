@@ -89,7 +89,7 @@ func resolveTemplatePath(suffix string) (scope, name, path string) {
 }
 
 // agentGuidancePath resolves an agent's own native guidance file
-// (CLAUDE.md / AGENTS.md / .kiro/steering/memory.md) from its pane id, by
+// (CLAUDE.md / AGENTS.md) from its pane id, by
 // looking up its workspace + agent_type in agent_config. Returns the absolute
 // path plus the workspace-relative filename. ok is false when the agent has no
 // guidance file (unknown pane, empty workspace, or an agent_type that doesn't
