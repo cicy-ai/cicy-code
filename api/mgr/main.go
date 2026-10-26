@@ -298,6 +298,7 @@ Options:
 	if !isAPIOnlyRuntime() {
 		go startWatcher()
 		go startTmuxHealth()
+		go startKiroThrottleRetry()
 		go startDesktopSnapshots()
 	}
 	startSystemResourceMonitor()
