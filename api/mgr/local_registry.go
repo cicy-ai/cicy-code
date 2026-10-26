@@ -198,7 +198,7 @@ func handleLocalRegistry(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case r.Method == "GET" && action == "":
-		writeLocalRegStatus(w)
+		writeLocalRegStatus(w, r)
 
 	case r.Method == "POST" && action == "rotate":
 		tok := genToken()
@@ -210,7 +210,7 @@ func handleLocalRegistry(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 500, err.Error())
 			return
 		}
-		writeLocalRegStatus(w)
+		writeLocalRegStatus(w, r)
 
 	case r.Method == "POST" && action == "publish":
 		var body struct {
@@ -235,7 +235,7 @@ func handleLocalRegistry(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = name
 		_ = version
-		writeLocalRegStatus(w)
+		writeLocalRegStatus(w, r)
 
 	case r.Method == "POST" && action == "unpublish":
 		var body struct {
@@ -250,11 +250,11 @@ func handleLocalRegistry(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 400, err.Error())
 			return
 		}
-		writeLocalRegStatus(w)
+		writeLocalRegStatus(w, r)
 
 	// Back-compat no-ops (the registry is always on now).
 	case r.Method == "POST" && (action == "start" || action == "stop"):
-		writeLocalRegStatus(w)
+		writeLocalRegStatus(w, r)
 
 	default:
 		httpErr(w, 405, "method not allowed")
@@ -273,7 +273,7 @@ type mySkillView struct {
 }
 
 // writeLocalRegStatus emits the always-on registry's status. Caller holds localRegMu.
-func writeLocalRegStatus(w http.ResponseWriter) {
+func writeLocalRegStatus(w http.ResponseWriter, r *http.Request) {
 	cfg := loadLocalRegConfig()
 	published := map[string]bool{}
 	for _, s := range skillcmd.LocalRegistrySkills(cfg.Dir) {
@@ -282,7 +282,7 @@ func writeLocalRegStatus(w http.ResponseWriter) {
 	mine := []mySkillView{}
 	for _, s := range skillcmd.ListPrivateSkills() {
 		v := mySkillView{Name: s.Name, Version: s.Version, Published: published[s.Name]}
-		if ms := privateMarketSkill(s.Name); ms != nil {
+		if ms := privateMarketSkill(s.Name, preferredLang(r)); ms != nil {
 			v.Title = ms.Title
 			v.Description = ms.Description
 			v.Category = ms.Category

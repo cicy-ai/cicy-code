@@ -455,7 +455,68 @@ func titleizeSkillName(name string) string {
 // catalog). registryNames is the set of names from fetchRegistrySkills.
 // A directory without SKILL.md is skipped (e.g. v1 leftover source trees
 // like cicy-skills/, .cache/, plus anything without a manifest yet).
-func scanUserSkills(registryNames map[string]struct{}) []marketSkill {
+// localSkillText is the display text of a skill dir's manifest.json, with
+// i18n[lang] (exact tag, then base language, then any region of it)
+// preferred over the English title/description.
+type localSkillText struct {
+	Name, Title, Description string
+	Category, Version        string
+	ConfigPath               string
+	Tags                     []string
+}
+
+func readLocalSkillText(dir, lang string) (localSkillText, bool) {
+	data, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		return localSkillText{}, false
+	}
+	var m struct {
+		Name        string   `json:"name"`
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		Category    string   `json:"category"`
+		Version     string   `json:"version"`
+		Tags        []string `json:"tags"`
+		Config      struct {
+			Path string `json:"path"`
+		} `json:"config"`
+		I18n map[string]struct {
+			Title       string `json:"title"`
+			Description string `json:"description"`
+		} `json:"i18n"`
+	}
+	if json.Unmarshal(data, &m) != nil || m.Name == "" {
+		return localSkillText{}, false
+	}
+	t := localSkillText{Name: m.Name, Title: m.Title, Description: m.Description,
+		Category: m.Category, Version: m.Version, Tags: m.Tags, ConfigPath: m.Config.Path}
+	if lang != "" {
+		base := strings.SplitN(lang, "-", 2)[0]
+		loc, ok := m.I18n[lang]
+		if !ok {
+			loc, ok = m.I18n[base]
+		}
+		for tag, l := range m.I18n { // "zh" → "zh-CN"
+			if !ok && strings.HasPrefix(tag, base+"-") {
+				loc, ok = l, true
+			}
+		}
+		if ok {
+			if loc.Title != "" {
+				t.Title = loc.Title
+			}
+			if loc.Description != "" {
+				t.Description = loc.Description
+			}
+		}
+	}
+	if t.Title == "" {
+		t.Title = titleizeSkillName(t.Name)
+	}
+	return t, true
+}
+
+func scanUserSkills(registryNames map[string]struct{}, lang string) []marketSkill {
 	root := userSkillsRoot()
 	if root == "" {
 		return nil
@@ -488,6 +549,9 @@ func scanUserSkills(registryNames map[string]struct{}) []marketSkill {
 			fmName = name
 		}
 		title := titleizeSkillName(fmName)
+		if t, ok := readLocalSkillText(filepath.Join(root, name), lang); ok {
+			title, fmDesc = t.Title, t.Description
+		}
 		out = append(out, marketSkill{
 			Name:        fmName,
 			Title:       title,
@@ -508,7 +572,7 @@ func mergedMarketCatalog(lang string) (skills []marketSkill, registryErr error) 
 	for _, s := range registry {
 		registryNames[s.Name] = struct{}{}
 	}
-	user := scanUserSkills(registryNames)
+	user := scanUserSkills(registryNames, lang)
 	skills = append(registry, user...)
 	return
 }
@@ -711,41 +775,23 @@ func findMarketSkill(name, lang string) *marketSkill {
 	// Fall back to a private skill (~/cicy-ai/skills/private/<name>): these are
 	// excluded from the merged catalog (they're not for public discovery) but
 	// must still be viewable from the "我的库" tab.
-	return privateMarketSkill(name)
+	return privateMarketSkill(name, lang)
 }
 
 // privateMarketSkill builds a marketSkill from a skill dir under PrivateSkillsDir.
-func privateMarketSkill(name string) *marketSkill {
-	data, err := os.ReadFile(filepath.Join(skillcmd.PrivateSkillsDir(), name, "manifest.json"))
-	if err != nil {
+func privateMarketSkill(name, lang string) *marketSkill {
+	t, ok := readLocalSkillText(filepath.Join(skillcmd.PrivateSkillsDir(), name), lang)
+	if !ok {
 		return nil
-	}
-	var m struct {
-		Name        string   `json:"name"`
-		Title       string   `json:"title"`
-		Description string   `json:"description"`
-		Category    string   `json:"category"`
-		Version     string   `json:"version"`
-		Tags        []string `json:"tags"`
-		Config      struct {
-			Path string `json:"path"`
-		} `json:"config"`
-	}
-	if json.Unmarshal(data, &m) != nil || m.Name == "" {
-		return nil
-	}
-	title := m.Title
-	if title == "" {
-		title = titleizeSkillName(m.Name)
 	}
 	return &marketSkill{
-		Name:        m.Name,
-		Title:       title,
-		Description: m.Description,
-		Version:     m.Version,
-		Category:    m.Category,
-		Tags:        m.Tags,
-		ConfigFile:  m.Config.Path,
+		Name:        t.Name,
+		Title:       t.Title,
+		Description: t.Description,
+		Version:     t.Version,
+		Category:    t.Category,
+		Tags:        t.Tags,
+		ConfigFile:  t.ConfigPath,
 		Source:      "private",
 	}
 }
