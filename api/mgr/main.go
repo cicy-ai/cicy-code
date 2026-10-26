@@ -375,14 +375,12 @@ Options:
 	http.HandleFunc("/api/panes", authM(handlePanes))
 	http.HandleFunc("/api/panes/create", authM(handleCreatePane))
 	http.HandleFunc("/api/panes/", authM(handlePaneByID))
-	http.HandleFunc("/api/panes/restart-all", authM(handleRestartAll))
 	// Legacy panes routes (frontend compatibility)
 	http.HandleFunc("/api/tmux/panes", authM(handlePanes))
 	http.HandleFunc("/api/tmux/panes/", authM(handlePaneByID))
 	http.HandleFunc("/api/tmux/create", authM(handleCreatePane))
 	http.HandleFunc("/api/tmux/fork", authM(handleForkPane))
 	http.HandleFunc("/api/tmux/fork/preview", authM(handleForkPreview))
-	http.HandleFunc("/api/tmux/restart_all", authM(handleRestartAll))
 
 	// Tmux
 	http.HandleFunc("/api/tmux/send", authM(handleSend))

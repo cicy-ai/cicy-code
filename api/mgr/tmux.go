@@ -5143,19 +5143,6 @@ func initPaneEnv(opts paneEnvOpts) {
 	// of cicy auto-pressing Enter for them.
 }
 
-func handleRestartAll(w http.ResponseWriter, r *http.Request) {
-	rows, _ := store.Query("SELECT pane_id FROM agent_config WHERE active=1")
-	defer rows.Close()
-	var results []M
-	for rows.Next() {
-		var pid string
-		rows.Scan(&pid)
-		// Simplified: just mark as restarted
-		results = append(results, M{"pane_id": pid, "success": true})
-	}
-	J(w, M{"success": true, "results": results, "total": len(results)})
-}
-
 type tmuxSendError struct {
 	Message      string
 	StatusCode   int
