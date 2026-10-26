@@ -806,8 +806,17 @@ func composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleT
 		}
 		return substituteTemplatePlaceholders(strings.Join(parts, "\n\n"), paneID, workspace, agentType)
 	}
-	return composeAgentMemory(paneID, workspace, agentType, projectTemplate, roleTemplate, lang)
+	content := composeAgentMemory(paneID, workspace, agentType, projectTemplate, roleTemplate, lang)
+	if normalizeAgentType(agentType) == "kiro-cli" {
+		content = kiroSteeringAlwaysHeader + content
+	}
+	return content
 }
+
+// kiroSteeringAlwaysHeader pins .kiro/steering/memory.md into every kiro turn.
+// The built-in kiro_default agent loads all steering files anyway, but a custom
+// agent (or the Kiro IDE) only includes front-matter-less files on demand.
+const kiroSteeringAlwaysHeader = "---\ninclusion: always\n---\n\n"
 
 // mergeLangIntoConfigJSON sets {"lang": <lang>} on a pane's config JSON blob.
 func mergeLangIntoConfigJSON(configJSON, lang string) string {

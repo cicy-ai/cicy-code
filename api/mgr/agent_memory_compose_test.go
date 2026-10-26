@@ -51,3 +51,24 @@ func TestComposeAgentMemoryIncludesRoleSystemBeforeProjectAndRole(t *testing.T) 
 		last = index
 	}
 }
+
+func TestKiroGuidancePinnedWithInclusionAlways(t *testing.T) {
+	previousRoot := cicyRootDir
+	cicyRootDir = t.TempDir()
+	t.Cleanup(func() { cicyRootDir = previousRoot })
+	path := filepath.Join(cicyRootDir, "memory", "global.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("GLOBAL_RULES"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	kiro := composeGuidanceContent("/tmp/workspace", "kiro-cli", "w-test", "", "", "en")
+	if !strings.HasPrefix(kiro, "---\ninclusion: always\n---\n\n") || !strings.Contains(kiro, "GLOBAL_RULES") {
+		t.Fatalf("kiro steering file must start with inclusion: always:\n%s", kiro)
+	}
+	if codex := composeGuidanceContent("/tmp/workspace", "codex", "w-test", "", "", "en"); strings.HasPrefix(codex, "---") {
+		t.Fatalf("non-kiro guidance must not get front matter:\n%s", codex)
+	}
+}
