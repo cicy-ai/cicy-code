@@ -50,6 +50,14 @@
 
 必须使用真实绝对路径，不要使用 `/tmp/...`、workspace 私有路径或单独文件名。保留正确扩展名。回复前确认引用的文件存在、可读且非空。最终回复中没有可打开的引用时，不得声称媒体已经附加或发送。
 
+## Git 身份与邮箱
+
+每个 Agent 有自己的 git 身份和收件箱：`<agent>.<实例名>@cicy-ai.com`。
+- 当前地址在环境变量 `$CICY_AGENT_EMAIL` 中，也可运行 `cicy-agent mail address` 查看。
+- 提交时自动使用这个身份（`GIT_AUTHOR_*` / `GIT_COMMITTER_*` 已注入）。不要用 `git config user.email` 或 `-c user.email=` 覆盖它，也不要在提交里冒用他人邮箱。
+- 收信：`cicy-agent mail ls`、`cicy-agent mail read <id>`；等待验证码或验证链接：`cicy-agent mail wait --from <发件方> --timeout 300`。
+- 注册外部服务或接收通知时，用自己的这个地址，不要用用户的私人邮箱。
+
 ## 约束
 
 - 项目必须创建或克隆到 `~/projects`，不要散落在其他路径。新项目或克隆项目应位于 `~/projects/<name>`。
