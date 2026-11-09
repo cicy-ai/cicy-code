@@ -548,8 +548,8 @@ export default function CodeEditor({
   }, [agentId, path, root]);
 
   const handleDownload = useCallback(() => {
-    fsApi.download(agentId, path);
-  }, [agentId, path]);
+    fsApi.download(agentId, path, root);
+  }, [agentId, path, root]);
 
   const handleSendToAgent = useCallback(async () => {
     let range: { startLine: number; startCharacter: number; endLine: number; endCharacter: number } | undefined;
