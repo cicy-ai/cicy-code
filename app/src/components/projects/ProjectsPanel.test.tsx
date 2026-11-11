@@ -251,9 +251,16 @@ describe('<ProjectsPanel /> floating action button', () => {
     rerender(<ProjectsPanel agents={[]} dockOpen={false} onOpenAgent={vi.fn()} />);
     expect(document.querySelector('[data-id="project-fab-wrap"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="projects-panel"]')).toHaveClass('relative');
+    // Grid mode: docked in the footer bar so it can't cover a card's send button.
+    expect(document.querySelector('[data-id="project-canvas-controls"] [data-id="project-fab-wrap"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-fab-wrap"]')).not.toHaveClass('absolute');
+    expect(document.querySelector('[data-id="project-fab-menu"]')).toHaveClass('pointer-events-none');
+
+    // Free canvas: floats bottom-right over the canvas.
+    fireEvent.click(document.querySelector('[data-id="project-canvas-mode-canvas"]')!);
+    expect(document.querySelector('[data-id="project-canvas-controls"] [data-id="project-fab-wrap"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-id="project-fab-wrap"]')).toHaveClass('absolute', 'bottom-16', 'right-5');
     expect(document.querySelector('[data-id="project-fab-wrap"]')).not.toHaveClass('fixed');
-    expect(document.querySelector('[data-id="project-fab-menu"]')).toHaveClass('pointer-events-none');
   });
 
   it('collapses the project list and remembers the preference', async () => {
@@ -333,6 +340,9 @@ describe('<ProjectsPanel /> project view cache', () => {
     expect(node('w-101').style.top).toBe(node('w-102').style.top);
     expect(document.querySelector('[data-id="project-agent-card-resize-w-101"]')).toBeNull();
 
+    // The top card is selected without a click, so its send button exists.
+    await waitFor(() => expect(node('w-101').style.zIndex).toBe('1000'));
+    expect(document.querySelector('[data-id="project-agent-prompt-send-w-101"]')).not.toBeNull();
     const list = document.querySelector('[data-id="project-window-agent-list"]')!;
     expect(list).not.toBeNull();
     fireEvent.click(document.querySelector('[data-id="project-window-agent-w-102"]')!);

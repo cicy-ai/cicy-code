@@ -144,6 +144,7 @@ const GRID_MODE_MARGIN = 16;
 // Window mode: every shown card is maximized into the same rect and stacked
 // by z-index; a left-hand agent list picks which one is on top.
 const WINDOW_MODE_SIDEBAR_WIDTH = 220;
+const WINDOW_MODE_SIDEBAR_COMPACT_WIDTH = 52;
 const WINDOW_MODE_MARGIN = 8;
 type ProjectLayoutMode = 'grid' | 'canvas' | 'window';
 // Minimum readable card size in grid mode. When the viewport can't fit every
@@ -381,7 +382,6 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
   const menuRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const status = String(agent.remote && agent.instanceOnline === false ? 'offline' : agent.status || 'idle').toLowerCase();
-  const unhealthy = /failed|error|offline|stopped/.test(status);
   const busy = /running|working|thinking|streaming/.test(status);
   // 标题就地编辑。用 contentEditable 而不是换成 <input>:这一行是 `items-baseline`
   // 的 flex,input 的基线算法和 h3 不同,一进编辑态整行(agentType + model 槽)就会
@@ -640,7 +640,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
       </div>
 
       <div data-id="project-agent-card-metrics" className="flex h-7 min-w-0 items-center gap-2 font-mono text-[12px] text-zinc-500">
-        <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', unhealthy ? 'bg-red-400' : busy || metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')} title={status} />
+        <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', projectAgentStatusDotClass(agent, metrics))} title={status} />
         <span
           data-id="project-agent-card-identity"
           onPointerDown={(event) => event.stopPropagation()}
@@ -815,6 +815,16 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
     </article>
   );
 }
+
+// One status colour for an agent, shared by the card header and the window-mode
+// agent list so the two can never disagree.
+const projectAgentStatus = (agent: ProjectAgent) => String(agent.remote && agent.instanceOnline === false ? 'offline' : agent.status || 'idle').toLowerCase();
+const projectAgentStatusDotClass = (agent: ProjectAgent, metrics?: AgentLiveMetrics) => {
+  const status = projectAgentStatus(agent);
+  if (/failed|error|offline|stopped/.test(status)) return 'bg-red-400';
+  if (/running|working|thinking|streaming/.test(status) || metrics?.working) return 'bg-amber-500';
+  return metrics ? 'bg-emerald-700' : 'bg-zinc-700';
+};
 
 // FAB 的原始位置(Tailwind `bottom-16` = 4rem)和让位时与浮层之间留的间距。
 const FAB_BASE_BOTTOM = 64;
@@ -1184,6 +1194,9 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     .sort((a, b) => a.rank - b.rank)
     .map((item) => item.agent);
   const minimizedAgents = visibleAgents.filter((agent) => minimizedSet.has(shortPaneId(agent.paneId)));
+  // Narrow viewports get an avatar-only rail so the card keeps most of the width.
+  const windowSidebarCompact = canvasSize.width < 640;
+  const windowSidebarWidth = windowSidebarCompact ? WINDOW_MODE_SIDEBAR_COMPACT_WIDTH : WINDOW_MODE_SIDEBAR_WIDTH;
   // Window mode: the selected card is the one on top; with nothing selected
   // (e.g. it was just minimized) fall back to the first shown card.
   const windowActiveId = (() => {
@@ -1229,7 +1242,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     // Grid mode: always tile every card to fill the viewport, ignoring stored
     // free-canvas positions (those are restored when the user switches back).
     if (layoutMode === 'window' && shownAgents.length) {
-      const width = Math.max(1, canvasSize.width - WINDOW_MODE_SIDEBAR_WIDTH - WINDOW_MODE_MARGIN * 2);
+      const width = Math.max(1, canvasSize.width - windowSidebarWidth - WINDOW_MODE_MARGIN * 2);
       const height = Math.max(1, canvasSize.height - 48 - (dockHeight || 0) - WINDOW_MODE_MARGIN * 2);
       shownAgents.forEach((agent, index) => {
         resolved[shortPaneId(agent.paneId)] = { x: WINDOW_MODE_MARGIN, y: WINDOW_MODE_MARGIN, width, height, z: index + 1 };
@@ -1260,7 +1273,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       occupied.push(layout);
     });
     return resolved;
-  }, [agentLayouts, shownAgentKey, layoutMode, canvasSize.width, canvasSize.height, dockHeight]);
+  }, [agentLayouts, shownAgentKey, layoutMode, canvasSize.width, canvasSize.height, dockHeight, windowSidebarWidth]);
+  // Window mode always has a card on top; keep it selected so its composer
+  // (send / attach are gated on selection) is usable without an extra click.
+  useEffect(() => {
+    if (layoutMode !== 'window' || !windowActiveId) return;
+    setSelectedAgentIds((current) => (current.size === 1 && current.has(windowActiveId) ? current : new Set([windowActiveId])));
+  }, [layoutMode, windowActiveId]);
   useEffect(() => {
     const receiveCloudReply = (event: Event) => {
       const detail = (event as CustomEvent)?.detail || {};
@@ -2437,6 +2456,78 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     });
   };
 
+  // Add-agent button. On the free canvas it floats bottom-right; in grid and
+  // window mode cards fill the viewport right down to the footer, so a floating
+  // button would sit on top of the last card's send/stop button — there it is
+  // docked into the footer bar instead.
+  const fabDocked = layoutMode !== 'canvas';
+  const fab = (
+<div
+          data-id="project-fab-wrap"
+          // 整个 wrap 常驻 184×130(收起的菜单只是 opacity-0,仍占布局),但真正可交互的
+          // 只有右下角那颗 40×40 的按钮。wrap 自身默认 pointer-events:auto,于是那圈空白
+          // 变成一块看不见的命中区,压住下面画布里 agent 卡片的 hover / 点击。
+          // → wrap 整体穿透,交互显式还给菜单(展开时)和按钮。
+          ref={fabRef}
+          className={fabDocked
+            ? 'relative ml-1 flex items-center'
+            : 'pointer-events-none absolute bottom-16 right-5 z-[80] flex flex-col items-end gap-2 transition-[bottom] duration-200'}
+          style={!fabDocked && fabLift ? { bottom: `${FAB_BASE_BOTTOM + fabLift}px` } : undefined}
+        >
+          <div
+            data-id="project-fab-menu"
+            className={cn(
+              'flex min-w-[184px] flex-col rounded-xl border border-white/[0.10] bg-[#202126] p-1 shadow-2xl transition-all duration-200',
+              fabDocked ? 'absolute bottom-9 left-0 z-[220] origin-bottom-left' : 'origin-bottom-right',
+              fabOpen ? 'pointer-events-auto translate-y-0 scale-100 opacity-100' : 'pointer-events-none translate-y-2 scale-95 opacity-0',
+            )}
+          >
+            <button
+              type="button"
+              data-id="project-fab-create-agent"
+              onClick={() => {
+                setFabOpen(false);
+                onCreateAgent({
+                  projectId: selectedProject.api_id,
+                  projectTemplate: selectedProject.project_template || (selectedProject.builtin ? 'default' : ''),
+                  onCreated: async (createdPaneId: string) => {
+                    await apiService.addGroupPane(selectedProject.api_id, createdPaneId);
+                  },
+                });
+              }}
+              className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[12px] text-zinc-100 transition-colors hover:bg-white/[0.07]"
+            >
+              <UserPlus data-id="project-fab-create-agent-icon" className="h-4 w-4" />
+              <span data-id="project-fab-create-agent-label">{t('projectCreateAgent')}</span>
+            </button>
+            <button
+              type="button"
+              data-id="project-fab-add-existing"
+              onClick={() => { setFabOpen(false); openAddAgents(selectedProject); }}
+              disabled={!selectedProject.api_id || availableAgents.length === 0}
+              className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[12px] text-zinc-100 transition-colors hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Users data-id="project-fab-add-existing-icon" className="h-4 w-4" />
+              <span data-id="project-fab-add-existing-label">{t('projectAddExistingAgent')}</span>
+            </button>
+          </div>
+          <button
+            type="button"
+            data-id="project-add-agent"
+            onClick={() => setFabOpen((open) => !open)}
+            className={cn(
+              'pointer-events-auto grid place-items-center bg-blue-600 text-white transition-transform hover:bg-blue-500 active:scale-95',
+              fabDocked ? 'h-7 w-7 rounded-md' : 'h-10 w-10 rounded-full shadow-[0_8px_20px_rgba(37,99,235,0.3)] hover:scale-105',
+            )}
+            title={t('projectAddAgent')}
+            aria-label={t('projectAddAgent')}
+            aria-expanded={fabOpen}
+          >
+            <Plus data-id="project-add-agent-icon" className={cn('transition-transform duration-200', fabDocked ? 'h-4 w-4' : 'h-5 w-5', fabOpen && 'rotate-45')} />
+          </button>
+        </div>
+  );
+
   return (
     <section data-id="projects-panel" className="relative flex h-full min-w-0 flex-1 bg-[#090a0d] text-zinc-300">
       <aside data-id="projects-list" className={cn('shrink-0 flex-col border-r border-white/[0.07] bg-[#0d0e12]', projectListCollapsed ? 'hidden' : 'flex w-[248px] max-[700px]:w-[180px]')}>
@@ -2587,13 +2678,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           <nav
             data-id="project-window-agent-list"
             aria-label={t('projectWindowAgentList', { defaultValue: 'Agent 列表' })}
-            className="absolute left-0 top-0 z-30 flex flex-col gap-0.5 overflow-y-auto border-r border-white/[0.07] bg-[#0d0e12]/95 p-2"
-            style={{ width: WINDOW_MODE_SIDEBAR_WIDTH, bottom: 48 + (dockHeight || 0) }}
+            className={cn('absolute left-0 top-0 z-30 flex flex-col gap-0.5 overflow-y-auto border-r border-white/[0.07] bg-[#0d0e12]/95', windowSidebarCompact ? 'p-1' : 'p-2')}
+            style={{ width: windowSidebarWidth, bottom: 48 + (dockHeight || 0) }}
           >
             {shownAgents.map((agent) => {
               const id = shortPaneId(agent.paneId);
               const active = id === windowActiveId;
-              const metrics = liveMetrics[id];
+              const metrics = liveMetrics[id] || (agentReplies[id] ? metricsFromCurrentReply(agentReplies[id]) : undefined);
               return (
                 <button
                   key={agent.paneId}
@@ -2603,19 +2694,20 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                   onClick={() => toggleAgentSelection(agent)}
                   title={agent.title || id}
                   className={cn(
-                    'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors',
+                    'relative flex w-full items-center gap-2 rounded-lg py-1.5 text-left transition-colors',
+                    windowSidebarCompact ? 'justify-center px-0' : 'px-2',
                     active ? 'bg-blue-500/15 text-blue-100' : 'text-zinc-300 hover:bg-white/[0.05]',
                   )}
                 >
                   <AgentAvatar agentType={agent.agentType} title={agent.title || id} variant="option" />
-                  <span className="min-w-0 flex-1">
+                  <span className={cn('min-w-0 flex-1', windowSidebarCompact && 'hidden')}>
                     <span className="block truncate text-[12px]">{agent.title || id}</span>
                     <span className="block truncate font-mono text-[10px] text-zinc-500">{id}</span>
                   </span>
                   <span
                     data-id={`project-window-agent-status-${id}`}
-                    className={cn('h-2 w-2 shrink-0 rounded-full', metrics?.working ? 'bg-amber-500' : metrics ? 'bg-emerald-700' : 'bg-zinc-700')}
-                    aria-hidden
+                    className={cn('h-2 w-2 shrink-0 rounded-full', projectAgentStatusDotClass(agent, metrics), windowSidebarCompact && 'absolute right-1.5 top-1.5 ring-2 ring-[#0d0e12]')}
+                    title={projectAgentStatus(agent)}
                   />
                 </button>
               );
@@ -2636,7 +2728,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
             style={layoutMode === 'grid'
               ? { transform: 'none', bottom: 48 + (dockHeight || 0) }
               : layoutMode === 'window'
-                ? { transform: 'none', left: WINDOW_MODE_SIDEBAR_WIDTH, bottom: 48 + (dockHeight || 0) }
+                ? { transform: 'none', left: windowSidebarWidth, bottom: 48 + (dockHeight || 0) }
                 : { transform: `translate(${canvasPan.x}px, ${canvasPan.y}px) scale(${canvasZoom})` }}
           >
             {layoutMode === 'grid' ? (
@@ -2963,7 +3055,8 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 )}
               >
                 <Icon className="h-3.5 w-3.5" />
-                <span>{t(key, { defaultValue: fallback })}</span>
+                {/* Narrow footer: icon-only, or the labels run into the right-hand controls. */}
+                {canvasSize.width < 720 ? null : <span>{t(key, { defaultValue: fallback })}</span>}
               </button>
             ))}
           </div>
@@ -3044,6 +3137,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               ) : null}
             </div>
           ) : null}
+          {!dockOpen && fabDocked ? fab : null}
         </div>
         {footerControls ? (
           <div data-id="project-canvas-footer-controls" className="absolute bottom-1.5 right-4 flex items-center gap-2 px-2 py-1">
@@ -3051,64 +3145,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
           </div>
         ) : null}
         </div>
-        {!dockOpen ? <div
-          data-id="project-fab-wrap"
-          // 整个 wrap 常驻 184×130(收起的菜单只是 opacity-0,仍占布局),但真正可交互的
-          // 只有右下角那颗 40×40 的按钮。wrap 自身默认 pointer-events:auto,于是那圈空白
-          // 变成一块看不见的命中区,压住下面画布里 agent 卡片的 hover / 点击。
-          // → wrap 整体穿透,交互显式还给菜单(展开时)和按钮。
-          ref={fabRef}
-          className="pointer-events-none absolute bottom-16 right-5 z-[80] flex flex-col items-end gap-2 transition-[bottom] duration-200"
-          style={fabLift ? { bottom: `${FAB_BASE_BOTTOM + fabLift}px` } : undefined}
-        >
-          <div
-            data-id="project-fab-menu"
-            className={cn(
-              'flex min-w-[184px] origin-bottom-right flex-col rounded-xl border border-white/[0.10] bg-[#202126] p-1 shadow-2xl transition-all duration-200',
-              fabOpen ? 'pointer-events-auto translate-y-0 scale-100 opacity-100' : 'pointer-events-none translate-y-2 scale-95 opacity-0',
-            )}
-          >
-            <button
-              type="button"
-              data-id="project-fab-create-agent"
-              onClick={() => {
-                setFabOpen(false);
-                onCreateAgent({
-                  projectId: selectedProject.api_id,
-                  projectTemplate: selectedProject.project_template || (selectedProject.builtin ? 'default' : ''),
-                  onCreated: async (createdPaneId: string) => {
-                    await apiService.addGroupPane(selectedProject.api_id, createdPaneId);
-                  },
-                });
-              }}
-              className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[12px] text-zinc-100 transition-colors hover:bg-white/[0.07]"
-            >
-              <UserPlus data-id="project-fab-create-agent-icon" className="h-4 w-4" />
-              <span data-id="project-fab-create-agent-label">{t('projectCreateAgent')}</span>
-            </button>
-            <button
-              type="button"
-              data-id="project-fab-add-existing"
-              onClick={() => { setFabOpen(false); openAddAgents(selectedProject); }}
-              disabled={!selectedProject.api_id || availableAgents.length === 0}
-              className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[12px] text-zinc-100 transition-colors hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Users data-id="project-fab-add-existing-icon" className="h-4 w-4" />
-              <span data-id="project-fab-add-existing-label">{t('projectAddExistingAgent')}</span>
-            </button>
-          </div>
-          <button
-            type="button"
-            data-id="project-add-agent"
-            onClick={() => setFabOpen((open) => !open)}
-            className="pointer-events-auto grid h-10 w-10 place-items-center rounded-full bg-blue-600 text-white shadow-[0_8px_20px_rgba(37,99,235,0.3)] transition-transform hover:scale-105 hover:bg-blue-500 active:scale-95"
-            title={t('projectAddAgent')}
-            aria-label={t('projectAddAgent')}
-            aria-expanded={fabOpen}
-          >
-            <Plus data-id="project-add-agent-icon" className={cn('h-5 w-5 transition-transform duration-200', fabOpen && 'rotate-45')} />
-          </button>
-        </div> : null}
+        {!dockOpen && !fabDocked ? fab : null}
         </div>
 
       </main>
