@@ -809,6 +809,29 @@ describe('<ProjectsPanel /> project creation', () => {
 });
 
 describe('<ProjectsPanel /> agent prompt footer', () => {
+  it('stops the pending spinner when no live status ever confirms the send', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+    // No status entry for this agent: nothing will ever reconcile the optimistic reply.
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'idle' }]} statuses={{}} activeAgentId="w-101" onOpenAgent={vi.fn()} />);
+    const input = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
+      if (!node) throw new Error('project agent prompt did not render');
+      return node as HTMLTextAreaElement;
+    });
+    // Jump the clock past the bridge window so it expires on the next tick.
+    const realNow = Date.now.bind(Date);
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 31000);
+    try {
+      fireEvent.change(input, { target: { value: '没有状态回执' } });
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+      await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(document.querySelector('[data-id="project-agent-prompt-cancel-w-101"]')).not.toBeInTheDocument());
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('clears the pending button when a newer authoritative status is completed', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
     agentSend.sendToAgent.mockResolvedValue(undefined);

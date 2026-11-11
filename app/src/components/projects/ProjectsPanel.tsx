@@ -223,6 +223,8 @@ const persistProjectAgentBodyTab = (agent: ProjectAgent, tab: ProjectAgentBodyTa
     }));
   } catch {}
 };
+// How long a just-sent prompt may show "busy" before any live status confirms it.
+const PROJECT_REPLY_BRIDGE_MAX_MS = 30000;
 const PROJECT_AGENT_BUSY_RE = /running|working|thinking|streaming|pending|tool_use|tool_call|in_progress/;
 const projectAgentIsBusy = (agent: ProjectAgent, statuses: Record<string, any>, liveMetrics: Record<string, AgentLiveMetrics>) => {
   const id = shortPaneId(agent.paneId);
@@ -1330,6 +1332,31 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       return next;
     });
   }, [statuses]);
+
+  // The optimistic bridge above ends when a newer terminal status arrives. If
+  // none ever does (the agent has no status entry, or the turn never started)
+  // it would spin forever, so a local bridge expires and the live status takes
+  // over. Remote agents are excluded: their reply arrives as a cloud event.
+  useEffect(() => {
+    const timers: number[] = [];
+    for (const [id, reply] of Object.entries(agentReplies)) {
+      if (!reply?._status_baseline) continue;
+      const agent = allAgents.find((item) => shortPaneId(item.paneId) === id);
+      if (!agent || agent.remote) continue;
+      const age = Date.now() - (Date.parse(String(reply.started_at || '')) || Date.now());
+      timers.push(window.setTimeout(() => {
+        setAgentReplies((current) => {
+          if (!current[id]?._status_baseline) return current;
+          const next = { ...current[id] };
+          delete next._status_baseline;
+          if (String(next.status || '') === 'pending') next.status = '';
+          delete optimisticQuestionsRef.current[id];
+          return { ...current, [id]: next };
+        });
+      }, Math.max(0, PROJECT_REPLY_BRIDGE_MAX_MS - age)));
+    }
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [agentReplies, allAgents]);
 
   useEffect(() => {
     const checkKey = `${selectedProject.id}:${paneMembershipKey}:${shownAgentKey}:${layoutVisibilityRevision}`;
@@ -2746,14 +2773,19 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               const cardMetrics = liveMetrics[shortPaneId(agent.paneId)] || (agentReplies[shortPaneId(agent.paneId)] ? metricsFromCurrentReply(agentReplies[shortPaneId(agent.paneId)]) : undefined);
               const cardShortId = shortPaneId(agent.paneId);
               const cardSelected = selectedAgentIds.has(cardShortId);
-              const cardLatest = statuses[agent.paneId] || statuses[`${cardShortId}:main.0`] || statuses[cardShortId] || {};
               // Keep the loading sentinel continuous across the send handoff:
               // sendToAgent resolves once input reaches the terminal, before the
               // server's live status necessarily flips to working. The optimistic
               // reply is already `pending`, so it bridges that gap until the
               // current-reply poll replaces it with an authoritative terminal state.
-              const observedReplyStatus = String(agentReplies[cardShortId]?.status || cardLatest?.status || agent.status || '').toLowerCase();
-              const cardBusy = !canceledAgentIds.has(cardShortId) && (sendingAgentIds.has(cardShortId) || Boolean(cardMetrics?.working) || /running|working|thinking|streaming|pending|tool_use|tool_call|in_progress/.test(observedReplyStatus));
+              // …but only while that bridge is live (it carries _status_baseline).
+              // Otherwise the live status decides, by the same rule as the header's
+              // "N working / idle" label: a stale reply snapshot must never keep
+              // the stop spinner turning on an agent the header calls idle.
+              const cardBridging = Boolean(agentReplies[cardShortId]?._status_baseline)
+                && PROJECT_AGENT_BUSY_RE.test(String(agentReplies[cardShortId]?.status || '').toLowerCase());
+              const cardBusy = !canceledAgentIds.has(cardShortId)
+                && (sendingAgentIds.has(cardShortId) || cardBridging || projectAgentIsBusy(agent, statuses, liveMetrics));
               const hasLocalActions = !agent.remote;
               const hasCliLifecycleActions = hasLocalActions && normalizeAgentType(agent.agentType) !== 'cicy';
               return (
