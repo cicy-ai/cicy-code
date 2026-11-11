@@ -713,6 +713,8 @@
   "projectLayoutMode": "布局",
   "projectLayoutModeGrid": "网格",
   "projectLayoutModeCanvas": "画布",
+  "projectLayoutModeWindow": "窗口",
+  "projectWindowAgentList": "Agent 列表",
   "projectWheelZoomEnable": "开启鼠标滚轮缩放",
   "projectWheelZoomDisable": "关闭鼠标滚轮缩放",
   "projectAddAgentTitle": "添加 Agent 到 {{name}}",

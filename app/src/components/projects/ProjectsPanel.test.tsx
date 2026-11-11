@@ -315,6 +315,40 @@ describe('<ProjectsPanel /> project view cache', () => {
     expect(zoom).toHaveTextContent('102%');
   });
 
+  it('window mode stacks maximized cards and switches the top one from the agent list', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0'], pane_count: 2 }] } });
+    render(<ProjectsPanel agents={[
+      { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' },
+      { paneId: 'w-102:main.0', title: '全栈工程师', agentType: 'claude' },
+    ]} onOpenAgent={vi.fn()} />);
+
+    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-node-w-102"]')).not.toBeNull());
+    fireEvent.click(document.querySelector('[data-id="project-canvas-mode-window"]')!);
+    expect(document.querySelector('[data-id="project-canvas-mode-window"]')).toHaveAttribute('aria-checked', 'true');
+    expect(JSON.parse(localStorage.getItem('cicy_project_view:default') || '{}').layoutMode).toBe('window');
+
+    const node = (id: string) => document.querySelector(`[data-id="project-canvas-node-${id}"]`) as HTMLElement;
+    // Every card occupies the same rect; no resize handle in window mode.
+    expect(node('w-101').style.left).toBe(node('w-102').style.left);
+    expect(node('w-101').style.top).toBe(node('w-102').style.top);
+    expect(document.querySelector('[data-id="project-agent-card-resize-w-101"]')).toBeNull();
+
+    const list = document.querySelector('[data-id="project-window-agent-list"]')!;
+    expect(list).not.toBeNull();
+    fireEvent.click(document.querySelector('[data-id="project-window-agent-w-102"]')!);
+    await waitFor(() => expect(node('w-102').style.zIndex).toBe('1000'));
+    expect(node('w-101').style.zIndex).not.toBe('1000');
+    expect(node('w-101')).toHaveAttribute('aria-hidden', 'true');
+    expect(document.querySelector('[data-id="project-window-agent-w-102"]')).toHaveAttribute('aria-current', 'true');
+
+    fireEvent.click(document.querySelector('[data-id="project-window-agent-w-101"]')!);
+    await waitFor(() => expect(node('w-101').style.zIndex).toBe('1000'));
+    expect(node('w-102').style.zIndex).not.toBe('1000');
+
+    fireEvent.click(document.querySelector('[data-id="project-canvas-mode-grid"]')!);
+    expect(document.querySelector('[data-id="project-window-agent-list"]')).toBeNull();
+  });
+
   it('reorders grid cards with the up/down buttons and remembers the order', async () => {
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0'], pane_count: 2 }] } });
     render(<ProjectsPanel agents={[

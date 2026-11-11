@@ -713,6 +713,8 @@
   "projectLayoutMode": "Layout",
   "projectLayoutModeGrid": "Grid",
   "projectLayoutModeCanvas": "Canvas",
+  "projectLayoutModeWindow": "Window",
+  "projectWindowAgentList": "Agent list",
   "projectWheelZoomEnable": "Enable mouse wheel zoom",
   "projectWheelZoomDisable": "Disable mouse wheel zoom",
   "projectAddAgentTitle": "Add agents to {{name}}",
