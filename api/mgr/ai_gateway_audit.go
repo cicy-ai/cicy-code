@@ -292,6 +292,10 @@ type aiGatewayAuditSession struct {
 	compSystemEst    int
 	compToolsEst     int
 	compHistoryEst   int
+	// threadMessages is the FULL message list of this request (expanded when the
+	// wire body was a thread-continue delta). Remembered with the response so the
+	// next delta on this chain can be expanded. nil when the chain is unknown.
+	threadMessages []interface{}
 }
 
 // aiGatewayPendingItem 描述一个尚未 flush 到 reply.Items 的流中 item。
@@ -486,6 +490,15 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		aiGatewayShortID(),
 	)
 	requestID := aiGatewayFirstNonEmpty(aiGatewayString(payloadMap["request_id"]), aiGatewayString(payloadMap["id"]), aiGatewayShortID())
+	// Thread-continue requests carry only the delta; from here on work with the
+	// expanded full-conversation body (see ai_gateway_thread.go). wireMap stays
+	// the raw request for the audit span and the cache fingerprint.
+	wireMap := payloadMap
+	threadOrphan := false
+	payloadMap, threadOrphan = aiGatewayExpandThreadBody(agentID, conversationID, payloadMap)
+	if aiGatewayThreadPreviousID(wireMap) != "" && !threadOrphan {
+		payloadValue = payloadMap
+	}
 	question := aiGatewayExtractQuestion(payloadMap)
 	turnID := aiGatewayFirstNonEmpty(codexMeta.TurnID, strings.TrimSpace(requestHeaders.Get("X-Cicy-Turn-Id")), aiGatewayString(payloadMap["turn_id"]), aiGatewayShortID())
 	targetURL := *targetBase
@@ -504,7 +517,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		URL:             targetURL.String(),
 		Method:          method,
 		RequestHeaders:  map[string][]string{},
-		RequestBody:     payloadValue,
+		RequestBody:     aiGatewayThreadSpanBody(wireMap, payloadValue),
 		Status:          "streaming",
 		StatusCode:      nil,
 		StartedAt:       startedAtISO,
@@ -645,6 +658,12 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	// writeStartSnapshots 会在主 turn 飞行中 resetReplyDir 掉 reply.json(观看者的
 	// live tail 瞬间被子代理输出顶掉),它的完成快照还可能被下一个主线续传继承。
 	// 归入 auxiliary 自动获得全部隔离;usage 记账在 gate 处单独放行(真实花费)。
+	// A continue request whose predecessor is unknown is a lone delta from some
+	// chain we cannot place; it must not overwrite the main conversation.
+	if auxKind == "" && threadOrphan {
+		auxKind = "sidechain"
+		log.Printf("[ai-gateway] orphan thread-continue request agent=%s conv=%s (previous message unknown)", agentID, conversationID)
+	}
 	if auxKind == "" && aiGatewayIsSidechainRequest(agentID, conversationID, requestHeaders, payloadMap) {
 		auxKind = "sidechain"
 		log.Printf("[ai-gateway] sidechain request agent=%s conv=%s (thread first-message mismatch)", agentID, conversationID)
@@ -673,6 +692,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		replyHooks:       newReplyHooksForPane(agentID, sameTurn),
 		auxiliary:        auxKind != "",
 		auxKind:          auxKind,
+		threadMessages:   aiGatewayThreadRequestMessages(payloadMap, threadOrphan),
 		compSystemHash:   hashJSON(payloadMap["system"]),
 		compToolsHash:    hashJSON(payloadMap["tools"]),
 		compFirstMsgHash: hashJSON(firstMsg),
@@ -1121,6 +1141,9 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	responseBody = aiGatewayMaybeGunzip(headers, responseBody)
 	parsed := aiGatewayParseResponse(headers, responseBody)
 	failed := responseErr != nil || statusCode >= 400
+	if !failed {
+		aiGatewayThreadRemember(s.agentID, s.threadMessages, responseBody)
+	}
 	// Dead-stream guard (found 2026-07-09, w-10036 history_id 1503): a 2xx whose
 	// stream delivered NOTHING — no live-flushed items, nothing parsable at rest,
 	// not even message_start usage — is an aborted round (client hung up during a
