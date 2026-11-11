@@ -25,6 +25,26 @@ describe('prepareRenderTurns', () => {
     expect(out[2].notices?.map((n) => n.kind)).toEqual(['context', 'notice']);
   });
 
+  it('shows only the user words for a mid-turn message delivered without a wrapper tag', () => {
+    const out = prepareRenderTurns([
+      tool(1),
+      user(2, 'The user sent a new message while you were working:\n问题很大，给我修了\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn. Address the message above as you continue this turn.'),
+    ]);
+    expect(out[1].role).toBe('user');
+    expect(out[1].steer).toBe(true);
+    expect(out[1].text).toBe('问题很大，给我修了');
+  });
+
+  it('renders a user record that is only a task notification as a notice, with entities decoded', () => {
+    const out = prepareRenderTurns([
+      user(1, 'hi'),
+      user(2, '<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command "a 2&gt;/dev/null &amp;&amp; b" completed</summary>\n</task-notification>'),
+    ]);
+    expect(out.map((t) => t.role)).toEqual(['user', 'system']);
+    expect(out[1].notices?.[0].kind).toBe('task');
+    expect(out[1].notices?.[0].text).toBe('Background command "a 2>/dev/null && b" completed');
+  });
+
   it('surfaces a mid-turn user message as a user turn tagged steer', () => {
     const out = prepareRenderTurns([
       tool(1),

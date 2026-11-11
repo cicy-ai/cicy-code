@@ -75,6 +75,24 @@ export function isNoiseParagraph(paragraph: string): boolean {
   return NOISE_PARAGRAPH_RES.some((re) => re.test(p));
 }
 
+// The harness XML-escapes the command line inside <summary>; shown verbatim it
+// reads `2&gt;/dev/null &amp;&amp; …`. `&amp;` goes last so `&amp;gt;` stays `&gt;`.
+function decodeEntities(text: string): string {
+  return String(text || '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&');
+}
+
+// A mid-turn user message that arrived WITHOUT a <system-reminder> wrapper
+// (Claude Code now delivers it as plain text). Returns the user's own words,
+// or null when the text is not such a message.
+export function unwrappedSteerText(input: string): string | null {
+  const text = String(input || '').trim();
+  if (!STEER_HEAD_RE.test(text)) return null;
+  const notice = classifySystemNotice(text);
+  return notice && notice.kind === 'steer' ? notice.text : null;
+}
+
 function readTag(text: string, tag: string): string {
   const m = text.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'i'));
   return m ? m[1].trim() : '';
@@ -105,7 +123,7 @@ export function classifySystemNotice(input: string): SystemNotice | null {
     const status = readTag(text, 'status');
     const taskId = readTag(text, 'task-id');
     const title = [status && status.toLowerCase(), taskId].filter(Boolean).join(' · ');
-    return { kind: 'task', text: summary || text, raw, title: title || undefined };
+    return { kind: 'task', text: decodeEntities(summary || text), raw: decodeEntities(raw), title: title || undefined };
   }
 
   const paragraphs = splitParagraphs(text).filter((p) => !isNoiseParagraph(p));

@@ -8,7 +8,7 @@ import { cn } from '../../../../lib/utils';
 import { splitLeadingHarnessBlocks, parseEnvironmentContext } from '../lib/normalizeItem';
 import { MarkdownBlock } from './Markdown';
 import { SystemNoticeGroup, EnvironmentContextCard } from './notices';
-import { classifySystemNotice } from '../lib/systemNotice';
+import { classifySystemNotice, unwrappedSteerText } from '../lib/systemNotice';
 
 // 用户轮的左侧头像(居左布局时用):一个用户 icon 的圆形头像,与 assistant 头像同尺寸/
 // 顶对齐,使问答两列头像对齐成一条线。
@@ -43,6 +43,12 @@ export function CollapsibleQ({ text, bare = false, open = false, onSetOpen, stee
   // the existing env-context / xml-block / bubble logic runs on the clean text.
   // `bare` (prompts-only): drop the harness fold entirely — show ONLY the clean
   // question, never a folded system card.
+  // Mid-turn user message delivered as plain text (no wrapper tag): show only
+  // the user's words, not the harness explainer around them.
+  const plainSteer = unwrappedSteerText(text);
+  if (plainSteer && plainSteer !== String(text || '').trim()) {
+    return <CollapsibleQ text={plainSteer} bare={bare} steer />;
+  }
   const { blocks: harnessBlocks, remaining: afterHarness } = splitLeadingHarnessBlocks(text);
   if (harnessBlocks.length) {
     if (bare) {

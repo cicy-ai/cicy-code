@@ -3,7 +3,8 @@
 
 import type { HistoryTurn } from '../types';
 import { getVisibleHistorySteps } from './turns';
-import { classifySystemNotice, type SystemNotice } from './systemNotice';
+import { classifySystemNotice, unwrappedSteerText, type SystemNotice } from './systemNotice';
+import { HARNESS_BLOCK_RE, splitLeadingHarnessBlocks } from './normalizeItem';
 
 // prepareRenderTurns turns the committed history (as stored) into what the list
 // actually paints:
@@ -43,6 +44,28 @@ function classifyTurns(turns: HistoryTurn[]): HistoryTurn[] {
     if (turn?.role === 'user' && INTERRUPT_ECHO_RE.test(String(turn.text || turn.q || ''))) {
       out.push({ ...turn, role: 'assistant', q: '', text: '已停止生成', a: '已停止生成', steps: [], outcome: 'cancelled' });
       continue;
+    }
+    if (turn?.role === 'user' && !turn?.outcome) {
+      const raw = String(turn.text || turn.q || '');
+      // Mid-turn user message delivered as plain text: keep only the user's words.
+      const steerText = unwrappedSteerText(raw);
+      if (steerText) {
+        out.push({ ...turn, q: steerText, text: steerText, steer: true });
+        continue;
+      }
+      // A "user" record that is nothing but harness blocks (a background-task
+      // notification, a reminder) is not something the user said: route it
+      // through the system-notice path instead of drawing a user row for it.
+      const { blocks, remaining } = splitLeadingHarnessBlocks(raw);
+      if (blocks.length && !remaining && blocks.every((block) => HARNESS_BLOCK_RE.test(block))) {
+        const notices = blocks.map((block) => classifySystemNotice(block)).filter(Boolean) as SystemNotice[];
+        for (const n of notices.filter((item) => item.kind === 'steer')) {
+          out.push({ ...turn, q: n.text, text: n.text, steer: true });
+        }
+        const rest = notices.filter((item) => item.kind !== 'steer');
+        if (rest.length) out.push({ ...turn, role: 'system', q: '', text: '', a: '', steps: [], notices: rest });
+        continue;
+      }
     }
     // cicy outcome records and /compact summaries are handled by the list itself.
     if (turn?.role !== 'system' || turn?.outcome) { out.push(turn); continue; }
