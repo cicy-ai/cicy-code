@@ -37,6 +37,7 @@ const api = vi.hoisted(() => ({
   updateGroupPaneLayout: vi.fn(),
   getAgentCurrentReply: vi.fn(),
   getAgentHistoryIDs: vi.fn(),
+  getAgentPromptLog: vi.fn(),
   getAgentCurrentHistory: vi.fn(),
   getAgentGreeting: vi.fn(),
   getIMAccounts: vi.fn(),
@@ -324,6 +325,7 @@ describe('<ProjectsPanel /> project view cache', () => {
   });
 
   it('window mode stacks maximized cards and switches the top one from the agent list', async () => {
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({ layoutMode: 'grid', layoutModeChosen: true }));
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0'], pane_count: 2 }] } });
     render(<ProjectsPanel agents={[
       { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' },
@@ -358,6 +360,23 @@ describe('<ProjectsPanel /> project view cache', () => {
 
     fireEvent.click(document.querySelector('[data-id="project-canvas-mode-grid"]')!);
     expect(document.querySelector('[data-id="project-window-agent-list"]')).toBeNull();
+  });
+
+  it('gives each local agent card its own Prompt tab and no project-wide prompt list', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    api.getAgentPromptLog.mockResolvedValue({ data: { agents: { 'w-101': [{ ts: '2026-11-12T08:00:00Z', content: 'only for w-101' }] } } });
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+    const tab = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-tab-prompts-w-101"]');
+      if (!node) throw new Error('prompt tab did not render');
+      return node as HTMLElement;
+    });
+    expect(document.querySelector('[data-id="project-prompt-log-open"]')).not.toBeInTheDocument();
+    fireEvent.click(tab);
+    await waitFor(() => expect(document.querySelector('[data-id="agent-prompt-row-text"]')).toHaveTextContent('only for w-101'));
+    expect(api.getAgentPromptLog).toHaveBeenCalledWith(['w-101']);
+    fireEvent.click(document.querySelector('[data-id="agent-prompt-row-reuse"]')!);
+    await waitFor(() => expect(document.querySelector('[data-id="project-agent-prompt-input-w-101"]')).toHaveValue('only for w-101'));
   });
 
   it('opens a project in window mode by default, and keeps grid only when it was chosen', async () => {

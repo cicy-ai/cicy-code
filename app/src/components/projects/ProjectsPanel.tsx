@@ -3,7 +3,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { AppWindow, ArrowDown, ArrowRight, ArrowUpCircle, BookOpen, Check, ChevronDown, ChevronUp, Copy, FileText, FolderKanban, GitBranch, Hand, History, LayoutDashboard, LayoutGrid, Loader2, MessageCircle, MessageSquareText, Minus, MoreHorizontal, Move, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, Pin, PinOff, Plus, RefreshCw, Search, SendHorizontal, Square, Trash2, UserPlus, Users, X, Zap } from 'lucide-react';
+import { AppWindow, ArrowDown, ArrowRight, ArrowUpCircle, BookOpen, Check, ChevronDown, ChevronUp, Copy, FileText, FolderKanban, GitBranch, Hand, History, LayoutDashboard, LayoutGrid, Loader2, MessageCircle, Minus, MoreHorizontal, Move, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, Pin, PinOff, Plus, RefreshCw, Search, SendHorizontal, Square, Trash2, UserPlus, Users, X, Zap } from 'lucide-react';
 import { Trans, useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -24,7 +24,7 @@ import CurrentHistoryView from '../chat/CurrentHistoryView';
 import { MarkdownImg } from '../chat/history/shared/Markdown';
 import TerminalView from '../terminal/TerminalView';
 import AgentProgressPanel from './AgentProgressPanel';
-import PromptLogModal, { type PromptLogAgent } from './PromptLogModal';
+import AgentPromptPanel from './AgentPromptPanel';
 import MarkdownFileEditor from '../files/MarkdownFileEditor';
 import UpdateAgentModal from '../layout/UpdateAgentModal';
 import WechatBindModal from '../layout/WechatBindModal';
@@ -104,7 +104,7 @@ const PROJECT_VIEW_CACHE_PREFIX = 'cicy_project_view:';
 const PROJECT_AGENT_QUEUE_KEY = 'cicy_project_agent_queue:v1';
 const PROJECT_AGENT_BODY_TABS_KEY = 'cicy_project_agent_body_tabs:v1';
 const PROJECT_LIST_COLLAPSED_KEY = 'cicy_projects_list_collapsed';
-type ProjectAgentBodyTab = 'history' | 'progress' | 'terminal' | 'role';
+type ProjectAgentBodyTab = 'history' | 'prompts' | 'progress' | 'terminal' | 'role';
 const DEFAULT_PROJECT_AGENT_WIDTH = 600;
 const DEFAULT_PROJECT_AGENT_HEIGHT = 320;
 const QUEUE_STATUS_GRACE_MS = 3000;
@@ -213,8 +213,9 @@ const readProjectAgentBodyTabs = (): Record<string, ProjectAgentBodyTab> => {
 };
 const readProjectAgentBodyTab = (agent: ProjectAgent): ProjectAgentBodyTab => {
   const value = readProjectAgentBodyTabs()[projectAgentIdentity(agent)];
-  if (value !== 'history' && value !== 'progress' && value !== 'terminal' && value !== 'role') return 'history';
-  if (value === 'progress' && agent.remote) return 'history';
+  if (value !== 'history' && value !== 'prompts' && value !== 'progress' && value !== 'terminal' && value !== 'role') return 'history';
+  // Progress and the prompt log are read from this instance's disk.
+  if ((value === 'progress' || value === 'prompts') && agent.remote) return 'history';
   return value === 'terminal' && !projectAgentCanUseTerminal(agent) ? 'history' : value;
 };
 const persistProjectAgentBodyTab = (agent: ProjectAgent, tab: ProjectAgentBodyTab) => {
@@ -349,7 +350,7 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRenameTitle, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onDelete, onMinimize, reorder, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
+function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, removable, footer, projectOptions = [], width, height, onSelect, onRenameTitle, onRemove, onMoveProject, onAddProject, onRestart, onUpdate, onBindWechat, onBindFeishu, onFork, onDelete, onMinimize, onReusePrompt, reorder, onTerminalOpenChange, onResizePointerDown, onResizePointerMove, onResizePointerUp }: {
   agent: ProjectAgent;
   metrics?: AgentLiveMetrics;
   terminalOpen?: boolean;
@@ -372,6 +373,8 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
   onFork?: () => void;
   onDelete?: () => void;
   onMinimize?: () => void;
+  /** Put a prompt from the card's Prompt tab back into its composer. */
+  onReusePrompt?: (text: string) => void;
   // Grid mode only: move this card one slot earlier / later.
   reorder?: { canUp: boolean; canDown: boolean; move: (delta: -1 | 1) => void };
   onTerminalOpenChange: (open: boolean) => void;
@@ -710,7 +713,7 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
         >
           {([
             ['history', '会话'],
-            ...(agent.remote ? [] : [['progress', '进度']]),
+            ...(agent.remote ? [] : [['prompts', 'Prompt'], ['progress', '进度']]),
             ...(agent.remote || String(agent.agentType || '').toLowerCase() === 'cicy' ? [] : [['terminal', 'Terminal']]),
             ['role', '角色'],
           ] as Array<[ProjectAgentBodyTab, string]>).map(([tab, label]) => {
@@ -778,6 +781,14 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
           {terminalOpen && agent.ttydSrc ? <TerminalView ttydSrc={agent.ttydSrc} className="h-full w-full" /> : (
             <div data-id={`project-agent-card-terminal-loading-${shortPaneId(agent.paneId)}`} className="grid h-full place-items-center text-[11px] text-zinc-600"><Loader2 className="h-4 w-4 animate-spin" /></div>
           )}
+        </div>
+      ) : activeBodyTab === 'prompts' ? (
+        <div
+          data-id={`project-agent-card-prompts-body-${shortPaneId(agent.paneId)}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          className="-mx-5 min-h-0 flex-1 overflow-hidden bg-[#0b0b0d]"
+        >
+          <AgentPromptPanel agentId={shortPaneId(agent.paneId)} busy={busy || Boolean(metrics?.working)} onReuse={onReusePrompt} />
         </div>
       ) : activeBodyTab === 'progress' ? (
         <div
@@ -921,7 +932,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
   const agentMembershipKey = agents.map((agent) => agent.paneId).sort().join('|');
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
-  const [promptLogOpen, setPromptLogOpen] = useState(false);
   const [agentAttachments, setAgentAttachments] = useState<Record<string, ProjectAttachment[]>>({});
   const [agentReplies, setAgentReplies] = useState<Record<string, any>>({});
   const [queuedAgentMessages, setQueuedAgentMessagesState] = useState<Record<string, QueuedAgentMessage[]>>(readProjectAgentQueue);
@@ -1206,11 +1216,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       : t('projectAllIdle', { defaultValue: '空闲' });
   };
   const visibleAgents = allAgents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
-  // The prompt log is read from this instance's disk, so cloud agents are left out.
-  const promptLogAgents = useMemo<PromptLogAgent[]>(() => allAgents.filter((agent) => !agent.remote).map((agent) => {
-    const id = shortPaneId(agent.paneId);
-    return { id, title: agent.title || id, agentType: agent.agentType, inProject: memberIds.has(id) };
-  }), [allAgents, memberIds]);
   // Minimized cards stay project members (polling, routing, counts) but are not
   // laid out; the footer selector lists them for restore.
   const minimizedSet = new Set(minimizedIds);
@@ -2465,13 +2470,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         detail: t('projectAgentResumeFailed', { defaultValue: '重启 {{name}} 失败', name: agent.title || id }),
       })));
   };
-  // Prompt list → card: bring the agent's card forward (restoring it when
-  // minimized) and make it the send target.
-  const focusProjectAgent = (id: string) => {
-    if (minimizedIds.includes(id)) { restoreAgent(id); return; }
-    const agent = visibleAgents.find((item) => shortPaneId(item.paneId) === id);
-    if (agent) toggleAgentSelection(agent);
-  };
   const restoreAgent = (id: string) => {
     setMinimized(minimizedIds.filter((item) => item !== id));
     if (minimizedIds.length <= 1) setMinimizedMenuOpen(false);
@@ -2860,6 +2858,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
                 height={layout.height}
                 onSelect={() => toggleAgentSelection(agent)}
                 onRenameTitle={(title) => renameAgentTitle(agent, title)}
+                onReusePrompt={(text) => {
+                  setAgentMessages((current) => ({ ...current, [cardShortId]: text }));
+                  toggleAgentSelection(agent);
+                  window.requestAnimationFrame(() => (document.querySelector(`[data-id="project-agent-prompt-input-${cardShortId}"]`) as HTMLTextAreaElement | null)?.focus());
+                }}
                 footer={(
                   <footer
                     data-id={`project-agent-card-footer-${shortPaneId(agent.paneId)}`}
@@ -3131,16 +3134,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            data-id="project-prompt-log-open"
-            onClick={() => setPromptLogOpen(true)}
-            title={t('promptLogOpen', { defaultValue: '查看发过的所有 prompt' })}
-            className="mr-1 flex h-7 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-[11px] text-zinc-400 transition-colors hover:text-zinc-200"
-          >
-            <MessageSquareText className="h-3.5 w-3.5" />
-            {canvasSize.width < 720 ? null : <span>{t('promptLogButton', { defaultValue: 'Prompt' })}</span>}
-          </button>
           {layoutMode === 'canvas' ? (
           <>
           <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
@@ -3230,18 +3223,6 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         </div>
 
       </main>
-
-      <PromptLogModal
-        open={promptLogOpen}
-        agents={promptLogAgents}
-        projectName={selectedProject.name}
-        onClose={() => setPromptLogOpen(false)}
-        onReuse={(id, text) => {
-          setAgentMessages((current) => ({ ...current, [id]: text }));
-          focusProjectAgent(id);
-        }}
-        onLocate={focusProjectAgent}
-      />
 
       <AppModal open={createOpen} title={t('projectCreateTitle')} onClose={closeCreateProject} maxWidth="480px">
         <div data-id="project-create-modal" className="space-y-5">
