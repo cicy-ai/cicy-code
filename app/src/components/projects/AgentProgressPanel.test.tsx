@@ -8,6 +8,8 @@ const api = vi.hoisted(() => ({
   updateTodo: vi.fn(),
 }));
 vi.mock('../../services/api', () => ({ default: api }));
+const send = vi.hoisted(() => ({ sendToAgent: vi.fn() }));
+vi.mock('../../services/agentSend', () => send);
 vi.mock('../chat/CurrentHistoryView', () => ({
   default: ({ paneId, agentType }: { paneId: string; agentType: string }) => <div data-testid="term">{`${agentType}:${paneId}`}</div>,
 }));
@@ -67,7 +69,7 @@ describe('AgentProgressPanel', () => {
     api.getAgentProgress.mockResolvedValue({ data: { helper: 'w-1090' } });
     api.refreshAgentProgress.mockResolvedValue({ data: { success: true, helper: 'w-1090', busy: true } });
     const view = render(<AgentProgressPanel mainId="w-1075" mainBusy={false} />);
-    await waitFor(() => expect(document.querySelector('[data-id="agent-progress-status-w-1075"]')).toHaveTextContent('正在整理最新对话'));
+    await waitFor(() => expect(document.querySelector('[data-id="agent-progress-status-w-1075"]')).toHaveTextContent('进度助手正在处理'));
     expect(document.querySelector('[data-id="agent-progress-empty-w-1075"]')).toHaveTextContent('正在整理对话');
     expect(document.querySelector('[data-id="agent-progress-refresh-w-1075"]')).toBeDisabled();
     view.unmount();
@@ -97,5 +99,42 @@ describe('AgentProgressPanel', () => {
     fireEvent.click(screen.getByText(/已确认 \d/, { selector: 'button' }));
     fireEvent.click(document.querySelector('[data-id="agent-progress-undo-4"]') as HTMLElement);
     await waitFor(() => expect(api.updateTodo).toHaveBeenCalledWith('w-1075', '4', { status: 'test' }));
+  });
+
+  it('sends what is typed to the helper, not the main agent, and opens its log', async () => {
+    api.getAgentProgress.mockResolvedValue({ data: { helper: 'w-1090' } });
+    send.sendToAgent.mockResolvedValue(true);
+    render(<AgentProgressPanel mainId="w-1075:main.0" mainBusy={false} />);
+    const input = document.querySelector('[data-id="agent-progress-input-w-1075"]') as HTMLTextAreaElement;
+    const button = document.querySelector('[data-id="agent-progress-send-w-1075"]') as HTMLButtonElement;
+    await waitFor(() => expect(input).not.toBeDisabled());
+    expect(button).toBeDisabled();
+    fireEvent.change(input, { target: { value: '第 2 条做完了吗' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(send.sendToAgent).toHaveBeenCalledTimes(1));
+    const [target, text, opts] = send.sendToAgent.mock.calls[0];
+    expect(target).toBe('w-1090');
+    expect(text).toContain('第 2 条做完了吗');
+    expect(text).toContain('--helper w-1090');
+    expect(opts).toMatchObject({ submit: true, agentType: 'cicy', fromComposer: true });
+    await waitFor(() => expect(input).toHaveValue(''));
+    // the reply shows up in the helper's conversation, so it is opened
+    expect(screen.getByTestId('term')).toBeInTheDocument();
+    // while the helper works, a second message is held back
+    fireEvent.change(input, { target: { value: '再问一句' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(send.sendToAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the text and says why when sending to the helper fails', async () => {
+    api.getAgentProgress.mockResolvedValue({ data: { helper: 'w-1090' } });
+    send.sendToAgent.mockRejectedValue(new Error('boom'));
+    render(<AgentProgressPanel mainId="w-1075:main.0" mainBusy={false} />);
+    const input = document.querySelector('[data-id="agent-progress-input-w-1075"]') as HTMLTextAreaElement;
+    await waitFor(() => expect(input).not.toBeDisabled());
+    fireEvent.change(input, { target: { value: '你好' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(document.querySelector('[data-id="agent-progress-send-error-w-1075"]')).toHaveTextContent('boom'));
+    expect(input).toHaveValue('你好');
   });
 });

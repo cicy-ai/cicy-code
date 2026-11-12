@@ -796,7 +796,8 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
         </div>
       ) : null}
       </div>
-      {activeBodyTab !== 'role' ? (
+      {/* 进度 tab has its own composer, which talks to the progress helper. */}
+      {activeBodyTab !== 'role' && activeBodyTab !== 'progress' ? (
         <div
           data-id={`project-agent-card-footer-slot-${shortPaneId(agent.paneId)}`}
           className="shrink-0 overflow-hidden rounded-b-2xl bg-[#15161b]"

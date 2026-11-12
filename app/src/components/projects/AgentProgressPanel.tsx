@@ -8,8 +8,9 @@
 // a one-line status bar until asked for.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Circle, CircleDot, Loader2, RefreshCw, Undo2 } from 'lucide-react';
+import { Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Circle, CircleDot, Loader2, RefreshCw, Send, Undo2 } from 'lucide-react';
 import apiService from '../../services/api';
+import { sendToAgent } from '../../services/agentSend';
 import CurrentHistoryView from '../chat/CurrentHistoryView';
 import { cn } from '../../lib/utils';
 
@@ -132,6 +133,10 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
   const [pending, setPending] = useState<string | null>(null);
   const refreshTimer = useRef<number | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const areaRef = useRef<HTMLDivElement | null>(null);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState('');
   const [split, setSplit] = useState(readSplit);
   const [dragging, setDragging] = useState(false);
   useEffect(() => { try { localStorage.setItem(SPLIT_KEY, String(split)); } catch {} }, [split]);
@@ -146,8 +151,8 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
     setDragging(true);
   }, []);
   const onSplitPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragging || !rootRef.current) return;
-    const rect = rootRef.current.getBoundingClientRect();
+    if (!dragging || !areaRef.current) return;
+    const rect = areaRef.current.getBoundingClientRect();
     if (rect.height <= 0) return;
     setSplit(clampSplit((event.clientY - rect.top) / rect.height));
   }, [dragging]);
@@ -251,6 +256,27 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
     }
   }, [main, loadTodos]);
 
+  // The composer on this tab talks to the helper, not to the main agent: ask
+  // about progress, or tell it to fix the list. The helper's shell runs outside
+  // its own workspace, so every message carries the id its commands need.
+  const canSend = Boolean(helper) && !helperBusy && !sending && draft.trim().length > 0;
+  const sendToHelper = useCallback(async () => {
+    const text = draft.trim();
+    if (!helper || helperBusy || sending || !text) return;
+    setSending(true);
+    setSendError('');
+    try {
+      await sendToAgent(helper, `${text}\n\n（如需执行 agent-progress 命令，一律带 --helper ${helper}）`, { submit: true, agentType: 'cicy', fromComposer: true });
+      setDraft('');
+      setHelperBusy(true);
+      setLogOpen(true);
+    } catch (err: any) {
+      setSendError(String(err?.response?.data?.detail || err?.response?.data?.error || err?.message || '发送失败'));
+    } finally {
+      setSending(false);
+    }
+  }, [draft, helper, helperBusy, sending]);
+
   const byRecent = (a: ProgressTodo, b: ProgressTodo) => String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
   const doing = (todos || []).filter((t) => t.status === 'todo');
   const review = (todos || []).filter((t) => t.status === 'test').sort(byRecent);
@@ -259,11 +285,12 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
   const helperStatus = helperError
     ? '进度助手启动失败'
     : !helper ? '正在启动进度助手…'
-    : helperBusy ? '进度助手正在整理最新对话…'
+    : helperBusy ? '进度助手正在处理…'
     : updatedAt ? `更新于 ${timeLabel(updatedAt, true)}` : '尚未更新';
 
   return (
-    <div ref={rootRef} data-id={`agent-progress-${main}`} className={cn('relative flex h-full min-h-0 flex-col', dragging && 'cursor-row-resize select-none')}>
+    <div ref={rootRef} data-id={`agent-progress-${main}`} className={cn('flex h-full min-h-0 flex-col', dragging && 'cursor-row-resize select-none')}>
+      <div ref={areaRef} className="relative flex min-h-0 flex-1 flex-col">
       {/* With the log open, the helper's conversation fills the whole panel
           (see below) and this summary sits on top of it. Dragging the handle
           only changes how tall the summary is — the conversation underneath
@@ -391,6 +418,37 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
             )}
           </div>
       ) : null}
+      </div>
+      <div data-id={`agent-progress-composer-${main}`} className="shrink-0 border-t border-white/[0.06] bg-[#15161b] px-3 py-2" onPointerDown={(e) => e.stopPropagation()}>
+        {sendError ? <p data-id={`agent-progress-send-error-${main}`} className="pb-1 text-[11px] text-red-400">发送失败：{sendError}</p> : null}
+        <div className="flex items-end gap-2">
+          <textarea
+            data-id={`agent-progress-input-${main}`}
+            rows={1}
+            value={draft}
+            disabled={!helper}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+              if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendToHelper(); }
+            }}
+            placeholder={helper ? '和进度助手对话：问进展，或让它调整上面的列表' : '正在启动进度助手…'}
+            className="max-h-28 min-h-[32px] min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[13px] leading-5 text-zinc-200 outline-none placeholder:text-zinc-600 disabled:opacity-50"
+            style={{ height: `${Math.min(112, 20 * Math.max(1, draft.split('\n').length) + 12)}px` }}
+          />
+          <button
+            type="button"
+            data-id={`agent-progress-send-${main}`}
+            disabled={!canSend}
+            onClick={() => { void sendToHelper(); }}
+            title={helperBusy ? '进度助手正在处理，稍等' : '发送给进度助手（Enter）'}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-500 disabled:bg-white/[0.06] disabled:text-zinc-600"
+          >
+            {sending || helperBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
