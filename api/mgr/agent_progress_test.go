@@ -62,6 +62,31 @@ func TestProgressAgentDocAndPrompt(t *testing.T) {
 	}
 }
 
+func TestProgressRefreshPromptIsSelfContained(t *testing.T) {
+	p := progressRefreshPrompt("w-3001")
+	for _, want := range []string{"不要调用 skill 工具", "agent-progress add", "agent-progress set <id>", "--helper w-3001", "绝不使用 done"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, p)
+		}
+	}
+}
+
+func TestProgressCursorCovers(t *testing.T) {
+	c := progressCursor{ConversationID: "c1", LastID: 10}
+	if !progressCursorCovers(c, "c1", 10) || !progressCursorCovers(c, "c1", 9) {
+		t.Fatal("a cursor at or past the head is up to date")
+	}
+	if progressCursorCovers(c, "c1", 11) {
+		t.Fatal("newer history must not count as up to date")
+	}
+	if progressCursorCovers(c, "c2", 5) || progressCursorCovers(c, "", 0) || progressCursorCovers(c, "c1", 0) {
+		t.Fatal("another conversation or an unknown head must not count as up to date")
+	}
+	if progressHelperBusy("w-none") {
+		t.Fatal("an unknown helper is not busy")
+	}
+}
+
 func TestKiroBootPinsDefaultModel(t *testing.T) {
 	lines := strings.Join(agentBootLines("kiro-cli", true, true, false, false, "w-2002", "claude-haiku-4.5"), "\n")
 	if !strings.Contains(lines, "kiro-cli chat $CICY_KIRO_RESUME --model 'claude-haiku-4.5' --trust-all-tools") {

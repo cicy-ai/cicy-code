@@ -537,7 +537,10 @@ const api = {
   // keeps the main agent's todo list in sync with its conversation.
   getAgentProgress: (mainId: string) => http.get(`/api/agents/progress/${encodeURIComponent(shortPaneRouteId(mainId))}`),
   ensureAgentProgress: (mainId: string) => http.post(`/api/agents/progress/${encodeURIComponent(shortPaneRouteId(mainId))}`),
-  refreshAgentProgress: (mainId: string) => http.post(`/api/agents/progress/${encodeURIComponent(shortPaneRouteId(mainId))}/refresh`),
+  // auto: opened tab / main agent went idle — the server skips the helper turn
+  // when the list already covers the conversation. A manual refresh always runs.
+  refreshAgentProgress: (mainId: string, auto = false) =>
+    http.post(`/api/agents/progress/${encodeURIComponent(shortPaneRouteId(mainId))}/refresh`, undefined, auto ? { params: { auto: 1 } } : undefined),
 
   listTodos: (paneId: string, allAgents?: boolean, params?: { status?: string; q?: string }) => {
     const pid = shortPaneRouteId(paneId);

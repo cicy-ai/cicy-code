@@ -10,9 +10,10 @@ package main
 // model, tools skill+shell). cicy runs in-process — no CLI, no tmux pane, no
 // resident process — so a helper per card costs nothing while idle.
 //
-//	GET  /api/agents/progress/<main>          → {helper: "w-xxxx"|""}
+//	GET  /api/agents/progress/<main>          → {helper: "w-xxxx"|"", busy, updated_at}
 //	POST /api/agents/progress/<main>          → create (if needed) + {helper}
 //	POST /api/agents/progress/<main>/refresh  → create (if needed) + run one turn
+//	     ?auto=1 skips the turn when the list already covers the conversation
 //
 // The helper is an ordinary agent_config row tagged config.progress_of=<main>;
 // it is hidden from /api/panes (isBuiltinAgent) and deleted with its main.
@@ -45,7 +46,7 @@ model: ` + progressHelperModel + `
 
 收到「更新进度」时，严格执行消息里给出的命令：digest → 按 digest 末尾的要求用
 add / set / edit 增改 todo → commit，最后回复一行结果（例如「已更新：新增 2，完成 1」）。
-需要细节时用 skill 工具读取 agent-progress 的 SKILL.md。标题和说明一律用中文。
+命令已在消息里给全，直接用 shell 执行，不要先去查找或阅读 skill 文档。标题和说明一律用中文。
 
 不要修改任何项目文件，不要给其他 Agent 发消息，不要把任务标成 done（done 只能由用户确认）。
 用户直接问你主 Agent 的进展时，先 digest 再基于内容回答（问答时不要 commit）。
@@ -67,11 +68,16 @@ func ensureProgressAgentDoc() {
 // progressRefreshPrompt carries the helper's own id: a cicy agent's shell tool
 // runs with the server's cwd/env, so the skill is told where its state lives.
 func progressRefreshPrompt(helper string) string {
-	return fmt.Sprintf("更新进度。依次执行：\n"+
+	return fmt.Sprintf("更新进度。直接用 shell 依次执行（命令已给全，不要调用 skill 工具，不要查找或阅读任何文档）：\n"+
 		"1. agent-progress digest --helper %[1]s\n"+
-		"2. 按输出末尾的要求，用 agent-progress add / set / edit（都带 --helper %[1]s）记录任务\n"+
+		"   输出里若写着 nothing new，直接回复「无新进展」并结束。\n"+
+		"2. 按输出末尾的要求记录任务（都带 --helper %[1]s）：\n"+
+		"   agent-progress add \"<标题>\" --status todo|test [--body \"<结果/剩余>\"]\n"+
+		"   agent-progress set <id> todo|test|dropped\n"+
+		"   agent-progress edit <id> [\"<标题>\"] [--body \"<文字>\"]\n"+
+		"   优先更新已有任务，不要重复新增；已完成用 test，未完成用 todo，绝不使用 done。\n"+
 		"3. agent-progress commit --helper %[1]s\n"+
-		"最后回复一行结果。", helper)
+		"最后只回复一行结果，例如「已更新：新增 1，完成 2」。", helper)
 }
 
 var progressCreateMu sync.Mutex
@@ -248,6 +254,68 @@ func writeProgressHelperFiles(workspace, main string, previous []string) {
 	_ = os.WriteFile(filepath.Join(workspace, ".cicy", "progress.json"), link, 0644)
 }
 
+// progressCursor is the skill's cursor file in the helper workspace: how far
+// into the main agent's conversation the todo list is current.
+type progressCursor struct {
+	ConversationID string `json:"conversation_id"`
+	LastID         int64  `json:"last_id"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
+func readProgressCursor(helper string) progressCursor {
+	var c progressCursor
+	ws := paneWorkspace(helper)
+	if ws == "" {
+		return c
+	}
+	if b, err := os.ReadFile(filepath.Join(ws, ".cicy", "progress-cursor.json")); err == nil {
+		_ = json.Unmarshal(b, &c)
+	}
+	return c
+}
+
+// progressHelperBusy reports a turn in flight WITHOUT creating a session: the
+// card polls this, and an idle helper must stay free.
+func progressHelperBusy(helper string) bool {
+	cicySessionsMu.Lock()
+	s := cicySessions[helper]
+	cicySessionsMu.Unlock()
+	return s != nil && s.isBusy()
+}
+
+// progressUpToDate: the cursor already covers the main agent's conversation, so
+// a helper turn would only burn tokens to say "nothing new". Unknown → false.
+func progressUpToDate(main, helper string) bool {
+	c := readProgressCursor(helper)
+	if c.ConversationID == "" || c.LastID <= 0 {
+		return false
+	}
+	conv, head := progressMainHead(main)
+	return progressCursorCovers(c, conv, head)
+}
+
+func progressCursorCovers(c progressCursor, conv string, head int64) bool {
+	return conv != "" && c.ConversationID == conv && head > 0 && c.LastID >= head
+}
+
+// progressMainHead is the main agent's conversation id and newest history id,
+// in the same id space the skill's digest reads (/api/agents/current-history).
+func progressMainHead(main string) (string, int64) {
+	if view, ok := loadNativeSessionView(main); ok {
+		return view.SessionID, int64(len(view.Items))
+	}
+	conv, head, err := agentHistoryCurrentMaxID(main, "")
+	if err != nil {
+		return "", 0
+	}
+	// The latest answer lives in reply.json until the next request commits it;
+	// the digest reads it as head+1.
+	if reply := agentInspectorLoadReply(main); strings.TrimSpace(reply.ConversationID) == conv && int64(reply.HistoryID) > head {
+		head = int64(reply.HistoryID)
+	}
+	return conv, head
+}
+
 // startProgressTurn runs one helper turn in the background. A refresh while a
 // turn is in flight is dropped: the running turn reads the same new history.
 func startProgressTurn(helper string) bool {
@@ -284,18 +352,31 @@ func handleAgentProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.Method == "GET" && action == "":
-		J(w, M{"success": true, "main": main, "helper": progressHelperFor(main)})
+		helper := progressHelperFor(main)
+		out := M{"success": true, "main": main, "helper": helper, "busy": false, "updated_at": ""}
+		if helper != "" {
+			out["busy"] = progressHelperBusy(helper)
+			out["updated_at"] = readProgressCursor(helper).UpdatedAt
+		}
+		J(w, out)
 	case r.Method == "POST" && (action == "" || action == "refresh"):
 		helper, created, err := ensureProgressHelper(main, getToken(r))
 		if err != nil {
 			J(w, M{"success": false, "error": err.Error()})
 			return
 		}
-		sent := false
+		sent, upToDate := false, false
 		if action == "refresh" {
-			sent = startProgressTurn(helper)
+			// auto=1 (tab opened / main agent went idle): skip the turn when the
+			// list already covers the conversation. A manual click always runs.
+			if r.URL.Query().Get("auto") == "1" && !created && progressUpToDate(main, helper) {
+				upToDate = true
+			} else {
+				sent = startProgressTurn(helper)
+			}
 		}
-		J(w, M{"success": true, "main": main, "helper": helper, "created": created, "sent": sent})
+		J(w, M{"success": true, "main": main, "helper": helper, "created": created, "sent": sent,
+			"up_to_date": upToDate, "busy": sent || progressHelperBusy(helper), "updated_at": readProgressCursor(helper).UpdatedAt})
 	default:
 		httpErr(w, 405, "method not allowed")
 	}

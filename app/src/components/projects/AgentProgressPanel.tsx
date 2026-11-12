@@ -1,13 +1,14 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-// 进度 tab of a project agent card: the main agent's todo list on top (kept in
-// sync by a hidden 副 agent — a custom cicy agent on a cheap model running the
-// agent-progress skill in-process, no CLI) and that sub-agent's conversation
-// below.
+// 进度 tab of a project agent card: the main agent's todo list (kept in sync by
+// a hidden 副 agent — a custom cicy agent on a cheap model running the
+// agent-progress skill in-process, no CLI). That sub-agent's own working log
+// (shell calls, thinking) is noise for most readers, so it stays folded behind
+// a one-line status bar until asked for.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleDot, Loader2, RefreshCw, Undo2 } from 'lucide-react';
+import { Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Circle, CircleDot, Loader2, RefreshCw, Undo2 } from 'lucide-react';
 import apiService from '../../services/api';
 import CurrentHistoryView from '../chat/CurrentHistoryView';
 import { cn } from '../../lib/utils';
@@ -35,17 +36,26 @@ const readSplit = () => {
   } catch { return 0.55; }
 };
 
+// Helper log (the sub-agent's conversation) folded by default.
+const LOG_KEY = 'agent-progress-log-open';
+const readLogOpen = () => { try { return localStorage.getItem(LOG_KEY) === '1'; } catch { return false; } };
+
 const shortId = (id: string) => String(id || '').split(':')[0];
 
 
-const timeLabel = (iso?: string) => {
+const timeLabel = (iso?: string, withTime = false) => {
   const t = iso ? new Date(iso) : null;
   if (!t || Number.isNaN(t.getTime())) return '';
   const sameDay = t.toDateString() === new Date().toDateString();
-  return sameDay
-    ? t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : t.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+  const time = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (sameDay) return time;
+  const day = t.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+  return withTime ? `${day} ${time}` : day;
 };
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <div className="px-2 pb-0.5 pt-2 text-[11px] text-zinc-600 first:pt-0">{children}</div>;
+}
 
 type RowKind = 'doing' | 'review' | 'confirmed';
 
@@ -111,7 +121,12 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
   const main = shortId(mainId);
   const [helper, setHelper] = useState('');
   const [helperError, setHelperError] = useState('');
+  const [helperBusy, setHelperBusy] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState('');
   const [todos, setTodos] = useState<ProgressTodo[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [logOpen, setLogOpen] = useState(readLogOpen);
+  useEffect(() => { try { localStorage.setItem(LOG_KEY, logOpen ? '1' : '0'); } catch {} }, [logOpen]);
   const [refreshing, setRefreshing] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
@@ -148,54 +163,68 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
     else if (event.key === 'End') { event.preventDefault(); setSplit(SPLIT_MAX); }
   }, []);
 
-  // Create (first open) or look up the helper. Creating it also starts the
-  // first summary so the list fills without a click.
+  const applyState = useCallback((data: any) => {
+    if (!data) return;
+    setHelperBusy(Boolean(data.busy));
+    if (data.updated_at) setUpdatedAt(String(data.updated_at));
+  }, []);
+
+  // Create (first open) or look up the helper, then bring the list up to date:
+  // the helper only runs while this tab is mounted, so a list opened later is
+  // usually behind. The server skips the turn when nothing is new.
   useEffect(() => {
     let alive = true;
-    setHelper(''); setHelperError('');
+    setHelper(''); setHelperError(''); setHelperBusy(false); setUpdatedAt('');
     (async () => {
       try {
         const got = await apiService.getAgentProgress(main);
-        let id = String(got.data?.helper || '');
-        if (!id) {
-          const made = await apiService.refreshAgentProgress(main);
-          if (!made.data?.success) throw new Error(made.data?.error || 'create failed');
-          id = String(made.data.helper || '');
-        }
-        if (alive) setHelper(id);
+        const existed = Boolean(got.data?.helper);
+        const made = await apiService.refreshAgentProgress(main, existed);
+        if (!made.data?.success) throw new Error(made.data?.error || 'create failed');
+        if (!alive) return;
+        setHelper(String(made.data.helper || got.data?.helper || ''));
+        applyState(made.data);
       } catch (err: any) {
         if (alive) setHelperError(String(err?.response?.data?.detail || err?.message || err));
       }
     })();
     return () => { alive = false; };
-  }, [main]);
+  }, [main, applyState]);
 
   const loadTodos = useCallback(async () => {
     try {
       const res = await apiService.listTodos(main, false, { status: 'all' });
       const list: ProgressTodo[] = (res.data?.todos || []).filter((t: ProgressTodo) => t.status !== 'dropped');
       setTodos(list);
+      setLoadError(false);
     } catch {
       setTodos((cur) => cur || []);
+      setLoadError(true);
     }
   }, [main]);
 
+  // Helper state (working / last update) rides along with the todo poll.
+  const loadState = useCallback(async () => {
+    try { applyState((await apiService.getAgentProgress(main)).data); } catch {}
+  }, [main, applyState]);
+
   useEffect(() => {
     void loadTodos();
-    const id = window.setInterval(() => { void loadTodos(); }, POLL_MS);
+    const id = window.setInterval(() => { void loadTodos(); void loadState(); }, POLL_MS);
     return () => window.clearInterval(id);
-  }, [loadTodos]);
+  }, [loadTodos, loadState]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (auto = false) => {
     setRefreshing(true);
     try {
-      const res = await apiService.refreshAgentProgress(main);
+      const res = await apiService.refreshAgentProgress(main, auto);
       if (res.data?.helper) setHelper(String(res.data.helper));
+      applyState(res.data);
     } catch {}
     // The helper works asynchronously; keep the spinner briefly as feedback.
     if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
     refreshTimer.current = window.setTimeout(() => setRefreshing(false), 1500);
-  }, [main]);
+  }, [main, applyState]);
 
   useEffect(() => () => { if (refreshTimer.current) window.clearTimeout(refreshTimer.current); }, []);
 
@@ -203,7 +232,7 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
   // skips the request while the helper is still working on a previous one.
   const wasBusy = useRef(mainBusy);
   useEffect(() => {
-    if (wasBusy.current && !mainBusy && helper) void refresh();
+    if (wasBusy.current && !mainBusy && helper) void refresh(true);
     wasBusy.current = mainBusy;
   }, [mainBusy, helper, refresh]);
 
@@ -226,10 +255,16 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
   const doing = (todos || []).filter((t) => t.status === 'todo');
   const review = (todos || []).filter((t) => t.status === 'test').sort(byRecent);
   const done = (todos || []).filter((t) => t.status === 'done').sort(byRecent);
+  const working = helperBusy || refreshing;
+  const helperStatus = helperError
+    ? '进度助手启动失败'
+    : !helper ? '正在启动进度助手…'
+    : helperBusy ? '进度助手正在整理最新对话…'
+    : updatedAt ? `更新于 ${timeLabel(updatedAt, true)}` : '尚未更新';
 
   return (
     <div ref={rootRef} data-id={`agent-progress-${main}`} className={cn('flex h-full min-h-0 flex-col', dragging && 'cursor-row-resize select-none')}>
-      <div data-id={`agent-progress-list-${main}`} className="flex min-h-0 shrink-0 flex-col" style={{ height: `${split * 100}%` }}>
+      <div data-id={`agent-progress-list-${main}`} className={cn('flex min-h-0 flex-col', logOpen ? 'shrink-0' : 'flex-1')} style={logOpen ? { height: `${split * 100}%` } : undefined}>
         <div className="flex h-8 shrink-0 items-center gap-2 px-3 text-[11px] text-zinc-500">
           <span>进行中 <b className="font-medium text-amber-400">{doing.length}</b></span>
           <span>待确认 <b className="font-medium text-sky-400">{review.length}</b></span>
@@ -238,31 +273,42 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
             type="button"
             data-id={`agent-progress-refresh-${main}`}
             onClick={(event) => { event.stopPropagation(); void refresh(); }}
-            disabled={!helper || refreshing}
+            disabled={!helper || working}
             title="让进度助手根据最新对话更新列表"
             className="ml-auto flex h-6 items-center gap-1 rounded-md px-2 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-40"
           >
-            <RefreshCw className={cn('h-3 w-3', refreshing && 'animate-spin')} />
-            更新
+            <RefreshCw className={cn('h-3 w-3', working && 'animate-spin')} />
+            {helperBusy ? '更新中' : '更新'}
           </button>
         </div>
-        <div className="fade-scroll-y min-h-0 flex-1 overflow-y-auto px-1 pb-2" onWheel={(e) => e.stopPropagation()}>
+        <div className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto px-1 pb-2" onWheel={(e) => e.stopPropagation()}>
           {todos === null ? (
             <div className="grid h-full place-items-center"><Loader2 className="h-4 w-4 animate-spin text-zinc-600" /></div>
+          ) : loadError && todos.length === 0 ? (
+            <div data-id={`agent-progress-load-error-${main}`} className="px-3 py-6 text-center text-[12px] text-zinc-500">
+              任务列表加载失败。
+              <button type="button" onClick={() => { void loadTodos(); }} className="ml-1 text-sky-400 hover:underline">重试</button>
+            </div>
           ) : todos.length === 0 ? (
             <p data-id={`agent-progress-empty-${main}`} className="px-3 py-6 text-center text-[12px] text-zinc-600">
-              {helper ? '进度助手正在整理对话，稍后这里会列出已完成和进行中的任务。' : '正在启动进度助手…'}
+              {helperError ? '进度助手没有启动，暂时无法整理任务。'
+                : !helper ? '正在启动进度助手…'
+                : working ? '进度助手正在整理对话，稍后这里会列出已完成和进行中的任务。'
+                : '还没有任务记录。对话有新进展后会自动整理，也可以点右上角「更新」。'}
             </p>
           ) : (
             <>
               {doing.length ? (
-                <ul data-id={`agent-progress-doing-${main}`} className="space-y-0.5">
-                  {doing.map((t) => <TodoRow key={t.id} todo={t} kind="doing" busy={pending === t.id} onConfirm={() => setStatus(t, 'done')} />)}
-                </ul>
+                <>
+                  <SectionLabel>进行中</SectionLabel>
+                  <ul data-id={`agent-progress-doing-${main}`} className="space-y-0.5">
+                    {doing.map((t) => <TodoRow key={t.id} todo={t} kind="doing" busy={pending === t.id} onConfirm={() => setStatus(t, 'done')} />)}
+                  </ul>
+                </>
               ) : null}
               {review.length ? (
                 <>
-                  <div className="mt-2 px-2 text-[11px] text-zinc-600">待确认</div>
+                  <SectionLabel>待确认</SectionLabel>
                   <ul data-id={`agent-progress-review-${main}`} className="space-y-0.5">
                     {review.map((t) => <TodoRow key={t.id} todo={t} kind="review" busy={pending === t.id} onConfirm={() => setStatus(t, 'done')} />)}
                   </ul>
@@ -285,39 +331,56 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
           )}
         </div>
       </div>
-      <div
-        data-id={`agent-progress-splitter-${main}`}
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="拖动调整进度列表与终端的高度"
-        aria-valuemin={Math.round(SPLIT_MIN * 100)}
-        aria-valuemax={Math.round(SPLIT_MAX * 100)}
-        aria-valuenow={Math.round(split * 100)}
-        tabIndex={0}
-        title="上下拖动调整高度，双击恢复默认"
-        onPointerDown={onSplitPointerDown}
-        onPointerMove={onSplitPointerMove}
-        onPointerUp={endSplitDrag}
-        onPointerCancel={endSplitDrag}
-        onDoubleClick={() => setSplit(0.55)}
-        onKeyDown={onSplitKeyDown}
-        className={cn(
-          'group relative z-10 flex h-2 shrink-0 cursor-row-resize touch-none items-center justify-center border-y border-white/[0.06] bg-white/[0.02] outline-none transition-colors',
-          'hover:bg-sky-500/10 focus-visible:bg-sky-500/15',
-          dragging && 'bg-sky-500/20'
-        )}
+      <button
+        type="button"
+        data-id={`agent-progress-log-toggle-${main}`}
+        aria-expanded={logOpen}
+        onClick={(event) => { event.stopPropagation(); setLogOpen((v) => !v); }}
+        title={logOpen ? '收起进度助手的工作日志' : '查看进度助手的工作日志'}
+        className="flex h-7 shrink-0 items-center gap-2 border-t border-white/[0.06] px-3 text-left text-[11px] text-zinc-500 hover:bg-white/[0.03] hover:text-zinc-300"
       >
-        <span className={cn('h-[3px] w-10 rounded-full bg-white/20 transition-colors group-hover:bg-sky-400/70', dragging && 'bg-sky-400')} />
-      </div>
-      <div data-id={`agent-progress-helper-${main}`} onWheel={(e) => e.stopPropagation()} className={cn('min-h-0 flex-1 overflow-hidden', dragging && 'pointer-events-none')}>
-        {helperError ? (
-          <p className="grid h-full place-items-center px-4 text-center text-[11px] text-red-400">进度助手启动失败：{helperError}</p>
-        ) : helper ? (
-          <CurrentHistoryView key={helper} paneId={helper} open pollLive fullWidth leftAlignQuestions agentType="cicy" />
-        ) : (
-          <div className="grid h-full place-items-center"><Loader2 className="h-4 w-4 animate-spin text-zinc-600" /></div>
-        )}
-      </div>
+        {helperBusy ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-sky-400" /> : <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', helperError ? 'bg-red-400' : 'bg-zinc-600')} />}
+        <span data-id={`agent-progress-status-${main}`} className={cn('min-w-0 flex-1 truncate', helperError && 'text-red-400')}>{helperStatus}</span>
+        <span className="shrink-0">助手日志</span>
+        {logOpen ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronUp className="h-3 w-3 shrink-0" />}
+      </button>
+      {logOpen ? (
+        <>
+          <div
+            data-id={`agent-progress-splitter-${main}`}
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="拖动调整进度列表与终端的高度"
+            aria-valuemin={Math.round(SPLIT_MIN * 100)}
+            aria-valuemax={Math.round(SPLIT_MAX * 100)}
+            aria-valuenow={Math.round(split * 100)}
+            tabIndex={0}
+            title="上下拖动调整高度，双击恢复默认"
+            onPointerDown={onSplitPointerDown}
+            onPointerMove={onSplitPointerMove}
+            onPointerUp={endSplitDrag}
+            onPointerCancel={endSplitDrag}
+            onDoubleClick={() => setSplit(0.55)}
+            onKeyDown={onSplitKeyDown}
+            className={cn(
+              'group relative z-10 flex h-2 shrink-0 cursor-row-resize touch-none items-center justify-center border-y border-white/[0.06] bg-white/[0.02] outline-none transition-colors',
+              'hover:bg-sky-500/10 focus-visible:bg-sky-500/15',
+              dragging && 'bg-sky-500/20'
+            )}
+          >
+            <span className={cn('h-[3px] w-10 rounded-full bg-white/20 transition-colors group-hover:bg-sky-400/70', dragging && 'bg-sky-400')} />
+          </div>
+          <div data-id={`agent-progress-helper-${main}`} onWheel={(e) => e.stopPropagation()} className={cn('min-h-0 flex-1 overflow-hidden', dragging && 'pointer-events-none')}>
+            {helperError ? (
+              <p className="grid h-full place-items-center px-4 text-center text-[11px] text-red-400">进度助手启动失败：{helperError}</p>
+            ) : helper ? (
+              <CurrentHistoryView key={helper} paneId={helper} open pollLive fullWidth leftAlignQuestions agentType="cicy" />
+            ) : (
+              <div className="grid h-full place-items-center"><Loader2 className="h-4 w-4 animate-spin text-zinc-600" /></div>
+            )}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
