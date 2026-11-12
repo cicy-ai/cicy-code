@@ -25,6 +25,7 @@ vi.mock('react-i18next', async () => {
 });
 
 const api = vi.hoisted(() => ({
+  sendKeys: vi.fn(),
   listGroups: vi.fn(),
   getGroup: vi.fn(),
   getPane: vi.fn(),
@@ -1635,6 +1636,68 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     ));
     expect(document.querySelectorAll('[data-id="project-agent-message-queue-item"]')).toHaveLength(0);
     expect(await screen.findByText(/第一条/)).toBeInTheDocument();
+  });
+
+  // Stop pressed while a tool runs: the CLI is idle again but the server status
+  // may never leave "working". That stale status used to hold every later
+  // message in the queue forever.
+  it('sends after a stop even when the live status never leaves working', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    api.sendKeys.mockResolvedValue({ data: { success: true } });
+    agentSend.sendToAgent.mockResolvedValue(undefined);
+    const agent = { paneId: 'w-101:main.0', title: '架构师', agentType: 'claude', status: 'working' };
+    const stuck = { 'w-101:main.0': { status: 'working', updated_at: '1', complete: false } };
+    render(<ProjectsPanel agents={[agent]} statuses={stuck} onOpenAgent={vi.fn()} />);
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(card);
+    const stop = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-prompt-cancel-w-101"]');
+      if (!node) throw new Error('stop button missing');
+      return node as HTMLElement;
+    });
+    fireEvent.click(stop);
+    await waitFor(() => expect(api.sendKeys).toHaveBeenCalledWith('w-101:main.0', 'C-c'));
+    const input = document.querySelector('[data-id="project-agent-prompt-input-w-101"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '取消后继续' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    // queued during the short settle window, then released although the status
+    // snapshot is still the one that was cancelled
+    await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalledWith(
+      'w-101:main.0', '取消后继续', { submit: true, agentType: 'claude', fromComposer: true },
+    ), { timeout: 4000 });
+    expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).not.toBeInTheDocument();
+  });
+
+  it('returns a queued prompt to the composer when its delivery fails', async () => {
+    api.listGroups.mockResolvedValue({
+      data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
+    });
+    agentSend.sendToAgent.mockRejectedValue(new Error('pane gone'));
+    const agent = { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex', status: 'thinking' };
+    const { rerender } = render(<ProjectsPanel agents={[agent]} statuses={{ 'w-101:main.0': { status: 'thinking', updated_at: '1' } }} onOpenAgent={vi.fn()} />);
+    const card = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-card-w-101"]');
+      if (!node) throw new Error('agent card did not render');
+      return node as HTMLElement;
+    });
+    fireEvent.click(card);
+    const input = await waitFor(() => {
+      const node = document.querySelector('[data-id="project-agent-prompt-input-w-101"]');
+      if (!node) throw new Error('prompt did not open');
+      return node as HTMLInputElement;
+    });
+    fireEvent.change(input, { target: { value: '别丢了我' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    expect(document.querySelector('[data-id="project-agent-message-queue-item"]')).toHaveTextContent('别丢了我');
+    rerender(<ProjectsPanel agents={[agent]} statuses={{ 'w-101:main.0': { status: 'completed', updated_at: '2' } }} onOpenAgent={vi.fn()} />);
+    await waitFor(() => expect(agentSend.sendToAgent).toHaveBeenCalled());
+    await waitFor(() => expect((document.querySelector('[data-id="project-agent-prompt-input-w-101"]') as HTMLInputElement).value).toBe('别丢了我'));
   });
 
   it('immediately sends a queued prompt while the agent is still busy', async () => {

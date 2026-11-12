@@ -969,6 +969,19 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const promptHistoryIndexRef = useRef<Record<string, number | null>>({});
   const promptHistoryDraftRef = useRef<Record<string, string>>({});
   const cancelReleaseTimersRef = useRef<Record<string, number>>({});
+  // Live-status signature at the moment the user pressed stop. A status that
+  // has not moved since then is the turn that was just cancelled — the server
+  // may never finalize it (CLI stopped mid-tool, no further request) — and must
+  // not keep the card busy or hold later messages in the queue.
+  const canceledStatusRef = useRef<Record<string, string>>({});
+  const liveStatusFor = (agent: ProjectAgent) => {
+    const id = shortPaneId(agent.paneId);
+    return statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id];
+  };
+  const statusFrozenByCancel = (agent: ProjectAgent) => {
+    const frozen = canceledStatusRef.current[shortPaneId(agent.paneId)];
+    return frozen !== undefined && projectAgentStatusSignature(liveStatusFor(agent)) === frozen;
+  };
   const mountedAtRef = useRef(Date.now());
   const queueGraceTimerRef = useRef<number | undefined>(undefined);
   const [queueFlushTick, setQueueFlushTick] = useState(0);
@@ -1930,6 +1943,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     // its input prompt. Sending immediately can type the text before the shell is
     // ready and have the accompanying Enter swallowed by the cancel transition.
     if (canceledAgentIds.has(id)) return true;
+    if (statusFrozenByCancel(agent)) return sendingAgentIds.has(id);
     const summary = statuses[agent.paneId] || statuses[`${id}:main.0`] || statuses[id] || {};
     // poll/status is the freshest source. Do not OR it with stale agent/reply
     // snapshots: an old "thinking" there would keep queued prompts stuck forever
@@ -1948,6 +1962,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       next.delete(id);
       return next;
     });
+    delete canceledStatusRef.current[id];
     setSendingAgentIds((current) => new Set(current).add(id));
     optimisticQuestionsRef.current[id] = displayQuestion;
     setAgentReplies((current) => ({
@@ -2105,9 +2120,12 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       const payload = queued.map((item) => item.payload).join('\n\n');
       const displayQuestion = payload;
       const previousReply = agentReplies[id];
-      queued.flatMap((item) => item.attachments).forEach((item) => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
+      // Hand text and attachments to the delivery: if it fails they go back to
+      // the composer instead of vanishing with the emptied queue.
+      const queuedText = queued.map((item) => questionWithoutUploadedAttachments(item.display)).filter(Boolean).join('\n');
+      const queuedAttachments = queued.flatMap((item) => item.attachments);
       setQueuedAgentMessages((current) => ({ ...current, [id]: [] }));
-      void deliverAgentMessage(agent, payload, displayQuestion, previousReply);
+      void deliverAgentMessage(agent, payload, displayQuestion, previousReply, queuedAttachments, queuedText);
     }
   }, [allAgents, agentReplies, queuedAgentMessages, sendingAgentIds, canceledAgentIds, statuses, queueFlushTick]);
 
@@ -2120,6 +2138,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       else if (agent.agentType === 'cicy') await apiService.cancelCicyReply(agent.paneId);
       else await apiService.sendKeys(agent.paneId, 'C-c');
       delete optimisticQuestionsRef.current[id];
+      canceledStatusRef.current[id] = projectAgentStatusSignature(liveStatusFor(agent));
       setSendingAgentIds((current) => {
         const next = new Set(current);
         next.delete(id);
@@ -2785,7 +2804,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               const cardBridging = Boolean(agentReplies[cardShortId]?._status_baseline)
                 && PROJECT_AGENT_BUSY_RE.test(String(agentReplies[cardShortId]?.status || '').toLowerCase());
               const cardBusy = !canceledAgentIds.has(cardShortId)
-                && (sendingAgentIds.has(cardShortId) || cardBridging || projectAgentIsBusy(agent, statuses, liveMetrics));
+                && (sendingAgentIds.has(cardShortId) || cardBridging || (!statusFrozenByCancel(agent) && projectAgentIsBusy(agent, statuses, liveMetrics)));
               const hasLocalActions = !agent.remote;
               const hasCliLifecycleActions = hasLocalActions && normalizeAgentType(agent.agentType) !== 'cicy';
               return (

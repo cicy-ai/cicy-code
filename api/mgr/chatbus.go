@@ -751,7 +751,9 @@ func pollAgentStatuses(paneID string, agents []M) M {
 		// poll_data push drives the whole team panel — no per-agent /current-reply
 		// polling. agentInspectorLiteMetrics returns nil when there's no usable
 		// reply snapshot (same skip-on-empty as the old {status,updated_at} read).
-		if m := agentInspectorLiteMetrics(short); m != nil {
+		if m := nativeSessionLiteMetrics(short); m != nil {
+			statuses[short+":main.0"] = m
+		} else if m := agentInspectorLiteMetrics(short); m != nil {
 			statuses[short+":main.0"] = m
 		}
 	}

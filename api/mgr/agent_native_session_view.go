@@ -72,30 +72,37 @@ func loadNativeSessionView(paneID string) (nativeSessionView, bool) {
 			continue
 		}
 		sid, path := ip.sessionFile(paneWorkspace(normPaneID(paneID)))
-		if sid == "" || path == "" {
-			return nativeSessionView{}, false
-		}
-		st, err := os.Stat(path)
-		if err != nil {
-			return nativeSessionView{}, false
-		}
-		nativeViewCache.mu.Lock()
-		if e, hit := nativeViewCache.items[path]; hit && e.size == st.Size() && e.modTime.Equal(st.ModTime()) {
-			nativeViewCache.mu.Unlock()
-			return e.view, len(e.view.Items) > 0
-		}
-		nativeViewCache.mu.Unlock()
-		items, model, err := ip.parseItems(path)
-		if err != nil {
-			return nativeSessionView{}, false
-		}
-		view := nativeSessionView{SessionID: sid, Model: model, Items: items, ModTime: st.ModTime()}
-		nativeViewCache.mu.Lock()
-		nativeViewCache.items[path] = nativeViewCacheEntry{modTime: st.ModTime(), size: st.Size(), view: view}
-		nativeViewCache.mu.Unlock()
-		return view, len(items) > 0
+		return loadNativeSessionViewAt(ip, sid, path)
 	}
 	return nativeSessionView{}, false
+}
+
+// loadNativeSessionViewAt parses (or serves from the mtime/size cache) the
+// session log at path. Split from loadNativeSessionView so a caller that already
+// resolved the session (the poll status path) doesn't pay to locate it again.
+func loadNativeSessionViewAt(ip nativeSessionItemsProvider, sid, path string) (nativeSessionView, bool) {
+	if sid == "" || path == "" {
+		return nativeSessionView{}, false
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return nativeSessionView{}, false
+	}
+	nativeViewCache.mu.Lock()
+	if e, hit := nativeViewCache.items[path]; hit && e.size == st.Size() && e.modTime.Equal(st.ModTime()) {
+		nativeViewCache.mu.Unlock()
+		return e.view, len(e.view.Items) > 0
+	}
+	nativeViewCache.mu.Unlock()
+	items, model, err := ip.parseItems(path)
+	if err != nil {
+		return nativeSessionView{}, false
+	}
+	view := nativeSessionView{SessionID: sid, Model: model, Items: items, ModTime: st.ModTime()}
+	nativeViewCache.mu.Lock()
+	nativeViewCache.items[path] = nativeViewCacheEntry{modTime: st.ModTime(), size: st.Size(), view: view}
+	nativeViewCache.mu.Unlock()
+	return view, len(items) > 0
 }
 
 // nativeItemIsUserPrompt reports whether item is a real human question (role

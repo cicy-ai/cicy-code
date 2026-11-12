@@ -5634,6 +5634,9 @@ func handleSendKeys(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, "failed to send keys: "+err.Error())
 		return
 	}
+	if keysLookLikeInterrupt(keys) {
+		aiGatewayScheduleInterruptSeal(winID)
+	}
 	J(w, M{"success": true, "win_id": shortPaneID(winID)})
 }
 

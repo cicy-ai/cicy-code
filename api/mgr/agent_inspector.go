@@ -2740,7 +2740,9 @@ func handleAgentCurrentReplyBatch(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			seen[id] = true
-			if m := agentInspectorLiteMetrics(id); m != nil {
+			if m := nativeSessionLiteMetrics(id); m != nil {
+				out[id] = m
+			} else if m := agentInspectorLiteMetrics(id); m != nil {
 				out[id] = m
 			}
 		}

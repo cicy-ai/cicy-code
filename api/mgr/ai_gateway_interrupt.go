@@ -4,6 +4,7 @@
 package main
 
 import (
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -61,4 +62,57 @@ func aiGatewayConsumeUserInterrupt(agentID string) bool {
 func keysLookLikeInterrupt(keys string) bool {
 	k := strings.TrimSpace(keys)
 	return k == "C-c" || k == "^C" || k == "\x03"
+}
+
+// aiGatewayInterruptSealDelay: how long an interrupted CLI gets to hang up its
+// in-flight request (completeFromResponse then seals the round itself).
+var aiGatewayInterruptSealDelay = 2 * time.Second
+
+// aiGatewayScheduleInterruptSeal covers the interrupt that completeFromResponse
+// never sees: Ctrl+C while a TOOL is running. There is no request in flight
+// then — reply.json sits at "working" (last stop_reason tool_use) waiting for a
+// follow-up request the stopped CLI will never send. The card stayed busy
+// forever and every later message was queued instead of sent.
+func aiGatewayScheduleInterruptSeal(agentID string) {
+	id := shortPaneID(normPaneID(strings.TrimSpace(agentID)))
+	if id == "" {
+		return
+	}
+	at := time.Now()
+	time.AfterFunc(aiGatewayInterruptSealDelay, func() {
+		defer func() { recover() }()
+		if aiGatewaySealInterruptedReply(id, at) {
+			log.Printf("[ai-gateway] interrupted tool run sealed agent=%s", id)
+		}
+	})
+}
+
+// aiGatewaySealInterruptedReply finalizes a reply that is still non-terminal
+// and has not been written since the interrupt. A reply updated after the
+// interrupt is live again (or was sealed by its own request) and is left alone.
+func aiGatewaySealInterruptedReply(agentID string, interruptedAt time.Time) bool {
+	reply, err := aiGatewayReadReplySnapshotFile(agentID)
+	if err != nil {
+		return false
+	}
+	status := strings.ToLower(strings.TrimSpace(reply.Status))
+	if status == "" || status == "idle" || status == "done" || isAIGatewayReplyTerminal(status) {
+		return false
+	}
+	if updated, perr := time.Parse(time.RFC3339, strings.TrimSpace(reply.UpdatedAt)); perr == nil && updated.After(interruptedAt.Add(-time.Second)) {
+		return false
+	}
+	marker := cicyOutcomeMarkerText("cancelled")
+	reply.Items = append(reply.Items, map[string]interface{}{
+		"id":           len(reply.Items) + 1,
+		"type":         "text",
+		"text":         marker,
+		"cicy_outcome": "cancelled",
+	})
+	reply.Status = "completed"
+	reply.LastStopReason = ""
+	reply.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	// This interrupt is spent: it must not reclassify a later, unrelated failure.
+	aiGatewayConsumeUserInterrupt(agentID)
+	return aiGatewayWriteReplySnapshot(agentID, reply) == nil
 }
