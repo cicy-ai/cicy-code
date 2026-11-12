@@ -186,6 +186,8 @@ const api = {
   getAgentUsageAnalysis: (id: string) => http.get(`/api/agents/usage-analysis/${encodeURIComponent(id)}`),
   getAgentUsageBlock: (id: string, idx: number) => http.get(`/api/agents/usage-block/${encodeURIComponent(id)}`, { params: { idx } }),
   getAgentHistoryIDs: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/history-ids/${encodeURIComponent(id)}`, { params }),
+  // Every prompt delivered to each agent, oldest first: { agents: { [id]: [{ ts, content }] } }.
+  getAgentPromptLog: (ids: string[]) => http.get('/api/agents/prompt-log', { params: { panes: ids.join(',') } }),
   getAgentCurrentReply: (id: string, params?: { conversation_id?: string }) => {
     const route = `/api/agents/current-reply/${encodeURIComponent(id)}`;
     const conversationId = String(params?.conversation_id || '');

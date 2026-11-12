@@ -552,6 +552,7 @@ Options:
 	http.HandleFunc("/api/agents/usage-block/", wa(handleAgentUsageBlockByPane))
 	http.HandleFunc("/api/agents/current-history-tool/", wa(handleAgentCurrentHistoryToolDetailByPane))
 	http.HandleFunc("/api/agents/history-ids/", wa(handleAgentHistoryIDsByPane))
+	http.HandleFunc("/api/agents/prompt-log", wa(handleAgentPromptLog))
 	http.HandleFunc("/api/agents/current-reply/", wa(handleAgentCurrentReplyByPane))
 	http.HandleFunc("/api/agents/current-reply-batch", wa(handleAgentCurrentReplyBatch))
 	http.HandleFunc("/api/agents/history-turn/", wa(handleAgentHistoryTurnByPane))

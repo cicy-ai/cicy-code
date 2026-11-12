@@ -3,7 +3,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { AppWindow, ArrowDown, ArrowRight, ArrowUpCircle, BookOpen, Check, ChevronDown, ChevronUp, Copy, FileText, FolderKanban, GitBranch, Hand, History, LayoutDashboard, LayoutGrid, Loader2, MessageCircle, Minus, MoreHorizontal, Move, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, Pin, PinOff, Plus, RefreshCw, Search, SendHorizontal, Square, Trash2, UserPlus, Users, X, Zap } from 'lucide-react';
+import { AppWindow, ArrowDown, ArrowRight, ArrowUpCircle, BookOpen, Check, ChevronDown, ChevronUp, Copy, FileText, FolderKanban, GitBranch, Hand, History, LayoutDashboard, LayoutGrid, Loader2, MessageCircle, MessageSquareText, Minus, MoreHorizontal, Move, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, Pin, PinOff, Plus, RefreshCw, Search, SendHorizontal, Square, Trash2, UserPlus, Users, X, Zap } from 'lucide-react';
 import { Trans, useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendToAgent } from '../../services/agentSend';
@@ -24,6 +24,7 @@ import CurrentHistoryView from '../chat/CurrentHistoryView';
 import { MarkdownImg } from '../chat/history/shared/Markdown';
 import TerminalView from '../terminal/TerminalView';
 import AgentProgressPanel from './AgentProgressPanel';
+import PromptLogModal, { type PromptLogAgent } from './PromptLogModal';
 import MarkdownFileEditor from '../files/MarkdownFileEditor';
 import UpdateAgentModal from '../layout/UpdateAgentModal';
 import WechatBindModal from '../layout/WechatBindModal';
@@ -147,6 +148,7 @@ const WINDOW_MODE_SIDEBAR_WIDTH = 220;
 const WINDOW_MODE_SIDEBAR_COMPACT_WIDTH = 52;
 const WINDOW_MODE_MARGIN = 8;
 type ProjectLayoutMode = 'grid' | 'canvas' | 'window';
+const DEFAULT_LAYOUT_MODE: ProjectLayoutMode = 'window';
 // Minimum readable card size in grid mode. When the viewport can't fit every
 // card at this size the grid grows downward and the grid viewport scrolls,
 // instead of squashing cards until their transcript is a sliver.
@@ -296,6 +298,9 @@ interface ProjectViewCache {
   pan: { x: number; y: number };
   layouts: Record<string, ProjectAgentLayout>;
   layoutMode: ProjectLayoutMode;
+  // Set once the user picks a mode. Older caches stored 'grid' simply because
+  // it was the default, so an unmarked 'grid' is not treated as a choice.
+  layoutModeChosen?: boolean;
   // Cards hidden from the grid/canvas (minimized); restorable from the footer selector.
   minimized: string[];
   // Grid order of cards (short pane ids); cards not listed keep roster order after these.
@@ -311,15 +316,16 @@ const readProjectViewCache = (projectId: number | string): ProjectViewCache | nu
       zoom: Math.min(2, Math.max(0.1, Number(value.zoom) || 1)),
       pan: { x: Number(value.pan?.x) || 0, y: Number(value.pan?.y) || 0 },
       layouts: value.layouts && typeof value.layouts === 'object' ? value.layouts : {},
-      // Default to the tidy grid; only an explicit 'canvas' opts into free drag.
-      layoutMode: value.layoutMode === 'canvas' || value.layoutMode === 'window' ? value.layoutMode : 'grid',
+      // Window is the default; grid only when the user picked it.
+      layoutMode: value.layoutMode === 'canvas' || (value.layoutMode === 'grid' && value.layoutModeChosen === true) ? value.layoutMode : DEFAULT_LAYOUT_MODE,
+      layoutModeChosen: value.layoutModeChosen === true,
       minimized: Array.isArray(value.minimized) ? value.minimized.map(String) : [],
       order: Array.isArray(value.order) ? value.order.map(String) : [],
     };
   } catch { return null; }
 };
 const writeProjectViewCache = (projectId: number | string, patch: Partial<ProjectViewCache>) => {
-  const current = readProjectViewCache(projectId) || { zoom: 1, pan: { x: 60, y: 60 }, layouts: {}, layoutMode: 'grid' as ProjectLayoutMode, minimized: [] as string[], order: [] as string[] };
+  const current = readProjectViewCache(projectId) || { zoom: 1, pan: { x: 60, y: 60 }, layouts: {}, layoutMode: DEFAULT_LAYOUT_MODE, minimized: [] as string[], order: [] as string[] };
   try { localStorage.setItem(projectViewCacheKey(projectId), JSON.stringify({ ...current, ...patch })); } catch {}
 };
 
@@ -915,6 +921,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
   const agentMembershipKey = agents.map((agent) => agent.paneId).sort().join('|');
   const [agentMessages, setAgentMessages] = useState<Record<string, string>>({});
+  const [promptLogOpen, setPromptLogOpen] = useState(false);
   const [agentAttachments, setAgentAttachments] = useState<Record<string, ProjectAttachment[]>>({});
   const [agentReplies, setAgentReplies] = useState<Record<string, any>>({});
   const [queuedAgentMessages, setQueuedAgentMessagesState] = useState<Record<string, QueuedAgentMessage[]>>(readProjectAgentQueue);
@@ -928,10 +935,10 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const [canvasPan, setCanvasPan] = useState({ x: 60, y: 60 });
   const [canvasZoom, setCanvasZoom] = useState(1);
   const [wheelZoomActive, setWheelZoomActive] = useState(false);
-  // Layout mode: 'grid' (default) tiles cards to fill the viewport; 'canvas'
-  // is the original free-drag infinite canvas. Persisted per project in the
-  // view cache. The free canvas is always available — grid is just the default.
-  const [layoutMode, setLayoutMode] = useState<ProjectLayoutMode>('grid');
+  // Layout mode: 'window' (default) stacks cards with one on top; 'grid' tiles
+  // them to fill the viewport; 'canvas' is the free-drag infinite canvas.
+  // Persisted per project in the view cache.
+  const [layoutMode, setLayoutMode] = useState<ProjectLayoutMode>(DEFAULT_LAYOUT_MODE);
   const [minimizedIds, setMinimizedIds] = useState<string[]>([]);
   // The designated knowledge specialist may be minimized (hidden), but its CLI is
   // never stopped: other agents and the knowledge panel rely on it staying live.
@@ -1199,6 +1206,11 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
       : t('projectAllIdle', { defaultValue: '空闲' });
   };
   const visibleAgents = allAgents.filter((agent) => memberIds.has(shortPaneId(agent.paneId)));
+  // The prompt log is read from this instance's disk, so cloud agents are left out.
+  const promptLogAgents = useMemo<PromptLogAgent[]>(() => allAgents.filter((agent) => !agent.remote).map((agent) => {
+    const id = shortPaneId(agent.paneId);
+    return { id, title: agent.title || id, agentType: agent.agentType, inProject: memberIds.has(id) };
+  }), [allAgents, memberIds]);
   // Minimized cards stay project members (polling, routing, counts) but are not
   // laid out; the footer selector lists them for restore.
   const minimizedSet = new Set(minimizedIds);
@@ -1409,7 +1421,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
     setAgentLayouts(cached?.layouts || {});
     setCanvasPan(cached?.pan || { x: 60, y: 60 });
     setCanvasZoom(cached?.zoom || 1);
-    setLayoutMode(cached?.layoutMode || 'grid');
+    setLayoutMode(cached?.layoutMode || DEFAULT_LAYOUT_MODE);
     setMinimizedIds(cached?.minimized || []);
     setCardOrder(cached?.order || []);
     setMinimizedMenuOpen(false);
@@ -2453,6 +2465,13 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         detail: t('projectAgentResumeFailed', { defaultValue: '重启 {{name}} 失败', name: agent.title || id }),
       })));
   };
+  // Prompt list → card: bring the agent's card forward (restoring it when
+  // minimized) and make it the send target.
+  const focusProjectAgent = (id: string) => {
+    if (minimizedIds.includes(id)) { restoreAgent(id); return; }
+    const agent = visibleAgents.find((item) => shortPaneId(item.paneId) === id);
+    if (agent) toggleAgentSelection(agent);
+  };
   const restoreAgent = (id: string) => {
     setMinimized(minimizedIds.filter((item) => item !== id));
     if (minimizedIds.length <= 1) setMinimizedMenuOpen(false);
@@ -2483,7 +2502,7 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
   const changeLayoutMode = (next: ProjectLayoutMode) => {
     setLayoutMode((prev) => {
       if (prev === next) return prev;
-      writeProjectViewCache(selectedProject.id, { layoutMode: next });
+      writeProjectViewCache(selectedProject.id, { layoutMode: next, layoutModeChosen: true });
       if (next === 'canvas') {
         // Entering free canvas: seed stored layouts from whatever the grid is
         // currently showing so cards don't jump, and reset pan/zoom to a sane
@@ -3112,6 +3131,16 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            data-id="project-prompt-log-open"
+            onClick={() => setPromptLogOpen(true)}
+            title={t('promptLogOpen', { defaultValue: '查看发过的所有 prompt' })}
+            className="mr-1 flex h-7 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-[11px] text-zinc-400 transition-colors hover:text-zinc-200"
+          >
+            <MessageSquareText className="h-3.5 w-3.5" />
+            {canvasSize.width < 720 ? null : <span>{t('promptLogButton', { defaultValue: 'Prompt' })}</span>}
+          </button>
           {layoutMode === 'canvas' ? (
           <>
           <button type="button" data-id="project-canvas-zoom-out" onClick={() => changeZoom(-0.1)} className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-white/[0.08] hover:text-white" title={t('projectZoomOut')}><Minus className="h-3.5 w-3.5" /></button>
@@ -3201,6 +3230,18 @@ export default function ProjectsPanel({ agents, statuses = {}, topRightControls,
         </div>
 
       </main>
+
+      <PromptLogModal
+        open={promptLogOpen}
+        agents={promptLogAgents}
+        projectName={selectedProject.name}
+        onClose={() => setPromptLogOpen(false)}
+        onReuse={(id, text) => {
+          setAgentMessages((current) => ({ ...current, [id]: text }));
+          focusProjectAgent(id);
+        }}
+        onLocate={focusProjectAgent}
+      />
 
       <AppModal open={createOpen} title={t('projectCreateTitle')} onClose={closeCreateProject} maxWidth="480px">
         <div data-id="project-create-modal" className="space-y-5">

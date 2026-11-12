@@ -1810,6 +1810,7 @@ func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnaps
 	current.Body = aiGatewayAnnotateCurrentBodyHistoryIDs(agentID, aiGatewayCloneJSONValue(current.Body))
 	current.MaxHistoryID = aiGatewayCurrentBodyMaxHistoryID(current.Body)
 	current.Prompts = aiGatewayBuildCurrentPrompts(agentID, current.ConversationID, current.Body, current.Timestamp)
+	agentPromptLogIngestSnapshot(agentID, current.ConversationID, current.Prompts)
 	return aiGatewayWriteSnapshotFile(agentID, "current.json", current.ConversationID, current)
 }
 

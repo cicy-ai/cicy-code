@@ -360,7 +360,22 @@ describe('<ProjectsPanel /> project view cache', () => {
     expect(document.querySelector('[data-id="project-window-agent-list"]')).toBeNull();
   });
 
+  it('opens a project in window mode by default, and keeps grid only when it was chosen', async () => {
+    api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] } });
+    // A cache written while grid was the default carries no choice marker.
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({ layoutMode: 'grid', zoom: 1, pan: { x: 60, y: 60 }, layouts: {} }));
+    const view = render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-mode-window"]')).toHaveAttribute('aria-checked', 'true'));
+
+    fireEvent.click(document.querySelector('[data-id="project-canvas-mode-grid"]')!);
+    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-mode-grid"]')).toHaveAttribute('aria-checked', 'true'));
+    view.unmount();
+    render(<ProjectsPanel agents={[{ paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' }]} onOpenAgent={vi.fn()} />);
+    await waitFor(() => expect(document.querySelector('[data-id="project-canvas-mode-grid"]')).toHaveAttribute('aria-checked', 'true'));
+  });
+
   it('reorders grid cards with the up/down buttons and remembers the order', async () => {
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({ layoutMode: 'grid', layoutModeChosen: true }));
     api.listGroups.mockResolvedValue({ data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0'], pane_count: 2 }] } });
     render(<ProjectsPanel agents={[
       { paneId: 'w-101:main.0', title: '架构师', agentType: 'codex' },
@@ -733,6 +748,7 @@ describe('<ProjectsPanel /> project view cache', () => {
   });
 
   it('never stacks cards that have no stored layout on top of each other', async () => {
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({ layoutMode: 'grid', layoutModeChosen: true }));
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0', 'w-102:main.0', 'w-103:main.0'], pane_count: 3 }] },
     });
@@ -1259,6 +1275,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
   });
 
   it('activates an inactive card as soon as its prompt takes focus', async () => {
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({ layoutMode: 'grid', layoutModeChosen: true }));
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
     });
@@ -1309,6 +1326,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
   });
 
   it('keeps the loading stop control visible on an inactive card', async () => {
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({ layoutMode: 'grid', layoutModeChosen: true }));
     api.listGroups.mockResolvedValue({
       data: { groups: [{ ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 }] },
     });
@@ -1322,6 +1340,7 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
   });
 
   it('offers separate move-to and add-to actions from the card More menu', async () => {
+    localStorage.setItem('cicy_project_view:default', JSON.stringify({ layoutMode: 'grid', layoutModeChosen: true }));
     api.listGroups.mockResolvedValue({ data: { groups: [
       { ...defaultGroups[0], pane_ids: ['w-101:main.0'], pane_count: 1 },
       defaultGroups[1],
