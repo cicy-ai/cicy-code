@@ -1,7 +1,7 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-import { Brain, Check, CircleHelp, Columns2, Copy, CornerDownLeft, ExternalLink, Folder, Grid3X3, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, X } from 'lucide-react'
+import { Brain, Check, CircleHelp, Columns2, Copy, CornerDownLeft, ExternalLink, Folder, Grid3X3, KeyRound, Keyboard, LineChart, ListTodo, Loader2, Maximize2, Minimize2, MoreHorizontal, Paperclip, Pencil, SendHorizontal, Settings, ShieldCheck, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -236,7 +236,7 @@ export function CardMoreMenu({ paneId, items }: { paneId: string; items: CardMen
   )
 }
 
-export function AgentCardMoreMenu({ paneId, onTodo, onFiles, onSession, onMemory, onAudit, onAccountMatrix, onSettings, todoCount = 0, auditCount = 0, settingsActive = false }: {
+export function AgentCardMoreMenu({ paneId, onTodo, onFiles, onSession, onMemory, onAudit, onAccountMatrix, onKeystore, onSettings, todoCount = 0, auditCount = 0, settingsActive = false }: {
   paneId: string;
   onTodo?: CardMenuItem['onClick'];
   onFiles: CardMenuItem['onClick'];
@@ -244,6 +244,7 @@ export function AgentCardMoreMenu({ paneId, onTodo, onFiles, onSession, onMemory
   onMemory?: CardMenuItem['onClick'];
   onAudit?: CardMenuItem['onClick'];
   onAccountMatrix?: CardMenuItem['onClick'];
+  onKeystore?: CardMenuItem['onClick'];
   onSettings: CardMenuItem['onClick'];
   todoCount?: number;
   auditCount?: number;
@@ -260,6 +261,7 @@ export function AgentCardMoreMenu({ paneId, onTodo, onFiles, onSession, onMemory
         ...(onMemory ? [{ id: 'agent-stack-card-memory', label: t('tabMemory'), icon: <Brain className="h-4 w-4" />, onClick: onMemory }] : []),
         ...(onAudit ? [{ id: 'agent-stack-card-audit', label: t('tabAudit', { ns: 'audit', defaultValue: '审计' }), icon: <ShieldCheck className="h-4 w-4" />, onClick: onAudit, badge: auditCount }] : []),
         ...(onAccountMatrix ? [{ id: 'agent-stack-card-account-matrix', label: t('accountMatrixTitle', { defaultValue: '账号矩阵' }), icon: <Grid3X3 className="h-4 w-4" />, onClick: onAccountMatrix }] : []),
+        ...(onKeystore ? [{ id: 'agent-stack-card-keystore', label: t('keystoreTitle', { defaultValue: '密钥库' }), icon: <KeyRound className="h-4 w-4" />, onClick: onKeystore }] : []),
         { id: 'agent-stack-card-settings', label: t('tabSettings'), icon: <Settings className="h-4 w-4" />, onClick: onSettings, active: settingsActive },
       ]}
     />
@@ -1094,6 +1096,11 @@ function AgentStackCard({
     onOpenPaneContent?.(item.paneId, 'github')
   }, [item.paneId, onOpenPaneContent])
 
+  const handleOpenKeystore = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onOpenPaneContent?.(item.paneId, 'keystore')
+  }, [item.paneId, onOpenPaneContent])
+
   const handleOpenSession = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     onOpenPaneSession(item.paneId)
@@ -1272,6 +1279,7 @@ function AgentStackCard({
               onMemory={onOpenPaneMemory ? handleOpenMemory : undefined}
               onAudit={auditEnabled && onOpenPaneContent ? handleOpenAudit : undefined}
               onAccountMatrix={onOpenPaneContent ? handleOpenAccountMatrix : undefined}
+              onKeystore={onOpenPaneContent ? handleOpenKeystore : undefined}
               onSettings={handleOpenSettings}
               todoCount={todoCount}
               auditCount={auditAlertCount}

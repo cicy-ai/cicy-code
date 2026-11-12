@@ -2426,6 +2426,7 @@ leftActive === 'skills' && !globalVar?.helper_mode ? (
                     onMemory={(event) => { event.stopPropagation(); openPaneMemory(activeCliPaneId); }}
                     onAudit={globalVar?.audit_enabled === true ? (event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'audit'); } : undefined}
                     onAccountMatrix={(event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'github'); }}
+                    onKeystore={(event) => { event.stopPropagation(); openPaneContent(activeCliPaneId, 'keystore'); }}
                     onSettings={(event) => { event.stopPropagation(); openPaneSettings(activeCliPaneId); }}
                     todoCount={todoCount}
                     auditCount={auditAlertCount}
