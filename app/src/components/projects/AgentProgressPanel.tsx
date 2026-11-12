@@ -263,8 +263,17 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
     : updatedAt ? `更新于 ${timeLabel(updatedAt, true)}` : '尚未更新';
 
   return (
-    <div ref={rootRef} data-id={`agent-progress-${main}`} className={cn('flex h-full min-h-0 flex-col', dragging && 'cursor-row-resize select-none')}>
-      <div data-id={`agent-progress-list-${main}`} className={cn('flex min-h-0 flex-col', logOpen ? 'shrink-0' : 'flex-1')} style={logOpen ? { height: `${split * 100}%` } : undefined}>
+    <div ref={rootRef} data-id={`agent-progress-${main}`} className={cn('relative flex h-full min-h-0 flex-col', dragging && 'cursor-row-resize select-none')}>
+      {/* With the log open, the helper's conversation fills the whole panel
+          (see below) and this summary sits on top of it. Dragging the handle
+          only changes how tall the summary is — the conversation underneath
+          keeps its size, so nothing in it moves or reflows. */}
+      <div
+        data-id={`agent-progress-summary-${main}`}
+        className={cn('flex min-h-0 flex-col', logOpen ? 'relative z-10 shrink-0 bg-[#0b0b0d] shadow-[0_6px_16px_rgba(0,0,0,0.45)]' : 'flex-1')}
+        style={logOpen ? { height: `${split * 100}%` } : undefined}
+      >
+      <div data-id={`agent-progress-list-${main}`} className="flex min-h-0 flex-1 flex-col">
         <div className="flex h-8 shrink-0 items-center gap-2 px-3 text-[11px] text-zinc-500">
           <span>进行中 <b className="font-medium text-amber-400">{doing.length}</b></span>
           <span>待确认 <b className="font-medium text-sky-400">{review.length}</b></span>
@@ -345,7 +354,6 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
         {logOpen ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronUp className="h-3 w-3 shrink-0" />}
       </button>
       {logOpen ? (
-        <>
           <div
             data-id={`agent-progress-splitter-${main}`}
             role="separator"
@@ -370,7 +378,10 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
           >
             <span className={cn('h-[3px] w-10 rounded-full bg-white/20 transition-colors group-hover:bg-sky-400/70', dragging && 'bg-sky-400')} />
           </div>
-          <div data-id={`agent-progress-helper-${main}`} onWheel={(e) => e.stopPropagation()} className={cn('min-h-0 flex-1 overflow-hidden', dragging && 'pointer-events-none')}>
+      ) : null}
+      </div>
+      {logOpen ? (
+          <div data-id={`agent-progress-helper-${main}`} onWheel={(e) => e.stopPropagation()} className={cn('absolute inset-0 overflow-hidden', dragging && 'pointer-events-none')}>
             {helperError ? (
               <p className="grid h-full place-items-center px-4 text-center text-[11px] text-red-400">进度助手启动失败：{helperError}</p>
             ) : helper ? (
@@ -379,7 +390,6 @@ export default function AgentProgressPanel({ mainId, mainBusy }: Props) {
               <div className="grid h-full place-items-center"><Loader2 className="h-4 w-4 animate-spin text-zinc-600" /></div>
             )}
           </div>
-        </>
       ) : null}
     </div>
   );
