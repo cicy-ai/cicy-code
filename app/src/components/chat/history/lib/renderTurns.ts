@@ -38,9 +38,19 @@ function systemTurnNotices(turn: HistoryTurn): SystemNotice[] {
 // produces on the live tail.
 const INTERRUPT_ECHO_RE = /^\s*\[Request interrupted by user(?: for tool use)?\]\s*$/i;
 
+// kiro writes its own interrupt as an assistant message. It is a status line,
+// not an answer: show the same 已停止生成 notice.
+const KIRO_INTERRUPT_RE = /^\s*Tool uses were interrupted, waiting for the next user prompt\.?\s*$/i;
+
 function classifyTurns(turns: HistoryTurn[]): HistoryTurn[] {
   const out: HistoryTurn[] = [];
   for (const turn of turns) {
+    if (turn?.role === 'assistant' && !turn?.outcome
+      && KIRO_INTERRUPT_RE.test(String(turn.a || turn.text || ''))
+      && !(turn.steps || []).some((step: any) => step?.type === 'tool')) {
+      out.push({ ...turn, q: '', text: '已停止生成', a: '已停止生成', steps: [], outcome: 'cancelled' });
+      continue;
+    }
     if (turn?.role === 'user' && INTERRUPT_ECHO_RE.test(String(turn.text || turn.q || ''))) {
       out.push({ ...turn, role: 'assistant', q: '', text: '已停止生成', a: '已停止生成', steps: [], outcome: 'cancelled' });
       continue;

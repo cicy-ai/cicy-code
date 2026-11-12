@@ -113,3 +113,35 @@ func TestSealInterruptedToolRun(t *testing.T) {
 		t.Fatal("a reply updated after the interrupt is live and must be left alone")
 	}
 }
+
+// kiro stores shell output as a json item; reading only text items left every
+// tool card in the chat view empty.
+func TestKiroToolResultTextReadsJSONOutput(t *testing.T) {
+	kiroHome := t.TempDir()
+	ws := t.TempDir()
+	dir := filepath.Join(kiroHome, "sessions", "cli")
+	writeKiroSession(t, dir, "sid", ws, []string{
+		`{"kind":"Prompt","data":{"content":[{"kind":"text","data":"run"}],"meta":{"timestamp":10}}}`,
+		`{"kind":"AssistantMessage","data":{"content":[{"kind":"toolUse","data":{"toolUseId":"t1","name":"shell","input":{"command":"ls"}}}],"meta":{"timestamp":11}}}`,
+		`{"kind":"ToolResults","data":{"content":[{"kind":"toolResult","data":{"toolUseId":"t1","status":"success","content":[{"kind":"json","data":{"exit_status":"exit status: 0","stdout":"a.txt\nb.txt\n","stderr":""}}]}}],"meta":{"timestamp":12}}}`,
+		`{"kind":"AssistantMessage","data":{"content":[{"kind":"toolUse","data":{"toolUseId":"t2","name":"shell","input":{"command":"false"}}}],"meta":{"timestamp":13}}}`,
+		`{"kind":"ToolResults","data":{"content":[{"kind":"toolResult","data":{"toolUseId":"t2","status":"error","content":[{"kind":"json","data":{"exit_status":"exit status: 1","stdout":"","stderr":"boom"}}]}}],"meta":{"timestamp":14}}}`,
+	})
+	items, _, err := kiroSessionProvider{}.parseItems(filepath.Join(dir, "sid.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := func(i int) string {
+		block := aiGatewayMap(aiGatewaySlice(items[i]["content"])[0])
+		return aiGatewayString(block["content"])
+	}
+	if got := result(2); got != "a.txt\nb.txt" {
+		t.Fatalf("stdout must be the tool output, got %q", got)
+	}
+	if got := result(4); got != "boom\n[exit status: 1]" {
+		t.Fatalf("stderr and a failing exit status must show, got %q", got)
+	}
+	if clipped := kiroClipToolResult(string(make([]rune, kiroToolResultMaxRunes+5))); len([]rune(clipped)) >= kiroToolResultMaxRunes+50 {
+		t.Fatal("oversized output must be clipped")
+	}
+}

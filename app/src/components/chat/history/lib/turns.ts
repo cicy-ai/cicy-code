@@ -113,7 +113,9 @@ export function buildTurnsFromRawItems(rawItems: RawHistoryItem[]): HistoryTurn[
           const result = typeof raw === 'string' ? raw : (raw != null ? JSON.stringify(raw) : '');
           // Anthropic flags failed tool runs with is_error on the tool_result
           // block — folded through so the card renders ✗ instead of ✓.
-          if (result) resultById.set(rid, { text: result, isError: p?.is_error === true });
+          // An empty result still belongs to its call (a command that printed
+          // nothing): fold it too, or it is drawn as a second, blank tool card.
+          resultById.set(rid, { text: result, isError: p?.is_error === true });
         }
         const toolUseIds = currentContent
           .filter((p: any) => String(p?.type || '').trim() === 'tool_use')

@@ -73,3 +73,15 @@ describe('prepareRenderTurns interrupt echo', () => {
     expect(out[1].outcome).toBe('cancelled');
   });
 });
+
+describe('prepareRenderTurns kiro interrupt', () => {
+  it('renders kiro\'s own interrupt line as the stopped notice, not as an answer', () => {
+    const out = prepareRenderTurns([
+      { role: 'user', q: '发版', text: '发版' },
+      { role: 'assistant', a: 'Tool uses were interrupted, waiting for the next user prompt', text: 'Tool uses were interrupted, waiting for the next user prompt', steps: [{ type: 'text', text: 'Tool uses were interrupted, waiting for the next user prompt' }] },
+    ] as HistoryTurn[]);
+    const stopped = out.find((turn) => turn.outcome === 'cancelled');
+    expect(stopped).toBeTruthy();
+    expect(out.some((turn) => /Tool uses were interrupted/.test(String(turn.a || turn.text || '')))).toBe(false);
+  });
+});

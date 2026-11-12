@@ -332,7 +332,7 @@ func kiroParseJSONL(path string) ([]aiGatewayMessageRecord, error) {
 					continue
 				}
 				if idx, ok := toolIdx[tr.ToolUseID]; ok && idx < len(cur.ToolCalls) {
-					cur.ToolCalls[idx].Output = kiroJoinText(tr.Content)
+					cur.ToolCalls[idx].Output = kiroToolResultText(tr.Content)
 				}
 			}
 		}
@@ -342,6 +342,49 @@ func kiroParseJSONL(path string) ([]aiGatewayMessageRecord, error) {
 }
 
 // kiroJoinText concatenates all string-valued "text" content items.
+// kiroToolResultText renders a tool result for display. kiro stores shell output
+// as a {"kind":"json"} item ({exit_status, stdout, stderr}), not text — reading
+// only text items left EVERY tool card in the chat view without its output.
+func kiroToolResultText(items []kiroContentItem) string {
+	var parts []string
+	for _, c := range items {
+		switch c.Kind {
+		case "text":
+			var s string
+			if json.Unmarshal(c.Data, &s) == nil && strings.TrimSpace(s) != "" {
+				parts = append(parts, s)
+			}
+		case "json":
+			var obj map[string]interface{}
+			if json.Unmarshal(c.Data, &obj) != nil {
+				if raw := strings.TrimSpace(string(c.Data)); raw != "" && raw != "null" {
+					parts = append(parts, raw)
+				}
+				continue
+			}
+			_, hasOut := obj["stdout"]
+			_, hasErr := obj["stderr"]
+			if hasOut || hasErr {
+				if out := strings.TrimRight(aiGatewayString(obj["stdout"]), "\n"); strings.TrimSpace(out) != "" {
+					parts = append(parts, out)
+				}
+				if errText := strings.TrimRight(aiGatewayString(obj["stderr"]), "\n"); strings.TrimSpace(errText) != "" {
+					parts = append(parts, errText)
+				}
+				// Only a failure is worth a line of its own; "exit status: 0" is noise.
+				if st := strings.TrimSpace(aiGatewayString(obj["exit_status"])); st != "" && !strings.HasSuffix(st, ": 0") && st != "0" {
+					parts = append(parts, "["+st+"]")
+				}
+				continue
+			}
+			if b, err := json.Marshal(obj); err == nil && len(obj) > 0 {
+				parts = append(parts, string(b))
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 func kiroJoinText(items []kiroContentItem) string {
 	var b strings.Builder
 	for _, c := range items {

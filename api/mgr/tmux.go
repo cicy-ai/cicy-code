@@ -4177,10 +4177,47 @@ func ensurePaneReadyForSend(paneID string, trace *tmuxSendTrace) error {
 	return waitForAgentInputReady(paneID, agentType, trace)
 }
 
+// suspendedAgentWakeTimeout: a cold CLI start (resume-latest) takes far longer
+// than the ordinary input-ready wait.
+var suspendedAgentWakeTimeout = 90 * time.Second
+
+// ensureLazyAgentReady wakes an agent that was stopped by minimizing its card.
+// "Minimized" lives in one browser's local storage, but the stop is server-wide:
+// another device (or another agent, or IM) still shows the agent as available
+// and sends to it. Without this the text met a bare shell — the send waited out
+// the ready timeout and failed, or worse was typed at the prompt. A message is
+// the clearest possible request for the agent to run, so start it and deliver.
 func ensureLazyAgentReady(paneID, agentType string) error {
-	_ = paneID
-	_ = agentType
-	return nil
+	if !agentSuspended(paneWorkspace(paneID)) {
+		return nil
+	}
+	setAgentSuspended(paneID, false)
+	if paneAgentProcessRunning(paneID) {
+		return nil
+	}
+	session := strings.Split(paneID, ":")[0]
+	if tmuxCommand("has-session", "-t", session).Run() != nil {
+		return fmt.Errorf("agent %s is stopped and its terminal session is gone; restore its card to restart it", shortPaneID(paneID))
+	}
+	log.Printf("[lazy-agent] %s was minimized; relaunching for an incoming message", shortPaneID(paneID))
+	if _, err := runTmux("send-keys", "-t", paneID, relaunchAgentCommand(paneID), "Enter"); err != nil {
+		return err
+	}
+	switch normalizeAgentType(agentType) {
+	case "", "codex", "gemini", "hermes":
+		// No reliable ready marker (see waitForAgentInputReady): give the CLI a
+		// fixed head start instead of waiting for a signal that never comes.
+		time.Sleep(8 * time.Second)
+		return nil
+	}
+	deadline := time.Now().Add(suspendedAgentWakeTimeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(time.Second)
+		if out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", promptConfirmCaptureStart); err == nil && isAgentInputReady(normalizeAgentType(agentType), out) {
+			return nil
+		}
+	}
+	return fmt.Errorf("agent %s did not become ready after being restarted", shortPaneID(paneID))
 }
 
 func waitForAgentInputReady(paneID, agentType string, trace *tmuxSendTrace) error {

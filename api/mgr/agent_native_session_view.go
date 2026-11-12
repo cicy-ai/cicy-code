@@ -18,6 +18,7 @@ package main
 // message the agent hasn't answered yet".
 
 import (
+	"fmt"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -334,7 +335,7 @@ func (kiroSessionProvider) parseItems(path string) ([]map[string]interface{}, st
 				blocks = append(blocks, map[string]interface{}{
 					"type":        "tool_result",
 					"tool_use_id": tr.ToolUseID,
-					"content":     kiroJoinText(tr.Content),
+					"content":     kiroClipToolResult(kiroToolResultText(tr.Content)),
 					"is_error":    tr.Status != "" && tr.Status != "success",
 				})
 			}
@@ -344,4 +345,16 @@ func (kiroSessionProvider) parseItems(path string) ([]map[string]interface{}, st
 		}
 	}
 	return items, model, nil
+}
+
+// kiroToolResultMaxRunes keeps a history page light: a single build log can be
+// megabytes, and the chat card only ever shows the head of it.
+const kiroToolResultMaxRunes = 20000
+
+func kiroClipToolResult(text string) string {
+	runes := []rune(text)
+	if len(runes) <= kiroToolResultMaxRunes {
+		return text
+	}
+	return string(runes[:kiroToolResultMaxRunes]) + fmt.Sprintf("\n… [+%d chars]", len(runes)-kiroToolResultMaxRunes)
 }
