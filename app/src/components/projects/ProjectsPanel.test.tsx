@@ -1382,12 +1382,19 @@ describe('<ProjectsPanel /> agent prompt footer', () => {
     fireEvent.click(document.querySelector('[data-id="project-agent-card-add-to"]') as HTMLElement);
     expect(document.querySelector('[data-id="project-agent-card-add-submenu"]')).toBeInTheDocument();
     expect(document.querySelector('[data-id="project-agent-card-submenu-label"]')).toHaveTextContent('添加到');
+    // Hovering the other row must NOT switch the open submenu: the pointer
+    // crosses it on the way to a project low in the list, and a silent switch
+    // turned "move" into "add".
     fireEvent.mouseEnter(document.querySelector('[data-id="project-agent-card-move-to"]') as HTMLElement);
-    expect(document.querySelector('[data-id="project-agent-card-move-submenu"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-id="project-agent-card-submenu-label"]')).toHaveTextContent('移动到');
+    expect(document.querySelector('[data-id="project-agent-card-add-submenu"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-move-submenu"]')).not.toBeInTheDocument();
     fireEvent.click(document.querySelector('[data-id="project-agent-card-move-to"]') as HTMLElement);
     expect(document.querySelector('[data-id="project-agent-card-move-submenu"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-submenu-label"]')).toHaveTextContent('移动到');
     fireEvent.mouseEnter(document.querySelector('[data-id="project-agent-card-add-to"]') as HTMLElement);
+    expect(document.querySelector('[data-id="project-agent-card-move-submenu"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-id="project-agent-card-add-submenu"]')).not.toBeInTheDocument();
+    fireEvent.click(document.querySelector('[data-id="project-agent-card-add-to"]') as HTMLElement);
     expect(document.querySelector('[data-id="project-agent-card-add-submenu"]')).toBeInTheDocument();
     fireEvent.click(document.querySelector('[data-id="project-agent-card-add-project-2"]') as HTMLElement);
     expect(api.removeGroupPane).not.toHaveBeenCalled();

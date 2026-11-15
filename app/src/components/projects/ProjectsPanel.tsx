@@ -606,12 +606,16 @@ function ProjectAgentCard({ agent, metrics, terminalOpen, teamId, selected, remo
                   <span>{t('fork', { ns: 'teamPanel', defaultValue: 'Fork' })}</span>
                 </button>
               ) : null}
-              <button type="button" data-id="project-agent-card-move-to" onMouseEnter={() => setProjectSubmenu((current) => current === null ? null : 'move')} onClick={(event) => { event.stopPropagation(); setProjectSubmenu('move'); }} className={cn('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]', hasAgentActions && 'mt-1 border-t border-white/[0.07]', projectSubmenu === 'move' && 'bg-white/[0.06] text-zinc-100')}>
+              {/* The submenu switches on click only. It hangs to the left and is often
+                  taller than the menu, so a pointer heading for a project low in the
+                  list crosses the other row — switching on hover silently turned a
+                  move into an add. */}
+              <button type="button" data-id="project-agent-card-move-to" onClick={(event) => { event.stopPropagation(); setProjectSubmenu('move'); }} className={cn('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]', hasAgentActions && 'mt-1 border-t border-white/[0.07]', projectSubmenu === 'move' && 'bg-white/[0.06] text-zinc-100')}>
                 <ArrowRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
                 <span className="min-w-0 flex-1">移动到</span>
                 <span className="text-zinc-600">›</span>
               </button>
-              {projectOptions.some((project) => !project.checked) ? <button type="button" data-id="project-agent-card-add-to" onMouseEnter={() => setProjectSubmenu((current) => current === null ? null : 'add')} onClick={(event) => { event.stopPropagation(); setProjectSubmenu('add'); }} className={cn('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]', projectSubmenu === 'add' && 'bg-white/[0.06] text-zinc-100')}>
+              {projectOptions.some((project) => !project.checked) ? <button type="button" data-id="project-agent-card-add-to" onClick={(event) => { event.stopPropagation(); setProjectSubmenu('add'); }} className={cn('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-white/[0.06]', projectSubmenu === 'add' && 'bg-white/[0.06] text-zinc-100')}>
                 <Plus className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
                 <span className="min-w-0 flex-1">添加到</span>
                 <span className="text-zinc-600">›</span>

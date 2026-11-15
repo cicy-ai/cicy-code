@@ -297,7 +297,8 @@ func handleGroupPanesCompat(w http.ResponseWriter, r *http.Request, groupID, sub
 	case "POST":
 		addWindowToGroup(w, groupID, paneID, "agent_ttyd", paneID, "pane_id", r.URL.Query().Get("mode") == "add")
 	case "DELETE":
-		store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, paneID)
+		// Memberships exist as both "w-N" and "w-N:main.0"; remove either form.
+		store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id IN (?,?)", groupID, shortPaneID(paneID), normPaneID(shortPaneID(paneID)))
 		J(w, M{"success": true, "group_id": groupID, "pane_id": paneID})
 	case "PATCH":
 		var req M
